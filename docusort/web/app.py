@@ -93,7 +93,7 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
         stats = db.stats()
-        recent = db.list_documents(limit=8)
+        recent = db.list_documents(limit=8, order_by="created_at")
         review_count = db.count_documents(status="review")
         return templates.TemplateResponse(
             request, "dashboard.html",

@@ -282,6 +282,7 @@ class Database:
         year: str | None = None,
         query: str | None = None,
         trash: bool = False,
+        order_by: str = "doc_date",  # 'doc_date' | 'created_at'
         limit: int = 200,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -320,9 +321,13 @@ class Database:
                 where.append("substr(doc_date, 1, 4) = ?")
                 params.append(year)
             where_sql = " WHERE " + " AND ".join(where)
+            order_sql = (
+                "ORDER BY created_at DESC" if order_by == "created_at"
+                else "ORDER BY COALESCE(doc_date, created_at) DESC"
+            )
             sql = (
                 "SELECT * FROM documents" + where_sql
-                + " ORDER BY COALESCE(doc_date, created_at) DESC LIMIT ? OFFSET ?"
+                + f" {order_sql} LIMIT ? OFFSET ?"
             )
             params += [limit, offset]
 

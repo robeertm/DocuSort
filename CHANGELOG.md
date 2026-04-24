@@ -2,6 +2,17 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.6.1] – 2026-04-24
+
+### Fixed
+
+- Dashboard "Recently processed" is now sorted by *processing* time
+  (`created_at`) rather than document date — a scan of a 2024 letter
+  taken today no longer gets buried below a 2026 invoice processed last
+  week. The library card grid keeps the doc-date sort (it's used for
+  archival browsing, not recency). Added an `order_by` parameter to
+  `Database.list_documents()` to make this explicit.
+
 ## [0.6.0] – 2026-04-24
 
 ### Added
