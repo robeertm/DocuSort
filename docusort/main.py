@@ -193,8 +193,37 @@ def main(argv: list[str] | None = None) -> int:
                         help="Classify and log but don't move anything")
     parser.add_argument("--no-web", action="store_true",
                         help="Run watcher only, no web UI")
+    parser.add_argument("--check-update", action="store_true",
+                        help="Check GitHub for a newer release and exit")
+    parser.add_argument("--update", action="store_true",
+                        help="Install the latest GitHub release and exit")
     parser.add_argument("--version", action="version", version=f"docusort {__version__}")
     args = parser.parse_args(argv)
+
+    if args.check_update or args.update:
+        from . import updater
+        if args.check_update:
+            info = updater.version_info()
+            if info.get("error"):
+                print(f"error: {info['error']}", file=sys.stderr)
+                return 2
+            print(f"current: {info['current']}")
+            print(f"latest:  {info['latest']}")
+            print("update available" if info["has_update"] else "up to date")
+            return 0 if info["has_update"] else 1
+        if args.update:
+            try:
+                result = updater.install_latest()
+            except Exception as exc:
+                print(f"update failed: {exc}", file=sys.stderr)
+                return 2
+            if not result.get("updated"):
+                print(f"no update: {result.get('reason')}")
+                return 0
+            print(f"updated {result['from']} -> {result['to']}")
+            print(f"pip: {result['pip']}")
+            print("restart required: run `sudo systemctl restart docusort` or re-run start script")
+            return 0
 
     settings = load_config()
     if args.dry_run:

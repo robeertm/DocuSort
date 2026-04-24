@@ -101,20 +101,46 @@ The template is configurable in `config/config.yaml`.
    live there. Dropping a PDF into `/volume1/Scan` still works — it appears
    correctly named under `/volume1/Dokumente/2026/…/`.
 
-## Quick start locally (Mac / Linux)
+## Quick start locally (Mac / Linux / Windows)
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-ant-...
-export DOCUSORT_CONFIG_DIR=$PWD/config
-# adjust paths in config/config.yaml, then:
-python -m docusort
+Three launcher scripts live in the project root — pick the one that matches
+your OS:
+
+- **macOS**: double-click `start.command` (or `./start.sh` from a Terminal)
+- **Linux**: `./start.sh`
+- **Windows**: double-click `start.bat`
+
+Each launcher creates a `.venv` on first run, keeps Python deps in sync,
+warns if tesseract / ocrmypdf are missing, and then boots the app on
+`http://localhost:8080`. Before the first start, create an `.env` next to
+the script with:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 OCR needs system-level Tesseract and ocrmypdf installed
-(`brew install tesseract tesseract-lang ocrmypdf` on macOS).
+(`brew install tesseract tesseract-lang ocrmypdf` on macOS,
+`sudo apt install tesseract-ocr tesseract-ocr-deu ocrmypdf` on Debian/Ubuntu).
+
+## Updates
+
+DocuSort ships with a built-in updater that pulls the newest release
+straight from GitHub:
+
+- **Web UI**: a banner appears on every page when a newer version is
+  available — one click installs it.
+- **CLI**: `python -m docusort --check-update` and
+  `python -m docusort --update`.
+
+On systemd hosts, enable the one-click restart by installing the scoped
+sudoers rule once:
+
+```bash
+./scripts/install-sudoers-rule.sh
+```
+
+The rule grants `NOPASSWD` only for `systemctl restart docusort`.
 
 ## Configuration
 

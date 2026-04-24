@@ -2,6 +2,31 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.4.0] – 2026-04-24
+
+### Added
+
+- **Self-updater** (`docusort/updater.py`). Asks the GitHub API for the
+  latest release, downloads the tarball, and swaps in the new code
+  atomically while preserving `.env`, `config/`, `.venv` and `logs/`.
+- **UI banner** on every page — if a newer release is out, a button
+  installs it and schedules a systemd restart. Response shows whether
+  the restart succeeded or manual `sudo systemctl restart docusort` is
+  needed. Powered by `/api/version` and `/api/update`.
+- **CLI flags**: `docusort --check-update` and `docusort --update`. Exit
+  codes make them scriptable (0 = no update, 1 = update available or
+  other end, 2 = error).
+- **Cross-platform launchers** for the project root:
+  - `start.sh` — Linux and macOS, creates venv on first run, installs
+    dependencies, warns about missing tesseract / ocrmypdf, refuses
+    to start without `config/config.yaml` and `.env`.
+  - `start.command` — double-clickable wrapper for macOS Finder.
+  - `start.bat` — Windows equivalent including `.env` parsing.
+- **Passwordless sudo helper** `scripts/install-sudoers-rule.sh` —
+  installs a narrowly scoped rule that lets the current user run
+  `systemctl restart docusort` without a password, which is what the
+  in-UI updater needs to finish the job.
+
 ## [0.3.0] – 2026-04-24
 
 ### Added

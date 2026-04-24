@@ -226,4 +226,23 @@ def create_app(settings: AppSettings, db: Database) -> FastAPI:
             }
         }
 
+    # ---------- Updater ----------
+    @app.get("/api/version")
+    def api_version():
+        from .. import updater
+        return updater.version_info()
+
+    @app.post("/api/update")
+    def api_update():
+        from .. import updater
+        try:
+            result = updater.install_latest()
+        except Exception as exc:
+            logger.exception("Update failed")
+            raise HTTPException(500, f"Update failed: {exc}")
+        if result.get("updated"):
+            restart = updater.restart_service()
+            result["restart"] = restart
+        return result
+
     return app

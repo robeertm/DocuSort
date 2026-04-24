@@ -32,6 +32,7 @@
     .btn-secondary { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap bg-ink-700 text-ink-100 hover:bg-ink-600 active:bg-ink-800; }
     .btn-ghost { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap text-ink-300 hover:bg-ink-700/50; }
     input, select, textarea { color-scheme: dark; }
+    [x-cloak] { display: none !important; }
   }
 </style>
 </head>
@@ -68,9 +69,117 @@
   </nav>
 </header>
 
+<!-- Update banner -->
+<div
+  x-data="updateBanner()"
+  x-init="check()"
+  x-cloak
+  x-show="state !== 'idle'"
+  class="mx-auto max-w-6xl px-4 mt-4"
+>
+  <template x-if="state === 'available'">
+    <div class="card p-4 flex flex-wrap items-center gap-3 border-emerald-500/30 bg-emerald-500/5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-emerald-300 shrink-0">
+        <path d="M21 12a9 9 0 1 1-3.51-7.13L21 8"/><path d="M21 3v5h-5"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm">
+          Update verfügbar: <span class="font-semibold text-emerald-300" x-text="info.current"></span>
+          → <span class="font-semibold text-emerald-300" x-text="info.latest"></span>
+        </div>
+        <a :href="info.html_url" target="_blank" rel="noopener" class="text-xs text-ink-400 hover:text-ink-200 underline">
+          Release Notes ansehen →
+        </a>
+      </div>
+      <button type="button" @click="install()" class="btn-primary">
+        Jetzt aktualisieren
+      </button>
+    </div>
+  </template>
+
+  <template x-if="state === 'installing'">
+    <div class="card p-4 flex items-center gap-3">
+      <svg class="h-5 w-5 animate-spin text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+      </svg>
+      <div class="text-sm">Update wird installiert — kann 1–2 Minuten dauern…</div>
+    </div>
+  </template>
+
+  <template x-if="state === 'done-restarted'">
+    <div class="card p-4 flex items-center gap-3 border-emerald-500/30 bg-emerald-500/5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-5 w-5 text-emerald-300">
+        <path d="M20 6 9 17l-5-5"/>
+      </svg>
+      <div class="flex-1 text-sm">
+        Update auf <span class="font-semibold" x-text="result.to"></span> installiert — Service startet neu.
+      </div>
+      <button type="button" @click="reloadAfter()" class="btn-secondary">Seite neu laden</button>
+    </div>
+  </template>
+
+  <template x-if="state === 'done-manual'">
+    <div class="card p-4 flex items-start gap-3 border-amber-500/30 bg-amber-500/5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-amber-300 shrink-0 mt-0.5">
+        <path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/>
+      </svg>
+      <div class="text-sm">
+        Update installiert — der Service muss manuell neu gestartet werden:
+        <code class="bg-ink-900/60 rounded px-2 py-0.5 text-xs">sudo systemctl restart docusort</code>
+      </div>
+    </div>
+  </template>
+
+  <template x-if="state === 'error'">
+    <div class="card p-4 flex items-start gap-3 border-rose-500/30 bg-rose-500/5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-rose-300 shrink-0 mt-0.5">
+        <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>
+      </svg>
+      <div class="flex-1 text-sm">
+        Update fehlgeschlagen: <span x-text="error" class="text-rose-300"></span>
+      </div>
+      <button type="button" @click="state='idle'" class="btn-ghost">Schließen</button>
+    </div>
+  </template>
+</div>
+
 <main class="mx-auto max-w-6xl px-4 py-6 sm:py-10">
   {% block content %}{% endblock %}
 </main>
+
+<script>
+function updateBanner() {
+  return {
+    state: 'idle',       // idle | available | installing | done-restarted | done-manual | error
+    info: {}, result: {}, error: '',
+    async check() {
+      try {
+        const r = await fetch('/api/version');
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data.has_update) { this.info = data; this.state = 'available'; }
+      } catch (e) { /* silent: network hiccups are not actionable here */ }
+    },
+    async install() {
+      this.state = 'installing';
+      try {
+        const r = await fetch('/api/update', { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'HTTP ' + r.status);
+        this.result = data;
+        this.state = data.restart && data.restart.restarted ? 'done-restarted' : 'done-manual';
+      } catch (e) {
+        this.error = e.message || String(e);
+        this.state = 'error';
+      }
+    },
+    reloadAfter() {
+      // Give systemd 6s to come back up, then reload.
+      setTimeout(() => location.reload(), 6000);
+    },
+  };
+}
+</script>
 
 <footer class="mx-auto max-w-6xl px-4 py-10 text-center text-xs text-ink-500">
   DocuSort · läuft auf deiner Synology · v{{ version }}
