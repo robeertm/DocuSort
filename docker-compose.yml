@@ -1,7 +1,7 @@
 services:
   docusort:
     build: .
-    image: docusort:0.7.0
+    image: docusort:0.7.1
     container_name: docusort
     restart: unless-stopped
     ports:

@@ -37,6 +37,10 @@
   "dashboard.all": "Alle →",
   "dashboard.nothing_yet": "Noch nichts verarbeitet.",
   "dashboard.start_upload": "Upload starten →",
+  "dashboard.upload_open": "Details →",
+  "dashboard.progress_uploading": "{n} hochladen",
+  "dashboard.progress_processing": "{n} klassifizieren",
+  "dashboard.progress_done": "{done} von {total} fertig",
 
   "library.title": "Bibliothek",
   "library.subtitle_default": "Durchsuche alle verarbeiteten Dokumente nach Kategorie, Jahr oder Volltext.",

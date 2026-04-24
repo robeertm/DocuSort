@@ -37,6 +37,10 @@
   "dashboard.all": "All →",
   "dashboard.nothing_yet": "Nothing processed yet.",
   "dashboard.start_upload": "Start uploading →",
+  "dashboard.upload_open": "Details →",
+  "dashboard.progress_uploading": "{n} uploading",
+  "dashboard.progress_processing": "{n} classifying",
+  "dashboard.progress_done": "{done} of {total} done",
 
   "library.title": "Library",
   "library.subtitle_default": "Search all processed documents by category, year or full text.",

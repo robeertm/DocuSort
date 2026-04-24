@@ -2,6 +2,23 @@
 {% block title %}{{ t('dashboard.title') }} · DocuSort{% endblock %}
 {% block content %}
 
+<!-- Live upload progress (reads the same IndexedDB the service worker writes) -->
+<div x-data="uploadProgress()" x-init="init()" x-show="hasActive()" x-cloak
+     class="card p-4 mb-6 border-emerald-500/30 bg-emerald-500/5">
+  <div class="flex items-center justify-between gap-3 mb-2 text-sm">
+    <div class="flex items-center gap-2 min-w-0">
+      <svg class="h-4 w-4 animate-spin text-emerald-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+      </svg>
+      <span class="font-medium truncate" x-text="label()"></span>
+    </div>
+    <a href="/upload" class="text-xs text-ink-400 hover:text-ink-200 shrink-0 underline">{{ t('dashboard.upload_open') }}</a>
+  </div>
+  <div class="h-1.5 rounded-full bg-ink-700/50 overflow-hidden">
+    <div class="h-full bg-emerald-500 transition-[width] duration-300" :style="`width: ${percent()}%`"></div>
+  </div>
+</div>
+
 {% set tot = stats.totals %}
 {% set cache_saved = (tot.cache_read_tokens or 0) * 0.9 / 1000000 %}
 {% set dup_saved = (tot.duplicates or 0) * 0.003 %}
@@ -221,6 +238,83 @@
 </div>
 
 <script>
+// ---- Dashboard upload-progress widget (IDB + BroadcastChannel) ----
+const UP_DB = "docusort-uploads";
+const UP_STORE = "items";
+const UP_BC = "docusort-upload";
+const UP_TERMINAL = new Set(["filed","review","failed","duplicate","unknown","error"]);
+
+function _openUpDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(UP_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(UP_STORE)) {
+        db.createObjectStore(UP_STORE, { keyPath: "id", autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function _allUp() {
+  try {
+    const db = await _openUpDB();
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction(UP_STORE, "readonly").objectStore(UP_STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) { return []; }
+}
+
+function uploadProgress() {
+  return {
+    items: [],
+    refreshTimer: null,
+
+    async init() {
+      this.items = await _allUp();
+      try {
+        const bc = new BroadcastChannel(UP_BC);
+        bc.onmessage = () => this.scheduleRefresh();
+      } catch (e) {}
+      // Gentle periodic refresh to pick up server-side status changes
+      // (the dashboard doesn't run the /api/status polling itself).
+      setInterval(() => this.refresh(), 4000);
+    },
+    scheduleRefresh() {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = setTimeout(() => this.refresh(), 200);
+    },
+    async refresh() { this.items = await _allUp(); },
+
+    hasActive() {
+      return this.items.some(it => !UP_TERMINAL.has(it.stage));
+    },
+    percent() {
+      if (this.items.length === 0) return 0;
+      const done = this.items.filter(it =>
+        UP_TERMINAL.has(it.stage) || it.stage === "filed" || it.stage === "review"
+      ).length;
+      return Math.round(done / this.items.length * 100);
+    },
+    label() {
+      const total = this.items.length;
+      const done = this.items.filter(it => UP_TERMINAL.has(it.stage)).length;
+      const uploading = this.items.filter(it => it.stage === "uploading" || it.stage === "pending-upload").length;
+      const processing = this.items.filter(it => it.stage === "queued" || it.stage === "server-queued" || it.stage === "processing").length;
+      // Build a concise "3 hochladen · 5 klassifizieren · 2/10 fertig"
+      const parts = [];
+      if (uploading)  parts.push(tr("dashboard.progress_uploading", { n: uploading }));
+      if (processing) parts.push(tr("dashboard.progress_processing", { n: processing }));
+      parts.push(tr("dashboard.progress_done", { done, total }));
+      return parts.join(" · ");
+    },
+  };
+}
+
 function syncWidget() {
   return {
     status: { enabled: false, rclone_installed: false, running: false },

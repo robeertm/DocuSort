@@ -37,6 +37,10 @@
   "dashboard.all": "Tutti →",
   "dashboard.nothing_yet": "Niente elaborato ancora.",
   "dashboard.start_upload": "Inizia a caricare →",
+  "dashboard.upload_open": "Dettagli →",
+  "dashboard.progress_uploading": "{n} in caricamento",
+  "dashboard.progress_processing": "{n} in classificazione",
+  "dashboard.progress_done": "{done} di {total} completati",
 
   "library.title": "Libreria",
   "library.subtitle_default": "Cerca tra tutti i documenti elaborati per categoria, anno o testo completo.",

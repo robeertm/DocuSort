@@ -2,6 +2,17 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.7.1] – 2026-04-24
+
+### Added
+
+- Dashboard shows a **live upload-progress card** while any file from
+  the Service-Worker queue is still uploading or being classified. The
+  card reads directly from IndexedDB (same store the service worker
+  writes) and subscribes to `BroadcastChannel('docusort-upload')`, so
+  it updates without polling the server. Click-through link jumps to
+  `/upload` for per-file detail.
+
 ## [0.7.0] – 2026-04-24
 
 ### Added

@@ -37,6 +37,10 @@
   "dashboard.all": "Todos →",
   "dashboard.nothing_yet": "Nada procesado aún.",
   "dashboard.start_upload": "Empezar a subir →",
+  "dashboard.upload_open": "Detalles →",
+  "dashboard.progress_uploading": "{n} subiendo",
+  "dashboard.progress_processing": "{n} clasificando",
+  "dashboard.progress_done": "{done} de {total} listos",
 
   "library.title": "Biblioteca",
   "library.subtitle_default": "Busca en todos los documentos procesados por categoría, año o texto completo.",

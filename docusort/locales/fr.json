@@ -37,6 +37,10 @@
   "dashboard.all": "Tous →",
   "dashboard.nothing_yet": "Rien n'a encore été traité.",
   "dashboard.start_upload": "Commencer l'import →",
+  "dashboard.upload_open": "Détails →",
+  "dashboard.progress_uploading": "{n} en cours d'envoi",
+  "dashboard.progress_processing": "{n} en classification",
+  "dashboard.progress_done": "{done} sur {total} terminés",
 
   "library.title": "Bibliothèque",
   "library.subtitle_default": "Recherchez parmi tous les documents traités par catégorie, année ou texte intégral.",
