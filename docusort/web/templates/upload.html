@@ -65,12 +65,11 @@
 
   <!-- Activity banner -->
   <template x-if="items.length > 0 && anyActive()">
-    <div class="card p-3 flex items-center gap-2 text-xs bg-emerald-500/5 border-emerald-500/20"
-         :class="swActive ? 'text-emerald-300' : 'text-amber-300'">
+    <div class="card p-3 flex items-center gap-2 text-xs text-amber-300 bg-amber-500/5 border-amber-500/20">
       <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
       </svg>
-      <span x-text="swActive ? tr('upload.background_hint') : tr('upload.foreground_hint')"></span>
+      <span x-text="tr('upload.foreground_hint')"></span>
     </div>
   </template>
 
@@ -86,17 +85,17 @@
       <ul class="divide-y divide-ink-700/50 -my-3 max-h-[60vh] overflow-y-auto">
         <template x-for="it in items" :key="it.id">
           <li class="flex items-center gap-3 py-3">
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" :class="iconBg(displayStage(it))">
-              <svg x-show="displayStage(it) === 'filed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4 text-emerald-300"><path d="M20 6 9 17l-5-5"/></svg>
-              <svg x-show="displayStage(it) === 'review'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-amber-300"><path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/></svg>
-              <svg x-show="displayStage(it) === 'failed' || displayStage(it) === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-rose-300"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
-              <svg x-show="displayStage(it) === 'duplicate'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-indigo-300"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M3 14V5a2 2 0 0 1 2-2h9"/></svg>
-              <svg x-show="['pending-upload','uploading','queued','processing'].includes(displayStage(it))"
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" :class="iconBg(it.stage)">
+              <svg x-show="it.stage === 'filed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4 text-emerald-300"><path d="M20 6 9 17l-5-5"/></svg>
+              <svg x-show="it.stage === 'review'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-amber-300"><path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/></svg>
+              <svg x-show="['failed','error','needs-repick'].includes(it.stage)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-rose-300"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+              <svg x-show="it.stage === 'duplicate'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-indigo-300"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M3 14V5a2 2 0 0 1 2-2h9"/></svg>
+              <svg x-show="['pending-upload','uploading','queued','server-queued','processing'].includes(it.stage)"
                    class="h-4 w-4 animate-spin text-ink-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/></svg>
             </div>
             <div class="min-w-0 flex-1">
               <div class="truncate text-sm font-medium" x-text="it.displayName"></div>
-              <div class="mt-1 text-xs" :class="stageColor(displayStage(it))" x-text="stageLabel(it)"></div>
+              <div class="mt-1 text-xs" :class="stageColor(it.stage)" x-text="stageLabel(it)"></div>
             </div>
             <template x-if="it.doc_id">
               <a :href="`/document/${it.doc_id}`" class="btn-ghost shrink-0 text-xs" x-text="tr('upload.view')"></a>
@@ -122,12 +121,20 @@
 </div>
 
 <script>
-// ---- IndexedDB helpers ----
+// In-memory uploads only.
+// IndexedDB stores metadata (so the dashboard widget + a tab reload still
+// see what's in flight), but never the file blob — Safari has a long-
+// standing bug where Blobs round-tripped through IndexedDB come back
+// 0 bytes when re-read in another execution context (e.g. a Service
+// Worker). We sidestep it by keeping File refs in a JS Map keyed by the
+// IDB id; if the tab closes mid-upload the pending items get marked
+// 'needs-repick' on next visit so the user knows to re-select them.
 const DB_NAME = "docusort-uploads";
 const STORE = "items";
 const ALLOWED_EXT = ["pdf","jpg","jpeg","png","tif","tiff","bmp"];
-const TERMINAL = new Set(["filed","review","failed","duplicate","unknown","error"]);
+const TERMINAL = new Set(["filed","review","failed","duplicate","unknown","error","needs-repick"]);
 const BC_NAME = "docusort-upload";
+const MAX_CONCURRENT = 4;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -166,10 +173,13 @@ async function idbGet(id) {
     req.onerror = () => reject(req.error);
   });
 }
-async function idbPut(record) {
+async function idbPatch(id, patch) {
+  const rec = await idbGet(id);
+  if (!rec) return;
+  Object.assign(rec, patch);
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const req = db.transaction(STORE, "readwrite").objectStore(STORE).put(record);
+    const req = db.transaction(STORE, "readwrite").objectStore(STORE).put(rec);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
@@ -184,53 +194,51 @@ async function idbDelete(id) {
   });
 }
 
+function notifyDashboard() {
+  // Dashboard widget listens on this channel; ping it after every change.
+  try { new BroadcastChannel(BC_NAME).postMessage({ type: "update" }); } catch (e) {}
+}
+
 function uploader() {
   return {
     dragOver: false,
-    items: [],               // UI-shaped items (no file blob)
-    polling: new Set(),      // doc IDs with active server-status poll
-    swActive: false,         // true once the service worker is live
-    pageDraining: false,     // true while the in-page fallback is draining
+    items: [],            // UI state (synced from IDB)
+    fileBlobs: new Map(), // id -> File (in-memory only)
+    polling: new Set(),
+    draining: false,
 
     async init() {
-      // 1. Try to register the service worker. Requires a secure context
-      //    (HTTPS or localhost) — over plain HTTP the browser silently
-      //    refuses and we fall back to in-page uploads.
-      if ("serviceWorker" in navigator && window.isSecureContext) {
+      // Make sure any old service worker stops claiming uploads — we run
+      // everything in-page now to avoid the IDB-blob bug.
+      if ("serviceWorker" in navigator) {
         try {
-          await navigator.serviceWorker.register("/upload-sw.js", { scope: "/" });
-          const reg = await Promise.race([
-            navigator.serviceWorker.ready,
-            new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 3000)),
-          ]);
-          if (reg && (reg.active || reg.waiting || reg.installing)) {
-            this.swActive = true;
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) {
+            if (r.scope.endsWith("/")) await r.unregister();
           }
-        } catch (e) {
-          console.warn("SW unavailable, falling back to in-page uploads:", e);
-        }
+        } catch (e) {}
       }
 
-      // 2. Listen to SW broadcasts (harmless if there's no SW).
-      try {
-        const bc = new BroadcastChannel(BC_NAME);
-        bc.onmessage = (evt) => this.onSwMessage(evt.data);
-      } catch (e) {}
-
-      // 3. Load previously known items from IDB (strip blobs for display).
       const stored = await idbAll();
       this.items = stored.map(this._toUiItem).sort((a, b) => a.id - b.id);
 
-      // 4. Resume server-side status polling for items that already have
-      //    an inbox_name but are not yet terminal.
+      // Items left as pending-upload from a previous session can't be
+      // resumed (no file blob in memory). Flip them so the user knows.
+      for (const it of this.items) {
+        if (it.stage === "pending-upload" || it.stage === "uploading") {
+          it.stage = "needs-repick";
+          await idbPatch(it.id, { stage: "needs-repick" });
+        }
+      }
+
+      // Resume server-status polling for items the server already owns.
       for (const it of this.items) {
         if (it.inbox_name && !TERMINAL.has(it.stage)) {
           this.pollStatus(it);
         }
       }
 
-      // 5. Kick off a drain — SW if we have one, otherwise in-page.
-      this.drain();
+      notifyDashboard();
     },
 
     _toUiItem(rec) {
@@ -247,196 +255,102 @@ function uploader() {
       };
     },
 
-    async onSwMessage(msg) {
-      if (!msg || msg.type !== "update") return;
-      const rec = await idbGet(msg.id);
-      if (!rec) return;
-      const existing = this.items.find(it => it.id === msg.id);
-      const ui = this._toUiItem(rec);
-      if (existing) Object.assign(existing, ui);
-      else this.items.push(ui);
-
-      // When SW finishes uploading, server now owns the file — start polling.
-      if (ui.inbox_name && !this.polling.has(ui.id) && !TERMINAL.has(ui.stage)) {
-        this.pollStatus(ui);
-      }
-    },
-
-    async drain() {
-      if (this.swActive) {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const w = reg.active || reg.waiting || reg.installing;
-          if (w) { w.postMessage({ type: "drain" }); return; }
-        } catch (e) { /* fall through to in-page */ }
-      }
-      this.drainInPage();
-    },
-
-    async drainInPage() {
-      // In-page fallback: the page itself POSTs pending files to /upload,
-      // mutating IDB as it goes so the dashboard widget sees progress.
-      if (this.pageDraining) return;
-      this.pageDraining = true;
-      try {
-        while (true) {
-          const pending = (await idbAll()).filter(
-            r => r.stage === "pending-upload" && r.file
-          );
-          if (pending.length === 0) break;
-          const batch = pending.slice(0, 4);
-          await Promise.all(batch.map(rec => this._pageUploadOne(rec)));
-        }
-      } finally {
-        this.pageDraining = false;
-      }
-    },
-
-    async _pageUploadOne(rec) {
-      rec.stage = "uploading";
-      await idbPut(rec);
-      this._mirror(rec);
-
-      try {
-        const form = new FormData();
-        form.append("files", rec.file, rec.originalName);
-        const r = await fetch("/upload", { method: "POST", body: form });
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const res = await r.json();
-        if (res.rejected && res.rejected.includes(rec.originalName)) {
-          rec.stage = "error"; rec.message = "format";
-        } else {
-          const entry = (res.saved || []).find(
-            s => s.original_name === rec.originalName
-          ) || (res.saved || [])[0];
-          if (entry && entry.inbox_name) {
-            rec.inbox_name = entry.inbox_name;
-            rec.stage = "server-queued";
-            rec.file = null;
-          } else {
-            rec.stage = "error"; rec.message = "unclear";
-          }
-        }
-      } catch (e) {
-        rec.stage = "error"; rec.message = String(e && e.message ? e.message : e);
-      }
-      rec.updated_at = Date.now();
-      await idbPut(rec);
-      this._mirror(rec);
-
-      if (rec.inbox_name && !TERMINAL.has(rec.stage) && !this.polling.has(rec.id)) {
-        const ui = this.items.find(x => x.id === rec.id);
-        if (ui) this.pollStatus(ui);
-      }
-    },
-
-    _mirror(rec) {
-      const ui = this.items.find(x => x.id === rec.id);
-      const fresh = this._toUiItem(rec);
-      if (ui) Object.assign(ui, fresh);
-      else this.items.push(fresh);
-      // Dashboard widget listens on BroadcastChannel; notify it too.
-      try { new BroadcastChannel(BC_NAME).postMessage({ type: "update", id: rec.id }); } catch (e) {}
-    },
-
-    // ---- User actions ----
     handleDrop(e) {
       this.dragOver = false;
       this.handleFiles(e.dataTransfer.files);
     },
+
     async handleFiles(fileList) {
       const files = Array.from(fileList || []);
       for (const f of files) {
         const ext = (f.name.split(".").pop() || "").toLowerCase();
         if (!ALLOWED_EXT.includes(ext)) continue;
         const id = await idbAdd({
-          file: f,
           originalName: f.name,
           displayName: f.webkitRelativePath || f.name,
           stage: "pending-upload",
           inbox_name: null,
           ts: Date.now(),
         });
+        this.fileBlobs.set(id, f);
         this.items.push({
           id,
           displayName: f.webkitRelativePath || f.name,
           stage: "pending-upload",
-          inbox_name: null,
-          doc_id: null, category: null, confidence: 0, cost_usd: 0, message: "",
+          inbox_name: null, doc_id: null, category: null,
+          confidence: 0, cost_usd: 0, message: "",
         });
       }
+      notifyDashboard();
       this.drain();
     },
 
-    async clearHistory() {
-      for (const it of this.items.slice()) {
-        const s = this.displayStage(it);
-        if (TERMINAL.has(s)) await idbDelete(it.id);
-      }
-      this.items = this.items.filter(it => !TERMINAL.has(this.displayStage(it)));
-    },
-
-    // ---- Stage / display helpers ----
-    displayStage(it) {
-      return it.stage;  // IDB stages and server stages share names where it matters
-    },
-    stageColor(s) {
-      return {
-        "pending-upload": "text-ink-400",
-        "uploading": "text-ink-400",
-        "server-queued": "text-ink-400",
-        "queued": "text-ink-400",
-        "processing": "text-emerald-300",
-        "filed": "text-emerald-300",
-        "review": "text-amber-300",
-        "failed": "text-rose-300",
-        "error": "text-rose-300",
-        "duplicate": "text-indigo-300",
-      }[s] || "text-ink-400";
-    },
-    iconBg(s) {
-      return {
-        "pending-upload": "bg-ink-700/60",
-        "uploading": "bg-ink-700/60",
-        "server-queued": "bg-ink-700/60",
-        "queued": "bg-ink-700/60",
-        "processing": "bg-ink-700/60",
-        "filed": "bg-emerald-500/15",
-        "review": "bg-amber-500/15",
-        "failed": "bg-rose-500/15",
-        "error": "bg-rose-500/15",
-        "duplicate": "bg-indigo-500/15",
-      }[s] || "bg-ink-700/60";
-    },
-    stageLabel(it) {
-      switch (it.stage) {
-        case "pending-upload":  return tr("stage.pending_upload");
-        case "uploading":       return tr("stage.uploading_bg");
-        case "server-queued":   return tr("stage.queued");
-        case "queued":          return tr("stage.queued");
-        case "processing":      return tr("stage.processing");
-        case "filed":           return tr("stage.filed",     { category: it.category, confidence: Math.round((it.confidence||0)*100), cost: (it.cost_usd||0).toFixed(4) });
-        case "review":          return tr("stage.review",    { category: it.category, confidence: Math.round((it.confidence||0)*100) });
-        case "failed":          return tr("stage.failed");
-        case "error":           return it.message === "format" ? tr("stage.error_format")
-                                     : it.message === "unclear" ? tr("stage.error_unclear")
-                                     : tr("stage.error") + (it.message ? " (" + it.message + ")" : "");
-        case "duplicate":       return tr("stage.duplicate", { category: it.category || "" });
-        default:                return it.stage;
+    async drain() {
+      if (this.draining) return;
+      this.draining = true;
+      try {
+        while (true) {
+          const pending = this.items.filter(
+            it => it.stage === "pending-upload" && this.fileBlobs.has(it.id)
+          );
+          if (pending.length === 0) break;
+          const batch = pending.slice(0, MAX_CONCURRENT);
+          await Promise.all(batch.map(it => this.uploadOne(it)));
+        }
+      } finally {
+        this.draining = false;
+        notifyDashboard();
       }
     },
-    anyActive() {
-      return this.items.some(it => !TERMINAL.has(it.stage));
-    },
-    summary() {
-      const done = this.items.filter(it => TERMINAL.has(it.stage)).length;
-      return tr("upload.summary_done_of_total", { done, total: this.items.length });
-    },
-    allDone() {
-      return this.items.length > 0 && !this.anyActive();
+
+    async uploadOne(it) {
+      const blob = this.fileBlobs.get(it.id);
+      if (!blob) {
+        it.stage = "needs-repick";
+        await idbPatch(it.id, { stage: "needs-repick" });
+        notifyDashboard();
+        return;
+      }
+      it.stage = "uploading";
+      await idbPatch(it.id, { stage: "uploading" });
+      notifyDashboard();
+
+      try {
+        const form = new FormData();
+        form.append("files", blob, blob.name || it.displayName);
+        const r = await fetch("/upload", { method: "POST", body: form });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const res = await r.json();
+        if (res.rejected && res.rejected.includes(blob.name)) {
+          it.stage = "error"; it.message = "format";
+        } else {
+          const entry = (res.saved || []).find(s => s.original_name === blob.name)
+            || (res.saved || [])[0];
+          if (entry && entry.inbox_name) {
+            it.inbox_name = entry.inbox_name;
+            it.stage = "server-queued";
+            this.fileBlobs.delete(it.id);  // free memory
+          } else {
+            it.stage = "error"; it.message = "unclear";
+          }
+        }
+      } catch (e) {
+        it.stage = "error";
+        it.message = String(e && e.message ? e.message : e);
+      }
+
+      await idbPatch(it.id, {
+        stage: it.stage,
+        inbox_name: it.inbox_name,
+        message: it.message,
+      });
+      notifyDashboard();
+
+      if (it.inbox_name && !TERMINAL.has(it.stage) && !this.polling.has(it.id)) {
+        this.pollStatus(it);
+      }
     },
 
-    // ---- Server-status polling (after SW upload) ----
     async pollStatus(item) {
       this.polling.add(item.id);
       try {
@@ -450,17 +364,11 @@ function uploader() {
             if (data.category)          item.category  = data.category;
             if (data.confidence != null) item.confidence = data.confidence;
             if (data.cost_usd != null)   item.cost_usd   = data.cost_usd;
-
-            // Mirror to IDB so a reload sees the same state.
-            const rec = await idbGet(item.id);
-            if (rec) {
-              rec.stage = item.stage;
-              rec.doc_id = item.doc_id;
-              rec.category = item.category;
-              rec.confidence = item.confidence;
-              rec.cost_usd = item.cost_usd;
-              await idbPut(rec);
-            }
+            await idbPatch(item.id, {
+              stage: item.stage, doc_id: item.doc_id, category: item.category,
+              confidence: item.confidence, cost_usd: item.cost_usd,
+            });
+            notifyDashboard();
             if (TERMINAL.has(item.stage)) return;
           } catch (e) { /* keep polling */ }
           await new Promise(r => setTimeout(r, 1500));
@@ -468,6 +376,74 @@ function uploader() {
       } finally {
         this.polling.delete(item.id);
       }
+    },
+
+    async clearHistory() {
+      for (const it of this.items.slice()) {
+        if (TERMINAL.has(it.stage)) await idbDelete(it.id);
+      }
+      this.items = this.items.filter(it => !TERMINAL.has(it.stage));
+      notifyDashboard();
+    },
+
+    // ---- Display ----
+    stageColor(s) {
+      return {
+        "pending-upload": "text-ink-400",
+        "uploading":      "text-emerald-300",
+        "server-queued":  "text-ink-400",
+        "queued":         "text-ink-400",
+        "processing":     "text-emerald-300",
+        "filed":          "text-emerald-300",
+        "review":         "text-amber-300",
+        "failed":         "text-rose-300",
+        "error":          "text-rose-300",
+        "duplicate":      "text-indigo-300",
+        "needs-repick":   "text-rose-300",
+      }[s] || "text-ink-400";
+    },
+    iconBg(s) {
+      return {
+        "pending-upload": "bg-ink-700/60",
+        "uploading":      "bg-ink-700/60",
+        "server-queued":  "bg-ink-700/60",
+        "queued":         "bg-ink-700/60",
+        "processing":     "bg-ink-700/60",
+        "filed":          "bg-emerald-500/15",
+        "review":         "bg-amber-500/15",
+        "failed":         "bg-rose-500/15",
+        "error":          "bg-rose-500/15",
+        "duplicate":      "bg-indigo-500/15",
+        "needs-repick":   "bg-rose-500/15",
+      }[s] || "bg-ink-700/60";
+    },
+    stageLabel(it) {
+      switch (it.stage) {
+        case "pending-upload": return tr("stage.pending_upload");
+        case "uploading":      return tr("stage.uploading_active");
+        case "server-queued":  return tr("stage.queued");
+        case "queued":         return tr("stage.queued");
+        case "processing":     return tr("stage.processing");
+        case "filed":          return tr("stage.filed",     { category: it.category, confidence: Math.round((it.confidence||0)*100), cost: (it.cost_usd||0).toFixed(4) });
+        case "review":         return tr("stage.review",    { category: it.category, confidence: Math.round((it.confidence||0)*100) });
+        case "failed":         return tr("stage.failed");
+        case "error":          return it.message === "format" ? tr("stage.error_format")
+                                    : it.message === "unclear" ? tr("stage.error_unclear")
+                                    : tr("stage.error") + (it.message ? " (" + it.message + ")" : "");
+        case "duplicate":      return tr("stage.duplicate", { category: it.category || "" });
+        case "needs-repick":   return tr("stage.needs_repick");
+        default:               return it.stage;
+      }
+    },
+    anyActive() {
+      return this.items.some(it => !TERMINAL.has(it.stage));
+    },
+    summary() {
+      const done = this.items.filter(it => TERMINAL.has(it.stage)).length;
+      return tr("upload.summary_done_of_total", { done, total: this.items.length });
+    },
+    allDone() {
+      return this.items.length > 0 && !this.anyActive();
     },
   };
 }

@@ -87,7 +87,7 @@
 </div>
 {% endif %}
 
-<div class="lg:grid lg:grid-cols-[260px_1fr] lg:gap-6">
+<div x-data="library({ trash: {{ trash | tojson }} })" class="lg:grid lg:grid-cols-[260px_1fr] lg:gap-6">
 
   <aside class="card p-3 mb-4 lg:mb-0 lg:sticky lg:top-24 lg:self-start lg:max-h-[calc(100vh-7rem)] lg:overflow-auto"
          x-data="{
@@ -186,5 +186,113 @@
     {% include "_card_grid.html" %}
   </div>
 </div>
+
+<!-- Sticky bulk-action bar -->
+<div x-data x-cloak
+     class="fixed inset-x-0 bottom-4 z-30 flex justify-center pointer-events-none px-4">
+  <div x-show="$store.libBulk.size > 0"
+       x-transition.opacity
+       class="card pointer-events-auto p-3 flex flex-wrap items-center gap-2 shadow-2xl border-emerald-500/40 bg-ink-900/95">
+    <span class="text-sm font-medium px-2"
+          x-text="tr('library.selected_count', { n: $store.libBulk.size })"></span>
+
+    <button type="button" @click="$store.libBulk.clear()"
+            class="btn-ghost text-xs">
+      {{ t('library.bulk_clear') }}
+    </button>
+
+    {% if not trash %}
+    <select @change="$store.libBulk.recategorize($event.target.value); $event.target.value=''"
+            class="rounded-xl bg-ink-800 border border-ink-700 px-3 py-2 text-sm">
+      <option value="">{{ t('library.bulk_recategorize') }}</option>
+      {% for c in categories %}
+        <option value="{{ c }}">{{ c }}</option>
+      {% endfor %}
+    </select>
+
+    <button type="button" @click="$store.libBulk.exportZip()" class="btn-secondary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+      </svg>
+      {{ t('library.bulk_export') }}
+    </button>
+
+    <button type="button" @click="$store.libBulk.trash()" class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+      </svg>
+      {{ t('library.bulk_trash') }}
+    </button>
+    {% else %}
+    <button type="button" @click="$store.libBulk.restore()" class="btn-secondary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 5v4h4"/>
+      </svg>
+      {{ t('trash.restore_button') }}
+    </button>
+    <button type="button" @click="$store.libBulk.purge()" class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+      {{ t('trash.purge_button') }}
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.addEventListener('alpine:init', () => {
+  // Shared selection store, accessible from cards inside _card_grid.html
+  // (which gets HTMX-swapped — local component state would die on swap).
+  Alpine.store('libBulk', {
+    ids: new Set(),
+    trashMode: false,
+    get size() { return this.ids.size; },
+    has(id) { return this.ids.has(id); },
+    toggle(id) {
+      if (this.ids.has(id)) this.ids.delete(id);
+      else this.ids.add(id);
+    },
+    clear() { this.ids.clear(); },
+
+    async _bulkPost(path, extra = {}) {
+      const ids = [...this.ids];
+      const r = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, ...extra }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        alert(d.detail || ('HTTP ' + r.status));
+        return null;
+      }
+      this.clear();
+      location.reload();
+      return r.json();
+    },
+    trash()      { return this._bulkPost('/api/bulk/delete'); },
+    restore()    { return this._bulkPost('/api/bulk/restore'); },
+    async purge() {
+      if (!confirm(tr('trash.confirm_purge'))) return;
+      return this._bulkPost('/api/bulk/purge');
+    },
+    async recategorize(category) {
+      if (!category) return;
+      return this._bulkPost('/api/bulk/recategorize', { category });
+    },
+    exportZip() {
+      const ids = [...this.ids].join(',');
+      window.open('/api/export.zip?ids=' + ids, '_blank');
+    },
+  });
+});
+
+function library({ trash }) {
+  return {
+    trash,
+    get selected() { return this.$store.libBulk.ids; },
+    has(id) { return this.$store.libBulk.has(id); },
+    toggle(id) { this.$store.libBulk.toggle(id); },
+  };
+}
+</script>
 
 {% endblock %}

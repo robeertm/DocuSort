@@ -109,6 +109,8 @@
   "stage.uploading": "Hochladen — {progress} %",
   "stage.pending_upload": "In Warteschlange · wartet auf Upload",
   "stage.uploading_bg": "Hochladen im Hintergrund…",
+  "stage.uploading_active": "Hochladen läuft…",
+  "stage.needs_repick": "Bitte erneut auswählen — Tab wurde geschlossen, Datei nicht mehr im Browser-Speicher",
   "stage.queued": "In Warteschlange · Watcher wartet auf Stabilität",
   "stage.processing": "OCR + Claude-Klassifizierung läuft…",
   "stage.filed": "✓ {category}  ·  {confidence} %  ·  ${cost}",
@@ -148,6 +150,13 @@
   "trash.empty_all": "Papierkorb leeren",
 
   "library.export": "Als ZIP exportieren",
+  "library.select": "Auswählen",
+  "library.deselect": "Auswahl entfernen",
+  "library.selected_count": "{n} ausgewählt",
+  "library.bulk_clear": "Auswahl aufheben",
+  "library.bulk_recategorize": "Kategorie ändern…",
+  "library.bulk_export": "ZIP der Auswahl",
+  "library.bulk_trash": "In den Papierkorb",
 
   "sync.heading": "Backup & Cloud-Sync",
   "sync.subtitle": "Exportiere die Bibliothek als ZIP oder synchronisiere sie via rclone mit deiner Cloud (iCloud, Google Drive, Dropbox, OneDrive, S3 …).",

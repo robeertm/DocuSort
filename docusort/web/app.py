@@ -274,6 +274,82 @@ def create_app(
         )
         return resp
 
+    # ---------- Bulk operations ----------
+    @app.post("/api/bulk/delete")
+    def bulk_delete(payload: dict):
+        from ..trash import delete_document as _delete
+        ids = payload.get("ids") or []
+        ok, errors = [], []
+        for doc_id in ids:
+            try:
+                _delete(int(doc_id), settings, db)
+                ok.append(int(doc_id))
+            except Exception as exc:
+                errors.append({"id": int(doc_id), "error": str(exc)})
+        return {"ok": ok, "errors": errors}
+
+    @app.post("/api/bulk/restore")
+    def bulk_restore(payload: dict):
+        from ..trash import restore_document as _restore
+        ids = payload.get("ids") or []
+        ok, errors = [], []
+        for doc_id in ids:
+            try:
+                _restore(int(doc_id), settings, db)
+                ok.append(int(doc_id))
+            except Exception as exc:
+                errors.append({"id": int(doc_id), "error": str(exc)})
+        return {"ok": ok, "errors": errors}
+
+    @app.post("/api/bulk/purge")
+    def bulk_purge(payload: dict):
+        from ..trash import purge_document as _purge
+        ids = payload.get("ids") or []
+        ok, errors = [], []
+        for doc_id in ids:
+            try:
+                _purge(int(doc_id), settings, db)
+                ok.append(int(doc_id))
+            except Exception as exc:
+                errors.append({"id": int(doc_id), "error": str(exc)})
+        return {"ok": ok, "errors": errors}
+
+    @app.post("/api/bulk/recategorize")
+    def bulk_recategorize(payload: dict):
+        ids = payload.get("ids") or []
+        category = payload.get("category", "")
+        if category not in category_names:
+            raise HTTPException(400, f"Unknown category: {category}")
+        ok, errors = [], []
+        for doc_id in ids:
+            try:
+                doc = db.get(int(doc_id))
+                if not doc:
+                    raise ValueError("not found")
+                old_path = Path(doc["library_path"])
+                if not old_path.exists():
+                    raise ValueError("library file missing")
+                year = (doc["doc_date"] or doc["created_at"])[:4]
+                new_dir = settings.paths.library / year / category
+                new_dir.mkdir(parents=True, exist_ok=True)
+                new_path = new_dir / old_path.name
+                if new_path.exists() and new_path != old_path:
+                    # uniquify
+                    i = 2
+                    while True:
+                        cand = new_dir / f"{old_path.stem}-{i}{old_path.suffix}"
+                        if not cand.exists():
+                            new_path = cand
+                            break
+                        i += 1
+                shutil.move(str(old_path), str(new_path))
+                db.update_category(int(doc_id), category)
+                db.update_paths(int(doc_id), str(new_path))
+                ok.append(int(doc_id))
+            except Exception as exc:
+                errors.append({"id": int(doc_id), "error": str(exc)})
+        return {"ok": ok, "errors": errors}
+
     # ---------- Trash: delete / restore / purge ----------
     @app.post("/api/document/{doc_id}/delete")
     def delete_document(doc_id: int):
@@ -309,12 +385,22 @@ def create_app(
     def export_zip(
         category: str | None = Query(None),
         year: str | None = Query(None),
+        ids: str | None = Query(None, description="comma-separated doc IDs"),
         include_trash: bool = Query(False),
     ):
         from ..export import stream_zip, suggested_filename
+        id_list: list[int] | None = None
+        if ids:
+            try:
+                id_list = [int(x) for x in ids.split(",") if x.strip()]
+            except ValueError:
+                raise HTTPException(400, "Invalid ids parameter")
         name = suggested_filename(category=category, year=year, trash=include_trash)
         return StreamingResponse(
-            stream_zip(settings, db, category=category, year=year, include_trash=include_trash),
+            stream_zip(
+                settings, db, category=category, year=year,
+                include_trash=include_trash, ids=id_list,
+            ),
             media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{name}"'},
         )

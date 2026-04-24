@@ -46,17 +46,23 @@ def _pick_files(
     category: str | None = None,
     year: str | None = None,
     include_trash: bool = False,
+    ids: list[int] | None = None,
 ) -> Iterable[tuple[Path, str]]:
     """Yield (disk_path, archive_name) pairs for documents matching the filter.
 
     Dedup by absolute file path — `duplicate` rows share the library_path with
     the original, so without this we'd write the same bytes twice under the
-    same archive name.
+    same archive name. If `ids` is given, the other filters are ignored and
+    only those rows are exported.
     """
-    docs = db.list_documents(
-        category=category or None, year=year or None,
-        limit=1_000_000, trash=include_trash,
-    )
+    if ids is not None:
+        docs = [db.get(i) for i in ids]
+        docs = [d for d in docs if d]
+    else:
+        docs = db.list_documents(
+            category=category or None, year=year or None,
+            limit=1_000_000, trash=include_trash,
+        )
     library_root = settings.paths.library
     seen: set[str] = set()
     for d in docs:
@@ -78,13 +84,15 @@ def stream_zip(
     category: str | None = None,
     year: str | None = None,
     include_trash: bool = False,
+    ids: list[int] | None = None,
     chunk_size: int = 64 * 1024,
 ) -> Iterator[bytes]:
     buf = _StreamingBuffer()
     zf = zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED, allowZip64=True)
 
     for src, arcname in _pick_files(
-        settings, db, category=category, year=year, include_trash=include_trash,
+        settings, db, category=category, year=year,
+        include_trash=include_trash, ids=ids,
     ):
         try:
             with src.open("rb") as f, zf.open(arcname, mode="w", force_zip64=True) as dst:

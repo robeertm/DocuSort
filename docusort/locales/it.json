@@ -109,6 +109,8 @@
   "stage.uploading": "Caricamento — {progress} %",
   "stage.pending_upload": "In coda · in attesa di caricamento",
   "stage.uploading_bg": "Caricamento in background…",
+  "stage.uploading_active": "Caricamento in corso…",
+  "stage.needs_repick": "Seleziona di nuovo — la scheda è stata chiusa e il file non è più in memoria",
   "stage.queued": "In coda · attesa stabilità",
   "stage.processing": "OCR + classificazione Claude in corso…",
   "stage.filed": "✓ {category}  ·  {confidence} %  ·  ${cost}",
@@ -148,6 +150,13 @@
   "trash.empty_all": "Svuota cestino",
 
   "library.export": "Esporta come ZIP",
+  "library.select": "Seleziona",
+  "library.deselect": "Rimuovi selezione",
+  "library.selected_count": "{n} selezionati",
+  "library.bulk_clear": "Pulisci selezione",
+  "library.bulk_recategorize": "Riclassifica…",
+  "library.bulk_export": "ZIP della selezione",
+  "library.bulk_trash": "Sposta nel cestino",
 
   "sync.heading": "Backup & sincronizzazione cloud",
   "sync.subtitle": "Esporta la libreria come ZIP o sincronizzala col tuo cloud via rclone (iCloud, Google Drive, Dropbox, OneDrive, S3…).",

@@ -2,6 +2,41 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.9.0] – 2026-04-25
+
+### Fixed
+
+- **Upload corrupted to 0 bytes on Safari + HTTPS.** WebKit has a long-
+  standing bug where `Blob`s round-tripped through IndexedDB (e.g. read
+  by a Service Worker) come back empty. Reworked the upload pipeline to
+  keep `File` references in a JS `Map` keyed by IDB id; IndexedDB now
+  stores only metadata. Pending items left over from a tab close are
+  marked `needs-repick` instead of silently uploading 0-byte files.
+- The legacy `/upload-sw.js` worker is unregistered on page load so any
+  cached SW from v0.7.x stops draining stale state.
+
+### Added
+
+- **Multiselect in the library**. Each card has a checkbox in the upper
+  left; clicking it toggles the card into a global selection. A sticky
+  bottom bar appears with bulk actions:
+  - **In den Papierkorb** (or restore / purge in trash view)
+  - **Kategorie ändern** dropdown — moves all selected files to the new
+    category folder + updates DB rows
+  - **ZIP der Auswahl** — streams a zip of just the selected docs
+- New endpoints:
+  - `POST /api/bulk/delete`
+  - `POST /api/bulk/restore`
+  - `POST /api/bulk/purge`
+  - `POST /api/bulk/recategorize`  body `{ids: [...], category: "X"}`
+  - `GET /api/export.zip?ids=1,2,3`
+
+### Notes
+
+- Tab-close mid-upload now loses only the in-flight files; previously
+  uploaded items in the same batch are safely on the server. The user
+  is told which items still need to be re-picked.
+
 ## [0.8.0] – 2026-04-24
 
 ### Added
