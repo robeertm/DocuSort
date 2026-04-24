@@ -2,6 +2,29 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.7.2] – 2026-04-24
+
+### Fixed
+
+- **Upload queue stuck at 0 over plain HTTP.** Browsers only register
+  service workers in a secure context (HTTPS or localhost), so on a
+  plain-HTTP deployment like `http://<nas>:9876` the SW registration
+  silently failed and `navigator.serviceWorker.ready` never resolved
+  — all uploads sat in IndexedDB forever.
+  - Added `window.isSecureContext` guard + a 3-second timeout around
+    the registration wait.
+  - When the SW is unavailable the page drains the IDB queue itself
+    via `fetch`, still writing progress back to IDB so the dashboard
+    widget sees live updates. The "tab can be closed" claim turns
+    into "keep this tab open" so the user knows the difference.
+- The `drain` entry point picks between SW and in-page automatically;
+  no more hanging on `serviceWorker.ready`.
+
+### Notes
+
+- To get TRUE background uploads, expose the app over HTTPS. On a
+  Tailscale-attached host that's one command — see README.
+
 ## [0.7.1] – 2026-04-24
 
 ### Added

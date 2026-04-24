@@ -122,6 +122,7 @@
   "stage.upload_aborted": "Upload aborted — tab was closed",
 
   "upload.background_hint": "Uploading in the background — you can close this tab.",
+  "upload.foreground_hint": "Uploading — keep this tab open until done (HTTPS would enable true background upload).",
 
   "retry.heading": "Retry classification",
   "retry.hint": "Re-sends the stored OCR text to Claude and refiles the document. No extra OCR cost.",

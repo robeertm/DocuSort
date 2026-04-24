@@ -63,13 +63,14 @@
     </div>
   </label>
 
-  <!-- Background banner -->
+  <!-- Activity banner -->
   <template x-if="items.length > 0 && anyActive()">
-    <div class="card p-3 flex items-center gap-2 text-xs text-emerald-300 bg-emerald-500/5 border-emerald-500/20">
+    <div class="card p-3 flex items-center gap-2 text-xs bg-emerald-500/5 border-emerald-500/20"
+         :class="swActive ? 'text-emerald-300' : 'text-amber-300'">
       <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
       </svg>
-      <span x-text="tr('upload.background_hint')"></span>
+      <span x-text="swActive ? tr('upload.background_hint') : tr('upload.foreground_hint')"></span>
     </div>
   </template>
 
@@ -188,19 +189,29 @@ function uploader() {
     dragOver: false,
     items: [],               // UI-shaped items (no file blob)
     polling: new Set(),      // doc IDs with active server-status poll
+    swActive: false,         // true once the service worker is live
+    pageDraining: false,     // true while the in-page fallback is draining
 
     async init() {
-      // 1. Register the service worker (scope /).
-      if ("serviceWorker" in navigator) {
+      // 1. Try to register the service worker. Requires a secure context
+      //    (HTTPS or localhost) — over plain HTTP the browser silently
+      //    refuses and we fall back to in-page uploads.
+      if ("serviceWorker" in navigator && window.isSecureContext) {
         try {
           await navigator.serviceWorker.register("/upload-sw.js", { scope: "/" });
-          await navigator.serviceWorker.ready;
+          const reg = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 3000)),
+          ]);
+          if (reg && (reg.active || reg.waiting || reg.installing)) {
+            this.swActive = true;
+          }
         } catch (e) {
-          console.warn("SW registration failed:", e);
+          console.warn("SW unavailable, falling back to in-page uploads:", e);
         }
       }
 
-      // 2. Listen to SW broadcasts.
+      // 2. Listen to SW broadcasts (harmless if there's no SW).
       try {
         const bc = new BroadcastChannel(BC_NAME);
         bc.onmessage = (evt) => this.onSwMessage(evt.data);
@@ -218,9 +229,8 @@ function uploader() {
         }
       }
 
-      // 5. Nudge the SW to drain, in case there are pending-upload items
-      //    still in IDB (the worker was killed before finishing).
-      this.tellDrain();
+      // 5. Kick off a drain — SW if we have one, otherwise in-page.
+      this.drain();
     },
 
     _toUiItem(rec) {
@@ -252,10 +262,81 @@ function uploader() {
       }
     },
 
-    async tellDrain() {
-      const ctrl = navigator.serviceWorker?.controller
-                || (await navigator.serviceWorker?.ready)?.active;
-      if (ctrl) ctrl.postMessage({ type: "drain" });
+    async drain() {
+      if (this.swActive) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const w = reg.active || reg.waiting || reg.installing;
+          if (w) { w.postMessage({ type: "drain" }); return; }
+        } catch (e) { /* fall through to in-page */ }
+      }
+      this.drainInPage();
+    },
+
+    async drainInPage() {
+      // In-page fallback: the page itself POSTs pending files to /upload,
+      // mutating IDB as it goes so the dashboard widget sees progress.
+      if (this.pageDraining) return;
+      this.pageDraining = true;
+      try {
+        while (true) {
+          const pending = (await idbAll()).filter(
+            r => r.stage === "pending-upload" && r.file
+          );
+          if (pending.length === 0) break;
+          const batch = pending.slice(0, 4);
+          await Promise.all(batch.map(rec => this._pageUploadOne(rec)));
+        }
+      } finally {
+        this.pageDraining = false;
+      }
+    },
+
+    async _pageUploadOne(rec) {
+      rec.stage = "uploading";
+      await idbPut(rec);
+      this._mirror(rec);
+
+      try {
+        const form = new FormData();
+        form.append("files", rec.file, rec.originalName);
+        const r = await fetch("/upload", { method: "POST", body: form });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const res = await r.json();
+        if (res.rejected && res.rejected.includes(rec.originalName)) {
+          rec.stage = "error"; rec.message = "format";
+        } else {
+          const entry = (res.saved || []).find(
+            s => s.original_name === rec.originalName
+          ) || (res.saved || [])[0];
+          if (entry && entry.inbox_name) {
+            rec.inbox_name = entry.inbox_name;
+            rec.stage = "server-queued";
+            rec.file = null;
+          } else {
+            rec.stage = "error"; rec.message = "unclear";
+          }
+        }
+      } catch (e) {
+        rec.stage = "error"; rec.message = String(e && e.message ? e.message : e);
+      }
+      rec.updated_at = Date.now();
+      await idbPut(rec);
+      this._mirror(rec);
+
+      if (rec.inbox_name && !TERMINAL.has(rec.stage) && !this.polling.has(rec.id)) {
+        const ui = this.items.find(x => x.id === rec.id);
+        if (ui) this.pollStatus(ui);
+      }
+    },
+
+    _mirror(rec) {
+      const ui = this.items.find(x => x.id === rec.id);
+      const fresh = this._toUiItem(rec);
+      if (ui) Object.assign(ui, fresh);
+      else this.items.push(fresh);
+      // Dashboard widget listens on BroadcastChannel; notify it too.
+      try { new BroadcastChannel(BC_NAME).postMessage({ type: "update", id: rec.id }); } catch (e) {}
     },
 
     // ---- User actions ----
@@ -284,7 +365,7 @@ function uploader() {
           doc_id: null, category: null, confidence: 0, cost_usd: 0, message: "",
         });
       }
-      this.tellDrain();
+      this.drain();
     },
 
     async clearHistory() {

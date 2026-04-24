@@ -122,6 +122,7 @@
   "stage.upload_aborted": "Envoi interrompu — onglet fermé",
 
   "upload.background_hint": "Envoi en arrière-plan — vous pouvez fermer cet onglet.",
+  "upload.foreground_hint": "Envoi en cours — garder l'onglet ouvert jusqu'à la fin (HTTPS permettrait l'envoi en arrière-plan).",
 
   "retry.heading": "Reclasser",
   "retry.hint": "Renvoie le texte OCR stocké à Claude et reclasse le document. Pas de coût OCR supplémentaire.",
