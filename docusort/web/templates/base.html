@@ -21,16 +21,18 @@
     },
   };
 </script>
-<style>
-  html { background: #0b1220; }
-  body { -webkit-tap-highlight-color: transparent; }
-  .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
-  .card { @apply rounded-2xl bg-ink-800/60 border border-ink-700/60 backdrop-blur; }
-  .btn  { @apply inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition; }
-  .btn-primary { @apply btn bg-emerald-500 text-white hover:bg-emerald-400 active:bg-emerald-600; }
-  .btn-secondary { @apply btn bg-ink-700 text-ink-100 hover:bg-ink-600 active:bg-ink-800; }
-  .btn-ghost { @apply btn text-ink-300 hover:bg-ink-700/50; }
-  input, select, textarea { color-scheme: dark; }
+<style type="text/tailwindcss">
+  @layer components {
+    html { background: #0b1220; }
+    body { -webkit-tap-highlight-color: transparent; }
+    .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap; }
+    .card { @apply rounded-2xl bg-ink-800/60 border border-ink-700/60 backdrop-blur; }
+    .btn  { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap; }
+    .btn-primary { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap bg-emerald-500 text-white hover:bg-emerald-400 active:bg-emerald-600; }
+    .btn-secondary { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap bg-ink-700 text-ink-100 hover:bg-ink-600 active:bg-ink-800; }
+    .btn-ghost { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap text-ink-300 hover:bg-ink-700/50; }
+    input, select, textarea { color-scheme: dark; }
+  }
 </style>
 </head>
 <body class="min-h-full bg-gradient-to-b from-ink-950 via-ink-900 to-ink-950 text-ink-100 antialiased">

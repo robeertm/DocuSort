@@ -22,17 +22,32 @@ logger = logging.getLogger("docusort.db")
 
 # Anthropic public list pricing (USD per 1M tokens, input / output).
 # Keyed by model prefix — dated suffixes like "-20251001" match via startswith.
+# Cache read/write multipliers are the documented ephemeral-cache factors.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5":  (1.0,  5.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-opus-4-7":  (15.0, 75.0),
 }
+CACHE_WRITE_MULTIPLIER = 1.25  # 5-minute ephemeral cache write surcharge
+CACHE_READ_MULTIPLIER  = 0.10  # cached token read factor
 
 
-def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+def calculate_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    cache_write: int = 0,
+    cache_read: int = 0,
+) -> float:
     for prefix, (in_price, out_price) in MODEL_PRICING.items():
         if model.startswith(prefix):
-            return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
+            return (
+                input_tokens  * in_price
+                + output_tokens * out_price
+                + cache_write   * in_price * CACHE_WRITE_MULTIPLIER
+                + cache_read    * in_price * CACHE_READ_MULTIPLIER
+            ) / 1_000_000
     logger.warning("Unknown model %s – cost will be recorded as 0", model)
     return 0.0
 
@@ -56,7 +71,10 @@ class DocumentRecord:
     input_tokens: int
     output_tokens: int
     cost_usd: float
-    status: str  # 'filed' | 'review' | 'failed'
+    status: str  # 'filed' | 'review' | 'failed' | 'duplicate'
+    content_hash: str = ""
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     extracted_text: str = ""
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
@@ -80,6 +98,9 @@ CREATE TABLE IF NOT EXISTS documents (
     model           TEXT,
     input_tokens    INTEGER,
     output_tokens   INTEGER,
+    cache_creation_tokens INTEGER DEFAULT 0,
+    cache_read_tokens     INTEGER DEFAULT 0,
+    content_hash    TEXT,
     cost_usd        REAL,
     status          TEXT NOT NULL,
     extracted_text  TEXT,
@@ -90,6 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category);
 CREATE INDEX IF NOT EXISTS idx_documents_doc_date ON documents(doc_date);
 CREATE INDEX IF NOT EXISTS idx_documents_status   ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_documents_created  ON documents(created_at);
+CREATE INDEX IF NOT EXISTS idx_documents_hash     ON documents(content_hash);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
     filename, sender, subject, reasoning, extracted_text,
@@ -128,7 +150,22 @@ class Database:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         logger.info("Database ready at %s", path)
+
+    def _migrate(self) -> None:
+        """Idempotent column adds for databases created by older versions."""
+        cols = {row["name"] for row in self._conn.execute("PRAGMA table_info(documents)")}
+        migrations = [
+            ("cache_creation_tokens", "INTEGER DEFAULT 0"),
+            ("cache_read_tokens",     "INTEGER DEFAULT 0"),
+            ("content_hash",          "TEXT"),
+        ]
+        for name, decl in migrations:
+            if name not in cols:
+                self._conn.execute(f"ALTER TABLE documents ADD COLUMN {name} {decl}")
+                logger.info("DB migration: added column %s", name)
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(content_hash)")
 
     def close(self) -> None:
         with self._lock:
@@ -162,6 +199,24 @@ class Database:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM documents WHERE id = ?", (doc_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def find_by_original_name(self, original_name: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM documents WHERE original_name = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (original_name,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def find_by_hash(self, content_hash: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM documents WHERE content_hash = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (content_hash,),
             ).fetchone()
         return dict(row) if row else None
 
@@ -238,9 +293,12 @@ class Database:
         with self._lock:
             totals = self._conn.execute("""
                 SELECT COUNT(*) AS n,
-                       COALESCE(SUM(input_tokens), 0)  AS input_tokens,
-                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                       COALESCE(SUM(cost_usd), 0)      AS cost_usd
+                       COALESCE(SUM(input_tokens), 0)            AS input_tokens,
+                       COALESCE(SUM(output_tokens), 0)           AS output_tokens,
+                       COALESCE(SUM(cache_creation_tokens), 0)   AS cache_creation_tokens,
+                       COALESCE(SUM(cache_read_tokens), 0)       AS cache_read_tokens,
+                       COALESCE(SUM(cost_usd), 0)                AS cost_usd,
+                       SUM(CASE WHEN status='duplicate' THEN 1 ELSE 0 END) AS duplicates
                 FROM documents
             """).fetchone()
             by_cat = self._conn.execute("""

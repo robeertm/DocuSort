@@ -2,6 +2,45 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.3.0] – 2026-04-24
+
+### Added
+
+- **Prompt caching** for Claude. System prompt (category guide + 12 few-shot
+  examples + processing rules) is now ~5k tokens and marked `cache_control:
+  ephemeral`. First call pays a 1.25× surcharge to write the cache, every
+  subsequent call within 5 minutes reads at 0.1×. On a typical bulk import of
+  1000 documents this saves **60–70 %** on input tokens.
+- **SHA256 duplicate detection** before OCR and Claude. Identical files are
+  filed as `status='duplicate'` with the same metadata as the original — no
+  OCR, no API call, no cost.
+- **Live upload status** — the upload page now polls `/api/status/{name}`
+  after each upload and shows per-file stage: `Hochladen → Warteschlange →
+  OCR läuft → Klassifiziert als X / Review / Duplikat`, with a direct link
+  to the filed document.
+- **Dashboard savings strip**: tokens saved by cache + dollars saved by
+  duplicate detection.
+- **Document detail**: Cache-write / cache-read token counts and the
+  document's SHA256.
+
+### Fixed
+
+- Nav-button layout on the dashboard. Tailwind Play CDN's `@apply` did not
+  resolve nested `btn` references, so the upload icon stacked above its
+  label. Utility classes are now emitted directly.
+
+### Changed
+
+- `Classifier` now returns `cache_creation_tokens` and `cache_read_tokens`.
+- `calculate_cost()` accepts `cache_write` / `cache_read` and applies the
+  1.25× / 0.10× multipliers.
+- DB: new columns `content_hash`, `cache_creation_tokens`, `cache_read_tokens`;
+  auto-migration on startup for existing databases.
+- Classifier system prompt moved from brief rules to a full guide (10
+  categories with signals & examples, 12 few-shot examples, common pitfalls,
+  OCR-aware processing notes). Improves classification accuracy and is
+  necessary to cross Haiku 4.5's cache-size minimum (~4k tokens).
+
 ## [0.2.1] – 2026-04-24
 
 ### Added

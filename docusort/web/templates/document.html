@@ -77,10 +77,22 @@
         <div class="flex justify-between gap-4"><dt class="text-ink-400">Modell</dt><dd class="font-mono text-xs">{{ doc.model or '—' }}</dd></div>
         <div class="flex justify-between gap-4"><dt class="text-ink-400">Input Token</dt><dd class="tabular-nums">{{ '{:,}'.format(doc.input_tokens or 0) }}</dd></div>
         <div class="flex justify-between gap-4"><dt class="text-ink-400">Output Token</dt><dd class="tabular-nums">{{ '{:,}'.format(doc.output_tokens or 0) }}</dd></div>
+        {% if doc.cache_creation_tokens %}
+          <div class="flex justify-between gap-4"><dt class="text-ink-400">Cache geschrieben</dt><dd class="tabular-nums text-indigo-300">{{ '{:,}'.format(doc.cache_creation_tokens) }}</dd></div>
+        {% endif %}
+        {% if doc.cache_read_tokens %}
+          <div class="flex justify-between gap-4"><dt class="text-ink-400">Cache gelesen</dt><dd class="tabular-nums text-emerald-300">{{ '{:,}'.format(doc.cache_read_tokens) }} · 0,1×</dd></div>
+        {% endif %}
         <div class="flex justify-between gap-4 pt-2 border-t border-ink-700/50">
           <dt class="text-ink-300 font-medium">Kosten</dt>
           <dd class="tabular-nums font-semibold">{{ doc.cost_usd | usd }} <span class="text-ink-500 text-xs">/ {{ doc.cost_usd | eur }}</span></dd>
         </div>
+        {% if doc.content_hash %}
+          <div class="flex justify-between gap-4 pt-2 border-t border-ink-700/50">
+            <dt class="text-ink-400">SHA256</dt>
+            <dd class="font-mono text-[10px] text-ink-500 truncate max-w-[160px]">{{ doc.content_hash }}</dd>
+          </div>
+        {% endif %}
       </dl>
     </div>
 

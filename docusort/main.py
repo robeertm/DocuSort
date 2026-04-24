@@ -14,6 +14,7 @@ DOCUSORT_LOG_LEVEL (DEBUG/INFO/WARNING/ERROR) controls verbosity.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import os
 import sys
@@ -29,6 +30,14 @@ from .organizer import organize
 from .watcher import process_existing, run_forever, watch
 
 
+def _sha256(path: Path, chunk_size: int = 1 << 16) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _build_pipeline(settings: AppSettings, classifier: Classifier, db: Database):
     log = logging.getLogger("docusort.pipeline")
 
@@ -38,6 +47,51 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier, db: Database)
         log.info("Processing %s (%.1f KB)", path.name, path.stat().st_size / 1024)
         original_name = path.name
         original_size = path.stat().st_size
+
+        # Duplicate check BEFORE OCR/Claude — SHA256 of raw file bytes.
+        content_hash = _sha256(path)
+        existing = db.find_by_hash(content_hash)
+        if existing:
+            log.info(
+                "Duplicate of doc %d (%s) — skipping OCR+Claude, recording as duplicate",
+                existing["id"], existing["filename"],
+            )
+            # Keep original in _Processed, don't re-file in library, register row.
+            try:
+                if settings.keep_original:
+                    settings.paths.processed.mkdir(parents=True, exist_ok=True)
+                    dup_target = settings.paths.processed / original_name
+                    if dup_target.exists():
+                        dup_target = settings.paths.processed / f"{content_hash[:8]}-{original_name}"
+                    path.rename(dup_target)
+                else:
+                    path.unlink(missing_ok=True)
+
+                dup_rec = DocumentRecord(
+                    filename=existing["filename"],
+                    original_name=original_name,
+                    category=existing["category"],
+                    doc_date=existing["doc_date"] or "",
+                    sender=existing["sender"] or "",
+                    subject=existing["subject"] or "",
+                    confidence=existing["confidence"] or 0.0,
+                    reasoning=f"Duplicate of doc {existing['id']}",
+                    library_path=existing["library_path"],
+                    processed_path="",
+                    file_size=original_size,
+                    page_count=existing.get("page_count"),
+                    ocr_used=False,
+                    model="",
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost_usd=0.0,
+                    status="duplicate",
+                    content_hash=content_hash,
+                )
+                db.insert_document(dup_rec)
+            except Exception as exc:
+                log.exception("Failed to record duplicate: %s", exc)
+            return
 
         ocr_res: OcrResult = extract_text(path, settings.ocr)
 
@@ -91,8 +145,11 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier, db: Database)
             model=cls.model,
             input_tokens=cls.input_tokens,
             output_tokens=cls.output_tokens,
+            cache_creation_tokens=cls.cache_creation_tokens,
+            cache_read_tokens=cls.cache_read_tokens,
             cost_usd=cls.cost_usd,
             status=status,
+            content_hash=content_hash,
             extracted_text=ocr_res.text[: settings.claude.max_text_chars],
         )
         try:

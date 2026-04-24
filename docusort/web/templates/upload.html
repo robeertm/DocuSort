@@ -6,7 +6,7 @@
   <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Dokumente hochladen</h1>
   <p class="text-ink-400 mt-1 text-sm">
     PDF oder Bild — per Drag &amp; Drop, Datei-Auswahl oder direkt vom Handy-Scan.
-    Alles Weitere läuft automatisch.
+    Die Klassifizierung läuft live — du siehst hier, wann ein Dokument fertig ist.
   </p>
 </div>
 
@@ -51,26 +51,51 @@
   <!-- Queue -->
   <template x-if="items.length > 0">
     <div class="card p-5">
-      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">Upload</h2>
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">
+        Verarbeitung
+      </h2>
       <ul class="divide-y divide-ink-700/50 -my-3">
         <template x-for="(it, i) in items" :key="i">
           <li class="flex items-center gap-3 py-3">
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ink-700/60 text-ink-300">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <path d="M14 2v6h6"/>
+            <!-- Status icon -->
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                 :class="iconBg(it.stage)">
+              <!-- filed -->
+              <svg x-show="it.stage === 'filed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4 text-emerald-300">
+                <path d="M20 6 9 17l-5-5"/>
+              </svg>
+              <!-- review -->
+              <svg x-show="it.stage === 'review'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-amber-300">
+                <path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/>
+              </svg>
+              <!-- failed / error -->
+              <svg x-show="it.stage === 'failed' || it.stage === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-rose-300">
+                <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>
+              </svg>
+              <!-- duplicate -->
+              <svg x-show="it.stage === 'duplicate'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-indigo-300">
+                <rect x="8" y="8" width="13" height="13" rx="2"/><path d="M3 14V5a2 2 0 0 1 2-2h9"/>
+              </svg>
+              <!-- in-progress spinner -->
+              <svg x-show="['uploading','queued','processing'].includes(it.stage)" class="h-4 w-4 animate-spin text-ink-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
               </svg>
             </div>
+
             <div class="min-w-0 flex-1">
               <div class="truncate text-sm font-medium" x-text="it.name"></div>
-              <div class="mt-1 h-1 rounded-full bg-ink-700/40 overflow-hidden">
-                <div class="h-full bg-emerald-500 transition-[width] duration-300"
+              <div class="mt-1 text-xs" :class="stageColor(it.stage)" x-text="stageLabel(it)"></div>
+              <div class="mt-1 h-1 rounded-full bg-ink-700/40 overflow-hidden" x-show="it.stage === 'uploading'">
+                <div class="h-full bg-emerald-500 transition-[width] duration-150"
                      :style="`width: ${it.progress}%`"></div>
               </div>
             </div>
-            <span class="text-xs tabular-nums"
-                  :class="it.status === 'done' ? 'text-emerald-300' : it.status === 'error' ? 'text-rose-300' : 'text-ink-400'"
-                  x-text="it.statusText"></span>
+
+            <template x-if="it.doc_id">
+              <a :href="`/document/${it.doc_id}`" class="btn-ghost shrink-0 text-xs">
+                Ansehen →
+              </a>
+            </template>
           </li>
         </template>
       </ul>
@@ -87,8 +112,8 @@
         <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
       </svg>
       <p class="leading-relaxed">
-        Nach dem Upload landen Dateien im <span class="font-mono text-xs bg-ink-700/50 rounded px-1.5 py-0.5">inbox/</span>-Ordner.
-        Der Watcher verarbeitet sie innerhalb weniger Sekunden automatisch und legt sie klassifiziert in die Bibliothek.
+        OCR + Claude brauchen je nach Seitenzahl <span class="font-medium text-ink-200">15–60 s</span> pro PDF.
+        Der Watcher wartet 5 s nach dem letzten Byte, bevor er loslegt — siehe Live-Status oben.
       </p>
     </div>
   </div>
@@ -106,18 +131,56 @@ function uploader() {
     handleFiles(fileList) {
       for (const f of fileList) this.uploadOne(f);
     },
+    stageColor(stage) {
+      return {
+        uploading: 'text-ink-400',
+        queued:    'text-ink-400',
+        processing:'text-emerald-300',
+        filed:     'text-emerald-300',
+        review:    'text-amber-300',
+        failed:    'text-rose-300',
+        error:     'text-rose-300',
+        duplicate: 'text-indigo-300',
+      }[stage] || 'text-ink-400';
+    },
+    iconBg(stage) {
+      return {
+        uploading: 'bg-ink-700/60',
+        queued:    'bg-ink-700/60',
+        processing:'bg-ink-700/60',
+        filed:     'bg-emerald-500/15',
+        review:    'bg-amber-500/15',
+        failed:    'bg-rose-500/15',
+        error:     'bg-rose-500/15',
+        duplicate: 'bg-indigo-500/15',
+      }[stage] || 'bg-ink-700/60';
+    },
+    stageLabel(it) {
+      switch (it.stage) {
+        case 'uploading': return `Hochladen — ${it.progress} %`;
+        case 'queued':    return 'In Warteschlange · Watcher wartet auf Stabilität';
+        case 'processing':return 'OCR + Claude-Klassifizierung läuft…';
+        case 'filed':     return `✓ ${it.category}  ·  ${(it.confidence * 100).toFixed(0)} %  ·  $${(it.cost_usd || 0).toFixed(4)}`;
+        case 'review':    return `⚠ Review (${(it.confidence * 100).toFixed(0)} %)  ·  ${it.category}`;
+        case 'failed':    return 'Fehlgeschlagen — siehe Logs';
+        case 'error':     return it.message || 'Netzwerkfehler';
+        case 'duplicate': return `Duplikat — bereits als „${it.category}" vorhanden`;
+        default:          return '';
+      }
+    },
     summary() {
-      const done = this.items.filter(i => i.status === 'done').length;
-      const total = this.items.length;
-      return `${done} von ${total} fertig`;
+      const done = this.items.filter(i => !['uploading','queued','processing'].includes(i.stage)).length;
+      return `${done} von ${this.items.length} fertig`;
     },
     allDone() {
-      return this.items.length > 0 && this.items.every(i => i.status !== 'uploading');
+      return this.items.length > 0 && this.items.every(i => !['uploading','queued','processing'].includes(i.stage));
     },
     async uploadOne(file) {
-      const item = { name: file.name, progress: 0, status: 'uploading', statusText: '0 %' };
+      const item = {
+        name: file.name, progress: 0, stage: 'uploading',
+        doc_id: null, category: null, confidence: 0, cost_usd: 0,
+      };
       this.items.push(item);
-      const self = this;
 
       const form = new FormData();
       form.append('files', file);
@@ -126,31 +189,56 @@ function uploader() {
       xhr.upload.addEventListener('progress', e => {
         if (e.lengthComputable) {
           item.progress = Math.round(e.loaded / e.total * 100);
-          item.statusText = `${item.progress} %`;
         }
       });
       xhr.addEventListener('load', () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           const res = JSON.parse(xhr.responseText);
           if (res.rejected && res.rejected.includes(file.name)) {
-            item.status = 'error';
-            item.statusText = 'Format nicht unterstützt';
-          } else {
+            item.stage = 'error';
+            item.message = 'Format nicht unterstützt';
+            return;
+          }
+          const entry = res.saved.find(s => s.original_name === file.name) || res.saved[0];
+          if (entry && entry.inbox_name) {
             item.progress = 100;
-            item.status = 'done';
-            item.statusText = 'In Verarbeitung';
+            item.stage = 'queued';
+            this.pollStatus(item, entry.inbox_name);
+          } else {
+            item.stage = 'error';
+            item.message = 'Upload-Antwort unklar';
           }
         } else {
-          item.status = 'error';
-          item.statusText = 'Fehler';
+          item.stage = 'error';
+          item.message = `HTTP ${xhr.status}`;
         }
       });
       xhr.addEventListener('error', () => {
-        item.status = 'error';
-        item.statusText = 'Netzwerkfehler';
+        item.stage = 'error';
+        item.message = 'Netzwerkfehler';
       });
       xhr.open('POST', '/upload');
       xhr.send(form);
+    },
+    async pollStatus(item, inboxName) {
+      const terminal = new Set(['filed','review','failed','duplicate','unknown','error']);
+      for (let attempt = 0; attempt < 120; attempt++) {   // up to ~3 min
+        try {
+          const res = await fetch(`/api/status/${encodeURIComponent(inboxName)}`);
+          if (!res.ok) throw new Error('status ' + res.status);
+          const data = await res.json();
+          item.stage = data.status;
+          if (data.doc_id)    item.doc_id    = data.doc_id;
+          if (data.category)  item.category  = data.category;
+          if (data.confidence != null) item.confidence = data.confidence;
+          if (data.cost_usd != null)   item.cost_usd   = data.cost_usd;
+          if (terminal.has(item.stage)) return;
+        } catch (e) {
+          // transient, keep polling
+        }
+        await new Promise(r => setTimeout(r, 1500));
+      }
+      item.stage = 'unknown';
     },
   };
 }

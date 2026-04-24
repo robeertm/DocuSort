@@ -177,10 +177,40 @@ def create_app(settings: AppSettings, db: Database) -> FastAPI:
             target = settings.paths.inbox / safe_name
             with target.open("wb") as f:
                 shutil.copyfileobj(up.file, f)
-            saved.append(safe_name)
+            saved.append({"inbox_name": safe_name, "original_name": up.filename})
             logger.info("Uploaded %s -> %s", up.filename, safe_name)
 
         return {"saved": saved, "rejected": rejected}
+
+    @app.get("/api/status/{inbox_name}")
+    def upload_status(inbox_name: str):
+        """Tell the upload UI whether the pipeline is done with a given file.
+
+        States:
+          queued     — file still sits in inbox/, waiting for stable size
+          processing — file still in inbox/ and has been there >5s (OCR running)
+          done       — classified and filed, doc_id + category returned
+          review     — classified with low confidence, doc_id returned
+          failed     — OCR or classification failed, doc_id returned
+          duplicate  — SHA256 matched an existing document
+          unknown    — neither in inbox nor in DB (cleaned up without record)
+        """
+        inbox_file = settings.paths.inbox / inbox_name
+        if inbox_file.exists():
+            age = datetime.now().timestamp() - inbox_file.stat().st_mtime
+            return {"status": "processing" if age > settings.stable_seconds else "queued"}
+
+        # Not in inbox → search DB by original_name (matches the safe_name we wrote)
+        d = db.find_by_original_name(inbox_name)
+        if d:
+            return {
+                "status": d["status"],  # filed | review | failed | duplicate
+                "doc_id": d["id"],
+                "category": d["category"],
+                "confidence": d["confidence"],
+                "cost_usd": d["cost_usd"],
+            }
+        return {"status": "unknown"}
 
     # ---------- JSON stats (for the cost chart) ----------
     @app.get("/api/stats")
