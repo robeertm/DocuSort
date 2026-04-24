@@ -2,6 +2,14 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.1.1] – 2026-04-24
+
+### Fixed
+
+- Add missing `docusort/__main__.py` so `python -m docusort` works. Without
+  this, the Docker container failed to start with
+  `'docusort' is a package and cannot be directly executed`.
+
 ## [0.1.0] – 2026-04-24
 
 ### Etappe 1 – MVP
