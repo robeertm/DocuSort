@@ -2,6 +2,21 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.6.3] – 2026-04-24
+
+### Added
+
+- **Persistent upload queue** — the per-file status list now survives tab
+  close / reload / language switch. The queue is stored in `localStorage`;
+  on page load, any file the server still owns (has an `inbox_name`) is
+  picked back up by `/api/status/{inbox_name}` polling and you see the
+  stage continue from wherever it was.
+- Files that were uploading when the tab was closed are shown as "Upload
+  abgebrochen" so you know to re-send them — the server never finished
+  writing those bytes.
+- **Verlauf leeren** button in the queue header keeps active items and
+  drops everything already in a terminal stage.
+
 ## [0.6.2] – 2026-04-24
 
 ### Changed

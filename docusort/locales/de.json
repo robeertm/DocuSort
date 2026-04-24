@@ -96,6 +96,7 @@
   "upload.camera_title": "Mit Kamera scannen",
   "upload.camera_hint": "Direkt aus dem Handy aufnehmen",
   "upload.queue_heading": "Verarbeitung",
+  "upload.clear_history": "Verlauf leeren",
   "upload.summary_done_of_total": "{done} von {total} fertig",
   "upload.to_library": "Zur Bibliothek →",
   "upload.view": "Ansehen →",
@@ -112,6 +113,7 @@
   "stage.error_http": "HTTP {status}",
   "stage.error_unclear": "Upload-Antwort unklar",
   "stage.duplicate": "Duplikat — bereits als „{category}\" vorhanden",
+  "stage.upload_aborted": "Upload abgebrochen — Tab geschlossen",
 
   "retry.heading": "Neu klassifizieren",
   "retry.hint": "Schickt den gespeicherten OCR-Text erneut an Claude und legt das Dokument neu ab. Keine zusätzlichen OCR-Kosten.",

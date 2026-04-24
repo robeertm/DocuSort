@@ -66,7 +66,12 @@
   <!-- Queue -->
   <template x-if="items.length > 0">
     <div class="card p-5">
-      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('upload.queue_heading') }}</h2>
+      <div class="flex items-baseline justify-between gap-3 mb-3">
+        <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('upload.queue_heading') }}</h2>
+        <button type="button" @click="clearHistory()" class="text-xs text-ink-400 hover:text-ink-200 underline">
+          {{ t('upload.clear_history') }}
+        </button>
+      </div>
       <ul class="divide-y divide-ink-700/50 -my-3 max-h-[60vh] overflow-y-auto">
         <template x-for="(it, i) in items" :key="i">
           <li class="flex items-center gap-3 py-3">
@@ -111,12 +116,62 @@
 const ALLOWED_EXT = ['pdf','jpg','jpeg','png','tif','tiff','bmp'];
 const MAX_CONCURRENT_UPLOADS = 4;
 
+const STORAGE_KEY = 'docusort.upload.queue.v1';
+const STORAGE_CAP = 200;
+const TERMINAL_STAGES = new Set(['filed','review','failed','duplicate','unknown','error']);
+
+function persistItems(items) {
+  try {
+    const slim = items.slice(-STORAGE_CAP).map(it => ({
+      name: it.name, inbox_name: it.inbox_name || null,
+      stage: it.stage, progress: it.progress || 0,
+      doc_id: it.doc_id || null, category: it.category || null,
+      confidence: it.confidence || 0, cost_usd: it.cost_usd || 0,
+      message: it.message || '', ts: it.ts || Date.now(),
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
+  } catch (e) { /* quota full / disabled — silently give up */ }
+}
+
+function loadItems() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const stored = JSON.parse(raw);
+    if (!Array.isArray(stored)) return [];
+    return stored.map(it => {
+      // Items in a client-only stage ('uploading'/'queued' without inbox_name)
+      // can't resume after a tab close — the File object is gone.
+      if (!it.inbox_name && !TERMINAL_STAGES.has(it.stage)) {
+        return { ...it, stage: 'error', message: tr('stage.upload_aborted') };
+      }
+      return it;
+    });
+  } catch (e) { return []; }
+}
+
 function uploader() {
   return {
     dragOver: false,
-    items: [],
+    items: loadItems(),
     queue: [],
     active: 0,
+
+    init() {
+      // Persist on any mutation so a closed tab doesn't lose its history.
+      this.$watch('items', () => persistItems(this.items), { deep: true });
+      // Resume polling for anything the server still owns.
+      for (const it of this.items) {
+        if (it.inbox_name && !TERMINAL_STAGES.has(it.stage)) {
+          this.pollStatus(it, it.inbox_name);
+        }
+      }
+    },
+
+    clearHistory() {
+      // Keep actively-running items; drop finished ones.
+      this.items = this.items.filter(it => !TERMINAL_STAGES.has(it.stage));
+    },
 
     handleDrop(e) {
       this.dragOver = false;
@@ -133,8 +188,9 @@ function uploader() {
     enqueue(file) {
       const item = {
         name: file.webkitRelativePath || file.name, file,
-        progress: 0, stage: 'queued',
+        progress: 0, stage: 'queued', inbox_name: null,
         doc_id: null, category: null, confidence: 0, cost_usd: 0,
+        ts: Date.now(),
       };
       this.items.push(item);
       this.queue.push(item);
@@ -202,7 +258,9 @@ function uploader() {
               }
               const entry = (res.saved || []).find(s => s.original_name === item.file.name) || res.saved[0];
               if (entry && entry.inbox_name) {
-                item.progress = 100; item.stage = 'queued';
+                item.progress = 100;
+                item.inbox_name = entry.inbox_name;
+                item.stage = 'queued';
                 this.pollStatus(item, entry.inbox_name).then(resolve);
                 return;
               }

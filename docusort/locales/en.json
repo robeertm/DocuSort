@@ -96,6 +96,7 @@
   "upload.camera_title": "Scan with camera",
   "upload.camera_hint": "Capture directly from your phone",
   "upload.queue_heading": "Processing",
+  "upload.clear_history": "Clear history",
   "upload.summary_done_of_total": "{done} of {total} done",
   "upload.to_library": "To the library →",
   "upload.view": "View →",
@@ -112,6 +113,7 @@
   "stage.error_http": "HTTP {status}",
   "stage.error_unclear": "Upload response unclear",
   "stage.duplicate": "Duplicate — already filed as \"{category}\"",
+  "stage.upload_aborted": "Upload aborted — tab was closed",
 
   "retry.heading": "Retry classification",
   "retry.hint": "Re-sends the stored OCR text to Claude and refiles the document. No extra OCR cost.",

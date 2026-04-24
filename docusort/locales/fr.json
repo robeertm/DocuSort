@@ -96,6 +96,7 @@
   "upload.camera_title": "Scanner avec la caméra",
   "upload.camera_hint": "Capturer directement depuis votre téléphone",
   "upload.queue_heading": "Traitement",
+  "upload.clear_history": "Effacer l'historique",
   "upload.summary_done_of_total": "{done} sur {total} terminés",
   "upload.to_library": "Vers la bibliothèque →",
   "upload.view": "Voir →",
@@ -112,6 +113,7 @@
   "stage.error_http": "HTTP {status}",
   "stage.error_unclear": "Réponse d'upload peu claire",
   "stage.duplicate": "Doublon — déjà classé sous « {category} »",
+  "stage.upload_aborted": "Envoi interrompu — onglet fermé",
 
   "retry.heading": "Reclasser",
   "retry.hint": "Renvoie le texte OCR stocké à Claude et reclasse le document. Pas de coût OCR supplémentaire.",
