@@ -34,6 +34,7 @@ class OCRSettings:
     languages: str = "deu+eng"
     skip_if_text: bool = True
     deskew: bool = True
+    max_parallel: int = 2  # cap concurrent OCR+Claude jobs to avoid OOM
 
 
 @dataclass
@@ -107,6 +108,7 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         languages=ocr_cfg.get("languages", "deu+eng"),
         skip_if_text=ocr_cfg.get("skip_if_text", True),
         deskew=ocr_cfg.get("deskew", True),
+        max_parallel=int(ocr_cfg.get("max_parallel", 2)),
     )
 
     cl_cfg = cfg.get("claude", {})

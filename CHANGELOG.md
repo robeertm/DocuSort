@@ -2,6 +2,26 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.9.2] – 2026-04-25
+
+### Fixed
+
+- **Web UI unreachable for minutes after a restart with a non-empty inbox.**
+  `process_existing()` was running synchronously before `_start_web()`, so a
+  crash that left N files behind would block port 9876 for `N × ~30–90 s`
+  until the queue drained. The watcher and uvicorn now come up immediately;
+  the inbox is drained from a daemon thread alongside.
+- **OOM under upload bursts.** Multiple `ocrmypdf` processes plus Claude
+  calls running fully in parallel could exhaust RAM on small VMs (the
+  trigger for the 0.9.1→0.9.2 incident: a 57 MB PDF on top of an already
+  busy pipeline → kernel OOM-kill → systemd restart loop). Pipeline now
+  gates concurrent OCR+Claude work with a `BoundedSemaphore`.
+
+### Added
+
+- `ocr.max_parallel` in `config.yaml` (default `2`). Cap on concurrent
+  OCR+Claude jobs. Raise it on beefy hardware, drop to `1` on tiny VMs.
+
 ## [0.9.1] – 2026-04-25
 
 ### Fixed

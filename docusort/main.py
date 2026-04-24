@@ -18,6 +18,7 @@ import hashlib
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
 from . import __version__
@@ -40,9 +41,16 @@ def _sha256(path: Path, chunk_size: int = 1 << 16) -> str:
 
 def _build_pipeline(settings: AppSettings, classifier: Classifier, db: Database):
     log = logging.getLogger("docusort.pipeline")
+    sem = threading.BoundedSemaphore(max(1, settings.ocr.max_parallel))
 
     def process(path: Path) -> None:
         if not path.exists() or not is_supported(path):
+            return
+        with sem:
+            _process_one(path)
+
+    def _process_one(path: Path) -> None:
+        if not path.exists():
             return
         log.info("Processing %s (%.1f KB)", path.name, path.stat().st_size / 1024)
         original_name = path.name
@@ -266,13 +274,22 @@ def main(argv: list[str] | None = None) -> int:
     classifier = Classifier(api_key, settings.claude, settings.categories)
     pipeline = _build_pipeline(settings, classifier, db)
 
-    process_existing(settings.paths.inbox, pipeline)
-
     if args.once:
+        process_existing(settings.paths.inbox, pipeline)
         log.info("One-shot mode finished.")
         return 0
 
     observer = watch(settings.paths.inbox, pipeline, settings.stable_seconds)
+
+    # Drain the inbox in the background so the web UI comes up immediately.
+    # The OCR+Claude semaphore inside the pipeline keeps memory bounded even
+    # when this thread races with watcher-spawned per-file threads.
+    threading.Thread(
+        target=process_existing,
+        args=(settings.paths.inbox, pipeline),
+        name="process-existing",
+        daemon=True,
+    ).start()
 
     if args.no_web:
         run_forever(observer)
