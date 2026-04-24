@@ -96,10 +96,11 @@ def create_app(settings: AppSettings, db: Database) -> FastAPI:
             year=year or None, query=q or None, limit=200,
         )
         years = db.distinct_years()
+        tree = db.tree()
         tpl = "_card_grid.html" if partial else "library.html"
         return templates.TemplateResponse(
             request, tpl,
-            {**base_ctx(request), "docs": docs, "years": years,
+            {**base_ctx(request), "docs": docs, "years": years, "tree": tree,
              "filter": {"category": category, "status": status, "year": year, "q": q}},
         )
 

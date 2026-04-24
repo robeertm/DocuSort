@@ -276,6 +276,49 @@ class Database:
             ).fetchall()
         return [r["y"] for r in rows if r["y"]]
 
+    def tree(self) -> dict[str, Any]:
+        """Build a year -> category aggregation for the library tree view.
+
+        Documents without a doc_date fall into a '—' year bucket so they stay
+        reachable. Review/failed status buckets are returned separately so the
+        UI can show them as quick-filters next to the tree.
+        """
+        with self._lock:
+            total_row = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost_usd FROM documents"
+            ).fetchone()
+            rows = self._conn.execute("""
+                SELECT COALESCE(NULLIF(substr(doc_date,1,4), ''), '—') AS year,
+                       category,
+                       COUNT(*) AS n,
+                       COALESCE(SUM(cost_usd), 0) AS cost_usd
+                FROM documents
+                GROUP BY year, category
+                ORDER BY year DESC, n DESC
+            """).fetchall()
+            status_rows = self._conn.execute("""
+                SELECT status, COUNT(*) AS n FROM documents
+                WHERE status IN ('review', 'failed') GROUP BY status
+            """).fetchall()
+
+        by_year: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            y = r["year"] or "—"
+            bucket = by_year.setdefault(y, {"year": y, "count": 0, "cost_usd": 0.0, "categories": []})
+            bucket["count"] += int(r["n"])
+            bucket["cost_usd"] += float(r["cost_usd"] or 0)
+            bucket["categories"].append({
+                "name": r["category"], "count": int(r["n"]),
+                "cost_usd": float(r["cost_usd"] or 0),
+            })
+
+        years = sorted(by_year.values(), key=lambda b: (b["year"] == "—", b["year"]), reverse=True)
+        return {
+            "total": dict(total_row) if total_row else {"n": 0, "cost_usd": 0.0},
+            "years": years,
+            "statuses": {r["status"]: int(r["n"]) for r in status_rows},
+        }
+
 
 _db_singleton: Database | None = None
 _singleton_lock = threading.Lock()

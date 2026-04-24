@@ -2,6 +2,18 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.2.1] – 2026-04-24
+
+### Added
+
+- **Treeview sidebar** in the library: year → category hierarchy with
+  per-node document counts. Click a year to filter, click a category under
+  it to drill down. Status quick-filters (Review / Fehler) appear below
+  the tree when relevant.
+- Active-filter breadcrumb chips above the grid — click the ✕ on a chip
+  to drop that facet without losing the others.
+- Alpine.js `@alpinejs/collapse` plugin for smooth expand/collapse.
+
 ## [0.2.0] – 2026-04-24
 
 ### Etappe 2 – Web UI, Cost-Tracking, Volltextsuche
