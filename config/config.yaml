@@ -1,0 +1,32 @@
+# DocuSort main configuration.
+# All paths below are INSIDE the Docker container – map them via docker-compose
+# to the folders on your Synology (see README and docker-compose.yml).
+
+paths:
+  inbox: /data/inbox          # where new scans arrive
+  library: /data/library      # where classified documents end up
+  review: /data/library/_Review       # low-confidence documents for manual sorting
+  processed: /data/library/_Processed # originals kept as a safety copy
+  logs: /app/logs
+
+# OCR settings (for scanned PDFs / images)
+ocr:
+  enabled: true
+  languages: "deu+eng"        # Tesseract language packs, "deu+eng" or "deu"
+  skip_if_text: true          # don't re-OCR PDFs that already have a text layer
+  deskew: true                # straighten crooked scans before OCR
+
+# Claude API settings
+claude:
+  model: "claude-haiku-4-5-20251001"  # fast & cheap; switch to claude-sonnet-4-6 for harder cases
+  max_text_chars: 12000       # cap on how much text we send to the model
+  min_confidence: 0.65        # below this, doc goes to _Review
+  timeout_seconds: 60
+
+# File handling
+keep_original: true           # keep a copy of the untouched original in _Processed
+filename_template: "{date}_{category}_{sender}_{subject}"
+max_filename_length: 120
+stable_seconds: 5             # wait this long after last write before processing
+
+dry_run: false                # set true to test without actually moving files

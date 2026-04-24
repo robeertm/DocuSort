@@ -1,0 +1,53 @@
+# Category definitions for DocuSort.
+# Claude receives these names and descriptions to classify each document.
+# You can freely rename, add or remove entries – keep "Sonstiges" as a fallback.
+
+categories:
+  - name: "Rechnungen"
+    description: >
+      Rechnungen jeder Art (Strom, Wasser, Telefon, Mobilfunk, Internet,
+      Online-Shops, Handwerker). Merkmale: Rechnungsnummer, Betrag, Fälligkeit.
+
+  - name: "Vertraege"
+    description: >
+      Verträge und Vertragsunterlagen (Miet-, Arbeits-, Kauf-, Dienstleistungs-,
+      Mobilfunk-, Strom-, Wartungsverträge). Auch Kündigungen und Änderungen.
+
+  - name: "Behoerde"
+    description: >
+      Behördliche Dokumente (Finanzamt, Einwohnermeldeamt, Rentenversicherung,
+      KFZ-Zulassung, Kommunalverwaltung, Ausländerbehörde). Amtliche Bescheide.
+
+  - name: "Gesundheit"
+    description: >
+      Arzt-, Zahnarzt-, Krankenhaus-, Therapie- und Apotheken-Unterlagen.
+      Befunde, Arztbriefe, Rezepte, Atteste, Impfpass, Heilmittelverordnungen.
+
+  - name: "Gehalt"
+    description: >
+      Gehaltsabrechnungen, Lohnzettel, Jahresmeldungen zur Sozialversicherung,
+      Lohnsteuerbescheinigungen, Boni-Abrechnungen.
+
+  - name: "Steuer"
+    description: >
+      Steuererklärungen, Steuerbescheide, Belege fürs Finanzamt,
+      ELSTER-Ausdrucke, Spendenbescheinigungen, Steuerbescheinigungen.
+
+  - name: "Haus"
+    description: >
+      Hausbau, Renovierung, Grundstück, Grundbuch, Bauunterlagen, Pläne,
+      Energieausweis, Nebenkostenabrechnungen, Hausverwaltung.
+
+  - name: "Versicherung"
+    description: >
+      Versicherungspolicen und -schreiben (Haftpflicht, Hausrat, KFZ, Leben,
+      Rente, Unfall, Rechtsschutz, Reise, Tier). Schadensmeldungen.
+
+  - name: "Bank"
+    description: >
+      Kontoauszüge, Depotauszüge, Kreditverträge, Darlehen, Zinsabrechnungen,
+      Wertpapierabrechnungen, Bankbescheinigungen, Kreditkartenabrechnungen.
+
+  - name: "Sonstiges"
+    description: >
+      Alles, was in keine andere Kategorie passt. Auch Fallback bei Unsicherheit.

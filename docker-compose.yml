@@ -1,0 +1,16 @@
+services:
+  docusort:
+    build: .
+    image: docusort:0.1.0
+    container_name: docusort
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TZ=Europe/Berlin
+      - DOCUSORT_LOG_LEVEL=INFO
+    volumes:
+      # Adjust the left side of each mapping to match your Synology paths.
+      - /volume1/Scan:/data/inbox
+      - /volume1/Dokumente:/data/library
+      - /volume1/docker/docusort/config:/app/config
+      - /volume1/docker/docusort/logs:/app/logs
