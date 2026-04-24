@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Bibliothek · DocuSort{% endblock %}
+{% block content %}
+
+<div class="mb-6">
+  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Bibliothek</h1>
+  <p class="text-ink-400 mt-1 text-sm">
+    {% if filter.status == 'review' %}
+      Dokumente mit niedriger Confidence — zur manuellen Prüfung.
+    {% else %}
+      Durchsuche alle verarbeiteten Dokumente nach Kategorie, Jahr oder Volltext.
+    {% endif %}
+  </p>
+</div>
+
+<!-- Filter bar -->
+<form
+  class="card p-4 mb-6 grid gap-3 sm:grid-cols-[1fr_auto_auto_auto_auto]"
+  hx-get="/library?partial=1"
+  hx-trigger="change, keyup delay:400ms from:input[name=q]"
+  hx-target="#grid"
+  hx-push-url="true"
+  hx-include="this"
+>
+  <label class="relative block">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400">
+      <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+    </svg>
+    <input type="search" name="q" value="{{ filter.q or '' }}"
+           placeholder="Suche: Absender, Betreff, Volltext …"
+           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 pl-10 pr-3 py-2.5 text-sm
+                  placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+  </label>
+
+  <select name="category" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+    <option value="">Alle Kategorien</option>
+    {% for c in categories %}
+      <option value="{{ c }}" {% if filter.category == c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="year" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+    <option value="">Alle Jahre</option>
+    {% for y in years %}
+      <option value="{{ y }}" {% if filter.year == y %}selected{% endif %}>{{ y }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="status" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+    <option value="">Alle Status</option>
+    <option value="filed"  {% if filter.status == 'filed' %}selected{% endif %}>Abgelegt</option>
+    <option value="review" {% if filter.status == 'review' %}selected{% endif %}>Review</option>
+    <option value="failed" {% if filter.status == 'failed' %}selected{% endif %}>Fehler</option>
+  </select>
+
+  <a href="/library" class="btn-secondary">Zurücksetzen</a>
+</form>
+
+<div id="grid">
+  {% include "_card_grid.html" %}
+</div>
+
+{% endblock %}

@@ -32,6 +32,8 @@ COPY config /app/config-default
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+EXPOSE 8080
+
 VOLUME ["/data", "/app/config", "/app/logs"]
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

@@ -8,6 +8,12 @@ paths:
   review: /data/library/_Review       # low-confidence documents for manual sorting
   processed: /data/library/_Processed # originals kept as a safety copy
   logs: /app/logs
+  db: /data/library/docusort.db  # SQLite database, kept alongside the library
+
+# Web UI
+web:
+  host: "0.0.0.0"             # 0.0.0.0 = listen on all interfaces inside the container
+  port: 8080                  # exposed via docker-compose; open http://<nas>:8080
 
 # OCR settings (for scanned PDFs / images)
 ocr:

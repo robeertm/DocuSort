@@ -18,6 +18,7 @@ from typing import Any
 from anthropic import Anthropic
 
 from .config import ClaudeSettings
+from .db import calculate_cost
 
 
 logger = logging.getLogger("docusort.classifier")
@@ -31,6 +32,10 @@ class Classification:
     subject: str
     confidence: float
     reasoning: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    model: str = ""
 
     @property
     def is_confident(self) -> bool:
@@ -123,6 +128,10 @@ class Classifier:
             logger.warning("Model returned unknown category %r – falling back", category)
             category = "Sonstiges"
 
+        in_tok = int(getattr(resp.usage, "input_tokens", 0) or 0)
+        out_tok = int(getattr(resp.usage, "output_tokens", 0) or 0)
+        cost = calculate_cost(self.settings.model, in_tok, out_tok)
+
         return Classification(
             category=category,
             date=str(data.get("date", date.today().isoformat())).strip(),
@@ -130,4 +139,8 @@ class Classifier:
             subject=str(data.get("subject", "")).strip() or "Dokument",
             confidence=float(data.get("confidence", 0.5)),
             reasoning=str(data.get("reasoning", "")).strip(),
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cost_usd=cost,
+            model=self.settings.model,
         )

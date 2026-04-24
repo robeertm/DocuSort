@@ -1,9 +1,11 @@
 services:
   docusort:
     build: .
-    image: docusort:0.1.1
+    image: docusort:0.2.0
     container_name: docusort
     restart: unless-stopped
+    ports:
+      - "8080:8080"           # Web UI; open http://<nas-ip>:8080
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - TZ=Europe/Berlin

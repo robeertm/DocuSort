@@ -1,0 +1,290 @@
+"""SQLite storage for document metadata, token usage, and costs.
+
+The database lives alongside the library (path comes from config) and is
+created on first access. Callers should use `open_db()` to get a `Database`
+instance — it owns a single connection in WAL mode so the watcher thread and
+the web server can read concurrently while writes are serialized.
+"""
+
+from __future__ import annotations
+
+import logging
+import sqlite3
+import threading
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Iterable
+
+
+logger = logging.getLogger("docusort.db")
+
+
+# Anthropic public list pricing (USD per 1M tokens, input / output).
+# Keyed by model prefix — dated suffixes like "-20251001" match via startswith.
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "claude-haiku-4-5":  (1.0,  5.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-opus-4-7":  (15.0, 75.0),
+}
+
+
+def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    for prefix, (in_price, out_price) in MODEL_PRICING.items():
+        if model.startswith(prefix):
+            return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
+    logger.warning("Unknown model %s – cost will be recorded as 0", model)
+    return 0.0
+
+
+@dataclass
+class DocumentRecord:
+    filename: str
+    original_name: str
+    category: str
+    doc_date: str
+    sender: str
+    subject: str
+    confidence: float
+    reasoning: str
+    library_path: str
+    processed_path: str
+    file_size: int
+    page_count: int | None
+    ocr_used: bool
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    status: str  # 'filed' | 'review' | 'failed'
+    extracted_text: str = ""
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS documents (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename        TEXT NOT NULL,
+    original_name   TEXT NOT NULL,
+    category        TEXT NOT NULL,
+    doc_date        TEXT,
+    sender          TEXT,
+    subject         TEXT,
+    confidence      REAL,
+    reasoning       TEXT,
+    library_path    TEXT NOT NULL,
+    processed_path  TEXT,
+    file_size       INTEGER,
+    page_count      INTEGER,
+    ocr_used        INTEGER,
+    model           TEXT,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    cost_usd        REAL,
+    status          TEXT NOT NULL,
+    extracted_text  TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category);
+CREATE INDEX IF NOT EXISTS idx_documents_doc_date ON documents(doc_date);
+CREATE INDEX IF NOT EXISTS idx_documents_status   ON documents(status);
+CREATE INDEX IF NOT EXISTS idx_documents_created  ON documents(created_at);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+    filename, sender, subject, reasoning, extracted_text,
+    content='documents', content_rowid='id'
+);
+
+CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+    INSERT INTO documents_fts(rowid, filename, sender, subject, reasoning, extracted_text)
+    VALUES (new.id, new.filename, new.sender, new.subject, new.reasoning, new.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+    INSERT INTO documents_fts(documents_fts, rowid, filename, sender, subject, reasoning, extracted_text)
+    VALUES ('delete', old.id, old.filename, old.sender, old.subject, old.reasoning, old.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+    INSERT INTO documents_fts(documents_fts, rowid, filename, sender, subject, reasoning, extracted_text)
+    VALUES ('delete', old.id, old.filename, old.sender, old.subject, old.reasoning, old.extracted_text);
+    INSERT INTO documents_fts(rowid, filename, sender, subject, reasoning, extracted_text)
+    VALUES (new.id, new.filename, new.sender, new.subject, new.reasoning, new.extracted_text);
+END;
+"""
+
+
+class Database:
+    def __init__(self, path: Path):
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(
+            str(path), check_same_thread=False, isolation_level=None
+        )
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.executescript(SCHEMA)
+        logger.info("Database ready at %s", path)
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def insert_document(self, rec: DocumentRecord) -> int:
+        data = asdict(rec)
+        data["ocr_used"] = 1 if rec.ocr_used else 0
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join(f":{k}" for k in data.keys())
+        sql = f"INSERT INTO documents ({cols}) VALUES ({placeholders})"
+        with self._lock:
+            cur = self._conn.execute(sql, data)
+            return cur.lastrowid or 0
+
+    def update_category(self, doc_id: int, category: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE documents SET category = ?, status = 'filed' WHERE id = ?",
+                (category, doc_id),
+            )
+
+    def update_paths(self, doc_id: int, library_path: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE documents SET library_path = ? WHERE id = ?",
+                (library_path, doc_id),
+            )
+
+    def get(self, doc_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM documents WHERE id = ?", (doc_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_documents(
+        self,
+        *,
+        category: str | None = None,
+        status: str | None = None,
+        year: str | None = None,
+        query: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[Any] = []
+
+        if query:
+            sql = (
+                "SELECT d.* FROM documents d "
+                "JOIN documents_fts f ON f.rowid = d.id "
+                "WHERE documents_fts MATCH ?"
+            )
+            params.append(query)
+            if category:
+                sql += " AND d.category = ?"
+                params.append(category)
+            if status:
+                sql += " AND d.status = ?"
+                params.append(status)
+            if year:
+                sql += " AND substr(d.doc_date, 1, 4) = ?"
+                params.append(year)
+            sql += " ORDER BY rank LIMIT ? OFFSET ?"
+            params += [limit, offset]
+        else:
+            if category:
+                where.append("category = ?")
+                params.append(category)
+            if status:
+                where.append("status = ?")
+                params.append(status)
+            if year:
+                where.append("substr(doc_date, 1, 4) = ?")
+                params.append(year)
+            where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+            sql = (
+                "SELECT * FROM documents" + where_sql
+                + " ORDER BY COALESCE(doc_date, created_at) DESC LIMIT ? OFFSET ?"
+            )
+            params += [limit, offset]
+
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_documents(
+        self, *, category: str | None = None, status: str | None = None
+    ) -> int:
+        where, params = [], []
+        if category:
+            where.append("category = ?")
+            params.append(category)
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM documents{where_sql}", params
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def stats(self) -> dict[str, Any]:
+        with self._lock:
+            totals = self._conn.execute("""
+                SELECT COUNT(*) AS n,
+                       COALESCE(SUM(input_tokens), 0)  AS input_tokens,
+                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                       COALESCE(SUM(cost_usd), 0)      AS cost_usd
+                FROM documents
+            """).fetchone()
+            by_cat = self._conn.execute("""
+                SELECT category, COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost_usd
+                FROM documents
+                GROUP BY category
+                ORDER BY n DESC
+            """).fetchall()
+            by_status = self._conn.execute("""
+                SELECT status, COUNT(*) AS n FROM documents GROUP BY status
+            """).fetchall()
+            by_month = self._conn.execute("""
+                SELECT substr(created_at,1,7) AS month,
+                       COUNT(*) AS n,
+                       COALESCE(SUM(cost_usd),0) AS cost_usd
+                FROM documents
+                GROUP BY month
+                ORDER BY month DESC
+                LIMIT 12
+            """).fetchall()
+        return {
+            "totals": dict(totals) if totals else {},
+            "by_category": [dict(r) for r in by_cat],
+            "by_status": [dict(r) for r in by_status],
+            "by_month": [dict(r) for r in by_month],
+        }
+
+    def distinct_years(self) -> list[str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT substr(doc_date,1,4) AS y FROM documents "
+                "WHERE doc_date IS NOT NULL AND doc_date != '' ORDER BY y DESC"
+            ).fetchall()
+        return [r["y"] for r in rows if r["y"]]
+
+
+_db_singleton: Database | None = None
+_singleton_lock = threading.Lock()
+
+
+def open_db(path: Path) -> Database:
+    """Return a process-wide singleton Database for the given path."""
+    global _db_singleton
+    with _singleton_lock:
+        if _db_singleton is None or _db_singleton.path != path:
+            _db_singleton = Database(path)
+        return _db_singleton

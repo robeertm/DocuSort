@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · DocuSort{% endblock %}
+{% block content %}
+
+{% set t = stats.totals %}
+
+<div class="mb-8">
+  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Dashboard</h1>
+  <p class="text-ink-400 mt-1 text-sm">Übersicht über deine Dokumente und deren Kosten.</p>
+</div>
+
+<!-- Stat cards -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-8">
+  <div class="card p-4">
+    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">Dokumente</div>
+    <div class="mt-2 text-2xl sm:text-3xl font-semibold">{{ t.n or 0 }}</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">Gesamtkosten</div>
+    <div class="mt-2 text-2xl sm:text-3xl font-semibold">{{ (t.cost_usd or 0) | usd }}</div>
+    <div class="text-xs text-ink-500 mt-0.5">≈ {{ (t.cost_usd or 0) | eur }}</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">Token (in / out)</div>
+    <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums">
+      {{ '{:,}'.format(t.input_tokens or 0) }}
+      <span class="text-ink-400 text-base font-normal">/</span>
+      {{ '{:,}'.format(t.output_tokens or 0) }}
+    </div>
+  </div>
+  <div class="card p-4">
+    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">Review offen</div>
+    <div class="mt-2 text-2xl sm:text-3xl font-semibold">
+      {% if review_count %}
+        <a href="/library?status=review" class="text-amber-300 hover:text-amber-200">{{ review_count }}</a>
+      {% else %}
+        <span class="text-ink-500">0</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Kategorien + Monate -->
+<div class="grid gap-4 sm:gap-6 lg:grid-cols-3 mb-8">
+
+  <div class="card p-5 lg:col-span-2">
+    <div class="flex items-baseline justify-between mb-4">
+      <h2 class="font-semibold">Nach Kategorie</h2>
+      <a href="/library" class="text-xs text-ink-400 hover:text-ink-200">Alle ansehen →</a>
+    </div>
+    {% if stats.by_category %}
+      {% set max_n = stats.by_category[0].n %}
+      <div class="space-y-2">
+        {% for c in stats.by_category %}
+          <a href="/library?category={{ c.category }}" class="block hover:bg-ink-700/30 rounded-lg p-2 -m-2 transition">
+            <div class="flex items-baseline justify-between mb-1 text-sm">
+              <span class="font-medium">{{ c.category }}</span>
+              <span class="tabular-nums text-ink-400">
+                {{ c.n }} <span class="text-ink-600 mx-1">·</span> {{ c.cost_usd | usd }}
+              </span>
+            </div>
+            <div class="h-1.5 rounded-full bg-ink-700/50 overflow-hidden">
+              <div class="h-full bg-emerald-500/80 rounded-full" style="width: {{ (c.n / max_n * 100) | round(1) }}%"></div>
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-ink-400 text-sm">Noch keine Dokumente verarbeitet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card p-5">
+    <h2 class="font-semibold mb-4">Letzte 12 Monate</h2>
+    {% if stats.by_month %}
+      {% set max_m = stats.by_month | map(attribute='n') | max %}
+      <div class="space-y-1.5">
+        {% for m in stats.by_month %}
+          <div class="flex items-center gap-3 text-xs">
+            <span class="text-ink-400 w-16 tabular-nums">{{ m.month }}</span>
+            <div class="flex-1 h-5 rounded bg-ink-700/40 overflow-hidden">
+              <div class="h-full bg-emerald-500/70" style="width: {{ (m.n / max_m * 100) | round(1) }}%"></div>
+            </div>
+            <span class="tabular-nums text-ink-300 w-8 text-right">{{ m.n }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-ink-400 text-sm">—</p>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- Letzte Dokumente -->
+<div class="card p-5">
+  <div class="flex items-baseline justify-between mb-4">
+    <h2 class="font-semibold">Zuletzt verarbeitet</h2>
+    <a href="/library" class="text-xs text-ink-400 hover:text-ink-200">Alle →</a>
+  </div>
+  {% if recent %}
+    <div class="divide-y divide-ink-700/50 -my-3">
+      {% for d in recent %}
+        <a href="/document/{{ d.id }}" class="flex items-center gap-3 py-3 group">
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ink-700/60 text-ink-300 group-hover:bg-ink-700">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <path d="M14 2v6h6"/>
+            </svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="truncate font-medium group-hover:text-white">{{ d.sender or '—' }} · {{ d.subject or d.filename }}</div>
+            <div class="text-xs text-ink-400 flex gap-2 items-center mt-0.5">
+              <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ d.category }}</span>
+              <span>{{ d.doc_date or '—' }}</span>
+              <span class="text-ink-500">·</span>
+              <span class="tabular-nums">{{ d.cost_usd | usd }}</span>
+              {% if d.status == 'review' %}<span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">Review</span>{% endif %}
+            </div>
+          </div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-ink-500 group-hover:text-ink-300">
+            <path d="m9 18 6-6-6-6"/>
+          </svg>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-ink-400 text-sm">Noch nichts verarbeitet. <a href="/upload" class="text-emerald-300 hover:underline">Upload starten →</a></p>
+  {% endif %}
+</div>
+
+{% endblock %}

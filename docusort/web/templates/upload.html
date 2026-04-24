@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Upload · DocuSort{% endblock %}
+{% block content %}
+
+<div class="mb-6">
+  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Dokumente hochladen</h1>
+  <p class="text-ink-400 mt-1 text-sm">
+    PDF oder Bild — per Drag &amp; Drop, Datei-Auswahl oder direkt vom Handy-Scan.
+    Alles Weitere läuft automatisch.
+  </p>
+</div>
+
+<div x-data="uploader()" class="max-w-2xl mx-auto space-y-4">
+
+  <!-- Drop zone -->
+  <label
+    @dragover.prevent="dragOver = true"
+    @dragleave.prevent="dragOver = false"
+    @drop.prevent="handleDrop($event)"
+    :class="dragOver ? 'border-emerald-400 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-500'"
+    class="card flex flex-col items-center justify-center gap-3 py-12 px-6 border-2 border-dashed cursor-pointer transition text-center"
+  >
+    <input type="file" class="hidden" multiple accept=".pdf,image/*"
+           x-ref="input" @change="handleFiles($event.target.files)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+         class="h-12 w-12 text-ink-400">
+      <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
+    </svg>
+    <div>
+      <div class="font-medium">Dateien hierher ziehen oder <span class="text-emerald-300">auswählen</span></div>
+      <div class="text-xs text-ink-400 mt-1">PDF, JPG, PNG, TIFF · mehrere möglich</div>
+    </div>
+  </label>
+
+  <!-- Mobile camera -->
+  <label class="card p-4 flex items-center gap-4 cursor-pointer hover:bg-ink-800/80 transition sm:hidden">
+    <input type="file" class="hidden" accept="image/*" capture="environment"
+           @change="handleFiles($event.target.files)">
+    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+        <circle cx="12" cy="13" r="4"/>
+      </svg>
+    </div>
+    <div>
+      <div class="font-medium">Mit Kamera scannen</div>
+      <div class="text-xs text-ink-400 mt-0.5">Direkt aus dem Handy aufnehmen</div>
+    </div>
+  </label>
+
+  <!-- Queue -->
+  <template x-if="items.length > 0">
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">Upload</h2>
+      <ul class="divide-y divide-ink-700/50 -my-3">
+        <template x-for="(it, i) in items" :key="i">
+          <li class="flex items-center gap-3 py-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ink-700/60 text-ink-300">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <path d="M14 2v6h6"/>
+              </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm font-medium" x-text="it.name"></div>
+              <div class="mt-1 h-1 rounded-full bg-ink-700/40 overflow-hidden">
+                <div class="h-full bg-emerald-500 transition-[width] duration-300"
+                     :style="`width: ${it.progress}%`"></div>
+              </div>
+            </div>
+            <span class="text-xs tabular-nums"
+                  :class="it.status === 'done' ? 'text-emerald-300' : it.status === 'error' ? 'text-rose-300' : 'text-ink-400'"
+                  x-text="it.statusText"></span>
+          </li>
+        </template>
+      </ul>
+      <div class="mt-4 flex items-center justify-between text-xs text-ink-400">
+        <span x-text="summary()"></span>
+        <a href="/library" class="btn-ghost" x-show="allDone()">Zur Bibliothek →</a>
+      </div>
+    </div>
+  </template>
+
+  <div class="card p-4 text-sm text-ink-300">
+    <div class="flex gap-2 items-start">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-ink-400 shrink-0 mt-0.5">
+        <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+      </svg>
+      <p class="leading-relaxed">
+        Nach dem Upload landen Dateien im <span class="font-mono text-xs bg-ink-700/50 rounded px-1.5 py-0.5">inbox/</span>-Ordner.
+        Der Watcher verarbeitet sie innerhalb weniger Sekunden automatisch und legt sie klassifiziert in die Bibliothek.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+function uploader() {
+  return {
+    dragOver: false,
+    items: [],
+    handleDrop(e) {
+      this.dragOver = false;
+      this.handleFiles(e.dataTransfer.files);
+    },
+    handleFiles(fileList) {
+      for (const f of fileList) this.uploadOne(f);
+    },
+    summary() {
+      const done = this.items.filter(i => i.status === 'done').length;
+      const total = this.items.length;
+      return `${done} von ${total} fertig`;
+    },
+    allDone() {
+      return this.items.length > 0 && this.items.every(i => i.status !== 'uploading');
+    },
+    async uploadOne(file) {
+      const item = { name: file.name, progress: 0, status: 'uploading', statusText: '0 %' };
+      this.items.push(item);
+      const self = this;
+
+      const form = new FormData();
+      form.append('files', file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.upload.addEventListener('progress', e => {
+        if (e.lengthComputable) {
+          item.progress = Math.round(e.loaded / e.total * 100);
+          item.statusText = `${item.progress} %`;
+        }
+      });
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const res = JSON.parse(xhr.responseText);
+          if (res.rejected && res.rejected.includes(file.name)) {
+            item.status = 'error';
+            item.statusText = 'Format nicht unterstützt';
+          } else {
+            item.progress = 100;
+            item.status = 'done';
+            item.statusText = 'In Verarbeitung';
+          }
+        } else {
+          item.status = 'error';
+          item.statusText = 'Fehler';
+        }
+      });
+      xhr.addEventListener('error', () => {
+        item.status = 'error';
+        item.statusText = 'Netzwerkfehler';
+      });
+      xhr.open('POST', '/upload');
+      xhr.send(form);
+    },
+  };
+}
+</script>
+
+{% endblock %}

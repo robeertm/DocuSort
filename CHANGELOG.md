@@ -2,6 +2,41 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.2.0] – 2026-04-24
+
+### Etappe 2 – Web UI, Cost-Tracking, Volltextsuche
+
+The default container now runs both the watcher and a web UI on port 8080.
+Open `http://<nas-ip>:8080` from your desktop or phone — no auth (pair with
+Tailscale or another VPN for remote access).
+
+### Added
+
+- **SQLite database** alongside the library (`docusort.db`) storing per-document
+  metadata, token usage and cost (USD + EUR preview).
+- **Web UI** built with FastAPI + Jinja + HTMX + Tailwind CSS — no build step,
+  runs in the same container. Dark mode, mobile-first.
+  - Dashboard: totals, cost breakdown, category distribution, 12-month activity,
+    recent documents.
+  - Library: filter by category / year / status, live full-text search via
+    HTMX (SQLite FTS5 over filename, sender, subject, reasoning, OCR text).
+  - Document detail: embedded PDF preview, full metadata, per-document cost,
+    Claude's reasoning, one-click recategorize (file is physically moved).
+  - Upload: drag & drop or multi-file picker, mobile camera capture for
+    direct phone-scan uploads, live progress bars.
+- Price table for Haiku 4.5 / Sonnet 4.6 / Opus 4.7 with automatic cost
+  calculation per document.
+- `--no-web` flag for running just the watcher (legacy behaviour).
+- FastAPI, uvicorn, jinja2 and python-multipart added to requirements.
+
+### Changed
+
+- `Classifier` now returns token usage, calculated cost and model name on each
+  `Classification`.
+- `extract_text()` returns an `OcrResult` with text, output path, OCR flag and
+  page count (previously just `(text, path)`).
+- Docker image now exposes port 8080; docker-compose maps it to the host.
+
 ## [0.1.1] – 2026-04-24
 
 ### Fixed

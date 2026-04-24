@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.subject or doc.filename }} · DocuSort{% endblock %}
+{% block content %}
+
+<div class="mb-6 flex items-start gap-3">
+  <a href="/library" class="btn-ghost shrink-0">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <path d="m15 18-6-6 6-6"/>
+    </svg>
+    Zurück
+  </a>
+  <div class="flex-1 min-w-0">
+    <div class="flex flex-wrap gap-2 mb-2">
+      <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">
+        {{ doc.category }}
+      </span>
+      {% if doc.status == 'review' %}
+        <span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">Review</span>
+      {% elif doc.status == 'failed' %}
+        <span class="chip bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/20">Fehler</span>
+      {% endif %}
+      {% if doc.ocr_used %}
+        <span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">OCR</span>
+      {% endif %}
+    </div>
+    <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">
+      {{ doc.subject or doc.filename }}
+    </h1>
+    <div class="text-ink-300 mt-1">{{ doc.sender or '—' }}</div>
+  </div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-[1fr_380px]">
+
+  <!-- Preview -->
+  <div class="card overflow-hidden">
+    {% if doc.library_path.lower().endswith('.pdf') %}
+      <iframe src="/document/{{ doc.id }}/file#toolbar=0"
+              class="w-full bg-white" style="height: 75vh" title="PDF Preview"></iframe>
+    {% else %}
+      <img src="/document/{{ doc.id }}/file" alt="{{ doc.filename }}" class="w-full">
+    {% endif %}
+    <div class="p-3 flex items-center justify-between text-xs text-ink-400 border-t border-ink-700/50">
+      <span class="truncate">{{ doc.filename }}</span>
+      <a href="/document/{{ doc.id }}/file?download=true" class="btn-ghost">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+        </svg>
+        Download
+      </a>
+    </div>
+  </div>
+
+  <!-- Meta -->
+  <aside class="space-y-4">
+
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">Metadaten</h2>
+      <dl class="text-sm space-y-2">
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Datum</dt><dd class="tabular-nums">{{ doc.doc_date or '—' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Confidence</dt>
+          <dd class="tabular-nums {% if doc.confidence < 0.65 %}text-amber-300{% else %}text-emerald-300{% endif %}">
+            {{ '%.0f'|format(doc.confidence * 100) }} %
+          </dd>
+        </div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Status</dt><dd>{{ doc.status }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Seiten</dt><dd class="tabular-nums">{{ doc.page_count or '—' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Größe</dt><dd class="tabular-nums">{{ doc.file_size | human_size }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Original</dt><dd class="text-right truncate">{{ doc.original_name }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Verarbeitet</dt><dd class="tabular-nums">{{ doc.created_at[:16].replace('T', ' ') }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">Kosten</h2>
+      <dl class="text-sm space-y-2">
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Modell</dt><dd class="font-mono text-xs">{{ doc.model or '—' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Input Token</dt><dd class="tabular-nums">{{ '{:,}'.format(doc.input_tokens or 0) }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">Output Token</dt><dd class="tabular-nums">{{ '{:,}'.format(doc.output_tokens or 0) }}</dd></div>
+        <div class="flex justify-between gap-4 pt-2 border-t border-ink-700/50">
+          <dt class="text-ink-300 font-medium">Kosten</dt>
+          <dd class="tabular-nums font-semibold">{{ doc.cost_usd | usd }} <span class="text-ink-500 text-xs">/ {{ doc.cost_usd | eur }}</span></dd>
+        </div>
+      </dl>
+    </div>
+
+    {% if doc.reasoning %}
+    <div class="card p-5">
+      <h2 class="font-semibold mb-2 text-sm uppercase tracking-wide text-ink-400">Claude-Begründung</h2>
+      <p class="text-sm text-ink-200 leading-relaxed italic">„{{ doc.reasoning }}"</p>
+    </div>
+    {% endif %}
+
+    <!-- Recategorize -->
+    <form action="/document/{{ doc.id }}/recategorize" method="post" class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">Kategorie ändern</h2>
+      <div class="flex gap-2">
+        <select name="category"
+                class="flex-1 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+          {% for c in categories %}
+            <option value="{{ c }}" {% if doc.category == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn-primary">Speichern</button>
+      </div>
+    </form>
+  </aside>
+</div>
+
+{% endblock %}

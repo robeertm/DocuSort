@@ -1,15 +1,18 @@
 # DocuSort
 
-AI-powered document organizer. Drops a file into your scan folder and – a few
-seconds later – it is renamed, dated, and filed into the right category in your
-document archive.
+AI-powered document organizer with a **web UI**. Upload a scan from your
+desktop or phone and – a few seconds later – it is renamed, dated, filed into
+the right category, and browsable in a clean, mobile-friendly interface.
 
 Built for a Synology NAS in Docker, but runs anywhere Docker runs.
 
+- **Web UI** on port 8080 — dashboard, library browser with full-text search,
+  per-document detail + PDF preview, mobile upload with camera capture
 - **OCR** for scanned PDFs and images (Tesseract `deu+eng`)
 - **Claude** (Anthropic API) classifies each document and extracts metadata
 - **Automatic filing** into `Library/YYYY/Category/` with a clean filename
-- **Low-confidence review folder** instead of wrong guesses
+- **Cost tracking** per document + aggregated (tokens in/out, USD and EUR preview)
+- **Low-confidence review folder** instead of wrong guesses, recategorize with one click
 - **Safety copy** of every original kept in `_Processed/`
 
 ## File naming
@@ -93,8 +96,10 @@ The template is configurable in `config/config.yaml`.
    sudo docker logs -f docusort
    ```
 
-6. **Drop a PDF** into `/volume1/Scan` and watch it appear, correctly named,
-   under `/volume1/Dokumente/2026/…/`.
+6. **Open the UI** at `http://<nas-ip>:8080` from any device on your network
+   (or over Tailscale / VPN) — dashboard, upload, library and cost overview
+   live there. Dropping a PDF into `/volume1/Scan` still works — it appears
+   correctly named under `/volume1/Dokumente/2026/…/`.
 
 ## Quick start locally (Mac / Linux)
 
@@ -136,8 +141,9 @@ sudo docker compose restart docusort
 ## CLI flags
 
 ```bash
-python -m docusort            # run forever (default in Docker)
+python -m docusort            # watcher + web UI on :8080 (default in Docker)
 python -m docusort --once     # process existing files and exit
+python -m docusort --no-web   # watcher only, no UI
 python -m docusort --dry-run  # classify + log, no moves
 python -m docusort --version
 ```
@@ -162,12 +168,11 @@ Scale model up to Sonnet 4.6 only if you see classification errors – it is
 
 ## Roadmap
 
-Planned for future "Etappen":
-
-- Etappe 2: Telegram / email notification on new file or `_Review` entry
-- Etappe 3: Duplicate detection across the whole library
-- Etappe 4: Full-text search UI (Meilisearch or SQLite FTS5)
+- ~~Etappe 2: Web UI, cost tracking, SQLite + FTS5 search~~ — shipped in **v0.2.0**
+- Etappe 3: Telegram / email notification on new file or `_Review` entry
+- Etappe 4: Duplicate detection across the whole library
 - Etappe 5: Automatic reminders for contract termination dates
+- Etappe 6: Prompt caching for bulk imports (reuse system prompt across calls)
 
 ## License
 

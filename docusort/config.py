@@ -8,7 +8,7 @@ environment variables – never from YAML.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ class Paths:
     review: Path
     processed: Path
     logs: Path
+    db: Path
 
 
 @dataclass
@@ -44,11 +45,18 @@ class ClaudeSettings:
 
 
 @dataclass
+class WebSettings:
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+
+@dataclass
 class AppSettings:
     paths: Paths
     categories: list[dict[str, Any]]
     ocr: OCRSettings
     claude: ClaudeSettings
+    web: WebSettings = field(default_factory=WebSettings)
     keep_original: bool = True
     filename_template: str = "{date}_{category}_{sender}_{subject}"
     max_filename_length: int = 120
@@ -70,12 +78,14 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
     cats = _load_yaml(config_dir / "categories.yaml")
 
     p = cfg.get("paths", {})
+    library_path = Path(p.get("library", "/data/library"))
     paths = Paths(
         inbox=Path(p.get("inbox", "/data/inbox")),
-        library=Path(p.get("library", "/data/library")),
+        library=library_path,
         review=Path(p.get("review", "/data/library/_Review")),
         processed=Path(p.get("processed", "/data/library/_Processed")),
         logs=Path(p.get("logs", "/app/logs")),
+        db=Path(p.get("db", str(library_path / "docusort.db"))),
     )
 
     ocr_cfg = cfg.get("ocr", {})
@@ -94,11 +104,18 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         timeout_seconds=cl_cfg.get("timeout_seconds", 60),
     )
 
+    web_cfg = cfg.get("web", {})
+    web = WebSettings(
+        host=web_cfg.get("host", "0.0.0.0"),
+        port=int(web_cfg.get("port", 8080)),
+    )
+
     return AppSettings(
         paths=paths,
         categories=cats.get("categories", []),
         ocr=ocr,
         claude=claude,
+        web=web,
         keep_original=cfg.get("keep_original", True),
         filename_template=cfg.get(
             "filename_template", "{date}_{category}_{sender}_{subject}"

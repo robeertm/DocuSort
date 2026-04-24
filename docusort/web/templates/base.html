@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="de" class="h-full">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>{% block title %}DocuSort{% endblock %}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+<script src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js" defer></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: { 50:'#f8fafc',100:'#f1f5f9',200:'#e2e8f0',300:'#cbd5e1',400:'#94a3b8',
+                 500:'#64748b',600:'#475569',700:'#334155',800:'#1e293b',900:'#0f172a',950:'#020617' },
+        },
+      },
+    },
+  };
+</script>
+<style>
+  html { background: #0b1220; }
+  body { -webkit-tap-highlight-color: transparent; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
+  .card { @apply rounded-2xl bg-ink-800/60 border border-ink-700/60 backdrop-blur; }
+  .btn  { @apply inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition; }
+  .btn-primary { @apply btn bg-emerald-500 text-white hover:bg-emerald-400 active:bg-emerald-600; }
+  .btn-secondary { @apply btn bg-ink-700 text-ink-100 hover:bg-ink-600 active:bg-ink-800; }
+  .btn-ghost { @apply btn text-ink-300 hover:bg-ink-700/50; }
+  input, select, textarea { color-scheme: dark; }
+</style>
+</head>
+<body class="min-h-full bg-gradient-to-b from-ink-950 via-ink-900 to-ink-950 text-ink-100 antialiased">
+
+<header class="sticky top-0 z-20 backdrop-blur bg-ink-900/70 border-b border-ink-800">
+  <nav class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-4">
+    <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg">
+      <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
+          <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>
+          <path d="M14 4v6h6"/>
+          <path d="M7 14h10M7 18h7"/>
+        </svg>
+      </span>
+      <span>DocuSort</span>
+      <span class="hidden sm:inline text-xs text-ink-400 font-normal ml-1">v{{ version }}</span>
+    </a>
+    <div class="flex-1"></div>
+    <a href="/library" class="hidden sm:inline-flex btn-ghost">Bibliothek</a>
+    <a href="/library?status=review" class="hidden sm:inline-flex btn-ghost">Review</a>
+    <a href="/upload" class="btn-primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
+      </svg>
+      <span>Upload</span>
+    </a>
+  </nav>
+  <!-- mobile nav -->
+  <nav class="sm:hidden mx-auto max-w-6xl px-4 pb-2 flex gap-1 text-sm">
+    <a href="/" class="btn-ghost flex-1 justify-center">Dashboard</a>
+    <a href="/library" class="btn-ghost flex-1 justify-center">Bibliothek</a>
+    <a href="/library?status=review" class="btn-ghost flex-1 justify-center">Review</a>
+  </nav>
+</header>
+
+<main class="mx-auto max-w-6xl px-4 py-6 sm:py-10">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="mx-auto max-w-6xl px-4 py-10 text-center text-xs text-ink-500">
+  DocuSort · läuft auf deiner Synology · v{{ version }}
+</footer>
+
+</body>
+</html>
