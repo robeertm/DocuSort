@@ -111,7 +111,8 @@ CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category);
 CREATE INDEX IF NOT EXISTS idx_documents_doc_date ON documents(doc_date);
 CREATE INDEX IF NOT EXISTS idx_documents_status   ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_documents_created  ON documents(created_at);
-CREATE INDEX IF NOT EXISTS idx_documents_hash     ON documents(content_hash);
+-- idx_documents_hash is created in _migrate() after the column has been
+-- added to pre-v0.3 databases.
 
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
     filename, sender, subject, reasoning, extracted_text,
