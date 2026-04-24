@@ -18,7 +18,7 @@
     class="card flex flex-col items-center justify-center gap-3 py-12 px-6 border-2 border-dashed cursor-pointer transition text-center"
   >
     <input type="file" class="hidden" multiple accept=".pdf,image/*"
-           @change="handleFiles($event.target.files)">
+           @change="handleFiles($event.target.files); $event.target.value=''">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-12 w-12 text-ink-400">
       <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
     </svg>
@@ -31,10 +31,10 @@
     </div>
   </label>
 
-  <!-- Folder picker (recursive incl. subfolders) -->
+  <!-- Folder picker -->
   <label class="card p-4 flex items-center gap-4 cursor-pointer hover:bg-ink-800/80 transition">
     <input type="file" class="hidden" webkitdirectory directory multiple
-           @change="handleFiles($event.target.files)">
+           @change="handleFiles($event.target.files); $event.target.value=''">
     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-300">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
         <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -50,7 +50,7 @@
   <!-- Mobile camera -->
   <label class="card p-4 flex items-center gap-4 cursor-pointer hover:bg-ink-800/80 transition sm:hidden">
     <input type="file" class="hidden" accept="image/*" capture="environment"
-           @change="handleFiles($event.target.files)">
+           @change="handleFiles($event.target.files); $event.target.value=''">
     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
@@ -63,6 +63,16 @@
     </div>
   </label>
 
+  <!-- Background banner -->
+  <template x-if="items.length > 0 && anyActive()">
+    <div class="card p-3 flex items-center gap-2 text-xs text-emerald-300 bg-emerald-500/5 border-emerald-500/20">
+      <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+      </svg>
+      <span x-text="tr('upload.background_hint')"></span>
+    </div>
+  </template>
+
   <!-- Queue -->
   <template x-if="items.length > 0">
     <div class="card p-5">
@@ -73,21 +83,19 @@
         </button>
       </div>
       <ul class="divide-y divide-ink-700/50 -my-3 max-h-[60vh] overflow-y-auto">
-        <template x-for="(it, i) in items" :key="i">
+        <template x-for="it in items" :key="it.id">
           <li class="flex items-center gap-3 py-3">
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" :class="iconBg(it.stage)">
-              <svg x-show="it.stage === 'filed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4 text-emerald-300"><path d="M20 6 9 17l-5-5"/></svg>
-              <svg x-show="it.stage === 'review'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-amber-300"><path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/></svg>
-              <svg x-show="it.stage === 'failed' || it.stage === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-rose-300"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
-              <svg x-show="it.stage === 'duplicate'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-indigo-300"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M3 14V5a2 2 0 0 1 2-2h9"/></svg>
-              <svg x-show="['uploading','queued','processing'].includes(it.stage)" class="h-4 w-4 animate-spin text-ink-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/></svg>
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" :class="iconBg(displayStage(it))">
+              <svg x-show="displayStage(it) === 'filed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4 text-emerald-300"><path d="M20 6 9 17l-5-5"/></svg>
+              <svg x-show="displayStage(it) === 'review'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-amber-300"><path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/></svg>
+              <svg x-show="displayStage(it) === 'failed' || displayStage(it) === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-rose-300"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+              <svg x-show="displayStage(it) === 'duplicate'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-indigo-300"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M3 14V5a2 2 0 0 1 2-2h9"/></svg>
+              <svg x-show="['pending-upload','uploading','queued','processing'].includes(displayStage(it))"
+                   class="h-4 w-4 animate-spin text-ink-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/></svg>
             </div>
             <div class="min-w-0 flex-1">
-              <div class="truncate text-sm font-medium" x-text="it.name"></div>
-              <div class="mt-1 text-xs" :class="stageColor(it.stage)" x-text="stageLabel(it)"></div>
-              <div class="mt-1 h-1 rounded-full bg-ink-700/40 overflow-hidden" x-show="it.stage === 'uploading'">
-                <div class="h-full bg-emerald-500 transition-[width] duration-150" :style="`width: ${it.progress}%`"></div>
-              </div>
+              <div class="truncate text-sm font-medium" x-text="it.displayName"></div>
+              <div class="mt-1 text-xs" :class="stageColor(displayStage(it))" x-text="stageLabel(it)"></div>
             </div>
             <template x-if="it.doc_id">
               <a :href="`/document/${it.doc_id}`" class="btn-ghost shrink-0 text-xs" x-text="tr('upload.view')"></a>
@@ -113,192 +121,272 @@
 </div>
 
 <script>
-const ALLOWED_EXT = ['pdf','jpg','jpeg','png','tif','tiff','bmp'];
-const MAX_CONCURRENT_UPLOADS = 4;
+// ---- IndexedDB helpers ----
+const DB_NAME = "docusort-uploads";
+const STORE = "items";
+const ALLOWED_EXT = ["pdf","jpg","jpeg","png","tif","tiff","bmp"];
+const TERMINAL = new Set(["filed","review","failed","duplicate","unknown","error"]);
+const BC_NAME = "docusort-upload";
 
-const STORAGE_KEY = 'docusort.upload.queue.v1';
-const STORAGE_CAP = 200;
-const TERMINAL_STAGES = new Set(['filed','review','failed','duplicate','unknown','error']);
-
-function persistItems(items) {
-  try {
-    const slim = items.slice(-STORAGE_CAP).map(it => ({
-      name: it.name, inbox_name: it.inbox_name || null,
-      stage: it.stage, progress: it.progress || 0,
-      doc_id: it.doc_id || null, category: it.category || null,
-      confidence: it.confidence || 0, cost_usd: it.cost_usd || 0,
-      message: it.message || '', ts: it.ts || Date.now(),
-    }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
-  } catch (e) { /* quota full / disabled — silently give up */ }
-}
-
-function loadItems() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const stored = JSON.parse(raw);
-    if (!Array.isArray(stored)) return [];
-    return stored.map(it => {
-      // Items in a client-only stage ('uploading'/'queued' without inbox_name)
-      // can't resume after a tab close — the File object is gone.
-      if (!it.inbox_name && !TERMINAL_STAGES.has(it.stage)) {
-        return { ...it, stage: 'error', message: tr('stage.upload_aborted') };
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE, { keyPath: "id", autoIncrement: true });
       }
-      return it;
-    });
-  } catch (e) { return []; }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbAdd(record) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readwrite").objectStore(STORE).add(record);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbAll() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readonly").objectStore(STORE).get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbPut(record) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readwrite").objectStore(STORE).put(record);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbDelete(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 function uploader() {
   return {
     dragOver: false,
-    items: loadItems(),
-    queue: [],
-    active: 0,
+    items: [],               // UI-shaped items (no file blob)
+    polling: new Set(),      // doc IDs with active server-status poll
 
-    init() {
-      // Persist on any mutation so a closed tab doesn't lose its history.
-      this.$watch('items', () => persistItems(this.items), { deep: true });
-      // Resume polling for anything the server still owns.
-      for (const it of this.items) {
-        if (it.inbox_name && !TERMINAL_STAGES.has(it.stage)) {
-          this.pollStatus(it, it.inbox_name);
+    async init() {
+      // 1. Register the service worker (scope /).
+      if ("serviceWorker" in navigator) {
+        try {
+          await navigator.serviceWorker.register("/upload-sw.js", { scope: "/" });
+          await navigator.serviceWorker.ready;
+        } catch (e) {
+          console.warn("SW registration failed:", e);
         }
+      }
+
+      // 2. Listen to SW broadcasts.
+      try {
+        const bc = new BroadcastChannel(BC_NAME);
+        bc.onmessage = (evt) => this.onSwMessage(evt.data);
+      } catch (e) {}
+
+      // 3. Load previously known items from IDB (strip blobs for display).
+      const stored = await idbAll();
+      this.items = stored.map(this._toUiItem).sort((a, b) => a.id - b.id);
+
+      // 4. Resume server-side status polling for items that already have
+      //    an inbox_name but are not yet terminal.
+      for (const it of this.items) {
+        if (it.inbox_name && !TERMINAL.has(it.stage)) {
+          this.pollStatus(it);
+        }
+      }
+
+      // 5. Nudge the SW to drain, in case there are pending-upload items
+      //    still in IDB (the worker was killed before finishing).
+      this.tellDrain();
+    },
+
+    _toUiItem(rec) {
+      return {
+        id: rec.id,
+        displayName: rec.displayName || rec.originalName,
+        stage: rec.stage,
+        inbox_name: rec.inbox_name || null,
+        doc_id: rec.doc_id || null,
+        category: rec.category || null,
+        confidence: rec.confidence || 0,
+        cost_usd: rec.cost_usd || 0,
+        message: rec.message || "",
+      };
+    },
+
+    async onSwMessage(msg) {
+      if (!msg || msg.type !== "update") return;
+      const rec = await idbGet(msg.id);
+      if (!rec) return;
+      const existing = this.items.find(it => it.id === msg.id);
+      const ui = this._toUiItem(rec);
+      if (existing) Object.assign(existing, ui);
+      else this.items.push(ui);
+
+      // When SW finishes uploading, server now owns the file — start polling.
+      if (ui.inbox_name && !this.polling.has(ui.id) && !TERMINAL.has(ui.stage)) {
+        this.pollStatus(ui);
       }
     },
 
-    clearHistory() {
-      // Keep actively-running items; drop finished ones.
-      this.items = this.items.filter(it => !TERMINAL_STAGES.has(it.stage));
+    async tellDrain() {
+      const ctrl = navigator.serviceWorker?.controller
+                || (await navigator.serviceWorker?.ready)?.active;
+      if (ctrl) ctrl.postMessage({ type: "drain" });
     },
 
+    // ---- User actions ----
     handleDrop(e) {
       this.dragOver = false;
       this.handleFiles(e.dataTransfer.files);
     },
-    handleFiles(fileList) {
-      for (const f of fileList) {
-        const ext = f.name.split('.').pop().toLowerCase();
-        if (!ALLOWED_EXT.includes(ext)) continue;  // silently skip .DS_Store etc. from folder picks
-        this.enqueue(f);
+    async handleFiles(fileList) {
+      const files = Array.from(fileList || []);
+      for (const f of files) {
+        const ext = (f.name.split(".").pop() || "").toLowerCase();
+        if (!ALLOWED_EXT.includes(ext)) continue;
+        const id = await idbAdd({
+          file: f,
+          originalName: f.name,
+          displayName: f.webkitRelativePath || f.name,
+          stage: "pending-upload",
+          inbox_name: null,
+          ts: Date.now(),
+        });
+        this.items.push({
+          id,
+          displayName: f.webkitRelativePath || f.name,
+          stage: "pending-upload",
+          inbox_name: null,
+          doc_id: null, category: null, confidence: 0, cost_usd: 0, message: "",
+        });
       }
-      this.pump();
-    },
-    enqueue(file) {
-      const item = {
-        name: file.webkitRelativePath || file.name, file,
-        progress: 0, stage: 'queued', inbox_name: null,
-        doc_id: null, category: null, confidence: 0, cost_usd: 0,
-        ts: Date.now(),
-      };
-      this.items.push(item);
-      this.queue.push(item);
-    },
-    pump() {
-      while (this.active < MAX_CONCURRENT_UPLOADS && this.queue.length > 0) {
-        this.active++;
-        const it = this.queue.shift();
-        this.uploadOne(it).finally(() => { this.active--; this.pump(); });
-      }
+      this.tellDrain();
     },
 
+    async clearHistory() {
+      for (const it of this.items.slice()) {
+        const s = this.displayStage(it);
+        if (TERMINAL.has(s)) await idbDelete(it.id);
+      }
+      this.items = this.items.filter(it => !TERMINAL.has(this.displayStage(it)));
+    },
+
+    // ---- Stage / display helpers ----
+    displayStage(it) {
+      return it.stage;  // IDB stages and server stages share names where it matters
+    },
     stageColor(s) {
       return {
-        uploading:'text-ink-400', queued:'text-ink-400', processing:'text-emerald-300',
-        filed:'text-emerald-300', review:'text-amber-300',
-        failed:'text-rose-300', error:'text-rose-300', duplicate:'text-indigo-300',
-      }[s] || 'text-ink-400';
+        "pending-upload": "text-ink-400",
+        "uploading": "text-ink-400",
+        "server-queued": "text-ink-400",
+        "queued": "text-ink-400",
+        "processing": "text-emerald-300",
+        "filed": "text-emerald-300",
+        "review": "text-amber-300",
+        "failed": "text-rose-300",
+        "error": "text-rose-300",
+        "duplicate": "text-indigo-300",
+      }[s] || "text-ink-400";
     },
     iconBg(s) {
       return {
-        uploading:'bg-ink-700/60', queued:'bg-ink-700/60', processing:'bg-ink-700/60',
-        filed:'bg-emerald-500/15', review:'bg-amber-500/15',
-        failed:'bg-rose-500/15', error:'bg-rose-500/15', duplicate:'bg-indigo-500/15',
-      }[s] || 'bg-ink-700/60';
+        "pending-upload": "bg-ink-700/60",
+        "uploading": "bg-ink-700/60",
+        "server-queued": "bg-ink-700/60",
+        "queued": "bg-ink-700/60",
+        "processing": "bg-ink-700/60",
+        "filed": "bg-emerald-500/15",
+        "review": "bg-amber-500/15",
+        "failed": "bg-rose-500/15",
+        "error": "bg-rose-500/15",
+        "duplicate": "bg-indigo-500/15",
+      }[s] || "bg-ink-700/60";
     },
     stageLabel(it) {
       switch (it.stage) {
-        case 'uploading':  return tr('stage.uploading',  { progress: it.progress });
-        case 'queued':     return tr('stage.queued');
-        case 'processing': return tr('stage.processing');
-        case 'filed':      return tr('stage.filed',      { category: it.category, confidence: Math.round((it.confidence || 0)*100), cost: (it.cost_usd || 0).toFixed(4) });
-        case 'review':     return tr('stage.review',     { category: it.category, confidence: Math.round((it.confidence || 0)*100) });
-        case 'failed':     return tr('stage.failed');
-        case 'error':      return it.message || tr('stage.error');
-        case 'duplicate':  return tr('stage.duplicate',  { category: it.category || '' });
-        default:           return '';
+        case "pending-upload":  return tr("stage.pending_upload");
+        case "uploading":       return tr("stage.uploading_bg");
+        case "server-queued":   return tr("stage.queued");
+        case "queued":          return tr("stage.queued");
+        case "processing":      return tr("stage.processing");
+        case "filed":           return tr("stage.filed",     { category: it.category, confidence: Math.round((it.confidence||0)*100), cost: (it.cost_usd||0).toFixed(4) });
+        case "review":          return tr("stage.review",    { category: it.category, confidence: Math.round((it.confidence||0)*100) });
+        case "failed":          return tr("stage.failed");
+        case "error":           return it.message === "format" ? tr("stage.error_format")
+                                     : it.message === "unclear" ? tr("stage.error_unclear")
+                                     : tr("stage.error") + (it.message ? " (" + it.message + ")" : "");
+        case "duplicate":       return tr("stage.duplicate", { category: it.category || "" });
+        default:                return it.stage;
       }
+    },
+    anyActive() {
+      return this.items.some(it => !TERMINAL.has(it.stage));
     },
     summary() {
-      const done = this.items.filter(i => !['uploading','queued','processing'].includes(i.stage)).length;
-      return tr('upload.summary_done_of_total', { done, total: this.items.length });
+      const done = this.items.filter(it => TERMINAL.has(it.stage)).length;
+      return tr("upload.summary_done_of_total", { done, total: this.items.length });
     },
     allDone() {
-      return this.items.length > 0 && this.items.every(i => !['uploading','queued','processing'].includes(i.stage));
+      return this.items.length > 0 && !this.anyActive();
     },
 
-    uploadOne(item) {
-      return new Promise(resolve => {
-        item.stage = 'uploading';
-        const form = new FormData();
-        form.append('files', item.file, item.file.name);
+    // ---- Server-status polling (after SW upload) ----
+    async pollStatus(item) {
+      this.polling.add(item.id);
+      try {
+        for (let i = 0; i < 300 && !TERMINAL.has(item.stage); i++) {
+          try {
+            const r = await fetch("/api/status/" + encodeURIComponent(item.inbox_name));
+            if (!r.ok) throw new Error("status " + r.status);
+            const data = await r.json();
+            item.stage = data.status;
+            if (data.doc_id != null)    item.doc_id    = data.doc_id;
+            if (data.category)          item.category  = data.category;
+            if (data.confidence != null) item.confidence = data.confidence;
+            if (data.cost_usd != null)   item.cost_usd   = data.cost_usd;
 
-        const xhr = new XMLHttpRequest();
-        xhr.upload.addEventListener('progress', e => {
-          if (e.lengthComputable) item.progress = Math.round(e.loaded / e.total * 100);
-        });
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const res = JSON.parse(xhr.responseText);
-              if (res.rejected && res.rejected.includes(item.file.name)) {
-                item.stage = 'error'; item.message = tr('stage.error_format');
-                resolve(); return;
-              }
-              const entry = (res.saved || []).find(s => s.original_name === item.file.name) || res.saved[0];
-              if (entry && entry.inbox_name) {
-                item.progress = 100;
-                item.inbox_name = entry.inbox_name;
-                item.stage = 'queued';
-                this.pollStatus(item, entry.inbox_name).then(resolve);
-                return;
-              }
-              item.stage = 'error'; item.message = tr('stage.error_unclear');
-            } catch (e) {
-              item.stage = 'error'; item.message = e.message || String(e);
+            // Mirror to IDB so a reload sees the same state.
+            const rec = await idbGet(item.id);
+            if (rec) {
+              rec.stage = item.stage;
+              rec.doc_id = item.doc_id;
+              rec.category = item.category;
+              rec.confidence = item.confidence;
+              rec.cost_usd = item.cost_usd;
+              await idbPut(rec);
             }
-          } else {
-            item.stage = 'error'; item.message = tr('stage.error_http', { status: xhr.status });
-          }
-          resolve();
-        });
-        xhr.addEventListener('error', () => {
-          item.stage = 'error'; item.message = tr('stage.error');
-          resolve();
-        });
-        xhr.open('POST', '/upload');
-        xhr.send(form);
-      });
-    },
-
-    async pollStatus(item, inboxName) {
-      const terminal = new Set(['filed','review','failed','duplicate','unknown','error']);
-      for (let attempt = 0; attempt < 240; attempt++) {  // up to ~6 min
-        try {
-          const res = await fetch('/api/status/' + encodeURIComponent(inboxName));
-          if (!res.ok) throw new Error('status ' + res.status);
-          const data = await res.json();
-          item.stage = data.status;
-          if (data.doc_id != null)    item.doc_id    = data.doc_id;
-          if (data.category)          item.category  = data.category;
-          if (data.confidence != null) item.confidence = data.confidence;
-          if (data.cost_usd != null)   item.cost_usd   = data.cost_usd;
-          if (terminal.has(item.stage)) return;
-        } catch (e) { /* keep polling */ }
-        await new Promise(r => setTimeout(r, 1500));
+            if (TERMINAL.has(item.stage)) return;
+          } catch (e) { /* keep polling */ }
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      } finally {
+        this.polling.delete(item.id);
       }
-      item.stage = 'unknown';
     },
   };
 }

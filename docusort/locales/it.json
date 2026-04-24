@@ -103,6 +103,8 @@
   "upload.ocr_hint": "OCR + Claude impiegano <b>15–60 s</b> per PDF a seconda delle pagine. Il watcher aspetta 5 s dopo l'ultimo byte.",
 
   "stage.uploading": "Caricamento — {progress} %",
+  "stage.pending_upload": "In coda · in attesa di caricamento",
+  "stage.uploading_bg": "Caricamento in background…",
   "stage.queued": "In coda · attesa stabilità",
   "stage.processing": "OCR + classificazione Claude in corso…",
   "stage.filed": "✓ {category}  ·  {confidence} %  ·  ${cost}",
@@ -114,6 +116,8 @@
   "stage.error_unclear": "Risposta di upload poco chiara",
   "stage.duplicate": "Duplicato — già archiviato come «{category}»",
   "stage.upload_aborted": "Caricamento interrotto — scheda chiusa",
+
+  "upload.background_hint": "Caricamento in background — puoi chiudere questa scheda.",
 
   "retry.heading": "Riclassifica",
   "retry.hint": "Rimanda il testo OCR memorizzato a Claude e archivia di nuovo il documento. Nessun costo OCR aggiuntivo.",

@@ -68,6 +68,19 @@ def create_app(
 
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    # Serve the upload service worker at root so its default scope is "/".
+    # A SW at /static/upload-sw.js would only control /static/*.
+    @app.get("/upload-sw.js", include_in_schema=False)
+    def upload_sw():
+        return FileResponse(
+            str(static_dir / "upload-sw.js"),
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "no-cache, must-revalidate",
+                "Service-Worker-Allowed": "/",
+            },
+        )
+
     category_names = [c["name"] for c in settings.categories]
 
     def _lang(request: Request) -> str:

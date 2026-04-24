@@ -2,6 +2,39 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.7.0] – 2026-04-24
+
+### Added
+
+- **True background uploads via Service Worker + IndexedDB.** Pick 50
+  files, close the tab, they still upload and get classified. Files are
+  stashed as Blobs in IndexedDB under `docusort-uploads`; a Service
+  Worker (served from `/upload-sw.js` with root scope) drains the queue
+  against `POST /upload` with 4 concurrent requests. The browser keeps
+  the worker alive for ~30–120 s after the last tab closes, which is
+  plenty for a few dozen PDFs over a LAN/Tailscale link.
+- If the worker is killed mid-drain (browser reclaim, OS sleep, or
+  longer inactivity), the next page load re-sends any item that still
+  has a file blob but no `inbox_name`. Server-side SHA256 dedup catches
+  stray double-uploads cleanly — no manual retry needed.
+- `BroadcastChannel('docusort-upload')` pushes live stage updates from
+  the worker to every open tab.
+- Banner "Upload läuft im Hintergrund — du kannst den Tab schließen"
+  appears while any item is active.
+
+### Removed
+
+- The "Upload abgebrochen — Tab geschlossen" error state, along with
+  the localStorage queue it was built on. Items that were uploading at
+  tab-close now just resume on next visit.
+
+### Notes
+
+- Chrome / Edge / Firefox / Safari 16+ all run Service Workers.
+- iOS Safari kills the SW aggressively when a tab is backgrounded —
+  in practice the first 20–30 seconds of background work still land,
+  which covers a typical handful of scans but not a full 100-file batch.
+
 ## [0.6.3] – 2026-04-24
 
 ### Added

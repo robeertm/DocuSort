@@ -103,6 +103,8 @@
   "upload.ocr_hint": "OCR + Claude brauchen je nach Seitenzahl <b>15–60 s</b> pro PDF. Der Watcher wartet 5 s nach dem letzten Byte, bevor er loslegt — siehe Live-Status oben.",
 
   "stage.uploading": "Hochladen — {progress} %",
+  "stage.pending_upload": "In Warteschlange · wartet auf Upload",
+  "stage.uploading_bg": "Hochladen im Hintergrund…",
   "stage.queued": "In Warteschlange · Watcher wartet auf Stabilität",
   "stage.processing": "OCR + Claude-Klassifizierung läuft…",
   "stage.filed": "✓ {category}  ·  {confidence} %  ·  ${cost}",
@@ -114,6 +116,8 @@
   "stage.error_unclear": "Upload-Antwort unklar",
   "stage.duplicate": "Duplikat — bereits als „{category}\" vorhanden",
   "stage.upload_aborted": "Upload abgebrochen — Tab geschlossen",
+
+  "upload.background_hint": "Upload läuft im Hintergrund — du kannst den Tab schließen.",
 
   "retry.heading": "Neu klassifizieren",
   "retry.hint": "Schickt den gespeicherten OCR-Text erneut an Claude und legt das Dokument neu ab. Keine zusätzlichen OCR-Kosten.",
