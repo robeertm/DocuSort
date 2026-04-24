@@ -119,5 +119,33 @@
   "retry.done": "✓ {category} — {confidence} %  ·  ${cost}",
   "retry.failed": "Retry failed:",
 
+  "trash.title": "Trash",
+  "trash.subtitle": "Documents you've deleted. Restore them or purge them permanently.",
+  "trash.move_to_trash": "Move to trash",
+  "trash.hint_active": "The document is moved to _Trash/ but keeps its metadata. You can restore it later.",
+  "trash.restore_or_purge": "Restore or purge permanently",
+  "trash.hint_in_trash": "Restore moves the file back to the library. Purge deletes it permanently.",
+  "trash.delete_button": "Move to trash",
+  "trash.restore_button": "Restore",
+  "trash.purge_button": "Purge permanently",
+  "trash.deleted": "Moved to trash.",
+  "trash.restored": "Restored.",
+  "trash.purged": "Permanently deleted.",
+  "trash.confirm_purge": "Permanently delete this document? This cannot be undone.",
+  "trash.confirm_empty": "Permanently delete all documents in the trash? This cannot be undone.",
+  "trash.empty_all": "Empty trash",
+
+  "library.export": "Export as ZIP",
+
+  "sync.heading": "Backup & Cloud sync",
+  "sync.subtitle": "Export the library as a single ZIP, or sync it to your cloud via rclone (iCloud, Google Drive, Dropbox, OneDrive, S3 …).",
+  "sync.export_zip": "Download ZIP",
+  "sync.remote": "Remote",
+  "sync.run_now": "Sync now",
+  "sync.running": "Sync running…",
+  "sync.last_run": "Last run: {when}",
+  "sync.disabled_hint": "Cloud sync is disabled. Set <code>sync.enabled: true</code> and a <code>sync.remote</code> in your <code>config.yaml</code> to enable it.",
+  "sync.rclone_missing": "rclone is not installed. On Debian: <code>sudo apt install rclone</code>, then run <code>rclone config</code> once to set up the remote.",
+
   "footer.running_on": "running on your server"
 }

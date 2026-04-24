@@ -119,5 +119,33 @@
   "retry.done": "✓ {category} — {confidence} %  ·  ${cost}",
   "retry.failed": "Échec du reclassement :",
 
+  "trash.title": "Corbeille",
+  "trash.subtitle": "Documents supprimés. Restaurer ou supprimer définitivement.",
+  "trash.move_to_trash": "Mettre à la corbeille",
+  "trash.hint_active": "Le document est déplacé vers _Trash/ en gardant ses métadonnées. Vous pouvez le restaurer plus tard.",
+  "trash.restore_or_purge": "Restaurer ou supprimer définitivement",
+  "trash.hint_in_trash": "Restaurer remet le fichier dans la bibliothèque. Supprimer définitivement l'efface complètement.",
+  "trash.delete_button": "Mettre à la corbeille",
+  "trash.restore_button": "Restaurer",
+  "trash.purge_button": "Supprimer définitivement",
+  "trash.deleted": "Mis à la corbeille.",
+  "trash.restored": "Restauré.",
+  "trash.purged": "Définitivement supprimé.",
+  "trash.confirm_purge": "Supprimer définitivement ce document ? Action irréversible.",
+  "trash.confirm_empty": "Supprimer définitivement tous les documents de la corbeille ? Action irréversible.",
+  "trash.empty_all": "Vider la corbeille",
+
+  "library.export": "Exporter en ZIP",
+
+  "sync.heading": "Sauvegarde & synchronisation",
+  "sync.subtitle": "Exportez la bibliothèque en ZIP ou synchronisez-la avec votre cloud via rclone (iCloud, Google Drive, Dropbox, OneDrive, S3…).",
+  "sync.export_zip": "Télécharger ZIP",
+  "sync.remote": "Distant",
+  "sync.run_now": "Synchroniser",
+  "sync.running": "Synchronisation…",
+  "sync.last_run": "Dernière exécution : {when}",
+  "sync.disabled_hint": "La synchronisation cloud est désactivée. Définissez <code>sync.enabled: true</code> et un <code>sync.remote</code> dans <code>config.yaml</code>.",
+  "sync.rclone_missing": "rclone n'est pas installé. Debian : <code>sudo apt install rclone</code>, puis <code>rclone config</code>.",
+
   "footer.running_on": "tourne sur votre serveur"
 }

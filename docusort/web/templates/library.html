@@ -2,17 +2,43 @@
 {% block title %}{{ t('library.title') }} · DocuSort{% endblock %}
 {% block content %}
 
-<div class="mb-6">
-  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('library.title') }}</h1>
-  <p class="text-ink-400 mt-1 text-sm">
-    {% if filter.status == 'review' %}{{ t('library.subtitle_review') }}{% else %}{{ t('library.subtitle_default') }}{% endif %}
-  </p>
+<div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
+  <div>
+    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">
+      {% if trash %}{{ t('trash.title') }}{% else %}{{ t('library.title') }}{% endif %}
+    </h1>
+    <p class="text-ink-400 mt-1 text-sm">
+      {% if trash %}{{ t('trash.subtitle') }}
+      {% elif filter.status == 'review' %}{{ t('library.subtitle_review') }}
+      {% else %}{{ t('library.subtitle_default') }}{% endif %}
+    </p>
+  </div>
+  <div class="flex items-center gap-2">
+    {% if trash %}
+      <form method="post" action="/api/trash/empty" onsubmit="return confirm('{{ t('trash.confirm_empty') }}');">
+        <button type="submit" class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+          </svg>
+          {{ t('trash.empty_all') }}
+        </button>
+      </form>
+    {% else %}
+      <a href="/api/export.zip{% if filter.year %}?year={{ filter.year }}{% if filter.category %}&category={{ filter.category }}{% endif %}{% elif filter.category %}?category={{ filter.category }}{% endif %}"
+         class="btn-secondary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+        </svg>
+        {{ t('library.export') }}
+      </a>
+    {% endif %}
+  </div>
 </div>
 
 <!-- Filter bar -->
 <form
   class="card p-4 mb-6 grid gap-3 sm:grid-cols-[1fr_auto_auto]"
-  hx-get="/library?partial=1"
+  hx-get="/library?partial=1{% if trash %}&trash=1{% endif %}"
   hx-trigger="change, keyup delay:400ms from:input[name=q]"
   hx-target="#grid"
   hx-push-url="true"
@@ -115,14 +141,14 @@
       <p class="text-xs text-ink-500 px-2.5 py-2">{{ t('library.no_docs') }}</p>
     {% endfor %}
 
-    {% if tree.statuses.review or tree.statuses.failed %}
+    {% if tree.statuses.review or tree.statuses.failed or tree.trash %}
     <div class="mt-3 pt-3 border-t border-ink-700/50">
       <div class="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-ink-500">
         {{ t('library.tree_status') }}
       </div>
       {% if tree.statuses.review %}
         <a href="/library?status=review"
-           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if filter.status == 'review' %}bg-amber-500/15 text-amber-200{% endif %}">
+           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if filter.status == 'review' and not trash %}bg-amber-500/15 text-amber-200{% endif %}">
           <span class="flex items-center gap-2">
             <span class="h-2 w-2 rounded-full bg-amber-400"></span>
             {{ t('card.review') }}
@@ -132,12 +158,24 @@
       {% endif %}
       {% if tree.statuses.failed %}
         <a href="/library?status=failed"
-           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if filter.status == 'failed' %}bg-rose-500/15 text-rose-200{% endif %}">
+           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if filter.status == 'failed' and not trash %}bg-rose-500/15 text-rose-200{% endif %}">
           <span class="flex items-center gap-2">
             <span class="h-2 w-2 rounded-full bg-rose-400"></span>
             {{ t('card.failed') }}
           </span>
           <span class="tabular-nums text-xs text-ink-400">{{ tree.statuses.failed }}</span>
+        </a>
+      {% endif %}
+      {% if tree.trash %}
+        <a href="/library?trash=1"
+           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if trash %}bg-ink-700/60 text-ink-100{% endif %}">
+          <span class="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5 text-ink-400">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+            </svg>
+            {{ t('trash.title') }}
+          </span>
+          <span class="tabular-nums text-xs text-ink-400">{{ tree.trash }}</span>
         </a>
       {% endif %}
     </div>

@@ -119,5 +119,33 @@
   "retry.done": "✓ {category} — {confidence} %  ·  ${cost}",
   "retry.failed": "Riclassifica fallita:",
 
+  "trash.title": "Cestino",
+  "trash.subtitle": "Documenti eliminati. Ripristinali o rimuovili definitivamente.",
+  "trash.move_to_trash": "Sposta nel cestino",
+  "trash.hint_active": "Il documento viene spostato in _Trash/ mantenendo i metadati. Puoi ripristinarlo più tardi.",
+  "trash.restore_or_purge": "Ripristina o rimuovi definitivamente",
+  "trash.hint_in_trash": "Ripristina rimette il file in libreria. Rimuovi definitivamente lo cancella.",
+  "trash.delete_button": "Sposta nel cestino",
+  "trash.restore_button": "Ripristina",
+  "trash.purge_button": "Rimuovi definitivamente",
+  "trash.deleted": "Spostato nel cestino.",
+  "trash.restored": "Ripristinato.",
+  "trash.purged": "Rimosso definitivamente.",
+  "trash.confirm_purge": "Rimuovere definitivamente questo documento? Non si può annullare.",
+  "trash.confirm_empty": "Rimuovere definitivamente tutti i documenti nel cestino? Non si può annullare.",
+  "trash.empty_all": "Svuota cestino",
+
+  "library.export": "Esporta come ZIP",
+
+  "sync.heading": "Backup & sincronizzazione cloud",
+  "sync.subtitle": "Esporta la libreria come ZIP o sincronizzala col tuo cloud via rclone (iCloud, Google Drive, Dropbox, OneDrive, S3…).",
+  "sync.export_zip": "Scarica ZIP",
+  "sync.remote": "Remoto",
+  "sync.run_now": "Sincronizza ora",
+  "sync.running": "Sincronizzazione…",
+  "sync.last_run": "Ultima esecuzione: {when}",
+  "sync.disabled_hint": "La sincronizzazione è disattivata. Imposta <code>sync.enabled: true</code> e un <code>sync.remote</code> in <code>config.yaml</code>.",
+  "sync.rclone_missing": "rclone non è installato. Debian: <code>sudo apt install rclone</code>, poi <code>rclone config</code>.",
+
   "footer.running_on": "in esecuzione sul tuo server"
 }

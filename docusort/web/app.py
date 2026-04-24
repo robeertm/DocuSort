@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -109,18 +109,19 @@ def create_app(
         status: str | None = Query(None),
         year: str | None = Query(None),
         q: str | None = Query(None),
+        trash: bool = Query(False),
         partial: bool = Query(False),
     ):
         docs = db.list_documents(
             category=category or None, status=status or None,
-            year=year or None, query=q or None, limit=200,
+            year=year or None, query=q or None, trash=trash, limit=500,
         )
         years = db.distinct_years()
         tree = db.tree()
         tpl = "_card_grid.html" if partial else "library.html"
         return templates.TemplateResponse(
             request, tpl,
-            {**base_ctx(request), "docs": docs, "years": years, "tree": tree,
+            {**base_ctx(request), "docs": docs, "years": years, "tree": tree, "trash": trash,
              "filter": {"category": category, "status": status, "year": year, "q": q}},
         )
 
@@ -259,6 +260,70 @@ def create_app(
             samesite="lax", httponly=False, path="/",
         )
         return resp
+
+    # ---------- Trash: delete / restore / purge ----------
+    @app.post("/api/document/{doc_id}/delete")
+    def delete_document(doc_id: int):
+        from ..trash import delete_document as _delete
+        try:
+            return _delete(doc_id, settings, db)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.post("/api/document/{doc_id}/restore")
+    def restore_document(doc_id: int):
+        from ..trash import restore_document as _restore
+        try:
+            return _restore(doc_id, settings, db)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.post("/api/document/{doc_id}/purge")
+    def purge_document(doc_id: int):
+        from ..trash import purge_document as _purge
+        try:
+            return _purge(doc_id, settings, db)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.post("/api/trash/empty")
+    def empty_trash_route():
+        from ..trash import empty_trash
+        return empty_trash(settings, db)
+
+    # ---------- Export ----------
+    @app.get("/api/export.zip")
+    def export_zip(
+        category: str | None = Query(None),
+        year: str | None = Query(None),
+        include_trash: bool = Query(False),
+    ):
+        from ..export import stream_zip, suggested_filename
+        name = suggested_filename(category=category, year=year, trash=include_trash)
+        return StreamingResponse(
+            stream_zip(settings, db, category=category, year=year, include_trash=include_trash),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
+
+    # ---------- Sync ----------
+    @app.get("/api/sync/status")
+    def sync_status():
+        from .. import sync as sync_mod
+        return sync_mod.status(settings)
+
+    @app.post("/api/sync/run")
+    def sync_run():
+        from .. import sync as sync_mod
+        if not settings.sync.enabled:
+            raise HTTPException(400, "sync disabled — set sync.enabled=true in config.yaml")
+        if not sync_mod.rclone_available():
+            raise HTTPException(
+                503,
+                "rclone is not installed. On Debian: sudo apt install rclone, "
+                "then run `rclone config` once to set up your remote.",
+            )
+        return sync_mod.run_sync_async(settings)
 
     # ---------- Retry failed / review docs ----------
     @app.post("/api/document/{doc_id}/retry")

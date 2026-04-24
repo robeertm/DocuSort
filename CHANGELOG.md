@@ -2,6 +2,37 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.6.0] – 2026-04-24
+
+### Added
+
+- **Trash** — every document gets a "Move to trash" button in the detail
+  view. Trashed docs are moved into a `_Trash/` tree that mirrors the
+  category layout, hidden from dashboard / library / tree / stats, and
+  excluded from the content-hash dedup lookup. The tree sidebar shows a
+  "Papierkorb" entry when trash is non-empty; from there individual docs
+  can be restored or permanently purged, or the whole trash emptied.
+- **ZIP export** — streaming download of the library (or a filtered
+  subset: `?category=X&year=Y`). `_Trash/` excluded by default.
+  Duplicate rows sharing a library_path are written once.
+- **Cloud sync via rclone** — `sync:` section in `config.yaml` with
+  `remote`, `source`, `extra_flags`, `timeout_seconds`. Works with any
+  rclone backend (iCloud Drive, Google Drive, Dropbox, OneDrive,
+  Synology C2, S3, WebDAV, SFTP, …). Dashboard shows install/config
+  status, last-run timestamp, transferred bytes/files, and has a
+  "Sync now" button that kicks off an async sync and polls status.
+- DB: `deleted_at` column + `idx_documents_deleted` index (migrated
+  idempotently on startup).
+- Routes: `POST /api/document/{id}/delete|restore|purge`,
+  `POST /api/trash/empty`, `GET /api/export.zip`,
+  `GET /api/sync/status`, `POST /api/sync/run`.
+
+### Changed
+
+- `stats()`, `tree()`, `distinct_years()`, `find_by_hash()` all now
+  exclude soft-deleted rows by default.
+- `list_documents()` gains a `trash=True` parameter.
+
 ## [0.5.0] – 2026-04-24
 
 ### Added

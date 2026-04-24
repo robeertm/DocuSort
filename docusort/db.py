@@ -161,12 +161,14 @@ class Database:
             ("cache_creation_tokens", "INTEGER DEFAULT 0"),
             ("cache_read_tokens",     "INTEGER DEFAULT 0"),
             ("content_hash",          "TEXT"),
+            ("deleted_at",            "TEXT"),
         ]
         for name, decl in migrations:
             if name not in cols:
                 self._conn.execute(f"ALTER TABLE documents ADD COLUMN {name} {decl}")
                 logger.info("DB migration: added column %s", name)
-        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(content_hash)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash    ON documents(content_hash)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_deleted ON documents(deleted_at)")
 
     def close(self) -> None:
         with self._lock:
@@ -263,10 +265,11 @@ class Database:
         return dict(row) if row else None
 
     def find_by_hash(self, content_hash: str) -> dict[str, Any] | None:
+        """Return the most recent non-deleted doc with this content hash."""
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM documents WHERE content_hash = ? "
-                "ORDER BY id DESC LIMIT 1",
+                "AND deleted_at IS NULL ORDER BY id DESC LIMIT 1",
                 (content_hash,),
             ).fetchone()
         return dict(row) if row else None
@@ -278,17 +281,20 @@ class Database:
         status: str | None = None,
         year: str | None = None,
         query: str | None = None,
+        trash: bool = False,
         limit: int = 200,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         where: list[str] = []
         params: list[Any] = []
+        trash_clause = "d.deleted_at IS NOT NULL" if trash else "d.deleted_at IS NULL"
+        trash_clause_plain = trash_clause.replace("d.", "")
 
         if query:
             sql = (
                 "SELECT d.* FROM documents d "
                 "JOIN documents_fts f ON f.rowid = d.id "
-                "WHERE documents_fts MATCH ?"
+                f"WHERE documents_fts MATCH ? AND {trash_clause}"
             )
             params.append(query)
             if category:
@@ -303,6 +309,7 @@ class Database:
             sql += " ORDER BY rank LIMIT ? OFFSET ?"
             params += [limit, offset]
         else:
+            where.append(trash_clause_plain)
             if category:
                 where.append("category = ?")
                 params.append(category)
@@ -312,7 +319,7 @@ class Database:
             if year:
                 where.append("substr(doc_date, 1, 4) = ?")
                 params.append(year)
-            where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+            where_sql = " WHERE " + " AND ".join(where)
             sql = (
                 "SELECT * FROM documents" + where_sql
                 + " ORDER BY COALESCE(doc_date, created_at) DESC LIMIT ? OFFSET ?"
@@ -324,23 +331,46 @@ class Database:
         return [dict(r) for r in rows]
 
     def count_documents(
-        self, *, category: str | None = None, status: str | None = None
+        self, *, category: str | None = None, status: str | None = None,
+        trash: bool = False,
     ) -> int:
-        where, params = [], []
+        where = ["deleted_at IS NOT NULL" if trash else "deleted_at IS NULL"]
+        params: list[Any] = []
         if category:
             where.append("category = ?")
             params.append(category)
         if status:
             where.append("status = ?")
             params.append(status)
-        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        where_sql = " WHERE " + " AND ".join(where)
         with self._lock:
             row = self._conn.execute(
                 f"SELECT COUNT(*) FROM documents{where_sql}", params
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def mark_deleted(self, doc_id: int, new_library_path: str) -> None:
+        """Flag a document as deleted and update its on-disk location."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE documents SET deleted_at = ?, library_path = ? WHERE id = ?",
+                (datetime.now().isoformat(timespec="seconds"), new_library_path, doc_id),
+            )
+
+    def mark_restored(self, doc_id: int, new_library_path: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE documents SET deleted_at = NULL, library_path = ? WHERE id = ?",
+                (new_library_path, doc_id),
+            )
+
+    def purge(self, doc_id: int) -> None:
+        """Permanent delete — row gone, FTS index cleaned via trigger."""
+        with self._lock:
+            self._conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+
     def stats(self) -> dict[str, Any]:
+        """Aggregate stats. Excludes trash from all counts and sums."""
         with self._lock:
             totals = self._conn.execute("""
                 SELECT COUNT(*) AS n,
@@ -350,38 +380,41 @@ class Database:
                        COALESCE(SUM(cache_read_tokens), 0)       AS cache_read_tokens,
                        COALESCE(SUM(cost_usd), 0)                AS cost_usd,
                        SUM(CASE WHEN status='duplicate' THEN 1 ELSE 0 END) AS duplicates
-                FROM documents
+                FROM documents WHERE deleted_at IS NULL
             """).fetchone()
             by_cat = self._conn.execute("""
                 SELECT category, COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost_usd
-                FROM documents
-                GROUP BY category
-                ORDER BY n DESC
+                FROM documents WHERE deleted_at IS NULL
+                GROUP BY category ORDER BY n DESC
             """).fetchall()
             by_status = self._conn.execute("""
-                SELECT status, COUNT(*) AS n FROM documents GROUP BY status
+                SELECT status, COUNT(*) AS n FROM documents
+                WHERE deleted_at IS NULL GROUP BY status
             """).fetchall()
             by_month = self._conn.execute("""
                 SELECT substr(created_at,1,7) AS month,
                        COUNT(*) AS n,
                        COALESCE(SUM(cost_usd),0) AS cost_usd
-                FROM documents
-                GROUP BY month
-                ORDER BY month DESC
-                LIMIT 12
+                FROM documents WHERE deleted_at IS NULL
+                GROUP BY month ORDER BY month DESC LIMIT 12
             """).fetchall()
+            trash_count = self._conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE deleted_at IS NOT NULL"
+            ).fetchone()[0]
         return {
             "totals": dict(totals) if totals else {},
             "by_category": [dict(r) for r in by_cat],
             "by_status": [dict(r) for r in by_status],
             "by_month": [dict(r) for r in by_month],
+            "trash_count": int(trash_count),
         }
 
     def distinct_years(self) -> list[str]:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT DISTINCT substr(doc_date,1,4) AS y FROM documents "
-                "WHERE doc_date IS NOT NULL AND doc_date != '' ORDER BY y DESC"
+                "WHERE doc_date IS NOT NULL AND doc_date != '' "
+                "AND deleted_at IS NULL ORDER BY y DESC"
             ).fetchall()
         return [r["y"] for r in rows if r["y"]]
 
@@ -390,25 +423,31 @@ class Database:
 
         Documents without a doc_date fall into a '—' year bucket so they stay
         reachable. Review/failed status buckets are returned separately so the
-        UI can show them as quick-filters next to the tree.
+        UI can show them as quick-filters next to the tree. Trash is not
+        included — it lives in its own view.
         """
         with self._lock:
             total_row = self._conn.execute(
-                "SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost_usd FROM documents"
+                "SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost_usd "
+                "FROM documents WHERE deleted_at IS NULL"
             ).fetchone()
             rows = self._conn.execute("""
                 SELECT COALESCE(NULLIF(substr(doc_date,1,4), ''), '—') AS year,
                        category,
                        COUNT(*) AS n,
                        COALESCE(SUM(cost_usd), 0) AS cost_usd
-                FROM documents
+                FROM documents WHERE deleted_at IS NULL
                 GROUP BY year, category
                 ORDER BY year DESC, n DESC
             """).fetchall()
             status_rows = self._conn.execute("""
                 SELECT status, COUNT(*) AS n FROM documents
-                WHERE status IN ('review', 'failed') GROUP BY status
+                WHERE deleted_at IS NULL AND status IN ('review', 'failed')
+                GROUP BY status
             """).fetchall()
+            trash_row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM documents WHERE deleted_at IS NOT NULL"
+            ).fetchone()
 
         by_year: dict[str, dict[str, Any]] = {}
         for r in rows:
@@ -426,6 +465,7 @@ class Database:
             "total": dict(total_row) if total_row else {"n": 0, "cost_usd": 0.0},
             "years": years,
             "statuses": {r["status"]: int(r["n"]) for r in status_rows},
+            "trash": int(trash_row["n"]) if trash_row else 0,
         }
 
 

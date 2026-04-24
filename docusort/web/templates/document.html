@@ -122,6 +122,42 @@
         <button type="submit" class="btn-primary">{{ t('document.save') }}</button>
       </div>
     </form>
+
+    <!-- Delete / Restore / Purge -->
+    <div class="card p-5" x-data="trashWidget({{ doc.id }}, {{ doc.deleted_at is not none | tojson }})">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">
+        {% if doc.deleted_at %}{{ t('trash.restore_or_purge') }}{% else %}{{ t('trash.move_to_trash') }}{% endif %}
+      </h2>
+      <p class="text-xs text-ink-400 mb-3">
+        {% if doc.deleted_at %}{{ t('trash.hint_in_trash') }}{% else %}{{ t('trash.hint_active') }}{% endif %}
+      </p>
+
+      {% if doc.deleted_at %}
+        <div class="flex gap-2">
+          <button type="button" @click="restore()" :disabled="busy" class="btn-secondary flex-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+              <path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 5v4h4"/>
+            </svg>
+            <span x-text="tr('trash.restore_button')"></span>
+          </button>
+          <button type="button" @click="purge()" :disabled="busy" class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+            </svg>
+            <span x-text="tr('trash.purge_button')"></span>
+          </button>
+        </div>
+      {% else %}
+        <button type="button" @click="del()" :disabled="busy" class="btn-ghost w-full text-rose-300 hover:bg-rose-500/10">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+          </svg>
+          <span x-text="tr('trash.delete_button')"></span>
+        </button>
+      {% endif %}
+
+      <div x-show="message" x-cloak class="mt-3 text-xs" :class="isError ? 'text-rose-300' : 'text-emerald-300'" x-text="message"></div>
+    </div>
   </aside>
 </div>
 
@@ -144,10 +180,31 @@ function retryWidget(docId) {
       } catch (e) {
         this.isError = true;
         this.message = tr('retry.failed') + ' ' + (e.message || e);
-      } finally {
-        this.busy = false;
-      }
+      } finally { this.busy = false; }
     },
+  };
+}
+
+function trashWidget(docId, inTrash) {
+  return {
+    busy: false, message: '', isError: false,
+    async _call(action, confirmKey, afterKey, redirect) {
+      if (confirmKey && !confirm(tr(confirmKey))) return;
+      this.busy = true; this.message = ''; this.isError = false;
+      try {
+        const r = await fetch('/api/document/' + docId + '/' + action, { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        this.message = tr(afterKey);
+        setTimeout(() => { location.href = redirect; }, 900);
+      } catch (e) {
+        this.isError = true;
+        this.message = (e.message || String(e));
+      } finally { this.busy = false; }
+    },
+    del()     { return this._call('delete',  null,                 'trash.deleted',  '/library'); },
+    restore() { return this._call('restore', null,                 'trash.restored', '/document/' + docId); },
+    purge()   { return this._call('purge',   'trash.confirm_purge','trash.purged',   '/library?trash=1'); },
   };
 }
 </script>

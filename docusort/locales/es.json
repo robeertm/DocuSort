@@ -119,5 +119,33 @@
   "retry.done": "✓ {category} — {confidence} %  ·  ${cost}",
   "retry.failed": "Reclasificación fallida:",
 
+  "trash.title": "Papelera",
+  "trash.subtitle": "Documentos eliminados. Restáuralos o elimínalos definitivamente.",
+  "trash.move_to_trash": "Mover a la papelera",
+  "trash.hint_active": "El documento se mueve a _Trash/ y mantiene sus metadatos. Puedes restaurarlo después.",
+  "trash.restore_or_purge": "Restaurar o eliminar definitivamente",
+  "trash.hint_in_trash": "Restaurar devuelve el archivo a la biblioteca. Eliminar definitivamente lo borra por completo.",
+  "trash.delete_button": "Mover a la papelera",
+  "trash.restore_button": "Restaurar",
+  "trash.purge_button": "Eliminar definitivamente",
+  "trash.deleted": "Movido a la papelera.",
+  "trash.restored": "Restaurado.",
+  "trash.purged": "Eliminado definitivamente.",
+  "trash.confirm_purge": "¿Eliminar este documento de forma permanente? No se puede deshacer.",
+  "trash.confirm_empty": "¿Eliminar definitivamente todo lo que hay en la papelera? No se puede deshacer.",
+  "trash.empty_all": "Vaciar papelera",
+
+  "library.export": "Exportar como ZIP",
+
+  "sync.heading": "Copia de seguridad y sincronización",
+  "sync.subtitle": "Exporta la biblioteca como ZIP o sincronízala con la nube vía rclone (iCloud, Google Drive, Dropbox, OneDrive, S3…).",
+  "sync.export_zip": "Descargar ZIP",
+  "sync.remote": "Remoto",
+  "sync.run_now": "Sincronizar ahora",
+  "sync.running": "Sincronizando…",
+  "sync.last_run": "Última ejecución: {when}",
+  "sync.disabled_hint": "La sincronización está desactivada. Establece <code>sync.enabled: true</code> y un <code>sync.remote</code> en <code>config.yaml</code>.",
+  "sync.rclone_missing": "rclone no está instalado. Debian: <code>sudo apt install rclone</code>, luego <code>rclone config</code>.",
+
   "footer.running_on": "se ejecuta en tu servidor"
 }

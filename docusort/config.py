@@ -52,12 +52,22 @@ class WebSettings:
 
 
 @dataclass
+class SyncSettings:
+    enabled: bool = False
+    remote: str = ""                 # e.g. "icloud:DocuSort"
+    source: str = "library"          # 'library' (excl. _Trash) | 'library_and_trash'
+    extra_flags: list = field(default_factory=list)
+    timeout_seconds: int = 1800      # 30 min default
+
+
+@dataclass
 class AppSettings:
     paths: Paths
     categories: list[dict[str, Any]]
     ocr: OCRSettings
     claude: ClaudeSettings
     web: WebSettings = field(default_factory=WebSettings)
+    sync: SyncSettings = field(default_factory=SyncSettings)
     keep_original: bool = True
     filename_template: str = "{date}_{category}_{sender}_{subject}"
     max_filename_length: int = 120
@@ -112,12 +122,22 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         default_language=str(web_cfg.get("default_language", "de")),
     )
 
+    sync_cfg = cfg.get("sync", {})
+    sync = SyncSettings(
+        enabled=bool(sync_cfg.get("enabled", False)),
+        remote=str(sync_cfg.get("remote", "")),
+        source=str(sync_cfg.get("source", "library")),
+        extra_flags=list(sync_cfg.get("extra_flags", []) or []),
+        timeout_seconds=int(sync_cfg.get("timeout_seconds", 1800)),
+    )
+
     return AppSettings(
         paths=paths,
         categories=cats.get("categories", []),
         ocr=ocr,
         claude=claude,
         web=web,
+        sync=sync,
         keep_original=cfg.get("keep_original", True),
         filename_template=cfg.get(
             "filename_template", "{date}_{category}_{sender}_{subject}"

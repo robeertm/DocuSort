@@ -14,6 +14,20 @@ paths:
 web:
   host: "0.0.0.0"             # 0.0.0.0 = listen on all interfaces inside the container
   port: 8080                  # exposed via docker-compose; open http://<nas>:8080
+  default_language: "de"      # de / en / fr / es / it — falls back to browser Accept-Language
+
+# Cloud sync (via rclone)
+# 1. sudo apt install rclone (or brew install rclone)
+# 2. rclone config  — set up an iCloud / Google Drive / Dropbox / OneDrive / S3 remote
+# 3. Set `remote` below to <remote-name>:<path>, e.g. "icloud:DocuSort" or "gdrive:Documents/DocuSort"
+# 4. Set `enabled: true` and restart.
+# See https://rclone.org/docs/ for the complete list of supported cloud services.
+sync:
+  enabled: false
+  remote: ""                   # e.g. "icloud:DocuSort-Backup"
+  source: "library"            # 'library' (excludes _Trash) | 'library_and_trash'
+  extra_flags: []              # e.g. ["--transfers=4", "--bwlimit=8M"]
+  timeout_seconds: 1800        # kill rclone if it runs longer than this
 
 # OCR settings (for scanned PDFs / images)
 ocr:

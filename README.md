@@ -192,6 +192,56 @@ A batch of 1 000 documents per month usually stays well under EUR 1 in API fees.
 Scale model up to Sonnet 4.6 only if you see classification errors – it is
 ~10× more expensive.
 
+## Trash, Export, Cloud sync
+
+### Trash
+Every document detail page has a **move-to-trash** button. Trashed documents
+move into a `_Trash/` tree that mirrors the category layout on disk and become
+hidden from the dashboard, tree and stats — but stay in the DB so they're
+recoverable. The library's tree sidebar gets a "Papierkorb" entry whenever
+the trash is non-empty. From there you can restore or permanently purge
+individual items, or empty the whole trash.
+
+### Export
+- **Dashboard** → "ZIP laden" → downloads the whole library as a single ZIP.
+- **Library filtered** → export a single year, a single category, or both.
+- `_Trash/` is excluded by default.
+- The download is streamed, so multi-GB exports don't spike memory.
+
+### Cloud sync (via rclone)
+
+DocuSort uses [rclone](https://rclone.org/) for cloud sync — whatever rclone
+supports, DocuSort can sync to. On the machine running DocuSort:
+
+```bash
+sudo apt install rclone       # Debian/Ubuntu
+brew install rclone           # macOS
+rclone config                 # interactive setup — add a remote
+```
+
+Then edit `config/config.yaml`:
+
+```yaml
+sync:
+  enabled: true
+  remote: "icloud:DocuSort-Backup"   # <remote-name>:<path>
+  source: "library"
+  extra_flags: ["--transfers=4"]
+```
+
+- **iCloud Drive**: pick `iclouddrive` in `rclone config`. Apple requires an
+  [app-specific password](https://support.apple.com/en-us/HT204397) instead
+  of your main password. See https://rclone.org/iclouddrive/ for details.
+- **Google Drive / Dropbox / OneDrive**: pick the respective backend in
+  `rclone config`, browse to the auth URL, paste the token back.
+- **Synology C2**: use the `s3` backend with Synology's endpoint.
+- **WebDAV / SFTP / S3**: all supported natively.
+
+After saving `config.yaml`, restart the service and click **Jetzt
+synchronisieren** on the dashboard. For scheduled sync, create a systemd
+timer that calls `curl -XPOST http://localhost:8080/api/sync/run` every
+night.
+
 ## Roadmap
 
 - ~~Etappe 2: Web UI, cost tracking, SQLite + FTS5 search~~ — shipped in **v0.2.0**

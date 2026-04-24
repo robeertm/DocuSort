@@ -119,5 +119,33 @@
   "retry.done": "✓ {category} — {confidence} %  ·  ${cost}",
   "retry.failed": "Retry fehlgeschlagen:",
 
+  "trash.title": "Papierkorb",
+  "trash.subtitle": "Gelöschte Dokumente. Wiederherstellen oder endgültig löschen.",
+  "trash.move_to_trash": "In den Papierkorb",
+  "trash.hint_active": "Das Dokument wird nach _Trash/ verschoben, Metadaten bleiben erhalten. Du kannst es später wiederherstellen.",
+  "trash.restore_or_purge": "Wiederherstellen oder endgültig löschen",
+  "trash.hint_in_trash": "Wiederherstellen verschiebt die Datei zurück in die Bibliothek. Endgültig löschen entfernt sie komplett.",
+  "trash.delete_button": "In den Papierkorb",
+  "trash.restore_button": "Wiederherstellen",
+  "trash.purge_button": "Endgültig löschen",
+  "trash.deleted": "In den Papierkorb verschoben.",
+  "trash.restored": "Wiederhergestellt.",
+  "trash.purged": "Endgültig gelöscht.",
+  "trash.confirm_purge": "Dieses Dokument endgültig löschen? Das kann nicht rückgängig gemacht werden.",
+  "trash.confirm_empty": "Alle Dokumente im Papierkorb endgültig löschen? Das kann nicht rückgängig gemacht werden.",
+  "trash.empty_all": "Papierkorb leeren",
+
+  "library.export": "Als ZIP exportieren",
+
+  "sync.heading": "Backup & Cloud-Sync",
+  "sync.subtitle": "Exportiere die Bibliothek als ZIP oder synchronisiere sie via rclone mit deiner Cloud (iCloud, Google Drive, Dropbox, OneDrive, S3 …).",
+  "sync.export_zip": "ZIP laden",
+  "sync.remote": "Remote",
+  "sync.run_now": "Jetzt synchronisieren",
+  "sync.running": "Sync läuft…",
+  "sync.last_run": "Letzter Lauf: {when}",
+  "sync.disabled_hint": "Cloud-Sync ist deaktiviert. Setze <code>sync.enabled: true</code> und ein <code>sync.remote</code> in der <code>config.yaml</code> um es zu aktivieren.",
+  "sync.rclone_missing": "rclone ist nicht installiert. Auf Debian: <code>sudo apt install rclone</code>, dann einmal <code>rclone config</code> ausführen.",
+
   "footer.running_on": "läuft auf deinem Server"
 }
