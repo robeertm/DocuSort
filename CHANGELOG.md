@@ -2,6 +2,18 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.6.2] – 2026-04-24
+
+### Changed
+
+- **Mobile PDF preview**: the iframe now renders at 40vh on phones (55vh
+  on tablets, 75vh on desktop) — iOS Safari's PDF-in-iframe rendering
+  was fighting the page, and the old 75vh filled the whole screen.
+- Tap on the preview (mobile) or click the **Vollbild**-button (any
+  size) opens the PDF in a new browser tab where the native PDF viewer
+  handles full-screen / pinch-zoom / etc. properly.
+- Image documents get a similar "click to open full size" affordance.
+
 ## [0.6.1] – 2026-04-24
 
 ### Fixed

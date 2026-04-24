@@ -84,6 +84,7 @@
   "document.change_category": "Changer de catégorie",
   "document.save": "Enregistrer",
   "document.download": "Télécharger",
+  "document.fullscreen": "Plein écran",
 
   "upload.title": "Importer des documents",
   "upload.subtitle": "PDF ou image — glisser-déposer, choix de fichiers, choix d'un dossier entier ou capture directe depuis le téléphone. La classification se fait en direct.",

@@ -27,18 +27,45 @@
   <!-- Preview -->
   <div class="card overflow-hidden">
     {% if doc.library_path.lower().endswith('.pdf') %}
-      <iframe src="/document/{{ doc.id }}/file#toolbar=0" class="w-full bg-white" style="height: 75vh" title="PDF Preview"></iframe>
+      <div class="relative group">
+        <iframe src="/document/{{ doc.id }}/file#toolbar=0"
+                class="w-full bg-white h-[40vh] sm:h-[55vh] lg:h-[75vh]"
+                title="PDF Preview"></iframe>
+        <!-- tap overlay: mobile only. Desktop users have the button below. -->
+        <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
+           class="absolute inset-0 sm:hidden"
+           aria-label="{{ t('document.fullscreen') }}"></a>
+        <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
+           class="absolute top-2 right-2 btn-secondary !py-1.5 !px-2.5 text-xs opacity-0 group-hover:opacity-100 transition shadow-lg">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+            <path d="M3 7V3h4M21 7V3h-4M3 17v4h4M21 17v4h-4"/>
+          </svg>
+          {{ t('document.fullscreen') }}
+        </a>
+      </div>
     {% else %}
-      <img src="/document/{{ doc.id }}/file" alt="{{ doc.filename }}" class="w-full">
-    {% endif %}
-    <div class="p-3 flex items-center justify-between text-xs text-ink-400 border-t border-ink-700/50">
-      <span class="truncate">{{ doc.filename }}</span>
-      <a href="/document/{{ doc.id }}/file?download=true" class="btn-ghost">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-        </svg>
-        {{ t('document.download') }}
+      <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener" class="block">
+        <img src="/document/{{ doc.id }}/file" alt="{{ doc.filename }}"
+             class="w-full max-h-[60vh] object-contain bg-white">
       </a>
+    {% endif %}
+    <div class="p-3 flex items-center justify-between gap-2 text-xs text-ink-400 border-t border-ink-700/50">
+      <span class="truncate min-w-0">{{ doc.filename }}</span>
+      <div class="flex items-center gap-1 shrink-0">
+        <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
+           class="btn-ghost sm:hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path d="M3 7V3h4M21 7V3h-4M3 17v4h4M21 17v4h-4"/>
+          </svg>
+          {{ t('document.fullscreen') }}
+        </a>
+        <a href="/document/{{ doc.id }}/file?download=true" class="btn-ghost">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>
+          {{ t('document.download') }}
+        </a>
+      </div>
     </div>
   </div>
 

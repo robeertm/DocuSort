@@ -84,6 +84,7 @@
   "document.change_category": "Change category",
   "document.save": "Save",
   "document.download": "Download",
+  "document.fullscreen": "Fullscreen",
 
   "upload.title": "Upload documents",
   "upload.subtitle": "PDF or image — by drag & drop, file picker, folder picker or directly from a phone scan. Classification runs live — you see here when a document is done.",
