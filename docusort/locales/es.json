@@ -124,7 +124,7 @@
   "stage.upload_aborted": "Subida cancelada — pestaña cerrada",
 
   "upload.background_hint": "Subiendo en segundo plano — puedes cerrar la pestaña.",
-  "upload.foreground_hint": "Subiendo — mantén la pestaña abierta hasta el final (HTTPS permitiría la subida en segundo plano).",
+  "upload.foreground_hint": "Subiendo — mantén la pestaña abierta hasta el final. Los documentos ya subidos siguen clasificándose en el servidor aunque cierres la pestaña.",
 
   "retry.heading": "Reclasificar",
   "retry.hint": "Reenvía el texto OCR guardado a Claude y reubica el documento. Sin coste OCR adicional.",

@@ -2,6 +2,17 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.9.1] – 2026-04-25
+
+### Fixed
+
+- Upload-page hint no longer mentions HTTPS as a path to background
+  uploads. The Service-Worker path was removed in v0.9.0 to dodge
+  Safari's IndexedDB-blob bug, so the previous text was misleading even
+  on a properly TLS-secured deployment. New copy explains what *does*
+  happen: keep the tab open until the bar finishes; already-uploaded
+  documents keep being classified on the server even after closing.
+
 ## [0.9.0] – 2026-04-25
 
 ### Fixed

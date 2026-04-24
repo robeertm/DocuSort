@@ -124,7 +124,7 @@
   "stage.upload_aborted": "Caricamento interrotto — scheda chiusa",
 
   "upload.background_hint": "Caricamento in background — puoi chiudere questa scheda.",
-  "upload.foreground_hint": "Caricamento — tieni la scheda aperta fino alla fine (HTTPS permetterebbe il caricamento in background).",
+  "upload.foreground_hint": "Caricamento — tieni la scheda aperta fino alla fine. I documenti già caricati continuano a essere classificati sul server anche se chiudi la scheda.",
 
   "retry.heading": "Riclassifica",
   "retry.hint": "Rimanda il testo OCR memorizzato a Claude e archivia di nuovo il documento. Nessun costo OCR aggiuntivo.",
