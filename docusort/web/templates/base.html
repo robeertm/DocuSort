@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de" class="h-full">
+<html lang="{{ lang }}" class="h-full">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -52,20 +52,43 @@
       <span class="hidden sm:inline text-xs text-ink-400 font-normal ml-1">v{{ version }}</span>
     </a>
     <div class="flex-1"></div>
-    <a href="/library" class="hidden sm:inline-flex btn-ghost">Bibliothek</a>
-    <a href="/library?status=review" class="hidden sm:inline-flex btn-ghost">Review</a>
+    <a href="/library" class="hidden sm:inline-flex btn-ghost">{{ t('nav.library') }}</a>
+    <a href="/library?status=review" class="hidden sm:inline-flex btn-ghost">{{ t('nav.review') }}</a>
+
+    <!-- language picker -->
+    <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+      <button type="button" @click="open = !open"
+              class="btn-ghost !px-2" :aria-label="'{{ t('nav.language') }}'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>
+        </svg>
+        <span class="hidden sm:inline text-xs uppercase tracking-wider">{{ lang }}</span>
+      </button>
+      <div x-show="open" x-cloak x-transition.opacity
+           class="absolute right-0 mt-2 w-40 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30">
+        {% for code, name in supported_langs %}
+          <button type="button" @click="switchLang('{{ code }}')"
+                  class="block w-full text-left px-3 py-2 text-sm hover:bg-ink-700/60 {% if code == lang %}bg-emerald-500/10 text-emerald-200{% endif %}">
+            <span class="uppercase text-ink-400 text-xs mr-2">{{ code }}</span>
+            <span>{{ name }}</span>
+          </button>
+        {% endfor %}
+      </div>
+    </div>
+
     <a href="/upload" class="btn-primary">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
         <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
       </svg>
-      <span>Upload</span>
+      <span>{{ t('nav.upload') }}</span>
     </a>
   </nav>
   <!-- mobile nav -->
   <nav class="sm:hidden mx-auto max-w-6xl px-4 pb-2 flex gap-1 text-sm">
-    <a href="/" class="btn-ghost flex-1 justify-center">Dashboard</a>
-    <a href="/library" class="btn-ghost flex-1 justify-center">Bibliothek</a>
-    <a href="/library?status=review" class="btn-ghost flex-1 justify-center">Review</a>
+    <a href="/" class="btn-ghost flex-1 justify-center">{{ t('nav.dashboard') }}</a>
+    <a href="/library" class="btn-ghost flex-1 justify-center">{{ t('nav.library') }}</a>
+    <a href="/library?status=review" class="btn-ghost flex-1 justify-center">{{ t('nav.review') }}</a>
   </nav>
 </header>
 
@@ -84,15 +107,16 @@
       </svg>
       <div class="flex-1 min-w-0">
         <div class="text-sm">
-          Update verfügbar: <span class="font-semibold text-emerald-300" x-text="info.current"></span>
+          {{ t('update.available') }}
+          <span class="font-semibold text-emerald-300" x-text="info.current"></span>
           → <span class="font-semibold text-emerald-300" x-text="info.latest"></span>
         </div>
         <a :href="info.html_url" target="_blank" rel="noopener" class="text-xs text-ink-400 hover:text-ink-200 underline">
-          Release Notes ansehen →
+          {{ t('update.release_notes') }}
         </a>
       </div>
       <button type="button" @click="install()" class="btn-primary">
-        Jetzt aktualisieren
+        {{ t('update.install_now') }}
       </button>
     </div>
   </template>
@@ -102,7 +126,7 @@
       <svg class="h-5 w-5 animate-spin text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
       </svg>
-      <div class="text-sm">Update wird installiert — kann 1–2 Minuten dauern…</div>
+      <div class="text-sm">{{ t('update.installing') }}</div>
     </div>
   </template>
 
@@ -111,10 +135,8 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-5 w-5 text-emerald-300">
         <path d="M20 6 9 17l-5-5"/>
       </svg>
-      <div class="flex-1 text-sm">
-        Update auf <span class="font-semibold" x-text="result.to"></span> installiert — Service startet neu.
-      </div>
-      <button type="button" @click="reloadAfter()" class="btn-secondary">Seite neu laden</button>
+      <div class="flex-1 text-sm" x-text="T['update.installed_restarted'].replace('{to}', result.to || '')"></div>
+      <button type="button" @click="reloadAfter()" class="btn-secondary">{{ t('update.reload_page') }}</button>
     </div>
   </template>
 
@@ -124,7 +146,7 @@
         <path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/>
       </svg>
       <div class="text-sm">
-        Update installiert — der Service muss manuell neu gestartet werden:
+        {{ t('update.installed_manual') }}
         <code class="bg-ink-900/60 rounded px-2 py-0.5 text-xs">sudo systemctl restart docusort</code>
       </div>
     </div>
@@ -136,9 +158,9 @@
         <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>
       </svg>
       <div class="flex-1 text-sm">
-        Update fehlgeschlagen: <span x-text="error" class="text-rose-300"></span>
+        {{ t('update.failed') }} <span x-text="error" class="text-rose-300"></span>
       </div>
-      <button type="button" @click="state='idle'" class="btn-ghost">Schließen</button>
+      <button type="button" @click="state='idle'" class="btn-ghost">{{ t('update.close') }}</button>
     </div>
   </template>
 </div>
@@ -147,43 +169,49 @@
   {% block content %}{% endblock %}
 </main>
 
+<footer class="mx-auto max-w-6xl px-4 py-10 text-center text-xs text-ink-500">
+  {{ t('app.footer', version=version) }}
+</footer>
+
 <script>
+const T = {{ js_translations | tojson }};
+function tr(key, vars) {
+  let s = T[key] || key;
+  if (vars) for (const k in vars) s = s.replaceAll('{' + k + '}', vars[k]);
+  return s;
+}
+async function switchLang(code) {
+  await fetch('/api/language/' + encodeURIComponent(code), { method: 'POST' });
+  location.reload();
+}
 function updateBanner() {
   return {
-    state: 'idle',       // idle | available | installing | done-restarted | done-manual | error
-    info: {}, result: {}, error: '',
+    state: 'idle', info: {}, result: {}, error: '',
     async check() {
       try {
         const r = await fetch('/api/version');
         if (!r.ok) return;
-        const data = await r.json();
-        if (data.has_update) { this.info = data; this.state = 'available'; }
-      } catch (e) { /* silent: network hiccups are not actionable here */ }
+        const d = await r.json();
+        if (d.has_update) { this.info = d; this.state = 'available'; }
+      } catch (e) {}
     },
     async install() {
       this.state = 'installing';
       try {
         const r = await fetch('/api/update', { method: 'POST' });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.detail || 'HTTP ' + r.status);
-        this.result = data;
-        this.state = data.restart && data.restart.restarted ? 'done-restarted' : 'done-manual';
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        this.result = d;
+        this.state = d.restart && d.restart.restarted ? 'done-restarted' : 'done-manual';
       } catch (e) {
         this.error = e.message || String(e);
         this.state = 'error';
       }
     },
-    reloadAfter() {
-      // Give systemd 6s to come back up, then reload.
-      setTimeout(() => location.reload(), 6000);
-    },
+    reloadAfter() { setTimeout(() => location.reload(), 6000); },
   };
 }
 </script>
-
-<footer class="mx-auto max-w-6xl px-4 py-10 text-center text-xs text-ink-500">
-  DocuSort · läuft auf deiner Synology · v{{ version }}
-</footer>
 
 </body>
 </html>

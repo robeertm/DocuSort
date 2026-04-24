@@ -1,40 +1,46 @@
 {% extends "base.html" %}
-{% block title %}Dashboard · DocuSort{% endblock %}
+{% block title %}{{ t('dashboard.title') }} · DocuSort{% endblock %}
 {% block content %}
 
-{% set t = stats.totals %}
-{% set cache_saved = (t.cache_read_tokens or 0) * 0.9 / 1000000 %}
-{% set dup_saved = (t.duplicates or 0) * 0.003 %}
+{% set tot = stats.totals %}
+{% set cache_saved = (tot.cache_read_tokens or 0) * 0.9 / 1000000 %}
+{% set dup_saved = (tot.duplicates or 0) * 0.003 %}
 
 <div class="mb-8">
-  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Dashboard</h1>
-  <p class="text-ink-400 mt-1 text-sm">Übersicht über deine Dokumente und deren Kosten.</p>
+  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('dashboard.title') }}</h1>
+  <p class="text-ink-400 mt-1 text-sm">{{ t('dashboard.subtitle') }}</p>
 </div>
 
 <!-- Stat cards -->
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4">
   <div class="card p-4">
-    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">Dokumente</div>
-    <div class="mt-2 text-2xl sm:text-3xl font-semibold">{{ t.n or 0 }}</div>
-    {% if t.duplicates %}
-      <div class="text-xs text-ink-500 mt-0.5">davon {{ t.duplicates }} Duplikat{{ 'e' if t.duplicates != 1 }}</div>
+    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.documents') }}</div>
+    <div class="mt-2 text-2xl sm:text-3xl font-semibold">{{ tot.n or 0 }}</div>
+    {% if tot.duplicates %}
+      <div class="text-xs text-ink-500 mt-0.5">
+        {% if tot.duplicates == 1 %}
+          {{ t('dashboard.of_which_duplicates_one', count=tot.duplicates) }}
+        {% else %}
+          {{ t('dashboard.of_which_duplicates_other', count=tot.duplicates) }}
+        {% endif %}
+      </div>
     {% endif %}
   </div>
   <div class="card p-4">
-    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">Gesamtkosten</div>
-    <div class="mt-2 text-2xl sm:text-3xl font-semibold">{{ (t.cost_usd or 0) | usd }}</div>
-    <div class="text-xs text-ink-500 mt-0.5">≈ {{ (t.cost_usd or 0) | eur }}</div>
+    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.total_cost') }}</div>
+    <div class="mt-2 text-2xl sm:text-3xl font-semibold">{{ (tot.cost_usd or 0) | usd }}</div>
+    <div class="text-xs text-ink-500 mt-0.5">≈ {{ (tot.cost_usd or 0) | eur }}</div>
   </div>
   <div class="card p-4">
-    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">Token (in / out)</div>
+    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.tokens_in_out') }}</div>
     <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums">
-      {{ '{:,}'.format(t.input_tokens or 0) }}
+      {{ '{:,}'.format(tot.input_tokens or 0) }}
       <span class="text-ink-400 text-base font-normal">/</span>
-      {{ '{:,}'.format(t.output_tokens or 0) }}
+      {{ '{:,}'.format(tot.output_tokens or 0) }}
     </div>
   </div>
   <div class="card p-4">
-    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">Review offen</div>
+    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.review_open') }}</div>
     <div class="mt-2 text-2xl sm:text-3xl font-semibold">
       {% if review_count %}
         <a href="/library?status=review" class="text-amber-300 hover:text-amber-200">{{ review_count }}</a>
@@ -46,34 +52,38 @@
 </div>
 
 <!-- Savings strip -->
-{% if (t.cache_read_tokens or 0) or (t.duplicates or 0) %}
+{% if (tot.cache_read_tokens or 0) or (tot.duplicates or 0) %}
 <div class="card p-4 mb-8 flex flex-wrap items-center gap-4 text-sm">
   <div class="flex items-center gap-2">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-emerald-300">
-      <path d="M20 12v9H4v-9M22 7H2v5h20zM12 22V7M12 7H7.5A2.5 2.5 0 0 1 7.5 2c1.9 0 2.5 2 3.5 5M12 7h4.5a2.5 2.5 0 0 0 0-5c-1.9 0-2.5 2-3.5 5"/>
+      <path d="M20 12v9H4v-9M22 7H2v5h20zM12 22V7"/>
     </svg>
-    <span class="text-ink-300">Eingespart:</span>
+    <span class="text-ink-300">{{ t('dashboard.savings_label') }}</span>
   </div>
-  {% if (t.cache_read_tokens or 0) %}
+  {% if (tot.cache_read_tokens or 0) %}
     <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">
-      Cache: {{ '{:,}'.format(t.cache_read_tokens) }} Tok  ·  ~${{ '%.4f'|format(cache_saved) }} gespart
+      {{ t('dashboard.cache_savings', tokens='{:,}'.format(tot.cache_read_tokens), amount='%.4f'|format(cache_saved)) }}
     </span>
   {% endif %}
-  {% if (t.duplicates or 0) %}
+  {% if (tot.duplicates or 0) %}
     <span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">
-      {{ t.duplicates }} Duplikat{{ 'e' if t.duplicates != 1 }} erkannt  ·  ~${{ '%.4f'|format(dup_saved) }} gespart
+      {% if tot.duplicates == 1 %}
+        {{ t('dashboard.duplicates_savings_one', count=tot.duplicates, amount='%.4f'|format(dup_saved)) }}
+      {% else %}
+        {{ t('dashboard.duplicates_savings_other', count=tot.duplicates, amount='%.4f'|format(dup_saved)) }}
+      {% endif %}
     </span>
   {% endif %}
 </div>
 {% endif %}
 
-<!-- Kategorien + Monate -->
+<!-- Categories + months -->
 <div class="grid gap-4 sm:gap-6 lg:grid-cols-3 mb-8">
 
   <div class="card p-5 lg:col-span-2">
     <div class="flex items-baseline justify-between mb-4">
-      <h2 class="font-semibold">Nach Kategorie</h2>
-      <a href="/library" class="text-xs text-ink-400 hover:text-ink-200">Alle ansehen →</a>
+      <h2 class="font-semibold">{{ t('dashboard.by_category') }}</h2>
+      <a href="/library" class="text-xs text-ink-400 hover:text-ink-200">{{ t('dashboard.see_all') }}</a>
     </div>
     {% if stats.by_category %}
       {% set max_n = stats.by_category[0].n %}
@@ -93,12 +103,12 @@
         {% endfor %}
       </div>
     {% else %}
-      <p class="text-ink-400 text-sm">Noch keine Dokumente verarbeitet.</p>
+      <p class="text-ink-400 text-sm">{{ t('dashboard.no_docs_yet') }}</p>
     {% endif %}
   </div>
 
   <div class="card p-5">
-    <h2 class="font-semibold mb-4">Letzte 12 Monate</h2>
+    <h2 class="font-semibold mb-4">{{ t('dashboard.last_12_months') }}</h2>
     {% if stats.by_month %}
       {% set max_m = stats.by_month | map(attribute='n') | max %}
       <div class="space-y-1.5">
@@ -116,14 +126,13 @@
       <p class="text-ink-400 text-sm">—</p>
     {% endif %}
   </div>
-
 </div>
 
-<!-- Letzte Dokumente -->
+<!-- Recent docs -->
 <div class="card p-5">
   <div class="flex items-baseline justify-between mb-4">
-    <h2 class="font-semibold">Zuletzt verarbeitet</h2>
-    <a href="/library" class="text-xs text-ink-400 hover:text-ink-200">Alle →</a>
+    <h2 class="font-semibold">{{ t('dashboard.recent') }}</h2>
+    <a href="/library" class="text-xs text-ink-400 hover:text-ink-200">{{ t('dashboard.all') }}</a>
   </div>
   {% if recent %}
     <div class="divide-y divide-ink-700/50 -my-3">
@@ -142,7 +151,9 @@
               <span>{{ d.doc_date or '—' }}</span>
               <span class="text-ink-500">·</span>
               <span class="tabular-nums">{{ d.cost_usd | usd }}</span>
-              {% if d.status == 'review' %}<span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">Review</span>{% endif %}
+              {% if d.status == 'review' %}<span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">{{ t('card.review') }}</span>{% endif %}
+              {% if d.status == 'failed' %}<span class="chip bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/20">{{ t('card.failed') }}</span>{% endif %}
+              {% if d.status == 'duplicate' %}<span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">{{ t('card.duplicate') }}</span>{% endif %}
             </div>
           </div>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-ink-500 group-hover:text-ink-300">
@@ -152,7 +163,7 @@
       {% endfor %}
     </div>
   {% else %}
-    <p class="text-ink-400 text-sm">Noch nichts verarbeitet. <a href="/upload" class="text-emerald-300 hover:underline">Upload starten →</a></p>
+    <p class="text-ink-400 text-sm">{{ t('dashboard.nothing_yet') }} <a href="/upload" class="text-emerald-300 hover:underline">{{ t('dashboard.start_upload') }}</a></p>
   {% endif %}
 </div>
 

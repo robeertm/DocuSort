@@ -189,6 +189,56 @@ class Database:
                 (category, doc_id),
             )
 
+    def update_classification(
+        self,
+        doc_id: int,
+        cls,
+        *,
+        library_path: str,
+        filename: str,
+        status: str,
+        extracted_text: str | None = None,
+    ) -> None:
+        """Apply a fresh Classification to an existing row. Token counts and
+        cost accumulate on top of the previous run (if any), so the history of
+        retries is visible in the per-document figures."""
+        fields = {
+            "category":      cls.category,
+            "doc_date":      cls.date,
+            "sender":        cls.sender,
+            "subject":       cls.subject,
+            "confidence":    cls.confidence,
+            "reasoning":     cls.reasoning,
+            "library_path":  library_path,
+            "filename":      filename,
+            "model":         cls.model,
+            "status":        status,
+        }
+        sql_sets = ", ".join(f"{k} = :{k}" for k in fields)
+        accum = (
+            "input_tokens = input_tokens + :input_tokens, "
+            "output_tokens = output_tokens + :output_tokens, "
+            "cache_creation_tokens = cache_creation_tokens + :cache_creation_tokens, "
+            "cache_read_tokens = cache_read_tokens + :cache_read_tokens, "
+            "cost_usd = cost_usd + :cost_usd"
+        )
+        params = {
+            **fields,
+            "input_tokens": cls.input_tokens,
+            "output_tokens": cls.output_tokens,
+            "cache_creation_tokens": cls.cache_creation_tokens,
+            "cache_read_tokens": cls.cache_read_tokens,
+            "cost_usd": cls.cost_usd,
+            "doc_id": doc_id,
+        }
+        text_sql = ""
+        if extracted_text is not None:
+            text_sql = ", extracted_text = :extracted_text"
+            params["extracted_text"] = extracted_text
+        sql = f"UPDATE documents SET {sql_sets}, {accum}{text_sql} WHERE id = :doc_id"
+        with self._lock:
+            self._conn.execute(sql, params)
+
     def update_paths(self, doc_id: int, library_path: str) -> None:
         with self._lock:
             self._conn.execute(

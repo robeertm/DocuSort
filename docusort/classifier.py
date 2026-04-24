@@ -265,21 +265,30 @@ def _build_user_message(text: str, max_chars: int) -> str:
     )
 
 
-_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
 def _parse_response(raw: str) -> dict[str, Any]:
-    """Extract the first JSON object from the model's reply."""
+    """Extract the first valid JSON object from the model's reply.
+
+    Uses json.JSONDecoder.raw_decode so we stop at the end of the first
+    object rather than greedily swallowing trailing text — avoids
+    "Extra data: line N column M" errors when the model adds commentary
+    after the JSON block.
+    """
     raw = raw.strip()
-    # Strip common markdown fences just in case.
     if raw.startswith("```"):
         raw = raw.strip("`")
         if raw.lower().startswith("json"):
             raw = raw[4:].lstrip()
-    match = _JSON_RE.search(raw)
-    if not match:
-        raise ValueError(f"No JSON object in model reply: {raw[:200]!r}")
-    return json.loads(match.group(0))
+
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(raw[i:])
+            return obj
+        except json.JSONDecodeError:
+            continue
+    raise ValueError(f"No valid JSON object in model reply: {raw[:200]!r}")
 
 
 class Classifier:

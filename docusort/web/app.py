@@ -14,12 +14,16 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from ..classifier import Classifier
 from ..config import AppSettings
 from ..db import Database, MODEL_PRICING
+from ..i18n import (
+    LANGUAGE_NAMES, SUPPORTED, all_translations_for_js, detect_language, translate,
+)
 from .. import __version__
 
 
@@ -47,7 +51,11 @@ def _usd(usd: float) -> str:
     return f"${usd:.2f}"
 
 
-def create_app(settings: AppSettings, db: Database) -> FastAPI:
+def create_app(
+    settings: AppSettings,
+    db: Database,
+    classifier: Classifier | None = None,
+) -> FastAPI:
     app = FastAPI(title="DocuSort", version=__version__)
     templates_dir = Path(__file__).parent / "templates"
     static_dir = Path(__file__).parent / "static"
@@ -62,11 +70,23 @@ def create_app(settings: AppSettings, db: Database) -> FastAPI:
 
     category_names = [c["name"] for c in settings.categories]
 
+    def _lang(request: Request) -> str:
+        return detect_language(
+            cookie=request.cookies.get("lang"),
+            accept_language=request.headers.get("accept-language"),
+            default=settings.web.default_language,
+        )
+
     def base_ctx(request: Request) -> dict:
+        lang = _lang(request)
         return {
             "request": request,
             "version": __version__,
             "categories": category_names,
+            "lang": lang,
+            "supported_langs": [(code, LANGUAGE_NAMES[code]) for code in SUPPORTED],
+            "t": lambda key, **kw: translate(key, lang, **kw),
+            "js_translations": all_translations_for_js(lang),
         }
 
     # ---------- Dashboard ----------
@@ -225,6 +245,34 @@ def create_app(settings: AppSettings, db: Database) -> FastAPI:
                 for prefix, (inp, out) in MODEL_PRICING.items()
             }
         }
+
+    # ---------- Language ----------
+    @app.post("/api/language/{lang}")
+    def set_language(lang: str):
+        if lang not in SUPPORTED:
+            raise HTTPException(400, f"Unsupported language: {lang}")
+        resp = JSONResponse({"lang": lang})
+        # one-year cookie; SameSite=Lax plays nice with the PR-style
+        # navigation the UI does after switching language.
+        resp.set_cookie(
+            "lang", lang, max_age=365 * 24 * 3600,
+            samesite="lax", httponly=False, path="/",
+        )
+        return resp
+
+    # ---------- Retry failed / review docs ----------
+    @app.post("/api/document/{doc_id}/retry")
+    def retry_doc(doc_id: int):
+        if classifier is None:
+            raise HTTPException(503, "classifier not available in this process")
+        from ..retry import retry_document
+        try:
+            return retry_document(doc_id, settings, classifier, db)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except Exception as exc:
+            logger.exception("retry failed for %d", doc_id)
+            raise HTTPException(500, f"retry failed: {exc}")
 
     # ---------- Updater ----------
     @app.get("/api/version")

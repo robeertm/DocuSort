@@ -48,6 +48,7 @@ class ClaudeSettings:
 class WebSettings:
     host: str = "0.0.0.0"
     port: int = 8080
+    default_language: str = "de"
 
 
 @dataclass
@@ -108,6 +109,7 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
     web = WebSettings(
         host=web_cfg.get("host", "0.0.0.0"),
         port=int(web_cfg.get("port", 8080)),
+        default_language=str(web_cfg.get("default_language", "de")),
     )
 
     return AppSettings(

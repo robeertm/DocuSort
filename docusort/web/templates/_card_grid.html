@@ -8,9 +8,11 @@
           {{ d.category }}
         </span>
         {% if d.status == 'review' %}
-          <span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">Review</span>
+          <span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">{{ t('card.review') }}</span>
         {% elif d.status == 'failed' %}
-          <span class="chip bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/20">Fehler</span>
+          <span class="chip bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/20">{{ t('card.failed') }}</span>
+        {% elif d.status == 'duplicate' %}
+          <span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">{{ t('card.duplicate') }}</span>
         {% endif %}
       </div>
 
@@ -38,7 +40,7 @@
        class="mx-auto h-10 w-10 text-ink-500">
     <path d="M21 21l-4.3-4.3"/><circle cx="11" cy="11" r="7"/>
   </svg>
-  <p class="mt-3">Keine Dokumente gefunden.</p>
-  <a href="/upload" class="btn-primary mt-4">Upload starten</a>
+  <p class="mt-3">{{ t('library.none_found') }}</p>
+  <a href="/upload" class="btn-primary mt-4">{{ t('library.start_upload') }}</a>
 </div>
 {% endif %}

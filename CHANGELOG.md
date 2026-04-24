@@ -2,6 +2,39 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.5.0] – 2026-04-24
+
+### Added
+
+- **Internationalisation**: 5 languages (German, English, French, Spanish,
+  Italian). Translations live in `docusort/locales/*.json`. The UI picks
+  the language from the `lang` cookie, then the browser's `Accept-Language`
+  header, then the `web.default_language` option in `config.yaml`.
+- **Language switcher** in the nav bar. Changes take effect immediately
+  (sets the `lang` cookie, reloads the page).
+- **Folder upload**: `webkitdirectory` picker lets you select a whole
+  folder tree. All supported PDFs and images are enqueued, uploaded with
+  a 4-concurrent cap, and classified — subfolders included. `.DS_Store`
+  and other non-document files are skipped silently.
+- **Retry for failed / review documents**: a "Retry" card on the document
+  detail page re-sends the stored OCR text to Claude and refiles the
+  document. No extra OCR cost. Token and $ usage accumulates on the row.
+- **Robust JSON parsing** in the classifier: switched from a greedy regex
+  to `json.JSONDecoder.raw_decode`, which stops at the end of the first
+  complete JSON object. Fixes "Extra data: line 8 column 4" failures when
+  the model adds commentary after its JSON.
+
+### Changed
+
+- Upload UI: the progress bar now shows only while a file is actually
+  uploading. Once the server has the bytes, the per-file row switches to
+  a live stage label (queued → processing → filed/review/duplicate).
+  Fixes the "100 % bar sits there forever" feedback.
+- Concurrent uploads are capped at 4 in the browser so the inbox doesn't
+  flood the watcher with a thousand parallel writes from a folder import.
+- `create_app()` accepts an optional `classifier` so the retry endpoint
+  can reuse the live classifier instance from the watcher process.
+
 ## [0.4.0] – 2026-04-24
 
 ### Added

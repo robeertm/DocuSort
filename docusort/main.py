@@ -172,12 +172,12 @@ def _ensure_dirs(settings: AppSettings) -> None:
         p.mkdir(parents=True, exist_ok=True)
 
 
-def _start_web(settings: AppSettings, db: Database) -> None:
+def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> None:
     """Run the FastAPI app with uvicorn in the current thread."""
     import uvicorn
     from .web.app import create_app
 
-    app = create_app(settings, db)
+    app = create_app(settings, db, classifier)
     uvicorn.run(
         app, host=settings.web.host, port=settings.web.port,
         log_level=os.environ.get("DOCUSORT_LOG_LEVEL", "info").lower(),
@@ -259,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        _start_web(settings, db)
+        _start_web(settings, db, classifier)
     finally:
         observer.stop()
         observer.join(timeout=5)

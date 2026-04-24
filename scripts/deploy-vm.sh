@@ -18,7 +18,7 @@ rsync -avz \
   --exclude='*.pyc' \
   --exclude='.env' \
   --exclude='config/config.yaml' \
-  --exclude='scripts/' \
+  --exclude='scripts/deploy-vm.sh' \
   "$LOCAL_DIR/" "$HOST:~/docusort/"
 
 echo
