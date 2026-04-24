@@ -16,6 +16,12 @@ web:
   port: 8080                  # exposed via docker-compose; open http://<nas>:8080
   default_language: "de"      # de / en / fr / es / it — falls back to browser Accept-Language
 
+  # Optional HTTPS. Set both to PEM paths the docusort process can read
+  # and the server starts in TLS mode on the same port. On Tailscale,
+  # scripts/setup-tailscale-https.sh sets this up end-to-end.
+  # ssl_cert: "/etc/docusort/certs/host.tailnet.ts.net.crt"
+  # ssl_key:  "/etc/docusort/certs/host.tailnet.ts.net.key"
+
 # Cloud sync (via rclone)
 # 1. sudo apt install rclone (or brew install rclone)
 # 2. rclone config  — set up an iCloud / Google Drive / Dropbox / OneDrive / S3 remote

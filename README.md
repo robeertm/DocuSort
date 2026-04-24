@@ -123,6 +123,34 @@ OCR needs system-level Tesseract and ocrmypdf installed
 (`brew install tesseract tesseract-lang ocrmypdf` on macOS,
 `sudo apt install tesseract-ocr tesseract-ocr-deu ocrmypdf` on Debian/Ubuntu).
 
+## HTTPS (required for background uploads)
+
+Browsers only run service workers in a secure context — over plain HTTP
+uploads work but run in the foreground (keep the tab open). Flipping to
+HTTPS buys you true background-uploads that survive a tab close.
+
+On a Tailscale-attached host, one script does everything:
+
+```bash
+./scripts/setup-tailscale-https.sh
+```
+
+It grabs a Let's Encrypt cert via `tailscale cert`, installs a weekly
+systemd timer that renews it, and updates `config/config.yaml` with the
+cert paths. After `sudo systemctl restart docusort` the UI lives at
+`https://<host>.<tailnet>.ts.net:9876`.
+
+To do it by hand, set these under `web:` in `config/config.yaml`:
+
+```yaml
+web:
+  ssl_cert: "/etc/docusort/certs/yourhost.ts.net.crt"
+  ssl_key:  "/etc/docusort/certs/yourhost.ts.net.key"
+```
+
+Any PEM cert/key pair works (Caddy, certbot, self-signed). Uvicorn picks
+them up on next start and serves TLS on the configured port.
+
 ## Updates
 
 DocuSort ships with a built-in updater that pulls the newest release

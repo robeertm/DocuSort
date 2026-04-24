@@ -2,6 +2,30 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.8.0] – 2026-04-24
+
+### Added
+
+- **Native HTTPS** via `web.ssl_cert` / `web.ssl_key` in config.yaml.
+  When both files exist uvicorn is booted in TLS mode on the same port;
+  no reverse proxy required. Without the keys the server still speaks
+  plain HTTP as before.
+- **`scripts/setup-tailscale-https.sh`** — one-shot installer that:
+  1. Pulls a Let's Encrypt cert via `tailscale cert` for the host's
+     MagicDNS name (e.g. `foo.tailnet.ts.net`).
+  2. Places the PEM files in `/etc/docusort/certs/` with the right
+     ownership / permissions.
+  3. Installs a weekly systemd timer (`docusort-cert-renew.timer`) that
+     renews via `tailscale cert` and restarts the service.
+  4. Patches `config.yaml` with the `ssl_cert` / `ssl_key` paths.
+
+### Notes
+
+- Once HTTPS is up, the upload page's service worker registers
+  successfully and background uploads (tab-close-safe) work.
+- Cert renewal is a no-op until the existing cert is within 30 days of
+  expiry — it's safe to run weekly.
+
 ## [0.7.2] – 2026-04-24
 
 ### Fixed

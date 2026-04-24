@@ -173,15 +173,35 @@ def _ensure_dirs(settings: AppSettings) -> None:
 
 
 def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> None:
-    """Run the FastAPI app with uvicorn in the current thread."""
+    """Run the FastAPI app with uvicorn in the current thread.
+
+    If `web.ssl_cert` and `web.ssl_key` point to readable files, uvicorn is
+    booted in TLS mode — required by browsers to register the upload
+    service worker over a non-localhost URL.
+    """
     import uvicorn
     from .web.app import create_app
 
+    log = logging.getLogger("docusort.main")
     app = create_app(settings, db, classifier)
+
+    ssl_kwargs: dict = {}
+    cert, key = settings.web.ssl_cert, settings.web.ssl_key
+    if cert and key:
+        if Path(cert).exists() and Path(key).exists():
+            ssl_kwargs = {"ssl_certfile": cert, "ssl_keyfile": key}
+            log.info("Starting HTTPS on port %d (cert=%s)", settings.web.port, cert)
+        else:
+            log.warning(
+                "SSL cert configured but not readable (%s / %s) — falling back to HTTP",
+                cert, key,
+            )
+
     uvicorn.run(
         app, host=settings.web.host, port=settings.web.port,
         log_level=os.environ.get("DOCUSORT_LOG_LEVEL", "info").lower(),
         access_log=False,
+        **ssl_kwargs,
     )
 
 

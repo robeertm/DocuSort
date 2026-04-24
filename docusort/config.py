@@ -49,6 +49,8 @@ class WebSettings:
     host: str = "0.0.0.0"
     port: int = 8080
     default_language: str = "de"
+    ssl_cert: str = ""   # path to PEM cert (optional)
+    ssl_key: str = ""    # path to PEM key  (optional)
 
 
 @dataclass
@@ -120,6 +122,8 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         host=web_cfg.get("host", "0.0.0.0"),
         port=int(web_cfg.get("port", 8080)),
         default_language=str(web_cfg.get("default_language", "de")),
+        ssl_cert=str(web_cfg.get("ssl_cert", "") or ""),
+        ssl_key=str(web_cfg.get("ssl_key", "") or ""),
     )
 
     sync_cfg = cfg.get("sync", {})
