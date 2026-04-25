@@ -26,14 +26,14 @@
   </div>
 </div>
 
-<div class="grid gap-6 lg:grid-cols-[1fr_380px]">
+<div class="grid gap-6 lg:grid-cols-[1fr_380px] items-start">
 
   <!-- Preview -->
-  <div class="card overflow-hidden">
+  <div class="card overflow-hidden lg:sticky lg:top-4">
     {% if doc.library_path.lower().endswith('.pdf') %}
       <div class="relative group">
-        <iframe src="/document/{{ doc.id }}/file#toolbar=0"
-                class="w-full bg-white h-[40vh] sm:h-[55vh] lg:h-[calc(100vh-7rem)]"
+        <iframe src="/document/{{ doc.id }}/file#toolbar=0&view=Fit"
+                class="w-full bg-white h-[40vh] sm:h-[55vh] lg:h-[calc(100vh-6rem)]"
                 title="PDF Preview"></iframe>
         <!-- tap overlay: mobile only. Desktop users have the button below. -->
         <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
