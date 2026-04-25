@@ -97,6 +97,7 @@ def backfill(
                 settings.max_filename_length,
                 old_path.suffix,
                 subcategory=new_subcategory,
+                current_path=old_path,
             )
             if new_path != old_path:
                 if dry_run:

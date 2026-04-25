@@ -269,6 +269,26 @@ async function _allUp() {
   } catch (e) { return []; }
 }
 
+async function _patchUp(id, patch) {
+  try {
+    const db = await _openUpDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(UP_STORE, "readwrite");
+      const store = tx.objectStore(UP_STORE);
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const cur = getReq.result;
+        if (!cur) { resolve(false); return; }
+        const next = { ...cur, ...patch };
+        const putReq = store.put(next);
+        putReq.onsuccess = () => resolve(true);
+        putReq.onerror = () => reject(putReq.error);
+      };
+      getReq.onerror = () => reject(getReq.error);
+    });
+  } catch (e) { return false; }
+}
+
 function uploadProgress() {
   return {
     items: [],
@@ -280,15 +300,45 @@ function uploadProgress() {
         const bc = new BroadcastChannel(UP_BC);
         bc.onmessage = () => this.scheduleRefresh();
       } catch (e) {}
-      // Gentle periodic refresh to pick up server-side status changes
-      // (the dashboard doesn't run the /api/status polling itself).
+      // Self-heal: poll the server for each non-terminal IDB item every
+      // tick. Without this the dashboard sat on stale "processing" rows
+      // forever when the upload tab was closed mid-batch.
+      this.refresh();
       setInterval(() => this.refresh(), 4000);
     },
     scheduleRefresh() {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = setTimeout(() => this.refresh(), 200);
     },
-    async refresh() { this.items = await _allUp(); },
+    async refresh() {
+      this.items = await _allUp();
+      await this.reconcile();
+      this.items = await _allUp();
+    },
+    async reconcile() {
+      // For each non-terminal IDB record, ask the server what state it
+      // really is in. The server is the source of truth — it knows
+      // whether the file is still in inbox/, has been classified, or has
+      // been forgotten entirely.
+      const stale = this.items.filter(
+        it => it.inbox_name && !UP_TERMINAL.has(it.stage)
+      );
+      if (stale.length === 0) return;
+      await Promise.allSettled(stale.map(async it => {
+        try {
+          const r = await fetch("/api/status/" + encodeURIComponent(it.inbox_name));
+          if (!r.ok) return;
+          const data = await r.json();
+          if (!data.status || data.status === it.stage) return;
+          const patch = { stage: data.status };
+          if (data.doc_id != null)     patch.doc_id    = data.doc_id;
+          if (data.category)           patch.category  = data.category;
+          if (data.confidence != null) patch.confidence = data.confidence;
+          if (data.cost_usd != null)   patch.cost_usd   = data.cost_usd;
+          await _patchUp(it.id, patch);
+        } catch (e) { /* network blip — try again next tick */ }
+      }));
+    },
 
     hasActive() {
       return this.items.some(it => !UP_TERMINAL.has(it.stage));

@@ -2,6 +2,23 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.10.1] – 2026-04-25
+
+### Fixed
+
+- **Backfill renamed unchanged files to `-N.pdf`.** `_uniquify` was being
+  asked to dodge the file we were *moving*, so a re-tag that landed at
+  the same path renamed `foo.pdf` to `foo-2.pdf` for no reason. Caught
+  during the v0.10.0 dry-run on 60+ docs. `target_path()` now takes an
+  optional `current_path` and short-circuits when the natural target
+  equals it.
+- **Dashboard upload-progress card stuck on "klassifizieren" forever.**
+  IDB records never reached a terminal stage when the user closed the
+  upload tab mid-batch — the dashboard widget read IDB but never asked
+  the server. Reconciler now polls `/api/status/<inbox_name>` for each
+  non-terminal IDB row on every tick (every 4 s) and patches the row
+  back to the server's truth.
+
 ## [0.10.0] – 2026-04-25
 
 ### Added

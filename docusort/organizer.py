@@ -74,8 +74,14 @@ def target_path(
     library_root: Path, date: str, category: str, sender: str, subject: str,
     template: str, max_len: int, suffix: str,
     subcategory: str = "",
+    current_path: Path | None = None,
 ) -> Path:
-    """Return the canonical, collision-free library path for given metadata."""
+    """Return the canonical, collision-free library path for given metadata.
+
+    When `current_path` is given and points at the natural target, return it
+    unchanged — otherwise we'd uniquify against ourselves and end up renaming
+    `foo.pdf` to `foo-2.pdf` for no reason.
+    """
     year = _parse_iso_date(date).strftime("%Y")
     if subcategory:
         target_dir = library_root / year / category / subcategory
@@ -85,7 +91,10 @@ def target_path(
     filename = build_filename_from_parts(
         date, category, sender, subject, template, max_len, suffix,
     )
-    return _uniquify(target_dir / filename)
+    natural = target_dir / filename
+    if current_path is not None and natural == current_path:
+        return current_path
+    return _uniquify(natural)
 
 
 def _uniquify(target: Path) -> Path:

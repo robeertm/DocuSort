@@ -232,6 +232,7 @@ def create_app(
             settings.max_filename_length,
             old_path.suffix,
             subcategory=sub,
+            current_path=old_path,
         )
         if new_path != old_path:
             shutil.move(str(old_path), str(new_path))
