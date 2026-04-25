@@ -135,7 +135,7 @@
             <a href="/library?year={{ y.year }}&category={{ c.name }}"
                class="flex items-center justify-between rounded-md px-2 py-1 text-sm hover:bg-ink-700/30"
                :class="'{{ y.year }}' === currentYear && '{{ c.name }}' === currentCategory ? 'bg-emerald-500/15 text-emerald-200' : 'text-ink-300'">
-              <span class="truncate">{{ c.name }}</span>
+              <span class="truncate">{{ cat(c.name) }}</span>
               <span class="tabular-nums text-xs text-ink-500">{{ c.count }}</span>
             </a>
           {% endfor %}
@@ -210,7 +210,7 @@
             class="rounded-xl bg-ink-800 border border-ink-700 px-3 py-2 text-sm">
       <option value="">{{ t('library.bulk_recategorize') }}</option>
       {% for c in categories %}
-        <option value="{{ c }}">{{ c }}</option>
+        <option value="{{ c }}">{{ cat(c) }}</option>
       {% endfor %}
     </select>
 

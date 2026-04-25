@@ -14,7 +14,7 @@
   </a>
   <div class="flex-1 min-w-0">
     <div class="flex flex-wrap gap-2 mb-2">
-      <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ doc.category }}{% if doc.subcategory %} · {{ doc.subcategory }}{% endif %}</span>
+      <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ cat(doc.category) }}{% if doc.subcategory %} · {{ sub(doc.category, doc.subcategory) }}{% endif %}</span>
       {% for tag in doc.tags_list %}
         <a href="/library?tag={{ tag }}"
            class="chip bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/20 hover:bg-sky-500/20">#{{ tag }}</a>
@@ -147,7 +147,7 @@
 
     {% if not doc.deleted_at %}
     <form action="/document/{{ doc.id }}/edit" method="post" class="card p-5 space-y-3"
-          x-data='editForm({ category: {{ doc.category | tojson }}, subcategory: {{ (doc.subcategory or "") | tojson }}, subMap: {{ subcategory_map | tojson }} })'>
+          x-data='editForm({ category: {{ doc.category | tojson }}, subcategory: {{ (doc.subcategory or "") | tojson }}, subMap: {{ subcategory_map | tojson }}, subLabels: {{ subcategory_labels | tojson }} })'>
       <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.edit_heading') }}</h2>
 
       <label class="block">
@@ -155,7 +155,7 @@
         <select name="category" x-model="category" @change="onCategoryChange()"
                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
           {% for c in categories %}
-            <option value="{{ c }}">{{ c }}</option>
+            <option value="{{ c }}">{{ cat(c) }}</option>
           {% endfor %}
         </select>
       </label>
@@ -166,7 +166,7 @@
                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
           <option value="">{{ t('document.subcategory_none') }}</option>
           <template x-for="s in subs" :key="s">
-            <option :value="s" x-text="s"></option>
+            <option :value="s" x-text="(subLabels[category] && subLabels[category][s]) || s"></option>
           </template>
         </select>
       </label>
@@ -241,9 +241,9 @@
 </div>
 
 <script>
-function editForm({ category, subcategory, subMap }) {
+function editForm({ category, subcategory, subMap, subLabels }) {
   return {
-    category, subcategory, subMap,
+    category, subcategory, subMap, subLabels,
     get subs() { return this.subMap[this.category] || []; },
     onCategoryChange() {
       // Reset subcategory if it doesn't fit the new category.

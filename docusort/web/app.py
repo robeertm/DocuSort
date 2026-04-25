@@ -22,7 +22,8 @@ from ..classifier import Classifier
 from ..config import AppSettings
 from ..db import Database, MODEL_PRICING
 from ..i18n import (
-    LANGUAGE_NAMES, SUPPORTED, all_translations_for_js, detect_language, translate,
+    LANGUAGE_NAMES, SUPPORTED, all_translations_for_js, category_label,
+    detect_language, subcategory_label, translate,
 )
 from .. import __version__
 
@@ -95,14 +96,23 @@ def create_app(
 
     def base_ctx(request: Request) -> dict:
         lang = _lang(request)
+        # Pre-compute the localised label map for the JS-driven subcategory
+        # dropdown — Alpine looks up sub_labels[category][canonical] = label.
+        sub_labels = {
+            cat: {sub: subcategory_label(cat, sub, lang) for sub in subs}
+            for cat, subs in subcategory_map.items()
+        }
         return {
             "request": request,
             "version": __version__,
             "categories": category_names,
             "subcategory_map": subcategory_map,
+            "subcategory_labels": sub_labels,
             "lang": lang,
             "supported_langs": [(code, LANGUAGE_NAMES[code]) for code in SUPPORTED],
             "t": lambda key, **kw: translate(key, lang, **kw),
+            "cat": lambda name: category_label(name, lang),
+            "sub": lambda parent, name: subcategory_label(parent, name, lang),
             "js_translations": all_translations_for_js(lang),
         }
 

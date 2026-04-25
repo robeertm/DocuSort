@@ -108,7 +108,7 @@
         {% for c in stats.by_category %}
           <a href="/library?category={{ c.category }}" class="block hover:bg-ink-700/30 rounded-lg p-2 -m-2 transition">
             <div class="flex items-baseline justify-between mb-1 text-sm">
-              <span class="font-medium">{{ c.category }}</span>
+              <span class="font-medium">{{ cat(c.category) }}</span>
               <span class="tabular-nums text-ink-400">
                 {{ c.n }} <span class="text-ink-600 mx-1">·</span> {{ c.cost_usd | usd }}
               </span>
@@ -217,7 +217,7 @@
           <div class="min-w-0 flex-1">
             <div class="truncate font-medium group-hover:text-white">{{ d.sender or '—' }} · {{ d.subject or d.filename }}</div>
             <div class="text-xs text-ink-400 flex gap-2 items-center mt-0.5">
-              <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ d.category }}</span>
+              <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ cat(d.category) }}</span>
               <span>{{ d.doc_date or '—' }}</span>
               <span class="text-ink-500">·</span>
               <span class="tabular-nums">{{ d.cost_usd | usd }}</span>

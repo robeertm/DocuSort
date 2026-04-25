@@ -71,6 +71,27 @@ def translate(key: str, lang: str = FALLBACK, **kwargs) -> str:
     return value
 
 
+def category_label(name: str, lang: str = FALLBACK) -> str:
+    """Localised label for a top-level category. Falls back to the canonical
+    German name when the translation is missing — that way custom categories
+    added via categories.yaml still render readably."""
+    if not name:
+        return ""
+    return translate(f"cat.{name}", lang) if (
+        f"cat.{name}" in _load(lang) or f"cat.{name}" in _load(FALLBACK)
+    ) else name
+
+
+def subcategory_label(parent: str, name: str, lang: str = FALLBACK) -> str:
+    """Localised label for a subcategory under a given parent."""
+    if not name:
+        return ""
+    key = f"sub.{parent}.{name}"
+    return translate(key, lang) if (
+        key in _load(lang) or key in _load(FALLBACK)
+    ) else name
+
+
 def detect_language(
     *,
     cookie: str | None = None,
