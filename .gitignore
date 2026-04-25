@@ -9,5 +9,5 @@ logs/
 .DS_Store
 .idea/
 .vscode/
-build/
-dist/
+/build/
+/dist/

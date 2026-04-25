@@ -6,52 +6,12 @@
 <meta name="theme-color" content="#0f172a">
 <title>{% block title %}DocuSort{% endblock %}</title>
 <style>
-  /* Hide everything until Tailwind has compiled its utilities and Alpine has
-     evaluated initial directives. Otherwise the unstyled HTML flashes for
-     ~50–200 ms and the user sees layout shift / wrong colours / wrong
-     visibility for cloaked elements. */
-  html:not(.app-ready) body { visibility: hidden; }
   html { background: #0b1220; }
+  [x-cloak] { display: none !important; }
 </style>
-<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="/static/tailwind.css">
 <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
 <script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
-<script>
-  // Reveal once Alpine has finished its first init pass — at that point
-  // Tailwind has already injected the compiled stylesheet (it ran during
-  // initial parse). Belt-and-braces timeout in case Alpine fails to load.
-  function _docusortReveal() {
-    document.documentElement.classList.add('app-ready');
-  }
-  document.addEventListener('alpine:initialized', _docusortReveal, { once: true });
-  setTimeout(_docusortReveal, 1500);
-</script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          ink: { 50:'#f8fafc',100:'#f1f5f9',200:'#e2e8f0',300:'#cbd5e1',400:'#94a3b8',
-                 500:'#64748b',600:'#475569',700:'#334155',800:'#1e293b',900:'#0f172a',950:'#020617' },
-        },
-      },
-    },
-  };
-</script>
-<style type="text/tailwindcss">
-  @layer components {
-    html { background: #0b1220; }
-    body { -webkit-tap-highlight-color: transparent; }
-    .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap; }
-    .card { @apply rounded-2xl bg-ink-800/60 border border-ink-700/60 backdrop-blur; }
-    .btn  { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap; }
-    .btn-primary { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap bg-emerald-500 text-white hover:bg-emerald-400 active:bg-emerald-600; }
-    .btn-secondary { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap bg-ink-700 text-ink-100 hover:bg-ink-600 active:bg-ink-800; }
-    .btn-ghost { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap text-ink-300 hover:bg-ink-700/50; }
-    input, select, textarea { color-scheme: dark; }
-    [x-cloak] { display: none !important; }
-  }
-</style>
 </head>
 <body class="min-h-full bg-gradient-to-b from-ink-950 via-ink-900 to-ink-950 text-ink-100 antialiased">
 

@@ -19,6 +19,7 @@ rsync -avz \
   --exclude='.env' \
   --exclude='config/config.yaml' \
   --exclude='scripts/deploy-vm.sh' \
+  --exclude='scripts/build/tailwindcss' \
   "$LOCAL_DIR/" "$HOST:~/docusort/"
 
 echo
