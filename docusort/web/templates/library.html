@@ -126,7 +126,7 @@
             <span class="tabular-nums text-xs text-ink-400">{{ y.count }}</span>
           </a>
         </div>
-        <div x-show="open" x-collapse class="pl-7 pr-1 space-y-0.5">
+        <div x-show="open" x-cloak class="pl-7 pr-1 space-y-0.5">
           {% for c in y.categories %}
             <a href="/library?year={{ y.year }}&category={{ c.name }}"
                class="flex items-center justify-between rounded-md px-2 py-1 text-sm hover:bg-ink-700/30"
