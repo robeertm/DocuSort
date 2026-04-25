@@ -3,7 +3,10 @@
 {% block content %}
 
 <div class="mb-6 flex items-start gap-3">
-  <a href="/library" class="btn-ghost shrink-0">
+  {%- set back_year = (doc.doc_date or doc.created_at)[:4] -%}
+  <a href="/library?year={{ back_year }}&category={{ doc.category }}{% if doc.subcategory %}&subcategory={{ doc.subcategory }}{% endif %}"
+     onclick="if (window.history.length > 1 && document.referrer) { event.preventDefault(); window.history.back(); }"
+     class="btn-ghost shrink-0">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
       <path d="m15 18-6-6 6-6"/>
     </svg>
