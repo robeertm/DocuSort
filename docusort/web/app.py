@@ -162,30 +162,49 @@ def create_app(
         media = "application/pdf" if path.suffix.lower() == ".pdf" else "application/octet-stream"
         return FileResponse(path, media_type=media, headers=headers)
 
-    @app.post("/document/{doc_id}/recategorize")
-    def recategorize(
+    @app.post("/document/{doc_id}/edit")
+    def edit_document(
         doc_id: int,
         category: str = Form(...),
+        doc_date: str = Form(""),
+        sender: str = Form(""),
+        subject: str = Form(""),
     ):
+        from ..organizer import target_path
+
         if category not in category_names:
             raise HTTPException(400, f"Unknown category: {category}")
         doc = db.get(doc_id)
         if not doc:
             raise HTTPException(404, "Document not found")
+        if doc.get("deleted_at"):
+            raise HTTPException(400, "Document is in trash — restore first")
 
         old_path = Path(doc["library_path"])
         if not old_path.exists():
-            raise HTTPException(404, "Original file missing on disk")
+            raise HTTPException(404, "File missing on disk")
 
-        year = (doc["doc_date"] or doc["created_at"])[:4]
-        new_dir = settings.paths.library / year / category
-        new_dir.mkdir(parents=True, exist_ok=True)
-        new_path = new_dir / old_path.name
-        shutil.move(str(old_path), str(new_path))
+        new_path = target_path(
+            settings.paths.library,
+            doc_date or doc["created_at"][:10],
+            category, sender.strip(), subject.strip(),
+            settings.filename_template,
+            settings.max_filename_length,
+            old_path.suffix,
+        )
+        if new_path != old_path:
+            shutil.move(str(old_path), str(new_path))
 
-        db.update_category(doc_id, category)
-        db.update_paths(doc_id, str(new_path))
-        logger.info("Recategorised doc %d: %s -> %s", doc_id, doc["category"], category)
+        db.update_metadata(
+            doc_id,
+            category=category,
+            doc_date=doc_date,
+            sender=sender.strip(),
+            subject=subject.strip(),
+            filename=new_path.name,
+            library_path=str(new_path),
+        )
+        logger.info("Edited doc %d -> %s", doc_id, new_path.name)
         return RedirectResponse(f"/document/{doc_id}", status_code=303)
 
     # ---------- Upload ----------

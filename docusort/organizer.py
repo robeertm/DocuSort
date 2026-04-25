@@ -46,18 +46,42 @@ def _parse_iso_date(value: str) -> datetime:
         return datetime.now()
 
 
-def build_filename(cls: Classification, template: str, max_len: int, suffix: str) -> str:
+def build_filename_from_parts(
+    date: str, category: str, sender: str, subject: str,
+    template: str, max_len: int, suffix: str,
+) -> str:
     parts = {
-        "date": _parse_iso_date(cls.date).strftime("%Y-%m-%d"),
-        "category": _slug(cls.category),
-        "sender": _slug(cls.sender) or "Unbekannt",
-        "subject": _slug(cls.subject) or "Dokument",
+        "date": _parse_iso_date(date).strftime("%Y-%m-%d"),
+        "category": _slug(category),
+        "sender": _slug(sender) or "Unbekannt",
+        "subject": _slug(subject) or "Dokument",
     }
     name = template.format(**parts)
     name = re.sub(r"-+", "-", name).strip("-_")
     if len(name) > max_len:
         name = name[:max_len].rstrip("-_")
     return f"{name}{suffix.lower()}"
+
+
+def build_filename(cls: Classification, template: str, max_len: int, suffix: str) -> str:
+    return build_filename_from_parts(
+        cls.date, cls.category, cls.sender, cls.subject,
+        template, max_len, suffix,
+    )
+
+
+def target_path(
+    library_root: Path, date: str, category: str, sender: str, subject: str,
+    template: str, max_len: int, suffix: str,
+) -> Path:
+    """Return the canonical, collision-free library path for given metadata."""
+    year = _parse_iso_date(date).strftime("%Y")
+    target_dir = library_root / year / category
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = build_filename_from_parts(
+        date, category, sender, subject, template, max_len, suffix,
+    )
+    return _uniquify(target_dir / filename)
 
 
 def _uniquify(target: Path) -> Path:

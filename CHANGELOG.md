@@ -2,6 +2,24 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.9.3] – 2026-04-25
+
+### Added
+
+- **Full metadata editing for any document.** The "Kategorie ändern"
+  card on the document detail page is replaced by a four-field edit
+  form: category, date, sender, subject. On save the file is renamed
+  using the existing template and moved to `library/<year>/<category>/`
+  matching the new metadata, with collision-safe uniquification. Useful
+  for fixing the "review" pile that Claude wasn't sure about, but works
+  on every doc.
+
+### Changed
+
+- `POST /document/{id}/recategorize` is gone, replaced by
+  `POST /document/{id}/edit` accepting `category`, `doc_date`, `sender`,
+  `subject` form fields. Internal route — no external callers.
+
 ## [0.9.2] – 2026-04-25
 
 ### Fixed

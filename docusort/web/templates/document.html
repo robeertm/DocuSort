@@ -138,17 +138,41 @@
     </div>
     {% endif %}
 
-    <form action="/document/{{ doc.id }}/recategorize" method="post" class="card p-5">
-      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('document.change_category') }}</h2>
-      <div class="flex gap-2">
-        <select name="category" class="flex-1 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+    {% if not doc.deleted_at %}
+    <form action="/document/{{ doc.id }}/edit" method="post" class="card p-5 space-y-3">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.edit_heading') }}</h2>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_category') }}</span>
+        <select name="category"
+                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
           {% for c in categories %}
             <option value="{{ c }}" {% if doc.category == c %}selected{% endif %}>{{ c }}</option>
           {% endfor %}
         </select>
-        <button type="submit" class="btn-primary">{{ t('document.save') }}</button>
-      </div>
+      </label>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_date') }}</span>
+        <input type="date" name="doc_date" value="{{ doc.doc_date or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm tabular-nums">
+      </label>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_sender') }}</span>
+        <input type="text" name="sender" value="{{ doc.sender or '' }}" maxlength="120"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+      </label>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_subject') }}</span>
+        <input type="text" name="subject" value="{{ doc.subject or '' }}" maxlength="200"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+      </label>
+
+      <button type="submit" class="btn-primary w-full">{{ t('document.save') }}</button>
     </form>
+    {% endif %}
 
     <!-- Delete / Restore / Purge -->
     <div class="card p-5" x-data="trashWidget({{ doc.id }}, {{ doc.deleted_at is not none | tojson }})">

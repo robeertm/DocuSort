@@ -248,6 +248,30 @@ class Database:
                 (library_path, doc_id),
             )
 
+    def update_metadata(
+        self,
+        doc_id: int,
+        *,
+        category: str,
+        doc_date: str,
+        sender: str,
+        subject: str,
+        filename: str,
+        library_path: str,
+        status: str = "filed",
+    ) -> None:
+        """Apply a manual metadata edit. Token counts and confidence are
+        preserved; status defaults to 'filed' since a human just verified it."""
+        with self._lock:
+            self._conn.execute(
+                """UPDATE documents SET
+                   category = ?, doc_date = ?, sender = ?, subject = ?,
+                   filename = ?, library_path = ?, status = ?
+                   WHERE id = ?""",
+                (category, doc_date, sender, subject, filename,
+                 library_path, status, doc_id),
+            )
+
     def get(self, doc_id: int) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
