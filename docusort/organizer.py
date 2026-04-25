@@ -73,10 +73,14 @@ def build_filename(cls: Classification, template: str, max_len: int, suffix: str
 def target_path(
     library_root: Path, date: str, category: str, sender: str, subject: str,
     template: str, max_len: int, suffix: str,
+    subcategory: str = "",
 ) -> Path:
     """Return the canonical, collision-free library path for given metadata."""
     year = _parse_iso_date(date).strftime("%Y")
-    target_dir = library_root / year / category
+    if subcategory:
+        target_dir = library_root / year / category / subcategory
+    else:
+        target_dir = library_root / year / category
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = build_filename_from_parts(
         date, category, sender, subject, template, max_len, suffix,
@@ -111,7 +115,10 @@ def organize(
     """
     if cls.is_confident:
         year = _parse_iso_date(cls.date).strftime("%Y")
+        sub = getattr(cls, "subcategory", "") or ""
         target_dir = settings.paths.library / year / cls.category
+        if sub:
+            target_dir = target_dir / sub
     else:
         target_dir = settings.paths.review
         logger.info(

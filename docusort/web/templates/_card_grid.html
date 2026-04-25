@@ -19,7 +19,7 @@
 
       <div class="flex items-start justify-between gap-2 pl-7">
         <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">
-          {{ d.category }}
+          {{ d.category }}{% if d.subcategory %} · {{ d.subcategory }}{% endif %}
         </span>
         {% if d.status == 'review' %}
           <span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">{{ t('card.review') }}</span>
@@ -34,6 +34,16 @@
         {{ d.subject or d.filename }}
       </h3>
       <div class="mt-1 text-sm text-ink-300 truncate">{{ d.sender or '—' }}</div>
+
+      {% if d.tags_list %}
+        <div class="mt-2 flex flex-wrap gap-1 pl-0.5">
+          {% for tag in d.tags_list[:4] %}
+            <span class="chip text-[10px] py-0.5 px-1.5 bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/20">
+              #{{ tag }}
+            </span>
+          {% endfor %}
+        </div>
+      {% endif %}
 
       <div class="mt-4 flex items-center justify-between text-xs text-ink-400">
         <span class="tabular-nums">{{ d.doc_date or '—' }}</span>

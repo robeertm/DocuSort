@@ -2,6 +2,47 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.10.0] – 2026-04-25
+
+### Added
+
+- **Subcategories.** Each top-level category can declare a fixed list of
+  subcategories in `categories.yaml`. Files are filed at
+  `library/<year>/<category>/<subcategory>/` when present, otherwise as
+  before. Five new top-level categories: `Auto`, `Bildung`, `Familie`,
+  `Reise`, `Hobby`.
+- **Tags.** Each document carries 0–8 free-form lowercase labels stored
+  as a JSON array on the row. Surfaced as `#chips` on cards and the
+  document detail page; click a chip to filter the library by that tag.
+  Examples Claude reaches for: `police`, `mahnung`, `kuendigung`,
+  `bescheid`, `quittung`, `vertrag`, `aenderung`, `nachweis`.
+- **Backfill** for existing inventory: `python -m docusort --backfill-tags`
+  re-asks Claude (using cached OCR text — no new OCR cost) to attach
+  subcategory + tags to every doc that's missing them, renames the file
+  via the existing template, and moves it into the matching subfolder.
+  `--backfill-dry-run` prints what would change without touching disk.
+
+### Changed
+
+- The classifier now returns `subcategory` and `tags` alongside the
+  existing fields. The system prompt grew by ~1 kB; cache layout is
+  preserved so cache-hit rate stays unchanged for warm sessions.
+- Document edit form gains a **Subcategory** dropdown (filtered to the
+  selected category's whitelist) and a **Tags** comma-separated input.
+- `POST /document/{id}/edit` accepts `subcategory` (validated against the
+  parent's whitelist) and `tags` (cleaned + deduped + truncated to 8).
+- File path moves now mirror the new structure: an edit that changes
+  category, subcategory, or date will move the file to the right
+  `<year>/<category>/<sub>/` directory automatically.
+- `GET /library` accepts `?subcategory=...&tag=...` filters.
+
+### Migration
+
+- `documents.subcategory TEXT DEFAULT ''` and
+  `documents.tags TEXT DEFAULT '[]'` columns are added on first start.
+- Existing rows keep their category and just get empty subcategory/tags
+  until you run `--backfill-tags`.
+
 ## [0.9.3] – 2026-04-25
 
 ### Added

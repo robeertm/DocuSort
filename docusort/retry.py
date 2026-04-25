@@ -59,10 +59,12 @@ def retry_document(
         raise ValueError(f"library file missing: {current}")
 
     year = _parse_iso_date(cls.date).strftime("%Y")
-    target_dir = (
-        settings.paths.library / year / cls.category
-        if cls.is_confident else settings.paths.review
-    )
+    if cls.is_confident:
+        target_dir = settings.paths.library / year / cls.category
+        if cls.subcategory:
+            target_dir = target_dir / cls.subcategory
+    else:
+        target_dir = settings.paths.review
     target_dir.mkdir(parents=True, exist_ok=True)
     target = _uniquify(
         target_dir / build_filename(

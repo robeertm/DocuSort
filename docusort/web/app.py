@@ -82,6 +82,9 @@ def create_app(
         )
 
     category_names = [c["name"] for c in settings.categories]
+    subcategory_map: dict[str, list[str]] = {
+        c["name"]: list(c.get("subcategories") or []) for c in settings.categories
+    }
 
     def _lang(request: Request) -> str:
         return detect_language(
@@ -96,6 +99,7 @@ def create_app(
             "request": request,
             "version": __version__,
             "categories": category_names,
+            "subcategory_map": subcategory_map,
             "lang": lang,
             "supported_langs": [(code, LANGUAGE_NAMES[code]) for code in SUPPORTED],
             "t": lambda key, **kw: translate(key, lang, **kw),
@@ -119,6 +123,8 @@ def create_app(
     def library(
         request: Request,
         category: str | None = Query(None),
+        subcategory: str | None = Query(None),
+        tag: str | None = Query(None),
         status: str | None = Query(None),
         year: str | None = Query(None),
         q: str | None = Query(None),
@@ -126,17 +132,32 @@ def create_app(
         partial: bool = Query(False),
     ):
         docs = db.list_documents(
-            category=category or None, status=status or None,
+            category=category or None, subcategory=subcategory or None,
+            tag=tag or None, status=status or None,
             year=year or None, query=q or None, trash=trash, limit=500,
         )
+        for d in docs:
+            _decode_tags(d)
         years = db.distinct_years()
         tree = db.tree()
+        tags = db.all_tags(trash=trash)
         tpl = "_card_grid.html" if partial else "library.html"
         return templates.TemplateResponse(
             request, tpl,
-            {**base_ctx(request), "docs": docs, "years": years, "tree": tree, "trash": trash,
-             "filter": {"category": category, "status": status, "year": year, "q": q}},
+            {**base_ctx(request), "docs": docs, "years": years, "tree": tree,
+             "tags": tags, "trash": trash,
+             "filter": {"category": category, "subcategory": subcategory,
+                        "tag": tag, "status": status, "year": year, "q": q}},
         )
+
+    def _decode_tags(doc: dict) -> dict:
+        """Add a `tags_list` Python list alongside the raw JSON `tags` string."""
+        import json as _json
+        try:
+            doc["tags_list"] = _json.loads(doc.get("tags") or "[]") or []
+        except Exception:
+            doc["tags_list"] = []
+        return doc
 
     # ---------- Document detail ----------
     @app.get("/document/{doc_id}", response_class=HTMLResponse)
@@ -144,6 +165,7 @@ def create_app(
         doc = db.get(doc_id)
         if not doc:
             raise HTTPException(404, "Document not found")
+        _decode_tags(doc)
         return templates.TemplateResponse(
             request, "document.html", {**base_ctx(request), "doc": doc},
         )
@@ -166,6 +188,8 @@ def create_app(
     def edit_document(
         doc_id: int,
         category: str = Form(...),
+        subcategory: str = Form(""),
+        tags: str = Form(""),
         doc_date: str = Form(""),
         sender: str = Form(""),
         subject: str = Form(""),
@@ -174,6 +198,22 @@ def create_app(
 
         if category not in category_names:
             raise HTTPException(400, f"Unknown category: {category}")
+        allowed_subs = subcategory_map.get(category, [])
+        sub = subcategory.strip()
+        if sub and sub not in allowed_subs:
+            raise HTTPException(400, f"Unknown subcategory {sub!r} under {category}")
+
+        # tags: comma-separated text → cleaned list of <=3 lowercase short labels
+        tag_list: list[str] = []
+        seen: set[str] = set()
+        for raw in tags.split(","):
+            t = raw.strip().lower()
+            if t and t not in seen and len(t) <= 32:
+                tag_list.append(t)
+                seen.add(t)
+            if len(tag_list) >= 8:
+                break
+
         doc = db.get(doc_id)
         if not doc:
             raise HTTPException(404, "Document not found")
@@ -191,6 +231,7 @@ def create_app(
             settings.filename_template,
             settings.max_filename_length,
             old_path.suffix,
+            subcategory=sub,
         )
         if new_path != old_path:
             shutil.move(str(old_path), str(new_path))
@@ -198,13 +239,16 @@ def create_app(
         db.update_metadata(
             doc_id,
             category=category,
+            subcategory=sub,
+            tags=tag_list,
             doc_date=doc_date,
             sender=sender.strip(),
             subject=subject.strip(),
             filename=new_path.name,
             library_path=str(new_path),
         )
-        logger.info("Edited doc %d -> %s", doc_id, new_path.name)
+        logger.info("Edited doc %d -> %s (sub=%s tags=%s)",
+                    doc_id, new_path.name, sub, tag_list)
         return RedirectResponse(f"/document/{doc_id}", status_code=303)
 
     # ---------- Upload ----------

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import logging
 import os
 import sys
@@ -79,6 +80,8 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier, db: Database)
                     filename=existing["filename"],
                     original_name=original_name,
                     category=existing["category"],
+                    subcategory=existing.get("subcategory") or "",
+                    tags=existing.get("tags") or "[]",
                     doc_date=existing["doc_date"] or "",
                     sender=existing["sender"] or "",
                     subject=existing["subject"] or "",
@@ -135,10 +138,13 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier, db: Database)
         if cls.confidence == 0 and cls.reasoning.startswith("No text"):
             status = "failed"
 
+        import json as _json
         rec = DocumentRecord(
             filename=target.name,
             original_name=original_name,
             category=cls.category,
+            subcategory=cls.subcategory,
+            tags=_json.dumps(cls.tags),
             doc_date=cls.date,
             sender=cls.sender,
             subject=cls.subject,
@@ -225,6 +231,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Check GitHub for a newer release and exit")
     parser.add_argument("--update", action="store_true",
                         help="Install the latest GitHub release and exit")
+    parser.add_argument("--backfill-tags", action="store_true",
+                        help="Re-classify existing docs to attach subcategory + tags, then exit")
+    parser.add_argument("--backfill-dry-run", action="store_true",
+                        help="Same as --backfill-tags but only prints what would change")
     parser.add_argument("--version", action="version", version=f"docusort {__version__}")
     args = parser.parse_args(argv)
 
@@ -272,6 +282,16 @@ def main(argv: list[str] | None = None) -> int:
 
     db = open_db(settings.paths.db)
     classifier = Classifier(api_key, settings.claude, settings.categories)
+
+    if args.backfill_tags or args.backfill_dry_run:
+        from . import backfill as backfill_mod
+        result = backfill_mod.backfill(
+            settings, db, classifier, dry_run=args.backfill_dry_run,
+        )
+        log.info("Backfill done: %s", result)
+        print(json.dumps(result, indent=2))
+        return 0
+
     pipeline = _build_pipeline(settings, classifier, db)
 
     if args.once:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -32,6 +32,8 @@ class Classification:
     subject: str
     confidence: float
     reasoning: str = ""
+    subcategory: str = ""              # optional, drives the file path when set
+    tags: list[str] = field(default_factory=list)
     input_tokens: int = 0              # uncached input tokens
     output_tokens: int = 0
     cache_creation_tokens: int = 0     # tokens written to the ephemeral cache
@@ -49,8 +51,10 @@ SYSTEM_PROMPT_BASE = """You are an expert document classifier for a German perso
 # Output format (strict)
 
 - Reply with ONE JSON object, no prose, no markdown fences, no trailing text.
-- Required keys: category, date, sender, subject, confidence, reasoning.
+- Required keys: category, subcategory, tags, date, sender, subject, confidence, reasoning.
 - category: MUST be exactly one of the allowed category names below.
+- subcategory: ONE of the parent category's listed subcategories, or empty string "" when the parent has no subcategories or none fits. NEVER invent a subcategory not listed.
+- tags: array of 0 to 3 lowercase short labels (German, no spaces, hyphens ok) that capture cross-cutting traits. Examples: "rechnung", "mahnung", "kuendigung", "police", "bescheid", "quittung", "vertrag", "aenderung", "nachweis", "erinnerung". Skip the category name itself — that is already stored. Empty array is fine.
 - date: the document's own date (Rechnungsdatum, Vertragsdatum, Briefdatum, Bescheiddatum) in ISO format YYYY-MM-DD. If the document spans a period, use the date it was issued. If no date is present, use today's date and lower the confidence.
 - sender: the organisation or person who issued the document. 1 to 4 words, keep legal suffixes like GmbH / AG / e.V., drop salutations like "Firma" or "Herr". Prefer ASCII-safe (no umlauts if the name is clearly anglicised; keep umlauts for German orgs — they will be transliterated downstream).
 - subject: concise description of what the document is about, 3 to 8 words. Include the most identifying detail (month, year, invoice number only if short, case number only if short).
@@ -60,50 +64,80 @@ SYSTEM_PROMPT_BASE = """You are an expert document classifier for a German perso
 
 # Category guide
 
-Each category lists typical senders, subject patterns, and the signals that reliably identify it.
+Each category lists typical senders, signals, AND its allowed subcategories. Pick the most specific subcategory; leave it empty "" when none fits or the category has no subs.
 
-## Rechnungen
-Invoices of any kind — utility bills (Strom, Wasser, Gas, Fernwärme), telecom (Mobilfunk, Festnetz, Internet), streaming (Netflix, Spotify), handwerker, online shops, Werkstatt.
-Signals: "Rechnung", "Rechnungsnummer", "Gesamtbetrag", "zu zahlender Betrag", "Fälligkeit", IBAN/BIC for payment.
-Typical senders: Vodafone, Telekom, 1&1, Stadtwerke, ENBW, E.ON, Amazon, IKEA.
+## Rechnungen  (no subcategories)
+Invoices of any kind — utility bills (Strom, Wasser, Gas, Fernwärme), telecom (Mobilfunk, Festnetz, Internet), streaming, handwerker, online shops, Werkstatt-Rechnungen for non-vehicle work.
+Signals: "Rechnung", "Rechnungsnummer", "Gesamtbetrag", "Fälligkeit", IBAN/BIC.
+NOTE: Invoices about a vehicle go to **Auto/KFZ** (or Fahrrad/Motorrad). Insurance-premium invoices with a Versicherungsnummer go to **Versicherung/<Sparte>**.
 
-## Vertraege
-Contracts and contract-related correspondence (Mietvertrag, Arbeitsvertrag, Kaufvertrag, Dienstleistungs-, Mobilfunk-, Strom-, Wartungsvertrag). Includes amendments ("Nachtrag"), terminations ("Kündigung"), and confirmations ("Vertragsbestätigung").
+## Vertraege  (no subcategories)
+Contracts and contract-related correspondence (Mietvertrag, Arbeitsvertrag, Kaufvertrag, Dienstleistungs-, Mobilfunk-, Strom-, Wartungsvertrag). Includes amendments ("Nachtrag"), terminations ("Kündigung"), and confirmations.
 Signals: "Vertrag", "Vereinbarung", "Nachtrag", "Kündigung", "Laufzeit", "Kündigungsfrist".
 
-## Behoerde
-Official documents from public authorities — Finanzamt is in "Steuer" instead. Here: Einwohnermeldeamt, Bürgeramt, KFZ-Zulassung, Gemeinde- und Kreisverwaltung, Rentenversicherung (without pay info), Ausländerbehörde, Standesamt, Jobcenter.
-Signals: Stadt-/Landkreis-/Gemeindewappen, "Bescheid", "Aktenzeichen", "Az.:", "Behörde".
-Examples: Grundsteuerbescheid (when issued by the Gemeinde, NOT the Finanzamt), Anmeldebestätigung, Fahrzeugschein-Kopie, Pass-Verlängerung.
+## Behoerde  →  Meldewesen | Sozialversicherung | Justiz | Sonstiges
+Public-authority correspondence — Finanzamt is in "Steuer" instead.
+- Meldewesen: Einwohnermeldeamt, Bürgeramt, Pass/Personalausweis, Anmeldebestätigung, Standesamt
+- Sozialversicherung: Rentenversicherung, Jobcenter, Agentur für Arbeit (without pay info)
+- Justiz: Gerichte, Anwaltsschreiben mit Aktenzeichen, Zustellungen
+- Sonstiges: Gemeinde- und Kreisverwaltung (z.B. Grundsteuerbescheid), Ausländerbehörde, sonstige Bescheide
 
-## Gesundheit
-Arzt, Zahnarzt, Krankenhaus, Therapie, Apotheken, Krankenkassen-Schreiben. Befunde, Arztbriefe, Rezepte, Atteste, Impfnachweise, Heilmittelverordnungen, Zuzahlungsbescheinigungen, Vorsorge-Einladungen.
-Signals: "Diagnose", "ICD", "Befund", "Rezept", "AU-Bescheinigung", "Krankenkasse".
-Typical senders: Hausarzt, Fachärzte, Krankenhäuser, TK, Barmer, AOK, DAK.
+## Gesundheit  →  Arzt | Apotheke | Krankenkasse | Therapie | Sonstiges
+- Arzt: Hausarzt, Facharzt, Zahnarzt, Krankenhaus — Arztbriefe, Befunde, Diagnosen
+- Apotheke: Rezepte, Apothekenrechnungen, Zuzahlungsbescheinigungen
+- Krankenkasse: TK, Barmer, AOK, DAK — Beitragsbescheide, Bescheinigungen, Versorgungsanzeigen
+- Therapie: Physio, Ergo, Psychotherapie, Heilpraktiker
+- Sonstiges: Impfpass, Vorsorge-Einladungen
 
-## Gehalt
-Gehaltsabrechnungen / Entgeltabrechnungen, Lohnzettel, Boni-/Tantieme-Abrechnungen, Jahresmeldungen zur Sozialversicherung, Lohnsteuerbescheinigungen, Sozialversicherungsnachweis.
-Signals: "Brutto", "Netto", "Sozialversicherung", "Lohnsteuer", "SV-Nr.", "Abrechnungszeitraum".
+## Gehalt  (no subcategories)
+Gehalts-/Entgeltabrechnungen, Lohnsteuerbescheinigungen, Boni- und Tantieme-Abrechnungen, Jahresmeldungen zur Sozialversicherung.
+Signals: "Brutto", "Netto", "SV-Nr.", "Abrechnungszeitraum".
 
-## Steuer
-Everything from or for the Finanzamt — Steuererklärungen, Steuerbescheide, ELSTER-Ausdrucke, Spendenbescheinigungen, Steuerbescheinigungen (z.B. von Banken), Umsatzsteuer-Voranmeldungen, Kapitalerträge.
-Signals: "Finanzamt", "Steuer-Identifikationsnummer", "Steuernummer", "Steuerbescheid", "Lohnsteuer" (when NOT part of a payslip).
-Note: Grundsteuerbescheide come from the Gemeinde → Behoerde. Income-tax assessments from the Finanzamt → Steuer.
+## Steuer  (no subcategories)
+Everything from or for the Finanzamt — Steuererklärungen, Steuerbescheide, ELSTER-Ausdrucke, Spendenbescheinigungen, Steuerbescheinigungen (z.B. von Banken), Kapitalerträge.
+Signals: "Finanzamt", "Steuer-Identifikationsnummer", "Steuernummer", "Steuerbescheid".
 
-## Haus
-Hausbau, Renovierung, Grundstück, Grundbuchauszug, Bauunterlagen, Pläne, Energieausweis, Nebenkostenabrechnungen (from Hausverwaltung / Vermieter, not utility companies), Hausverwaltungs-Rundschreiben, Protokolle der Eigentümerversammlung.
-Signals: "Wohnungseigentümergemeinschaft", "Hausgeld", "Nebenkostenabrechnung", "Hausverwaltung", "Grundbuch".
+## Haus  →  Miete | Bau | Nebenkosten | Renovierung | Grundstueck
+- Miete: Mietverträge (auch hier landet das, nicht in Vertraege), Mieterhöhungen, Mahnungen vom Vermieter, Wohnungsübergabe-Protokolle
+- Bau: Hausbau, Bauunterlagen, Pläne, Energieausweis, Architektenpläne
+- Nebenkosten: Nebenkostenabrechnungen (von Hausverwaltung/Vermieter, nicht Stadtwerke), Hausgeld
+- Renovierung: Handwerker-Angebote/-Rechnungen für die eigene Immobilie
+- Grundstueck: Grundbuchauszug, Grundstückskaufvertrag, Vermessungsunterlagen
 
-## Versicherung
-Versicherungspolicen, Beitragsanpassungen, Schadensmeldungen, Schadensregulierungen, Jahresbestätigungen. Sparten: Haftpflicht, Hausrat, KFZ, Leben, Rente, Unfall, Rechtsschutz, Reise, Tier, Gebäude.
-Signals: "Versicherungsschein", "Versicherungsnummer", "Versicherungsbeitrag", "Schadensmeldung", "Police".
+## Versicherung  →  KFZ | Hausrat | Haftpflicht | Kranken | Leben | Reise | Tier | Rechtsschutz | Sonstiges
+Policen, Beitragsanpassungen, Schadensmeldungen, Jahresbestätigungen. Pick the sub by Sparte.
+NOTE: Krankenkassen-Schreiben (gesetzlich, TK/Barmer/AOK) gehen NICHT hierher → Gesundheit/Krankenkasse. Hier landet **private** Krankenversicherung (Allianz, Debeka, AXA Kranken).
+Signals: "Versicherungsschein", "Versicherungsnummer", "Versicherungsbeitrag", "Police", "Schadensmeldung".
 
-## Bank
-Kontoauszüge, Depotauszüge, Kreditverträge, Darlehen, Zinsabrechnungen, Wertpapierabrechnungen, Kreditkartenabrechnungen, Bankbescheinigungen.
-Signals: IBAN, "Kontoauszug", "Buchungsdatum", "Wertpapierabrechnung", "Dispositionskredit", bank letterheads.
+## Bank  →  Konto | Kredit | Wertpapiere | Karte
+- Konto: Kontoauszüge, Daueraufträge, Kontoeröffnung, Kontoführungsentgelte
+- Kredit: Kreditverträge, Darlehensverträge, Zinsabrechnungen, Tilgungspläne
+- Wertpapiere: Depotauszüge, Wertpapierabrechnungen, Steuerbescheinigungen der Bank
+- Karte: Kreditkartenabrechnungen, Karten-Bestellungen, EC-Karten-Belege
 
-## Sonstiges
-Fallback for anything that genuinely doesn't match the other buckets — newsletters, club memberships, hobbies, private correspondence. Also the safe choice when confidence is low.
+## Auto  →  KFZ | Fahrrad | Motorrad | Sonstiges
+Alles rund ums Fahrzeug — KFZ-Zulassung, Fahrzeugschein, Fahrzeugbrief, TÜV/HU-Bescheinigungen, Werkstatt- und Reifenrechnungen, Tankquittungen-Sammlungen.
+NOTE: KFZ-Versicherungsdokumente → Versicherung/KFZ (nicht hierher).
+Signals: KFZ-Kennzeichen, "Fahrzeug-Ident-Nr.", "FIN", "TÜV", "Hauptuntersuchung", "Werkstatt".
+
+## Bildung  →  Schule | Studium | Fortbildung | Zeugnisse
+Schul-, Uni-, Fortbildungs-Unterlagen — Zeugnisse, Diplome, Immatrikulation, BAföG, Schulungs-Zertifikate, Bewerbungs-Unterlagen.
+
+## Familie  →  Kinder | Erbe | Eltern | Sonstiges
+- Kinder: Geburtsurkunden, Schulanmeldungen (eigene Kinder), Kita-Beiträge, Sorgerechtsfragen
+- Erbe: Testamente, Erbscheine, Erbauseinandersetzungsverträge, Notar-Erbsachen
+- Eltern: Vollmachten, Pflege-Unterlagen, Patientenverfügungen
+- Sonstiges: Heiratsurkunden, persönliche Korrespondenz mit Verwandten
+
+## Reise  →  Buchung | Hotel | Ticket | Visum
+Reisebuchungen, Flug- und Bahn-Tickets, Hotel-Rechnungen, Reisepass und Visumsunterlagen, Reise-Stornos.
+NOTE: Reiseversicherung → Versicherung/Reise.
+
+## Hobby  →  Sport | Musik | Sammeln | Sonstiges
+Vereins-Mitgliedschaften, Trainings-Rechnungen, Hobby-Abos, Sammlerkäufe, Musik- und Konzerttickets (sofern nicht als Reise klassifiziert).
+
+## Sonstiges  (no subcategories)
+Fallback for anything that genuinely doesn't match the other buckets — newsletters, club newsletters ohne Mitgliedschaft, sonstige private Korrespondenz. Also the safe choice when confidence is low.
 
 # Few-shot examples
 
@@ -113,7 +147,7 @@ Input (excerpt):
 "Vodafone GmbH · Ihre Rechnung vom 14.02.2026 · Rechnungsnr. R123456 · Mobilfunk Februar 2026 · Gesamtbetrag 29,99 EUR · Fälligkeit 28.02.2026"
 
 Output:
-{"category":"Rechnungen","date":"2026-02-14","sender":"Vodafone GmbH","subject":"Mobilfunkrechnung Februar 2026","confidence":0.95,"reasoning":"Klar erkennbare Mobilfunkrechnung mit Rechnungsnummer und Fälligkeit."}
+{"category":"Rechnungen","subcategory":"","tags":["mobilfunk"],"date":"2026-02-14","sender":"Vodafone GmbH","subject":"Mobilfunkrechnung Februar 2026","confidence":0.95,"reasoning":"Klar erkennbare Mobilfunkrechnung mit Rechnungsnummer und Fälligkeit."}
 
 ## Example 2 — Arztbefund
 
@@ -121,7 +155,7 @@ Input (excerpt):
 "Dr. med. Susanne Müller · Facharztpraxis für Innere Medizin · Arztbrief vom 03.01.2026 · Patient: Robert Manuwald · Diagnose: Blutbild unauffällig, Cholesterin leicht erhöht"
 
 Output:
-{"category":"Gesundheit","date":"2026-01-03","sender":"Praxis Dr. Müller","subject":"Arztbrief Blutbild","confidence":0.94,"reasoning":"Arztbrief mit Diagnose und Befund aus einer Facharztpraxis."}
+{"category":"Gesundheit","subcategory":"Arzt","tags":["befund"],"date":"2026-01-03","sender":"Praxis Dr. Müller","subject":"Arztbrief Blutbild","confidence":0.94,"reasoning":"Arztbrief mit Diagnose und Befund aus einer Facharztpraxis."}
 
 ## Example 3 — Steuerbescheid
 
@@ -129,7 +163,7 @@ Input (excerpt):
 "Finanzamt Dresden III · Bescheid für 2024 über Einkommensteuer · Steuer-Nr. 203/150/12345 · Datum 20.03.2026 · Festsetzung: Erstattung 412,00 EUR"
 
 Output:
-{"category":"Steuer","date":"2026-03-20","sender":"Finanzamt Dresden","subject":"Einkommensteuerbescheid 2024","confidence":0.97,"reasoning":"Offizieller Einkommensteuerbescheid vom Finanzamt mit Steuernummer."}
+{"category":"Steuer","subcategory":"","tags":["bescheid","einkommensteuer"],"date":"2026-03-20","sender":"Finanzamt Dresden","subject":"Einkommensteuerbescheid 2024","confidence":0.97,"reasoning":"Offizieller Einkommensteuerbescheid vom Finanzamt mit Steuernummer."}
 
 ## Example 4 — Niedrige Confidence
 
@@ -137,7 +171,7 @@ Input (excerpt):
 "Sehr geehrter Herr Manuwald, anbei wie besprochen die Unterlagen. Mit freundlichen Grüßen."
 
 Output:
-{"category":"Sonstiges","date":"","sender":"Unbekannt","subject":"Kurzes Anschreiben ohne Inhalt","confidence":0.2,"reasoning":"Kein Absender, kein Datum, kein eindeutiger Dokumenttyp erkennbar."}
+{"category":"Sonstiges","subcategory":"","tags":[],"date":"","sender":"Unbekannt","subject":"Kurzes Anschreiben ohne Inhalt","confidence":0.2,"reasoning":"Kein Absender, kein Datum, kein eindeutiger Dokumenttyp erkennbar."}
 
 ## Example 5 — Kontoauszug
 
@@ -145,15 +179,15 @@ Input (excerpt):
 "Sparkasse Dresden · Kontoauszug Nr. 03/2026 · Konto-Inhaber: Robert Manuwald · IBAN DE12 8505 0300 0123 4567 89 · Buchungszeitraum 01.03.2026 bis 31.03.2026 · Saldo: 4.218,54 EUR"
 
 Output:
-{"category":"Bank","date":"2026-03-31","sender":"Sparkasse Dresden","subject":"Kontoauszug Marz 2026","confidence":0.96,"reasoning":"Kontoauszug der Sparkasse mit IBAN, Buchungszeitraum und Saldo."}
+{"category":"Bank","subcategory":"Konto","tags":["kontoauszug"],"date":"2026-03-31","sender":"Sparkasse Dresden","subject":"Kontoauszug Marz 2026","confidence":0.96,"reasoning":"Kontoauszug der Sparkasse mit IBAN, Buchungszeitraum und Saldo."}
 
-## Example 6 — Versicherungsschreiben
+## Example 6 — KFZ-Versicherungs-Anpassung
 
 Input (excerpt):
-"Allianz Versicherungs-AG · Versicherungsnummer HV-7654321 · Beitragsanpassung zum 01.01.2026 · Haftpflichtversicherung · neuer Jahresbeitrag 89,40 EUR"
+"Allianz Versicherungs-AG · Versicherungsnummer KH-7654321 · Beitragsanpassung KFZ-Haftpflicht zum 01.01.2026 · Fahrzeug VW Golf, KFZ-Kz. DD-AB 1234 · neuer Jahresbeitrag 412,00 EUR"
 
 Output:
-{"category":"Versicherung","date":"2026-01-01","sender":"Allianz","subject":"Beitragsanpassung Haftpflicht 2026","confidence":0.95,"reasoning":"Versicherungsschreiben mit Versicherungsnummer und Beitragsanpassung."}
+{"category":"Versicherung","subcategory":"KFZ","tags":["police","aenderung"],"date":"2026-01-01","sender":"Allianz","subject":"Beitragsanpassung KFZ-Haftpflicht 2026","confidence":0.95,"reasoning":"Versicherungsschreiben mit Versicherungsnummer und KFZ-Bezug."}
 
 ## Example 7 — Nebenkostenabrechnung
 
@@ -161,7 +195,7 @@ Input (excerpt):
 "Hausverwaltung Müller & Co. · Nebenkostenabrechnung 2024 · Objekt: Musterstraße 12, 01454 Radeberg · Abrechnungszeitraum 01.01.2024–31.12.2024 · Nachzahlung 212,45 EUR"
 
 Output:
-{"category":"Haus","date":"2024-12-31","sender":"Hausverwaltung Mueller","subject":"Nebenkostenabrechnung 2024","confidence":0.94,"reasoning":"Nebenkostenabrechnung von der Hausverwaltung fuer ein Mietobjekt."}
+{"category":"Haus","subcategory":"Nebenkosten","tags":["nachzahlung"],"date":"2024-12-31","sender":"Hausverwaltung Mueller","subject":"Nebenkostenabrechnung 2024","confidence":0.94,"reasoning":"Nebenkostenabrechnung von der Hausverwaltung fuer ein Mietobjekt."}
 
 ## Example 8 — Entgeltabrechnung
 
@@ -169,7 +203,7 @@ Input (excerpt):
 "Acme Engineering GmbH · Entgeltabrechnung Februar 2026 · Mitarbeiter-Nr. 4711 · SV-Nummer 12 345678 R 901 · Bruttogehalt 5.200,00 EUR · Nettogehalt 3.218,47 EUR"
 
 Output:
-{"category":"Gehalt","date":"2026-02-28","sender":"Acme Engineering","subject":"Entgeltabrechnung Februar 2026","confidence":0.97,"reasoning":"Gehaltsabrechnung mit Brutto, Netto, SV-Nummer und Abrechnungszeitraum."}
+{"category":"Gehalt","subcategory":"","tags":["abrechnung"],"date":"2026-02-28","sender":"Acme Engineering","subject":"Entgeltabrechnung Februar 2026","confidence":0.97,"reasoning":"Gehaltsabrechnung mit Brutto, Netto, SV-Nummer und Abrechnungszeitraum."}
 
 ## Example 9 — Mietvertrag
 
@@ -177,7 +211,7 @@ Input (excerpt):
 "Mietvertrag — Wohnung · Vermieter: Heinrich Berger, Dresdner Straße 45, 01454 Radeberg · Mieter: Robert Manuwald · Mietbeginn: 01.05.2026 · Kaltmiete 780,00 EUR · Nebenkostenvorauszahlung 180,00 EUR · Unterschriftsdatum 12.04.2026"
 
 Output:
-{"category":"Vertraege","date":"2026-04-12","sender":"Heinrich Berger","subject":"Mietvertrag Wohnung Radeberg","confidence":0.96,"reasoning":"Unterschriebener Mietvertrag mit Mietbeginn, Kaltmiete und Vermieter-Angaben."}
+{"category":"Haus","subcategory":"Miete","tags":["vertrag"],"date":"2026-04-12","sender":"Heinrich Berger","subject":"Mietvertrag Wohnung Radeberg","confidence":0.96,"reasoning":"Unterschriebener Mietvertrag — Wohnen → Haus/Miete."}
 
 ## Example 10 — Kündigung Mobilfunk
 
@@ -185,7 +219,7 @@ Input (excerpt):
 "An: Telefonica Germany GmbH · Betreff: Kündigung meines Mobilfunkvertrags zum nächstmöglichen Termin · Kundennummer 987654321 · Rufnummer 0175-1234567 · Datum 05.01.2026 · Robert Manuwald"
 
 Output:
-{"category":"Vertraege","date":"2026-01-05","sender":"Robert Manuwald","subject":"Kuendigung Mobilfunkvertrag Telefonica","confidence":0.93,"reasoning":"Kündigungsschreiben eines Mobilfunkvertrags — gehört zu den Verträgen."}
+{"category":"Vertraege","subcategory":"","tags":["kuendigung","mobilfunk"],"date":"2026-01-05","sender":"Robert Manuwald","subject":"Kuendigung Mobilfunkvertrag Telefonica","confidence":0.93,"reasoning":"Kündigungsschreiben eines Mobilfunkvertrags."}
 
 ## Example 11 — Krankenkassen-Beitragsbescheid
 
@@ -193,7 +227,7 @@ Input (excerpt):
 "Techniker Krankenkasse · Beitragsbescheid · Versicherten-Nr. A123456789 · Ab 01.01.2026 beträgt Ihr monatlicher Beitrag 18,45 EUR · Bescheid vom 18.12.2025"
 
 Output:
-{"category":"Gesundheit","date":"2025-12-18","sender":"TK","subject":"Beitragsbescheid Krankenkasse 2026","confidence":0.9,"reasoning":"Beitragsbescheid der Krankenkasse — Gesundheit-Kategorie, da keine Lohn-/Gehaltsinformationen."}
+{"category":"Gesundheit","subcategory":"Krankenkasse","tags":["bescheid"],"date":"2025-12-18","sender":"TK","subject":"Beitragsbescheid Krankenkasse 2026","confidence":0.9,"reasoning":"Beitragsbescheid einer gesetzlichen Krankenkasse."}
 
 ## Example 12 — Grundsteuerbescheid (Gemeinde)
 
@@ -201,7 +235,31 @@ Input (excerpt):
 "Große Kreisstadt Radeberg · Bescheid über die Festsetzung der Grundsteuer B für das Jahr 2026 · Aktenzeichen GS-2026/0045 · Datum 12.02.2026 · Jahresbetrag 428,00 EUR"
 
 Output:
-{"category":"Behoerde","date":"2026-02-12","sender":"Stadt Radeberg","subject":"Grundsteuerbescheid 2026","confidence":0.94,"reasoning":"Grundsteuerbescheid von der Gemeinde — Behoerde, nicht Steuer."}
+{"category":"Behoerde","subcategory":"Sonstiges","tags":["bescheid","grundsteuer"],"date":"2026-02-12","sender":"Stadt Radeberg","subject":"Grundsteuerbescheid 2026","confidence":0.94,"reasoning":"Grundsteuerbescheid von der Gemeinde — Behoerde, nicht Steuer."}
+
+## Example 13 — TÜV-Bescheinigung
+
+Input (excerpt):
+"DEKRA Automobil GmbH · Hauptuntersuchung gem. § 29 StVZO · Fahrzeug VW Golf, KFZ-Kz. DD-AB 1234 · FIN WVWZZZ1KZ7W123456 · Prüfung bestanden, neue HU-Plakette gültig bis 03/2028 · Datum 12.03.2026"
+
+Output:
+{"category":"Auto","subcategory":"KFZ","tags":["tuev","nachweis"],"date":"2026-03-12","sender":"DEKRA","subject":"HU-Bescheinigung VW Golf 2026","confidence":0.96,"reasoning":"Hauptuntersuchung eines KFZ — Auto/KFZ."}
+
+## Example 14 — Hotelbuchung
+
+Input (excerpt):
+"Booking.com · Reservierungsbestätigung Nr. 2987654321 · Hotel Garni Bergblick, Mayrhofen · Anreise 22.07.2026 · Abreise 29.07.2026 · Gesamtbetrag 1.142,00 EUR"
+
+Output:
+{"category":"Reise","subcategory":"Hotel","tags":["buchung"],"date":"2026-07-22","sender":"Booking.com","subject":"Hotelbuchung Mayrhofen Juli 2026","confidence":0.94,"reasoning":"Hotel-Reservierungsbestaetigung mit Buchungsnummer."}
+
+## Example 15 — Erbauseinandersetzungsvertrag
+
+Input (excerpt):
+"Notar Dr. Braun · Erbauseinandersetzungsvertrag betreffend den Nachlass des Herrn Heinrich Manuwald, verstorben am 14.06.2024 · Datum 11.02.2026 · Beteiligte: Robert Manuwald, Steffi Manuwald"
+
+Output:
+{"category":"Familie","subcategory":"Erbe","tags":["vertrag","notar"],"date":"2026-02-11","sender":"Dr. Braun Notar","subject":"Erbauseinandersetzung Nachlass Manuwald","confidence":0.95,"reasoning":"Notarieller Erbauseinandersetzungsvertrag — Familie/Erbe."}
 
 # Processing notes
 
@@ -238,8 +296,13 @@ When classifying:
 
 # Reminder
 
-Your output is a single JSON object. Use EXACTLY one of these category names:
-Rechnungen, Vertraege, Behoerde, Gesundheit, Gehalt, Steuer, Haus, Versicherung, Bank, Sonstiges
+Your output is a single JSON object with these required keys:
+category, subcategory, tags, date, sender, subject, confidence, reasoning.
+
+Use EXACTLY one of these category names:
+Rechnungen, Vertraege, Behoerde, Gesundheit, Gehalt, Steuer, Haus, Versicherung, Bank, Auto, Bildung, Familie, Reise, Hobby, Sonstiges
+
+Subcategory MUST be empty "" or one of the parent's listed subs. Tags is an array of 0..3 lowercase short German labels.
 """
 
 
@@ -247,12 +310,16 @@ def _build_system_prompt(categories: list[dict[str, Any]]) -> str:
     # Categories from config override the baked-in list, but the structure
     # above is intentionally verbose so the full prompt crosses the 2048-
     # token threshold required for Haiku's prompt cache.
-    names = [c["name"] for c in categories]
-    if names:
-        override = "\n\n# Active category list for this request\n" + ", ".join(names)
-    else:
-        override = ""
-    return SYSTEM_PROMPT_BASE + override
+    if not categories:
+        return SYSTEM_PROMPT_BASE
+    lines = ["\n\n# Active category list for this request (use EXACTLY these spellings)"]
+    for c in categories:
+        subs = c.get("subcategories") or []
+        if subs:
+            lines.append(f"- {c['name']}: {' | '.join(subs)}")
+        else:
+            lines.append(f"- {c['name']}: (no subcategories — leave subcategory empty)")
+    return SYSTEM_PROMPT_BASE + "\n".join(lines)
 
 
 def _build_user_message(text: str, max_chars: int) -> str:
@@ -298,6 +365,9 @@ class Classifier:
         self.settings = settings
         self.categories = categories
         self._allowed_names = {c["name"] for c in categories}
+        self._allowed_subs: dict[str, set[str]] = {
+            c["name"]: set(c.get("subcategories") or []) for c in categories
+        }
         self._system_prompt = _build_system_prompt(categories)
 
     def classify(self, text: str) -> Classification:
@@ -328,6 +398,27 @@ class Classifier:
             logger.warning("Model returned unknown category %r – falling back", category)
             category = "Sonstiges"
 
+        subcategory = str(data.get("subcategory", "") or "").strip()
+        allowed_subs = self._allowed_subs.get(category, set())
+        if subcategory and subcategory not in allowed_subs:
+            logger.warning(
+                "Model returned subcategory %r not allowed under %r – dropping",
+                subcategory, category,
+            )
+            subcategory = ""
+
+        raw_tags = data.get("tags") or []
+        tags: list[str] = []
+        if isinstance(raw_tags, list):
+            seen: set[str] = set()
+            for t in raw_tags:
+                tag = str(t).strip().lower()
+                if tag and tag not in seen and len(tag) <= 32:
+                    tags.append(tag)
+                    seen.add(tag)
+                if len(tags) >= 3:
+                    break
+
         u = resp.usage
         in_tok = int(getattr(u, "input_tokens", 0) or 0)
         out_tok = int(getattr(u, "output_tokens", 0) or 0)
@@ -341,6 +432,8 @@ class Classifier:
 
         return Classification(
             category=category,
+            subcategory=subcategory,
+            tags=tags,
             date=str(data.get("date", date.today().isoformat())).strip(),
             sender=str(data.get("sender", "")).strip() or "Unbekannt",
             subject=str(data.get("subject", "")).strip() or "Dokument",

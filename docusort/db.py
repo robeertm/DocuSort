@@ -76,6 +76,8 @@ class DocumentRecord:
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     extracted_text: str = ""
+    subcategory: str = ""
+    tags: str = "[]"  # JSON array of lowercase short labels
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
 
@@ -162,6 +164,8 @@ class Database:
             ("cache_read_tokens",     "INTEGER DEFAULT 0"),
             ("content_hash",          "TEXT"),
             ("deleted_at",            "TEXT"),
+            ("subcategory",           "TEXT DEFAULT ''"),
+            ("tags",                  "TEXT DEFAULT '[]'"),
         ]
         for name, decl in migrations:
             if name not in cols:
@@ -169,6 +173,7 @@ class Database:
                 logger.info("DB migration: added column %s", name)
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash    ON documents(content_hash)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_deleted ON documents(deleted_at)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_subcat  ON documents(subcategory)")
 
     def close(self) -> None:
         with self._lock:
@@ -204,8 +209,11 @@ class Database:
         """Apply a fresh Classification to an existing row. Token counts and
         cost accumulate on top of the previous run (if any), so the history of
         retries is visible in the per-document figures."""
+        import json as _json
         fields = {
             "category":      cls.category,
+            "subcategory":   getattr(cls, "subcategory", "") or "",
+            "tags":          _json.dumps(getattr(cls, "tags", []) or []),
             "doc_date":      cls.date,
             "sender":        cls.sender,
             "subject":       cls.subject,
@@ -253,6 +261,8 @@ class Database:
         doc_id: int,
         *,
         category: str,
+        subcategory: str,
+        tags: list[str],
         doc_date: str,
         sender: str,
         subject: str,
@@ -262,13 +272,16 @@ class Database:
     ) -> None:
         """Apply a manual metadata edit. Token counts and confidence are
         preserved; status defaults to 'filed' since a human just verified it."""
+        import json as _json
         with self._lock:
             self._conn.execute(
                 """UPDATE documents SET
-                   category = ?, doc_date = ?, sender = ?, subject = ?,
+                   category = ?, subcategory = ?, tags = ?,
+                   doc_date = ?, sender = ?, subject = ?,
                    filename = ?, library_path = ?, status = ?
                    WHERE id = ?""",
-                (category, doc_date, sender, subject, filename,
+                (category, subcategory, _json.dumps(tags),
+                 doc_date, sender, subject, filename,
                  library_path, status, doc_id),
             )
 
@@ -302,6 +315,8 @@ class Database:
         self,
         *,
         category: str | None = None,
+        subcategory: str | None = None,
+        tag: str | None = None,
         status: str | None = None,
         year: str | None = None,
         query: str | None = None,
@@ -314,6 +329,9 @@ class Database:
         params: list[Any] = []
         trash_clause = "d.deleted_at IS NOT NULL" if trash else "d.deleted_at IS NULL"
         trash_clause_plain = trash_clause.replace("d.", "")
+        # Tag match: tags are JSON arrays of strings; LIKE on the JSON is fine
+        # for the cardinalities we deal with (low thousands).
+        tag_like = f'%"{tag}"%' if tag else None
 
         if query:
             sql = (
@@ -325,6 +343,12 @@ class Database:
             if category:
                 sql += " AND d.category = ?"
                 params.append(category)
+            if subcategory:
+                sql += " AND d.subcategory = ?"
+                params.append(subcategory)
+            if tag_like:
+                sql += " AND d.tags LIKE ?"
+                params.append(tag_like)
             if status:
                 sql += " AND d.status = ?"
                 params.append(status)
@@ -338,6 +362,12 @@ class Database:
             if category:
                 where.append("category = ?")
                 params.append(category)
+            if subcategory:
+                where.append("subcategory = ?")
+                params.append(subcategory)
+            if tag_like:
+                where.append("tags LIKE ?")
+                params.append(tag_like)
             if status:
                 where.append("status = ?")
                 params.append(status)
@@ -358,6 +388,24 @@ class Database:
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    def all_tags(self, trash: bool = False) -> list[tuple[str, int]]:
+        """Return distinct tags with their occurrence count (excl. trash)."""
+        import json as _json
+        trash_clause = "deleted_at IS NOT NULL" if trash else "deleted_at IS NULL"
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT tags FROM documents WHERE {trash_clause} AND tags IS NOT NULL AND tags != '[]'"
+            ).fetchall()
+        counts: dict[str, int] = {}
+        for r in rows:
+            try:
+                for t in _json.loads(r["tags"] or "[]"):
+                    if t:
+                        counts[t] = counts.get(t, 0) + 1
+            except Exception:
+                continue
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
     def count_documents(
         self, *, category: str | None = None, status: str | None = None,

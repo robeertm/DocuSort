@@ -1,6 +1,14 @@
 # Category definitions for DocuSort.
-# Claude receives these names and descriptions to classify each document.
-# You can freely rename, add or remove entries – keep "Sonstiges" as a fallback.
+# Each top-level category has an optional list of subcategories. Files are
+# filed at library/<year>/<category>/<subcategory>/ when a subcategory is
+# present; otherwise just library/<year>/<category>/.
+#
+# Tags are free-form labels (lowercase, short) and are NOT part of the file
+# path — they live in the database for cross-cutting search like "all
+# Mahnungen across all categories" or "everything tagged 'police'".
+#
+# Keep "Sonstiges" as a fallback. You can freely rename, reorder, add or
+# remove entries.
 
 categories:
   - name: "Rechnungen"
@@ -15,13 +23,15 @@ categories:
 
   - name: "Behoerde"
     description: >
-      Behördliche Dokumente (Finanzamt, Einwohnermeldeamt, Rentenversicherung,
-      KFZ-Zulassung, Kommunalverwaltung, Ausländerbehörde). Amtliche Bescheide.
+      Behördliche Dokumente (Einwohnermeldeamt, KFZ-Zulassung, Kommunalverwaltung,
+      Ausländerbehörde, Standesamt, Jobcenter, Justiz). Amtliche Bescheide.
+    subcategories: ["Meldewesen", "Sozialversicherung", "Justiz", "Sonstiges"]
 
   - name: "Gesundheit"
     description: >
       Arzt-, Zahnarzt-, Krankenhaus-, Therapie- und Apotheken-Unterlagen.
       Befunde, Arztbriefe, Rezepte, Atteste, Impfpass, Heilmittelverordnungen.
+    subcategories: ["Arzt", "Apotheke", "Krankenkasse", "Therapie", "Sonstiges"]
 
   - name: "Gehalt"
     description: >
@@ -30,23 +40,55 @@ categories:
 
   - name: "Steuer"
     description: >
-      Steuererklärungen, Steuerbescheide, Belege fürs Finanzamt,
+      Steuererklärungen, Steuerbescheide vom Finanzamt, Belege fürs Finanzamt,
       ELSTER-Ausdrucke, Spendenbescheinigungen, Steuerbescheinigungen.
 
   - name: "Haus"
     description: >
-      Hausbau, Renovierung, Grundstück, Grundbuch, Bauunterlagen, Pläne,
-      Energieausweis, Nebenkostenabrechnungen, Hausverwaltung.
+      Wohnen — Mietvertrag, Hausbau, Renovierung, Grundstück, Grundbuch,
+      Bauunterlagen, Pläne, Energieausweis, Nebenkostenabrechnungen, Hausverwaltung.
+    subcategories: ["Miete", "Bau", "Nebenkosten", "Renovierung", "Grundstueck"]
 
   - name: "Versicherung"
     description: >
-      Versicherungspolicen und -schreiben (Haftpflicht, Hausrat, KFZ, Leben,
-      Rente, Unfall, Rechtsschutz, Reise, Tier). Schadensmeldungen.
+      Versicherungspolicen und -schreiben jeder Sparte. Schadensmeldungen.
+    subcategories: ["KFZ", "Hausrat", "Haftpflicht", "Kranken", "Leben", "Reise", "Tier", "Rechtsschutz", "Sonstiges"]
 
   - name: "Bank"
     description: >
       Kontoauszüge, Depotauszüge, Kreditverträge, Darlehen, Zinsabrechnungen,
       Wertpapierabrechnungen, Bankbescheinigungen, Kreditkartenabrechnungen.
+    subcategories: ["Konto", "Kredit", "Wertpapiere", "Karte"]
+
+  - name: "Auto"
+    description: >
+      Alles rund um Fahrzeuge — KFZ-Zulassung, TÜV/HU, Werkstatt-Rechnungen,
+      Tankquittungen, Fahrräder, Motorräder. Versicherungen für Fahrzeuge
+      gehören unter Versicherung/KFZ, nicht hierher.
+    subcategories: ["KFZ", "Fahrrad", "Motorrad", "Sonstiges"]
+
+  - name: "Bildung"
+    description: >
+      Schule, Studium, Fortbildung, Zertifikate, Zeugnisse, Bewerbungs-Unterlagen.
+    subcategories: ["Schule", "Studium", "Fortbildung", "Zeugnisse"]
+
+  - name: "Familie"
+    description: >
+      Familiäre Unterlagen — Geburtsurkunden, Heirat, Erbsachen, Korrespondenz
+      mit Verwandten, Schreiben rund um Kinder oder pflegebedürftige Eltern.
+    subcategories: ["Kinder", "Erbe", "Eltern", "Sonstiges"]
+
+  - name: "Reise"
+    description: >
+      Reise-Buchungen, Flugtickets, Bahn-Tickets, Hotel-Belege, Reisepass-Sachen,
+      Visumsangelegenheiten. Reiseversicherung → Versicherung/Reise.
+    subcategories: ["Buchung", "Hotel", "Ticket", "Visum"]
+
+  - name: "Hobby"
+    description: >
+      Freizeit, Sport, Vereins-Mitgliedschaften, Musik, Sammeln, Abos für
+      Streamingdienste mit Hobby-Bezug (Spiele, Sport).
+    subcategories: ["Sport", "Musik", "Sammeln", "Sonstiges"]
 
   - name: "Sonstiges"
     description: >
