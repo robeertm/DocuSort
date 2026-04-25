@@ -33,7 +33,7 @@
     {% if doc.library_path.lower().endswith('.pdf') %}
       <div class="relative group">
         <iframe src="/document/{{ doc.id }}/file#toolbar=0"
-                class="w-full bg-white h-[40vh] sm:h-[55vh] lg:h-[88vh] xl:h-[92vh]"
+                class="w-full bg-white h-[40vh] sm:h-[55vh] lg:h-[calc(100vh-7rem)]"
                 title="PDF Preview"></iframe>
         <!-- tap overlay: mobile only. Desktop users have the button below. -->
         <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
