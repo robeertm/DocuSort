@@ -111,13 +111,16 @@
     </div>
 
     {% for y in tree.years %}
-      <div x-data="{ open: {% if filter.year == y.year %}true{% else %}false{% endif %} }" class="mb-0.5">
+      {% set y_open = (filter.year == y.year) %}
+      <div x-data="{ open: {{ y_open | tojson }} }" class="mb-0.5">
         <div class="flex items-center rounded-lg hover:bg-ink-700/30"
              :class="'{{ y.year }}' === currentYear && !currentCategory ? 'bg-emerald-500/15 text-emerald-200' : ''">
           <button type="button" @click="open = !open"
                   class="p-1.5 text-ink-500 hover:text-ink-200 shrink-0">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                 class="h-3.5 w-3.5 transition-transform" :class="open ? 'rotate-90' : ''">
+                 class="h-3.5 w-3.5 transition-transform"
+                 :class="open ? 'rotate-90' : ''"
+                 {% if y_open %}style="transform: rotate(90deg)"{% endif %}>
               <path d="m9 18 6-6-6-6"/>
             </svg>
           </button>
@@ -126,7 +129,8 @@
             <span class="tabular-nums text-xs text-ink-400">{{ y.count }}</span>
           </a>
         </div>
-        <div x-show="open" x-cloak class="pl-7 pr-1 space-y-0.5">
+        <div x-show="open" class="pl-7 pr-1 space-y-0.5"
+             {% if not y_open %}style="display: none"{% endif %}>
           {% for c in y.categories %}
             <a href="/library?year={{ y.year }}&category={{ c.name }}"
                class="flex items-center justify-between rounded-md px-2 py-1 text-sm hover:bg-ink-700/30"
