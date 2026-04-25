@@ -5,10 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f172a">
 <title>{% block title %}DocuSort{% endblock %}</title>
+<style>
+  /* Hide everything until Tailwind has compiled its utilities and Alpine has
+     evaluated initial directives. Otherwise the unstyled HTML flashes for
+     ~50–200 ms and the user sees layout shift / wrong colours / wrong
+     visibility for cloaked elements. */
+  html:not(.app-ready) body { visibility: hidden; }
+  html { background: #0b1220; }
+</style>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
-<script defer src="https://unpkg.com/@alpinejs/collapse@3.14.3/dist/cdn.min.js"></script>
 <script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
+<script>
+  // Reveal once Alpine has finished its first init pass — at that point
+  // Tailwind has already injected the compiled stylesheet (it ran during
+  // initial parse). Belt-and-braces timeout in case Alpine fails to load.
+  function _docusortReveal() {
+    document.documentElement.classList.add('app-ready');
+  }
+  document.addEventListener('alpine:initialized', _docusortReveal, { once: true });
+  setTimeout(_docusortReveal, 1500);
+</script>
 <script>
   tailwind.config = {
     theme: {
