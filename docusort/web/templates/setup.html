@@ -325,9 +325,10 @@
   </div>
 
   <!-- ===== Folder picker modal ===== -->
+  <template x-teleport="body">
   <div x-show="picker.open" x-cloak
        @keydown.escape.window="picker.open = false"
-       class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/60">
+       class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
     <div class="w-full max-w-xl max-h-[calc(100vh-2rem)] flex flex-col rounded-2xl bg-ink-900 border border-ink-700 shadow-2xl overflow-hidden"
          @click.outside="picker.open = false">
       <div class="flex items-center justify-between px-4 py-3 border-b border-ink-700 shrink-0">
@@ -376,6 +377,7 @@
       </div>
     </div>
   </div>
+  </template>
 </div>
 
 <script>

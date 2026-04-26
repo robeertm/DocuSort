@@ -2,6 +2,20 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.12.3] – 2026-04-26
+
+### Fixed
+
+- **Folder picker modal got painted over by sibling cards.** The
+  `.card` class uses `backdrop-blur`, which creates its own stacking
+  context — that meant a `position: fixed z-40` modal nested inside
+  one card couldn't paint over a *later* sibling card with its own
+  stacking context. The "Speicherorte" card under the Backup section
+  showed through the modal. Modal is now teleported to `<body>` via
+  Alpine's `x-teleport`, escaping the card's stacking context entirely.
+  Z-index bumped to 50 and backdrop opacity from `/60` to `/70` for a
+  bit more contrast.
+
 ## [0.12.2] – 2026-04-26
 
 ### Fixed
