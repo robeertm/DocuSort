@@ -100,12 +100,18 @@ def update_paths(
 def update_web(
     *,
     default_language: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
     config_dir: Path | None = None,
 ) -> Path:
     cfg = _read_raw(config_dir)
     web = cfg.get("web") or {}
     if default_language:
         web["default_language"] = default_language
+    if host is not None:
+        web["host"] = host
+    if port is not None:
+        web["port"] = int(port)
     cfg["web"] = web
     return _write_raw(cfg, config_dir)
 

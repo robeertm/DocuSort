@@ -2,6 +2,26 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.12.6] – 2026-04-26
+
+### Added
+
+- **Web server host + port editable from the UI.** New "Web-Server"
+  section on the settings page lets you change `web.host` and
+  `web.port` without touching `config.yaml`. The setup wizard's AI
+  step gained an "Advanced (host & port)" disclosure so the values
+  can be customised on first run too.
+- **`POST /api/settings/web`** writes the new values to `config.yaml`,
+  validates port range (1–65535), and returns `restart_required: true`
+  so the UI can prompt for a service restart.
+
+### Changed
+
+- README no longer hardcodes port `8080` everywhere — uses
+  `<port>` placeholder with "default 8080, configurable in /settings"
+  notes. Privileged ports (<1024) get an explicit warning since
+  DocuSort doesn't run as root.
+
 ## [0.12.5] – 2026-04-26
 
 ### Added

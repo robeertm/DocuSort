@@ -763,7 +763,9 @@ def create_app(
              "current_model": settings.ai.model,
              "current_base_url": settings.ai.base_url,
              "library_path": str(settings.paths.library),
-             "inbox_path": str(settings.paths.inbox)},
+             "inbox_path": str(settings.paths.inbox),
+             "web_host": settings.web.host,
+             "web_port": settings.web.port},
         )
 
     @app.get("/settings", response_class=HTMLResponse)
@@ -788,6 +790,9 @@ def create_app(
              "library_path": str(settings.paths.library),
              "inbox_path": str(settings.paths.inbox),
              "stored_secrets": masked,
+             "web_host":         settings.web.host,
+             "web_port":         settings.web.port,
+             "web_ssl_enabled":  bool(settings.web.ssl_cert and settings.web.ssl_key),
              "sync_enabled":     settings.sync.enabled,
              "sync_target_type": settings.sync.target_type,
              "sync_local_path":  settings.sync.local_path,
@@ -962,6 +967,28 @@ def create_app(
         )
         settings.web.default_language = lang
         return {"ok": True}
+
+    @app.post("/api/settings/web")
+    def api_settings_web(payload: dict):
+        from .. import settings_writer
+        host = (payload.get("host") or "").strip()
+        try:
+            port = int(payload.get("port") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "port must be an integer")
+        if port < 1 or port > 65535:
+            raise HTTPException(400, "port must be between 1 and 65535")
+        if host and host not in ("0.0.0.0", "127.0.0.1", "::", "::1") \
+                and not host.replace(".", "").replace(":", "").replace("-", "").isalnum():
+            # Light sanity check — accept hostnames + dotted IPs, refuse weird input.
+            raise HTTPException(400, f"unusual host value: {host!r}")
+        settings_writer.update_web(
+            host=host or None, port=port, config_dir=settings.config_dir,
+        )
+        if host:
+            settings.web.host = host
+        settings.web.port = port
+        return {"ok": True, "restart_required": True}
 
     @app.get("/api/setup/state")
     def api_setup_state():

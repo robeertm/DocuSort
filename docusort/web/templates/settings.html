@@ -65,6 +65,44 @@
     </div>
   </section>
 
+  <!-- ===== Web server (host + port) ===== -->
+  <section class="card p-6" x-data="webSettings()">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.web.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.web.subtitle') }}</p>
+
+    <div class="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3 mb-2">
+      <div>
+        <label class="block text-sm font-medium mb-1">{{ t('settings.web.host') }}</label>
+        <input x-model="host" type="text" placeholder="0.0.0.0"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">{{ t('settings.web.port') }}</label>
+        <input x-model.number="port" type="number" min="1" max="65535"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+    </div>
+    <p class="text-xs text-ink-500 mb-3">{{ t('settings.web.hint') }}</p>
+
+    {% if web_ssl_enabled %}
+      <p class="text-xs text-emerald-300/80 mb-3">{{ t('settings.web.https_active') }}</p>
+    {% endif %}
+
+    <div x-show="message" x-cloak class="text-sm rounded-lg px-3 py-2 mb-3"
+         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="message"></div>
+
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-ink-500" x-show="restartHint" x-cloak>
+        {{ t('settings.web.restart_hint') }}
+      </p>
+      <button type="button" @click="save()" :disabled="saving" class="ml-auto btn-primary"
+              :class="saving ? 'opacity-50 cursor-not-allowed' : ''">
+        {{ t('settings.save') }}
+      </button>
+    </div>
+  </section>
+
   <!-- ===== Backup ===== -->
   <section class="card p-6" x-data="syncSettings()">
     <h2 class="text-lg font-semibold mb-1">{{ t('settings.sync.heading') }}</h2>
@@ -481,6 +519,41 @@ function settingsPage() {
         this.ai.message = e.message || String(e);
       } finally {
         this.ai.saving = false;
+      }
+    },
+  };
+}
+
+function webSettings() {
+  return {
+    host: '{{ web_host }}',
+    port: {{ web_port }},
+    saving: false,
+    message: '',
+    ok: false,
+    restartHint: false,
+    async save() {
+      this.message = '';
+      this.saving = true;
+      try {
+        const r = await fetch('/api/settings/web', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ host: this.host, port: this.port }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        const d = await r.json();
+        this.ok = true;
+        this.message = T['settings.web.saved'];
+        this.restartHint = !!d.restart_required;
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally {
+        this.saving = false;
       }
     },
   };

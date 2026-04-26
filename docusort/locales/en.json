@@ -421,5 +421,14 @@
   "analytics.shop_type": "Type",
   "analytics.total": "Total",
   "analytics.no_items_found": "No matches.",
-  "analytics.recent_receipts": "Recent receipts"
+  "analytics.recent_receipts": "Recent receipts",
+  "settings.web.heading": "Web server",
+  "settings.web.subtitle": "Address and port the UI listens on.",
+  "settings.web.host": "Host",
+  "settings.web.port": "Port",
+  "settings.web.hint": "Host: 0.0.0.0 = all interfaces. Port: typical 8080 (HTTP) or 9876 (HTTPS via the Tailscale setup script). Privileged ports < 1024 are not available — DocuSort does not run as root.",
+  "settings.web.https_active": "HTTPS is active (TLS cert configured in config.yaml).",
+  "settings.web.restart_hint": "Host or port changes take effect after the service restarts — you'll need to reach the UI at the new address afterwards.",
+  "settings.web.saved": "Saved.",
+  "setup.advanced": "Advanced (host & port)"
 }

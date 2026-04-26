@@ -421,5 +421,14 @@
   "analytics.shop_type": "Type",
   "analytics.total": "Total",
   "analytics.no_items_found": "Aucun résultat.",
-  "analytics.recent_receipts": "Tickets récents"
+  "analytics.recent_receipts": "Tickets récents",
+  "settings.web.heading": "Serveur web",
+  "settings.web.subtitle": "Adresse et port d'écoute de l'interface.",
+  "settings.web.host": "Hôte",
+  "settings.web.port": "Port",
+  "settings.web.hint": "Hôte : 0.0.0.0 = toutes interfaces. Port : 8080 (HTTP) ou 9876 (HTTPS via le script Tailscale). Les ports < 1024 ne sont pas accessibles — DocuSort ne tourne pas en root.",
+  "settings.web.https_active": "HTTPS actif (certificat TLS configuré dans config.yaml).",
+  "settings.web.restart_hint": "Le changement d'hôte ou de port prend effet après redémarrage — tu devras ensuite accéder à l'interface à la nouvelle adresse.",
+  "settings.web.saved": "Enregistré.",
+  "setup.advanced": "Avancé (hôte & port)"
 }

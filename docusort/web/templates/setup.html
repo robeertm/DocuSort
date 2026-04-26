@@ -100,6 +100,25 @@
     <div x-show="error" x-cloak class="mt-3 text-sm text-rose-300 bg-rose-500/10 rounded-lg px-3 py-2"
          x-text="error"></div>
 
+    <details class="mt-4 rounded-xl border border-ink-700/60 bg-ink-900/40 px-3 py-2">
+      <summary class="cursor-pointer text-sm text-ink-300 hover:text-ink-100">
+        {{ t('setup.advanced') }}
+      </summary>
+      <div class="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3">
+        <div>
+          <label class="block text-xs font-medium mb-1 text-ink-400">{{ t('settings.web.host') }}</label>
+          <input x-model="webHost" type="text" placeholder="0.0.0.0"
+                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1 text-ink-400">{{ t('settings.web.port') }}</label>
+          <input x-model.number="webPort" type="number" min="1" max="65535"
+                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+      <p class="text-xs text-ink-500 mt-2">{{ t('settings.web.hint') }}</p>
+    </details>
+
     <div class="mt-6 flex justify-between">
       <button type="button" @click="step = 1" class="btn-ghost">{{ t('setup.back') }}</button>
       <button type="button" @click="saveAi()" :disabled="saving"
@@ -412,6 +431,8 @@ function setupWizard() {
     model:    '{{ current_model }}'    || 'claude-haiku-4-5-20251001',
     baseUrl:  '{{ current_base_url }}' || '',
     apiKey:   '',
+    webHost:  '{{ web_host }}'         || '0.0.0.0',
+    webPort:  {{ web_port }}           || 8080,
     saving:   false,
     error:    '',
 
@@ -472,6 +493,18 @@ function setupWizard() {
           const d = await r.json().catch(() => ({}));
           throw new Error(d.detail || ('HTTP ' + r.status));
         }
+
+        // Persist host/port too if the user touched the Advanced disclosure
+        // and changed them. Silently ignore failures here — these are
+        // optional and the user can always edit via /settings later.
+        try {
+          await fetch('/api/settings/web', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host: this.webHost, port: this.webPort }),
+          });
+        } catch (e) { console.warn('web settings save skipped:', e); }
+
         this.step = 3;
       } catch (e) {
         this.error = e.message || String(e);

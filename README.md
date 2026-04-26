@@ -32,7 +32,8 @@ leave your network.
   </tr>
 </table>
 
-- **Web UI** on port 8080 — dashboard, library browser with full-text search,
+- **Web UI** on a port you pick (default 8080, configurable in the wizard
+  and in `/settings`) — dashboard, library browser with full-text search,
   per-document detail + PDF preview, mobile upload with camera capture
 - **First-run setup wizard** at `/setup` — pick language, AI provider, paste
   token, optionally configure backup. Always-reachable settings page at `/settings`
@@ -137,11 +138,13 @@ The template is configurable in `config/config.yaml`.
    sudo docker logs -f docusort
    ```
 
-5. **Open the UI** at `http://<nas-ip>:8080`. On first start the **setup
-   wizard** at `/setup` walks you through language, AI provider + token,
-   and optional backup target. The wizard writes `config/secrets.yaml`
-   (mode 0600, gitignored) and updates `config/config.yaml`. After the
-   final step the service restarts itself and lands you on the dashboard.
+5. **Open the UI** at `http://<nas-ip>:<port>` (default `8080`; you can
+   change it during setup or later in `/settings`). On first start the
+   **setup wizard** at `/setup` walks you through language, AI provider +
+   token, an optional port + host, and an optional backup target. The
+   wizard writes `config/secrets.yaml` (mode 0600, gitignored) and updates
+   `config/config.yaml`. After the final step the service restarts itself
+   and lands you on the dashboard.
 
    Dropping a PDF into `/volume1/Scan` then works — it appears correctly
    named under `/volume1/Dokumente/2026/…/`.
@@ -163,9 +166,10 @@ your OS:
 - **Windows**: double-click `start.bat`
 
 Each launcher creates a `.venv` on first run, keeps Python deps in sync,
-warns if tesseract / ocrmypdf are missing, and then boots the app on
-`http://localhost:8080`. Open the URL — the **setup wizard** at `/setup`
-collects everything else.
+warns if tesseract / ocrmypdf are missing, and then boots the app on the
+configured port (default `http://localhost:8080`). Open the URL — the
+**setup wizard** at `/setup` collects everything else, including the
+port if you want a different one.
 
 If you'd rather pre-seed the API key as an env var instead of typing it
 in the wizard, drop a `.env` next to the launcher with one of:
@@ -258,7 +262,7 @@ wizard handles the restart for you.
 ## CLI flags
 
 ```bash
-python -m docusort            # watcher + web UI on :8080 (default in Docker)
+python -m docusort            # watcher + web UI on the configured port (default 8080)
 python -m docusort --once     # process existing files and exit
 python -m docusort --no-web   # watcher only, no UI
 python -m docusort --dry-run  # classify + log, no moves
@@ -365,7 +369,8 @@ catch broken auth before flipping `enabled: true`. Broken OAuth remotes
 one-click **Reconnect** button that re-opens the token-paste form.
 
 For scheduled sync, point a systemd timer at
-`curl -XPOST http://localhost:8080/api/sync/run`.
+`curl -XPOST http://localhost:<port>/api/sync/run` (port defaults to 8080;
+the value lives under `web.port` in `config.yaml`).
 
 ## Roadmap
 
