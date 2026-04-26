@@ -1,10 +1,36 @@
 # DocuSort
 
-AI-powered document organizer with a **web UI**. Upload a scan from your
-desktop or phone and – a few seconds later – it is renamed, dated, filed into
-the right category, and browsable in a clean, mobile-friendly interface.
+**AI-powered, self-hosted document organizer with OCR, receipt scanning, and analytics.**
+Upload a scan from your desktop or phone and — a few seconds later — it is
+renamed, dated, filed into the right category, and browsable in a clean,
+mobile-friendly interface. Receipts are auto-detected and broken down into
+structured line items so you can see where your money actually goes.
 
-Built for a Synology NAS in Docker, but runs anywhere Docker runs.
+Built for a Synology NAS in Docker, but runs anywhere Docker (or just
+plain Python) runs. Pick your AI: Anthropic Claude, OpenAI GPT, Google
+Gemini, or run a local model via Ollama — your documents never have to
+leave your network.
+
+![Dashboard](docs/screenshots/01-dashboard.png)
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/02-library.png"><img src="docs/screenshots/02-library.png" alt="Library with year tree, full-text search, tag filters" /></a></td>
+    <td width="50%"><a href="docs/screenshots/03-analytics.png"><img src="docs/screenshots/03-analytics.png" alt="Analytics: spend per month, by shop type, by item category" /></a></td>
+  </tr>
+  <tr>
+    <td><sub><b>Library</b> — year tree, full-text search across OCR text, tag filters, ZIP export of any selection.</sub></td>
+    <td><sub><b>Analytics</b> — receipts auto-extracted into line items: total spent, by shop type, by item category, top items, monthly trend.</sub></td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/04-settings.png"><img src="docs/screenshots/04-settings.png" alt="Settings: AI provider switch + cloud sync target chooser" /></a></td>
+    <td><a href="docs/screenshots/05-backup.png"><img src="docs/screenshots/05-backup.png" alt="Local-folder backup with built-in path picker" /></a></td>
+  </tr>
+  <tr>
+    <td><sub><b>Settings</b> — switch AI providers (Anthropic / OpenAI / Gemini / Ollama) without losing keys, configure backup target.</sub></td>
+    <td><sub><b>Backup</b> — local rsync to a USB stick / NAS share (zero auth) or cloud via rclone with a headless OAuth-token-paste flow.</sub></td>
+  </tr>
+</table>
 
 - **Web UI** on port 8080 — dashboard, library browser with full-text search,
   per-document detail + PDF preview, mobile upload with camera capture

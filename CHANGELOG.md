@@ -2,6 +2,21 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.12.5] – 2026-04-26
+
+### Added
+
+- **README screenshot gallery.** Six PNGs in `docs/screenshots/` —
+  dashboard, library, analytics, settings, backup, upload — embedded
+  near the top of the README so the project page is no longer
+  text-only.
+- **GitHub repository topics** for discoverability:
+  `document-management`, `document-organizer`, `document-classifier`,
+  `ocr`, `ai`, `llm`, `claude`, `openai`, `gemini`, `ollama`,
+  `self-hosted`, `synology`, `nas`, `python`, `fastapi`, `htmx`,
+  `receipt-scanner`, `expense-tracker`, `local-first`, `privacy`.
+- Repo description rewritten and the typo (`docomentscanner`) fixed.
+
 ## [0.12.4] – 2026-04-26
 
 ### Changed
