@@ -2,6 +2,17 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.12.1] – 2026-04-26
+
+### Fixed
+
+- **Mobile nav was missing Analytics and Settings.** Both links lived
+  only in the desktop-only `hidden sm:inline-flex` row, so on phones
+  the Analytics dashboard and Settings page were unreachable from the
+  header. The bottom mobile nav now lists all five entries (Dashboard,
+  Library, Review, Auswertung, Einstellungen) and is horizontally
+  scrollable when the viewport can't fit them.
+
 ## [0.12.0] – 2026-04-26
 
 ### Added — Receipt scanner & analytics

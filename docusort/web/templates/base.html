@@ -70,10 +70,12 @@
     </a>
   </nav>
   <!-- mobile nav -->
-  <nav class="sm:hidden mx-auto max-w-6xl px-4 pb-2 flex gap-1 text-sm">
-    <a href="/" class="btn-ghost flex-1 justify-center">{{ t('nav.dashboard') }}</a>
-    <a href="/library" class="btn-ghost flex-1 justify-center">{{ t('nav.library') }}</a>
-    <a href="/library?status=review" class="btn-ghost flex-1 justify-center">{{ t('nav.review') }}</a>
+  <nav class="sm:hidden mx-auto max-w-6xl px-4 pb-2 flex gap-1 text-sm overflow-x-auto">
+    <a href="/" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.dashboard') }}</a>
+    <a href="/library" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.library') }}</a>
+    <a href="/library?status=review" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.review') }}</a>
+    <a href="/analytics" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.analytics') }}</a>
+    <a href="/settings" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.settings') }}</a>
   </nav>
 </header>
 
