@@ -1,0 +1,664 @@
+{% extends "base.html" %}
+{% block title %}{{ t('setup.title') }} · DocuSort{% endblock %}
+{% block content %}
+
+<div class="max-w-2xl mx-auto" x-data="setupWizard()">
+  <div class="mb-8 text-center">
+    <div class="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-300 mb-4">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-8 w-8">
+        <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>
+        <path d="M14 4v6h6"/>
+      </svg>
+    </div>
+    <h1 class="text-3xl font-semibold tracking-tight">{{ t('setup.title') }}</h1>
+    <p class="text-ink-400 mt-2">{{ t('setup.subtitle') }}</p>
+  </div>
+
+  <!-- Progress steps -->
+  <div class="flex items-center justify-between mb-8 text-xs text-ink-400">
+    <template x-for="(label, i) in stepLabels" :key="i">
+      <div class="flex-1 flex items-center">
+        <div class="h-7 w-7 rounded-full flex items-center justify-center font-semibold shrink-0"
+             :class="step > i+1 ? 'bg-emerald-500/20 text-emerald-300' :
+                     step === i+1 ? 'bg-emerald-500 text-ink-950' :
+                                    'bg-ink-700/50 text-ink-500'">
+          <span x-show="step <= i+1" x-text="i+1"></span>
+          <svg x-show="step > i+1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="h-3.5 w-3.5">
+            <path d="M20 6 9 17l-5-5"/>
+          </svg>
+        </div>
+        <div class="hidden sm:block ml-2 truncate" x-text="label"
+             :class="step === i+1 ? 'text-emerald-300' : ''"></div>
+        <div class="flex-1 h-px mx-2 bg-ink-700/50" x-show="i < stepLabels.length-1"></div>
+      </div>
+    </template>
+  </div>
+
+  <!-- ===== Step 1: Language ===== -->
+  <div x-show="step === 1" x-transition.opacity class="card p-6">
+    <h2 class="text-xl font-semibold mb-1">{{ t('setup.step_lang.title') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('setup.step_lang.subtitle') }}</p>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {% for code, name in supported_langs %}
+        <button type="button" @click="selectLang('{{ code }}')"
+                :class="lang === '{{ code }}' ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-100' : 'border-ink-700 hover:border-ink-600'"
+                class="flex items-center justify-between rounded-xl border px-4 py-3 text-left transition">
+          <span class="font-medium">{{ name }}</span>
+          <span class="uppercase text-xs text-ink-400">{{ code }}</span>
+        </button>
+      {% endfor %}
+    </div>
+    <div class="mt-6 flex justify-end">
+      <button type="button" @click="step = 2" class="btn-primary">{{ t('setup.next') }}</button>
+    </div>
+  </div>
+
+  <!-- ===== Step 2: AI Provider ===== -->
+  <div x-show="step === 2" x-transition.opacity class="card p-6">
+    <h2 class="text-xl font-semibold mb-1">{{ t('setup.step_ai.title') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('setup.step_ai.subtitle') }}</p>
+
+    <label class="block text-sm font-medium mb-2">{{ t('setup.step_ai.provider') }}</label>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-5">
+      <template x-for="p in providerCards" :key="p.id">
+        <button type="button" @click="selectProvider(p.id)"
+                :class="provider === p.id ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                class="rounded-xl border p-3 text-left transition">
+          <div class="flex items-center gap-2 font-medium" x-text="p.label"></div>
+          <div class="text-xs text-ink-400 mt-1" x-text="p.hint"></div>
+        </button>
+      </template>
+    </div>
+
+    <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.model') }}</label>
+    <input x-model="model" type="text"
+           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-1
+                  focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+    <div class="text-xs text-ink-500 mb-4" x-text="modelHint"></div>
+
+    <template x-if="provider === 'openai_compat'">
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.base_url') }}</label>
+        <input x-model="baseUrl" type="url" placeholder="http://localhost:11434/v1"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono
+                      focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+        <div class="text-xs text-ink-500 mt-1">{{ t('setup.step_ai.base_url_hint') }}</div>
+      </div>
+    </template>
+
+    <template x-if="provider !== 'openai_compat'">
+      <div class="mb-2">
+        <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.api_key') }}</label>
+        <input x-model="apiKey" type="password" autocomplete="off"
+               :placeholder="apiKeyPlaceholder"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono
+                      focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+        <div class="text-xs text-ink-500 mt-1" x-text="apiKeyHint"></div>
+      </div>
+    </template>
+
+    <div x-show="error" x-cloak class="mt-3 text-sm text-rose-300 bg-rose-500/10 rounded-lg px-3 py-2"
+         x-text="error"></div>
+
+    <div class="mt-6 flex justify-between">
+      <button type="button" @click="step = 1" class="btn-ghost">{{ t('setup.back') }}</button>
+      <button type="button" @click="saveAi()" :disabled="saving"
+              class="btn-primary"
+              :class="saving ? 'opacity-50 cursor-not-allowed' : ''">
+        <span x-show="!saving">{{ t('setup.save_continue') }}</span>
+        <span x-show="saving" x-cloak>{{ t('setup.saving') }}</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Step 3: Backup (optional) ===== -->
+  <div x-show="step === 3" x-transition.opacity class="card p-6">
+    <h2 class="text-xl font-semibold mb-1">{{ t('setup.step_sync.title') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('setup.step_sync.subtitle_v2') }}</p>
+
+    <!-- Big tile chooser -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+      <button type="button" @click="syncMode = 'local'"
+              :class="syncMode === 'local' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+              class="rounded-xl border p-4 text-left transition">
+        <div class="flex items-center gap-2 mb-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5 text-emerald-300">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="font-medium">{{ t('settings.sync.local_title') }}</span>
+          <span class="ml-auto text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
+            {{ t('settings.sync.recommended') }}
+          </span>
+        </div>
+        <p class="text-xs text-ink-400">{{ t('settings.sync.local_hint') }}</p>
+      </button>
+
+      <button type="button" @click="syncMode = 'cloud'"
+              :class="syncMode === 'cloud' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+              class="rounded-xl border p-4 text-left transition">
+        <div class="flex items-center gap-2 mb-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5 text-sky-300">
+            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+          </svg>
+          <span class="font-medium">{{ t('settings.sync.cloud_title') }}</span>
+          <span class="ml-auto text-[10px] uppercase tracking-wider bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">
+            {{ t('settings.sync.advanced') }}
+          </span>
+        </div>
+        <p class="text-xs text-ink-400">{{ t('settings.sync.cloud_hint') }}</p>
+      </button>
+    </div>
+
+    <!-- LOCAL ============================================== -->
+    <template x-if="syncMode === 'local'">
+      <div>
+        <label class="block text-sm font-medium mb-1">{{ t('settings.sync.local_path') }}</label>
+        <div class="flex gap-2 mb-2">
+          <input x-model="localPath" type="text"
+                 @input.debounce.500ms="checkLocalPath()"
+                 placeholder="/mnt/backup/docusort"
+                 class="flex-1 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+          <button type="button" @click="openPicker()"
+                  class="btn-secondary whitespace-nowrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            {{ t('settings.sync.browse') }}
+          </button>
+        </div>
+        <div class="text-xs text-ink-500 mb-3">{{ t('settings.sync.local_path_hint') }}</div>
+        <div x-show="pathFeedback.shown" x-cloak class="text-xs rounded-lg px-3 py-2 mb-3"
+             :class="pathFeedback.ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+             x-text="pathFeedback.text"></div>
+      </div>
+    </template>
+
+    <!-- CLOUD ============================================== -->
+    <template x-if="syncMode === 'cloud'">
+      <div>
+        <div x-show="!rcloneInstalled" x-cloak class="rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 mb-4 text-sm">
+          <strong class="text-amber-200">{{ t('setup.step_sync.no_rclone_title') }}</strong>
+          <p class="text-amber-100/80 mt-1">{{ t('setup.step_sync.no_rclone_hint') }}</p>
+          <code class="block mt-2 bg-ink-900/60 rounded px-2 py-1 text-xs">sudo apt install rclone</code>
+        </div>
+
+        <div x-show="rcloneInstalled" x-cloak>
+          <p class="text-xs text-ink-400 mb-2">{{ t('settings.sync.simple_first') }}</p>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+            <button type="button" @click="syncBackend = 'webdav'"
+                    :class="syncBackend === 'webdav' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                    class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+              <div class="font-medium">WebDAV / Nextcloud</div>
+              <div class="text-xs text-ink-400">{{ t('settings.sync.webdav_hint') }}</div>
+            </button>
+            <button type="button" @click="syncBackend = 'sftp'"
+                    :class="syncBackend === 'sftp' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                    class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+              <div class="font-medium">SFTP</div>
+              <div class="text-xs text-ink-400">{{ t('settings.sync.sftp_hint') }}</div>
+            </button>
+            <button type="button" @click="syncBackend = 's3'"
+                    :class="syncBackend === 's3' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                    class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+              <div class="font-medium">S3 / R2 / MinIO</div>
+              <div class="text-xs text-ink-400">{{ t('settings.sync.s3_hint') }}</div>
+            </button>
+          </div>
+          <details class="mb-4">
+            <summary class="cursor-pointer text-xs text-ink-400 hover:text-ink-200">
+              {{ t('settings.sync.show_oauth') }}
+            </summary>
+            <div class="mt-3 rounded-lg bg-amber-500/5 border border-amber-500/20 p-3">
+              <p class="text-xs text-amber-200/80 mb-2">{{ t('settings.sync.oauth_warning') }}</p>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button type="button" @click="syncBackend = 'drive'"
+                        :class="syncBackend === 'drive' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                        class="rounded-xl border px-3 py-2.5 text-sm transition">Google Drive</button>
+                <button type="button" @click="syncBackend = 'dropbox'"
+                        :class="syncBackend === 'dropbox' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                        class="rounded-xl border px-3 py-2.5 text-sm transition">Dropbox</button>
+                <button type="button" @click="syncBackend = 'onedrive'"
+                        :class="syncBackend === 'onedrive' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                        class="rounded-xl border px-3 py-2.5 text-sm transition">OneDrive</button>
+              </div>
+            </div>
+          </details>
+
+          <template x-if="['drive','dropbox','onedrive'].includes(syncBackend)">
+            <div class="space-y-3">
+              <label class="block text-sm font-medium">{{ t('setup.step_sync.remote_name') }}</label>
+              <input x-model="syncName" type="text" placeholder="my-drive"
+                     class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+              <div class="rounded-xl bg-ink-900/60 border border-ink-700 p-4 text-sm">
+                <p class="font-medium mb-2">{{ t('setup.step_sync.oauth_intro') }}</p>
+                <ol class="list-decimal ml-5 space-y-2 text-ink-300">
+                  <li x-html="T['setup.step_sync.oauth_step1']"></li>
+                  <li>
+                    <span x-text="T['setup.step_sync.oauth_step2']"></span>
+                    <code class="block mt-1 bg-ink-950 rounded px-2 py-1 text-xs font-mono select-all"
+                          x-text="'rclone authorize \"' + syncBackend + '\"'"></code>
+                  </li>
+                  <li x-text="T['setup.step_sync.oauth_step3']"></li>
+                </ol>
+              </div>
+              <label class="block text-sm font-medium">{{ t('setup.step_sync.token') }}</label>
+              <textarea x-model="syncToken" rows="4"
+                        placeholder='{"access_token":"...","token_type":"Bearer","refresh_token":"...","expiry":"..."}'
+                        class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-xs font-mono"></textarea>
+            </div>
+          </template>
+
+          <template x-if="syncBackend === 's3'">
+            <div class="space-y-3">
+              <label class="block text-sm font-medium">{{ t('setup.step_sync.remote_name') }}</label>
+              <input x-model="syncName" type="text" placeholder="s3" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+              <div class="grid grid-cols-2 gap-2">
+                <input x-model="s3.access_key_id"     placeholder="Access key ID"     class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                <input x-model="s3.secret_access_key" type="password" placeholder="Secret" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                <input x-model="s3.region"            placeholder="Region (eu-west-1)"  class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                <input x-model="s3.endpoint"          placeholder="Endpoint (optional)" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+              </div>
+            </div>
+          </template>
+
+          <template x-if="syncBackend === 'webdav'">
+            <div class="space-y-3">
+              <label class="block text-sm font-medium">{{ t('setup.step_sync.remote_name') }}</label>
+              <input x-model="syncName" type="text" placeholder="nextcloud" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+              <input x-model="webdav.url"      placeholder="https://cloud.example.com/remote.php/dav/files/USER/" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+              <div class="grid grid-cols-2 gap-2">
+                <input x-model="webdav.user"     placeholder="username"             class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                <input x-model="webdav.password" type="password" placeholder="password" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+              </div>
+            </div>
+          </template>
+
+          <template x-if="syncBackend === 'sftp'">
+            <div class="space-y-3">
+              <label class="block text-sm font-medium">{{ t('setup.step_sync.remote_name') }}</label>
+              <input x-model="syncName" type="text" placeholder="backup" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+              <div class="grid grid-cols-2 gap-2">
+                <input x-model="sftp.host" placeholder="host"     class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                <input x-model.number="sftp.port" type="number" placeholder="22" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                <input x-model="sftp.user" placeholder="user"     class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                <input x-model="sftp.password" type="password" placeholder="password (or leave blank for key)" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+              </div>
+              <input x-model="sftp.key_file" placeholder="path to private key (optional)" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <div x-show="syncMessage" x-cloak class="mt-3 text-sm rounded-lg px-3 py-2"
+         :class="syncOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="syncMessage"></div>
+
+    <div class="mt-6 flex justify-between">
+      <button type="button" @click="step = 2" class="btn-ghost">{{ t('setup.back') }}</button>
+      <div class="flex gap-2">
+        <button type="button" @click="finishWithoutSync()" class="btn-secondary">
+          {{ t('setup.skip_step') }}
+        </button>
+        <button type="button" @click="saveSync()" :disabled="!syncReady || saving"
+                class="btn-primary"
+                :class="(!syncReady || saving) ? 'opacity-50 cursor-not-allowed' : ''">
+          {{ t('setup.save_continue') }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Step 4: Done ===== -->
+  <div x-show="step === 4" x-transition.opacity class="card p-6 text-center">
+    <div class="inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300 mb-4">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-7 w-7">
+        <path d="M20 6 9 17l-5-5"/>
+      </svg>
+    </div>
+    <h2 class="text-xl font-semibold mb-2">{{ t('setup.done.title') }}</h2>
+    <p class="text-ink-400 text-sm mb-6">{{ t('setup.done.subtitle') }}</p>
+    <button type="button" @click="restartAndGo()" class="btn-primary">
+      {{ t('setup.done.cta') }}
+    </button>
+    <p class="text-xs text-ink-500 mt-4">{{ t('setup.done.hint') }}</p>
+  </div>
+
+  <!-- ===== Folder picker modal ===== -->
+  <div x-show="picker.open" x-cloak
+       @keydown.escape.window="picker.open = false"
+       class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/60">
+    <div class="w-full max-w-xl rounded-2xl bg-ink-900 border border-ink-700 shadow-2xl"
+         @click.outside="picker.open = false">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-ink-700">
+        <div class="font-medium text-sm">{{ t('settings.sync.picker_title') }}</div>
+        <button type="button" @click="picker.open = false" class="btn-ghost text-xs">✕</button>
+      </div>
+      <div class="px-4 py-3 border-b border-ink-700">
+        <div class="text-xs text-ink-400 mb-1">{{ t('settings.sync.current_path') }}</div>
+        <div class="font-mono text-xs text-emerald-300 truncate" x-text="picker.path || '/'"></div>
+      </div>
+      <div class="px-4 py-2 border-b border-ink-700 flex flex-wrap gap-1">
+        <template x-for="s in picker.shortcuts" :key="s.path">
+          <button type="button" @click="loadPicker(s.path)"
+                  class="text-xs px-2 py-1 rounded-md bg-ink-800 hover:bg-ink-700"
+                  x-text="s.label"></button>
+        </template>
+      </div>
+      <div class="max-h-80 overflow-y-auto">
+        <button type="button" x-show="picker.parent" @click="loadPicker(picker.parent)"
+                class="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-ink-800/50 text-ink-300">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+            <path d="m9 18-6-6 6-6"/>
+          </svg>..
+        </button>
+        <template x-if="picker.error">
+          <div class="px-4 py-3 text-xs text-rose-300" x-text="picker.error"></div>
+        </template>
+        <template x-for="d in picker.entries" :key="d.path">
+          <button type="button" @click="loadPicker(d.path)"
+                  class="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-ink-800/50">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4 text-emerald-300">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span x-text="d.name"></span>
+          </button>
+        </template>
+        <template x-if="!picker.entries.length && !picker.error">
+          <div class="px-4 py-6 text-center text-xs text-ink-500">{{ t('settings.sync.empty_dir') }}</div>
+        </template>
+      </div>
+      <div class="px-4 py-3 border-t border-ink-700 flex justify-end gap-2">
+        <button type="button" @click="picker.open = false" class="btn-ghost text-sm">{{ t('setup.back') }}</button>
+        <button type="button" @click="pickCurrent()" class="btn-primary text-sm">
+          {{ t('settings.sync.pick_this') }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function setupWizard() {
+  return {
+    step: 1,
+    stepLabels: [
+      tr('setup.step_lang.short'),
+      tr('setup.step_ai.short'),
+      tr('setup.step_sync.short'),
+      tr('setup.done.short'),
+    ],
+
+    // Step 1
+    lang: '{{ lang }}',
+    async selectLang(code) {
+      this.lang = code;
+      try {
+        await fetch('/api/language/' + encodeURIComponent(code), { method: 'POST' });
+        await fetch('/api/settings/language', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ default_language: code }),
+        });
+        // Reload so new translations apply immediately.
+        location.reload();
+      } catch (e) { console.warn(e); }
+    },
+
+    // Step 2 — AI
+    provider: '{{ current_provider }}' || 'anthropic',
+    model:    '{{ current_model }}'    || 'claude-haiku-4-5-20251001',
+    baseUrl:  '{{ current_base_url }}' || '',
+    apiKey:   '',
+    saving:   false,
+    error:    '',
+
+    providerCards: [
+      { id: 'anthropic',    label: 'Anthropic Claude',  hint: tr('setup.provider.anthropic_hint') },
+      { id: 'openai',       label: 'OpenAI GPT',        hint: tr('setup.provider.openai_hint') },
+      { id: 'gemini',       label: 'Google Gemini',     hint: tr('setup.provider.gemini_hint') },
+      { id: 'openai_compat', label: tr('setup.provider.compat_label'), hint: tr('setup.provider.compat_hint') },
+    ],
+    defaults: {
+      anthropic:    { model: 'claude-haiku-4-5-20251001', baseUrl: '' },
+      openai:       { model: 'gpt-4o-mini',                baseUrl: '' },
+      gemini:       { model: 'gemini-2.5-flash',           baseUrl: '' },
+      openai_compat:{ model: 'llama3.1',                   baseUrl: 'http://localhost:11434/v1' },
+    },
+    selectProvider(p) {
+      this.provider = p;
+      const d = this.defaults[p];
+      if (d) {
+        if (!this.model || Object.values(this.defaults).some(x => x.model === this.model))
+          this.model = d.model;
+        if (p === 'openai_compat' && !this.baseUrl) this.baseUrl = d.baseUrl;
+      }
+    },
+    get modelHint() {
+      const m = {
+        anthropic:     tr('setup.step_ai.model_hint_anthropic'),
+        openai:        tr('setup.step_ai.model_hint_openai'),
+        gemini:        tr('setup.step_ai.model_hint_gemini'),
+        openai_compat: tr('setup.step_ai.model_hint_compat'),
+      };
+      return m[this.provider] || '';
+    },
+    get apiKeyPlaceholder() {
+      return this.provider === 'anthropic' ? 'sk-ant-...' :
+             this.provider === 'openai'    ? 'sk-...' :
+             this.provider === 'gemini'    ? 'AIza...' : '';
+    },
+    get apiKeyHint() {
+      return tr('setup.step_ai.api_key_hint');
+    },
+
+    async saveAi() {
+      this.error = '';
+      this.saving = true;
+      try {
+        const r = await fetch('/api/settings/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: this.provider,
+            model: this.model,
+            base_url: this.baseUrl,
+            api_key: this.apiKey,
+          }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        this.step = 3;
+      } catch (e) {
+        this.error = e.message || String(e);
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // Step 3 — Backup
+    syncMode: 'local',           // 'local' | 'cloud'
+    localPath: '',
+    pathFeedback: { shown: false, ok: false, text: '' },
+    picker: { open: false, path: '/', parent: '', entries: [], shortcuts: [], error: '' },
+
+    async openPicker() {
+      this.picker.open = true;
+      await this.loadPicker(this.localPath || '/');
+    },
+    async loadPicker(path) {
+      try {
+        const r = await fetch('/api/fs/list?path=' + encodeURIComponent(path));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.picker.error = d.detail || ('HTTP ' + r.status); return; }
+        this.picker.path      = d.path;
+        this.picker.parent    = d.parent;
+        this.picker.entries   = d.entries || [];
+        this.picker.shortcuts = d.shortcuts || [];
+        this.picker.error     = d.error || '';
+      } catch (e) { this.picker.error = String(e); }
+    },
+    pickCurrent() {
+      this.localPath = this.picker.path;
+      this.picker.open = false;
+      this.checkLocalPath();
+    },
+
+    rcloneInstalled: false,
+    syncBackend: '',
+    syncName: 'cloud',
+    syncToken: '',
+    syncMessage: '',
+    syncOk: false,
+    s3:     { access_key_id: '', secret_access_key: '', region: '', endpoint: '' },
+    webdav: { url: '', user: '', password: '' },
+    sftp:   { host: '', port: 22, user: '', password: '', key_file: '' },
+
+    async init() {
+      try {
+        const r = await fetch('/api/sync/remotes');
+        if (r.ok) {
+          const d = await r.json();
+          this.rcloneInstalled = d.rclone_installed;
+        }
+      } catch (e) {}
+    },
+
+    finishWithoutSync() { this.step = 4; },
+
+    get syncReady() {
+      if (this.syncMode === 'local')  return !!this.localPath && this.pathFeedback.ok;
+      if (this.syncMode === 'cloud')  return !!this.syncBackend;
+      return false;
+    },
+
+    async checkLocalPath() {
+      if (!this.localPath) { this.pathFeedback.shown = false; return; }
+      try {
+        const r = await fetch('/api/sync/check-path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: this.localPath }),
+        });
+        const d = await r.json().catch(() => ({}));
+        this.pathFeedback.shown = true;
+        if (d.ok) {
+          this.pathFeedback.ok = true;
+          if (d.free_bytes != null) {
+            const gb = (d.free_bytes / 1024 / 1024 / 1024).toFixed(1);
+            this.pathFeedback.text = T['settings.sync.path_ok'].replace('{free}', gb);
+          } else {
+            this.pathFeedback.text = T['settings.sync.path_ok_short'];
+          }
+        } else {
+          this.pathFeedback.ok = false;
+          this.pathFeedback.text = T['settings.sync.path_bad'] + ' ' + (d.error || '');
+        }
+      } catch (e) {
+        this.pathFeedback.shown = true;
+        this.pathFeedback.ok = false;
+        this.pathFeedback.text = String(e);
+      }
+    },
+
+    async saveSync() {
+      this.syncMessage = '';
+      this.saving = true;
+      try {
+        if (this.syncMode === 'local') {
+          const r = await fetch('/api/settings/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              enabled: true, target_type: 'local',
+              local_path: this.localPath, source: 'library',
+            }),
+          });
+          if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.detail || ('HTTP ' + r.status));
+          }
+          this.syncOk = true;
+          this.syncMessage = tr('settings.sync.local_saved');
+          setTimeout(() => { this.step = 4; }, 600);
+          return;
+        }
+
+        // CLOUD
+        let res;
+        if (['drive','dropbox','onedrive'].includes(this.syncBackend)) {
+          res = await fetch('/api/sync/remote/oauth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.syncName, backend: this.syncBackend, token: this.syncToken }),
+          });
+        } else if (this.syncBackend === 's3') {
+          res = await fetch('/api/sync/remote/s3', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.syncName, ...this.s3 }),
+          });
+        } else if (this.syncBackend === 'webdav') {
+          res = await fetch('/api/sync/remote/webdav', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.syncName, ...this.webdav }),
+          });
+        } else if (this.syncBackend === 'sftp') {
+          res = await fetch('/api/sync/remote/sftp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.syncName, ...this.sftp }),
+          });
+        } else {
+          throw new Error('No backend chosen');
+        }
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + res.status));
+        }
+
+        const test = await fetch('/api/sync/test/' + encodeURIComponent(this.syncName), { method: 'POST' });
+        const td = await test.json().catch(() => ({}));
+        if (!td.ok) throw new Error(tr('setup.step_sync.test_failed') + ' ' + (td.error || ''));
+
+        const remoteAddr = this.syncName + ':DocuSort';
+        const r2 = await fetch('/api/settings/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: true, target_type: 'rclone',
+            remote: remoteAddr, source: 'library',
+          }),
+        });
+        if (!r2.ok) {
+          const d = await r2.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r2.status));
+        }
+
+        this.syncOk = true;
+        this.syncMessage = tr('setup.step_sync.success').replace('{name}', this.syncName);
+        setTimeout(() => { this.step = 4; }, 600);
+      } catch (e) {
+        this.syncOk = false;
+        this.syncMessage = e.message || String(e);
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // Step 4
+    async restartAndGo() {
+      try {
+        await fetch('/api/setup/restart', { method: 'POST' });
+      } catch (e) {}
+      // Give the service ~6 seconds to come back, then redirect to dashboard.
+      setTimeout(() => { location.href = '/'; }, 6000);
+    },
+  };
+}
+</script>
+
+{% endblock %}

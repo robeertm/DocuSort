@@ -8,12 +8,24 @@ Built for a Synology NAS in Docker, but runs anywhere Docker runs.
 
 - **Web UI** on port 8080 — dashboard, library browser with full-text search,
   per-document detail + PDF preview, mobile upload with camera capture
+- **First-run setup wizard** at `/setup` — pick language, AI provider, paste
+  token, optionally configure backup. Always-reachable settings page at `/settings`
+- **Multi-provider AI**: Anthropic Claude · OpenAI GPT · Google Gemini · or any
+  OpenAI-compatible endpoint (Ollama, Groq, xAI, Mistral, OpenRouter …) for
+  fully local classification
+- **Subcategories + free-form tags** — files land at
+  `Library/YYYY/Category/Subcategory/` and carry up to 8 lowercase labels
 - **OCR** for scanned PDFs and images (Tesseract `deu+eng`)
-- **Claude** (Anthropic API) classifies each document and extracts metadata
-- **Automatic filing** into `Library/YYYY/Category/` with a clean filename
-- **Cost tracking** per document + aggregated (tokens in/out, USD and EUR preview)
-- **Low-confidence review folder** instead of wrong guesses, recategorize with one click
+- **Backup** to a local folder (rsync, no setup) or to the cloud via rclone
+  (Drive · Dropbox · OneDrive · S3 · WebDAV · SFTP). Headless-friendly:
+  no browser needed on the host.
+- **Cost tracking** per document + aggregated (tokens in/out, USD and EUR preview),
+  with prompt-caching factored in for Anthropic and OpenAI
+- **Low-confidence review folder** instead of wrong guesses, full metadata
+  editing on the document detail page
+- **Trash + restore + permanent purge**, ZIP export of any filtered selection
 - **Safety copy** of every original kept in `_Processed/`
+- **i18n**: German · English · French · Italian · Spanish
 
 ## File naming
 
@@ -57,10 +69,15 @@ The template is configurable in `config/config.yaml`.
 ## Requirements
 
 - Docker and docker-compose (Synology: install "Container Manager" from Package
-  Center, DSM 7.2+)
-- An Anthropic API key with a billing profile attached
+  Center, DSM 7.2+) — or run directly on Linux/macOS via the launchers below
 - A folder on your NAS where scans arrive (e.g. `/volume1/Scan`)
 - A folder that will become your library (e.g. `/volume1/Dokumente`)
+- **An API key for one** of:
+  - Anthropic Claude (`ANTHROPIC_API_KEY`, recommended — cheapest with prompt caching)
+  - OpenAI GPT (`OPENAI_API_KEY`)
+  - Google Gemini (`GEMINI_API_KEY`)
+  - …or no key at all if you run a local model via Ollama. Hardware
+    suggestion: 8 GB RAM for an 8B model, 16 GB for a 13B, GPU recommended.
 
 ## Quick start on Synology
 
@@ -70,14 +87,7 @@ The template is configurable in `config/config.yaml`.
    scp -r docusort admin@synology:/volume1/docker/
    ```
 
-2. **Create the `.env` file** in the project folder:
-   ```bash
-   cd /volume1/docker/docusort
-   cp .env.example .env
-   nano .env     # fill in ANTHROPIC_API_KEY
-   ```
-
-3. **Adjust `docker-compose.yml`** if your paths differ. Defaults:
+2. **Adjust `docker-compose.yml`** if your paths differ. Defaults:
    ```yaml
    volumes:
      - /volume1/Scan:/data/inbox
@@ -86,20 +96,31 @@ The template is configurable in `config/config.yaml`.
      - /volume1/docker/docusort/logs:/app/logs
    ```
 
-4. **Build and start**:
+3. **Build and start**:
    ```bash
    sudo docker compose up -d --build
    ```
 
-5. **Check the logs**:
+4. **Check the logs**:
    ```bash
    sudo docker logs -f docusort
    ```
 
-6. **Open the UI** at `http://<nas-ip>:8080` from any device on your network
-   (or over Tailscale / VPN) — dashboard, upload, library and cost overview
-   live there. Dropping a PDF into `/volume1/Scan` still works — it appears
-   correctly named under `/volume1/Dokumente/2026/…/`.
+5. **Open the UI** at `http://<nas-ip>:8080`. On first start the **setup
+   wizard** at `/setup` walks you through language, AI provider + token,
+   and optional backup target. The wizard writes `config/secrets.yaml`
+   (mode 0600, gitignored) and updates `config/config.yaml`. After the
+   final step the service restarts itself and lands you on the dashboard.
+
+   Dropping a PDF into `/volume1/Scan` then works — it appears correctly
+   named under `/volume1/Dokumente/2026/…/`.
+
+   You can revisit any of those choices later under **Einstellungen** (the
+   cog in the header) — provider, model, API keys, paths, sync target.
+
+> **Legacy env-var setup also still works** — if you set
+> `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` / `GEMINI_API_KEY`) in your
+> `.env`, DocuSort picks it up and skips the wizard's token step.
 
 ## Quick start locally (Mac / Linux / Windows)
 
@@ -112,11 +133,16 @@ your OS:
 
 Each launcher creates a `.venv` on first run, keeps Python deps in sync,
 warns if tesseract / ocrmypdf are missing, and then boots the app on
-`http://localhost:8080`. Before the first start, create an `.env` next to
-the script with:
+`http://localhost:8080`. Open the URL — the **setup wizard** at `/setup`
+collects everything else.
+
+If you'd rather pre-seed the API key as an env var instead of typing it
+in the wizard, drop a `.env` next to the launcher with one of:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=AIza...
 ```
 
 OCR needs system-level Tesseract and ocrmypdf installed
@@ -172,25 +198,31 @@ The rule grants `NOPASSWD` only for `systemctl restart docusort`.
 
 ## Configuration
 
-All behaviour is controlled by two YAML files in `config/`:
+All behaviour is controlled by three files in `config/`:
 
-- `config.yaml` – paths, OCR settings, Claude model, thresholds
-- `categories.yaml` – the list of categories and their Claude hints
+- `config.yaml` – paths, OCR settings, AI provider/model, sync target, thresholds
+- `categories.yaml` – the list of categories and their subcategories
+- `secrets.yaml` – API keys (mode 0600, gitignored). Written by the wizard.
 
-Relevant knobs:
+Most users never edit these directly — the **setup wizard** and the
+**`/settings`** page cover everything. The knobs that matter:
 
 | Setting | Default | What it does |
 |---|---|---|
-| `claude.model` | `claude-haiku-4-5-20251001` | Fast & cheap. Use `claude-sonnet-4-6` for tougher documents. |
-| `claude.min_confidence` | `0.65` | Documents below this go to `_Review` |
+| `ai.provider` | `anthropic` | `anthropic` · `openai` · `gemini` · `openai_compat` |
+| `ai.model` | `claude-haiku-4-5-20251001` | Provider-specific model id |
+| `ai.base_url` | `""` | Only for `openai_compat` (e.g. `http://localhost:11434/v1` for Ollama) |
+| `ai.min_confidence` | `0.65` | Documents below this go to `_Review` |
 | `ocr.languages` | `deu+eng` | Tesseract language packs |
+| `ocr.max_parallel` | `2` | Cap on concurrent OCR + AI jobs (memory bound) |
+| `sync.target_type` | `local` | `local` (rsync to a folder) or `rclone` (cloud) |
+| `sync.local_path` | `""` | Target folder for local-mode backup |
+| `sync.remote` | `""` | rclone remote, format `<name>:<path>` |
 | `keep_original` | `true` | Keep an untouched copy of each original in `_Processed` |
 | `dry_run` | `false` | Classify and log but don't move anything |
 
-After changing config, restart the container:
-```bash
-sudo docker compose restart docusort
-```
+After changing config from the CLI, restart the service. From the UI the
+wizard handles the restart for you.
 
 ## CLI flags
 
@@ -207,18 +239,33 @@ python -m docusort --version
 1. File appears in `inbox/`.
 2. Watcher waits until the file size stops changing (default 5 s).
 3. If the PDF has no text layer, `ocrmypdf` adds one.
-4. The first ~12 k characters go to Claude, together with the category list.
-5. Claude replies with strict JSON: `category, date, sender, subject, confidence`.
-6. Confidence ≥ 0.65 → move to `library/YYYY/Category/`.
-   Lower → move to `_Review/` for a human look.
+4. The first ~12 k characters go to the configured AI provider, together
+   with the category list and the prompt that forces JSON output.
+5. The model replies with strict JSON: `category, subcategory, tags,
+   date, sender, subject, confidence, reasoning`.
+6. Confidence ≥ 0.65 → move to `library/YYYY/Category/Subcategory/`
+   (subcategory dir is omitted when empty). Lower → move to `_Review/`
+   for a human look.
 7. The original is copied to `_Processed/` before being removed from `inbox/`.
 
 ## Cost
 
-Haiku 4.5 classifies a typical one-page letter for a fraction of a cent.
-A batch of 1 000 documents per month usually stays well under EUR 1 in API fees.
-Scale model up to Sonnet 4.6 only if you see classification errors – it is
-~10× more expensive.
+Per provider (typical one-page letter, ~3 k input + 200 output tokens):
+
+| Provider | Model | Roughly per doc |
+|---|---|---|
+| Anthropic | Haiku 4.5 (with prompt cache) | ~$0.0005 |
+| Anthropic | Sonnet 4.6 (with prompt cache) | ~$0.005 |
+| OpenAI | gpt-4o-mini | ~$0.0008 |
+| OpenAI | gpt-4o | ~$0.015 |
+| Google | Gemini 2.5 Flash | ~$0.0005 |
+| Google | Gemini 2.5 Pro | ~$0.008 |
+| Local | Ollama (any model) | $0 — only your electricity |
+
+A batch of 1 000 documents per month with Haiku 4.5 stays well under
+EUR 1 in API fees. The dashboard shows actual cost across all providers
+in real time, with cache savings (Anthropic) and cached-prompt savings
+(OpenAI) credited.
 
 ## Trash, Export, Cloud sync
 
@@ -236,39 +283,58 @@ individual items, or empty the whole trash.
 - `_Trash/` is excluded by default.
 - The download is streamed, so multi-GB exports don't spike memory.
 
-### Cloud sync (via rclone)
+### Backup
 
-DocuSort uses [rclone](https://rclone.org/) for cloud sync — whatever rclone
-supports, DocuSort can sync to. On the machine running DocuSort:
+Two backup paths, picked from the wizard or `/settings` → "Backup":
 
-```bash
-sudo apt install rclone       # Debian/Ubuntu
-brew install rclone           # macOS
-rclone config                 # interactive setup — add a remote
-```
+#### Local folder (recommended, zero auth)
 
-Then edit `config/config.yaml`:
+Mirror the library to any path on the host with rsync — a mounted USB
+stick, NAS share, NFS/SMB mount, second disk. No tokens, no OAuth.
+
+In the UI: pick the **"Lokaler Ordner / NAS-Mount"** tile, browse to the
+folder with the built-in folder picker (or paste a path), enable. Equivalent
+config:
 
 ```yaml
 sync:
   enabled: true
-  remote: "icloud:DocuSort-Backup"   # <remote-name>:<path>
-  source: "library"
-  extra_flags: ["--transfers=4"]
+  target_type: local
+  local_path: /mnt/backup/docusort
 ```
 
-- **iCloud Drive**: pick `iclouddrive` in `rclone config`. Apple requires an
-  [app-specific password](https://support.apple.com/en-us/HT204397) instead
-  of your main password. See https://rclone.org/iclouddrive/ for details.
-- **Google Drive / Dropbox / OneDrive**: pick the respective backend in
-  `rclone config`, browse to the auth URL, paste the token back.
-- **Synology C2**: use the `s3` backend with Synology's endpoint.
-- **WebDAV / SFTP / S3**: all supported natively.
+Backed by `rsync -a --delete --delete-excluded --exclude=_Trash/`. If
+rsync isn't installed, DocuSort falls back to a slower pure-Python copy.
 
-After saving `config.yaml`, restart the service and click **Jetzt
-synchronisieren** on the dashboard. For scheduled sync, create a systemd
-timer that calls `curl -XPOST http://localhost:8080/api/sync/run` every
-night.
+#### Cloud (rclone)
+
+DocuSort uses [rclone](https://rclone.org/) for cloud sync — whatever
+rclone supports, DocuSort can sync to. **Headless-friendly**: no
+browser needed on the host. On the machine running DocuSort:
+
+```bash
+sudo apt install rclone     # Debian/Ubuntu
+brew install rclone         # macOS
+```
+
+Then in **`/settings` → Backup → Cloud-Speicher (rclone)**:
+
+- **WebDAV / Nextcloud · SFTP · S3 / R2 / MinIO**: simple form — URL,
+  credentials, done. No OAuth, works on any headless machine.
+- **Google Drive · Dropbox · OneDrive** (folded behind "Show OAuth
+  providers"): the only flow that needs OAuth. On a separate machine
+  *with* a browser, run e.g. `rclone authorize "drive"` — it spawns a
+  one-shot OAuth dance, prints a JSON token. Paste that token into the
+  textarea in the UI; DocuSort writes the remote into `rclone.conf`
+  for you. No `rclone config` interaction on the host.
+
+A "Test" button next to each remote runs `rclone lsd <remote>:` so you
+catch broken auth before flipping `enabled: true`. Broken OAuth remotes
+(empty `token` field in `rclone.conf`) get a red "defekt" badge with a
+one-click **Reconnect** button that re-opens the token-paste form.
+
+For scheduled sync, point a systemd timer at
+`curl -XPOST http://localhost:8080/api/sync/run`.
 
 ## Roadmap
 

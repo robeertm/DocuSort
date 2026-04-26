@@ -19,17 +19,46 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..classifier import Classifier
-from ..config import AppSettings
+from ..config import AppSettings, get_api_key, is_configured, load_secrets
 from ..db import Database, MODEL_PRICING
 from ..i18n import (
     LANGUAGE_NAMES, SUPPORTED, all_translations_for_js, category_label,
     detect_language, subcategory_label, translate,
 )
+from ..providers import PROVIDERS
+from ..providers.pricing import all_pricing
 from .. import __version__
 
 
 logger = logging.getLogger("docusort.web")
 ALLOWED_SUFFIXES = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+
+
+def _fs_shortcuts(settings) -> list[dict]:
+    """Quick-jump targets shown above the directory list. Each shortcut is
+    only included when it actually exists and is readable — irrelevant entries
+    just hide themselves rather than rendering as broken jumps."""
+    candidates: list[tuple[str, str]] = [
+        ("Home",   str(Path.home())),
+        ("/mnt",   "/mnt"),
+        ("/media", "/media"),
+        ("/tmp",   "/tmp"),
+        ("/data",  "/data"),
+    ]
+    out = []
+    seen: set[str] = set()
+    for label, path in candidates:
+        try:
+            p = Path(path)
+            if not p.is_dir():
+                continue
+            if str(p) in seen:
+                continue
+            seen.add(str(p))
+            out.append({"label": label, "path": str(p)})
+        except (OSError, PermissionError):
+            pass
+    return out
 
 
 def _human_size(n: int | None) -> str:
@@ -68,6 +97,32 @@ def create_app(
     templates.env.filters["usd"] = _usd
 
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # ---------- First-run gate ----------
+    # Paths that always work even when the install is unconfigured (the
+    # wizard, language switcher, static files, and a few read-only API
+    # endpoints the wizard itself calls).
+    _setup_open = (
+        "/setup", "/static/", "/upload-sw.js",
+        "/api/setup/", "/api/settings/", "/api/sync/", "/api/language/",
+        "/api/version", "/api/pricing",
+    )
+
+    @app.middleware("http")
+    async def first_run_gate(request: Request, call_next):
+        path = request.url.path
+        if not is_configured(settings) and not any(
+            path == p or path.startswith(p) for p in _setup_open
+        ):
+            # Browsers get a real redirect, JSON callers get 503 so they
+            # can show a clean error instead of an HTML page.
+            if request.headers.get("accept", "").startswith("application/json"):
+                return JSONResponse(
+                    {"detail": "DocuSort is not yet configured — open /setup"},
+                    status_code=503,
+                )
+            return RedirectResponse("/setup", status_code=303)
+        return await call_next(request)
 
     # Serve the upload service worker at root so its default scope is "/".
     # A SW at /static/upload-sw.js would only control /static/*.
@@ -483,7 +538,10 @@ def create_app(
     @app.get("/api/sync/status")
     def sync_status():
         from .. import sync as sync_mod
-        return sync_mod.status(settings)
+        from .. import rclone_setup
+        base = sync_mod.status(settings)
+        base["rclone_version"] = rclone_setup.rclone_version()
+        return base
 
     @app.post("/api/sync/run")
     def sync_run():
@@ -497,6 +555,325 @@ def create_app(
                 "then run `rclone config` once to set up your remote.",
             )
         return sync_mod.run_sync_async(settings)
+
+    # ---------- Sync: headless rclone remote setup ----------
+    @app.get("/api/sync/remotes")
+    def sync_list_remotes():
+        from .. import rclone_setup
+        return {
+            "rclone_installed": rclone_setup.rclone_available(),
+            "rclone_version": rclone_setup.rclone_version(),
+            "conf_path": str(rclone_setup.conf_path()),
+            "remotes": rclone_setup.list_remotes(),
+            "supported_backends": list(rclone_setup.SUPPORTED_BACKENDS),
+            "oauth_backends": sorted(rclone_setup.OAUTH_BACKENDS),
+        }
+
+    @app.get("/api/sync/authorize-command/{backend}")
+    def sync_authorize_command(backend: str):
+        from .. import rclone_setup
+        try:
+            return {"command": rclone_setup.authorize_command(backend),
+                    "backend": backend}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.post("/api/sync/remote/oauth")
+    def sync_add_oauth_remote(payload: dict):
+        from .. import rclone_setup
+        try:
+            path = rclone_setup.add_oauth_remote(
+                name=payload.get("name", ""),
+                backend=payload.get("backend", ""),
+                token_json=payload.get("token", ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "conf_path": str(path)}
+
+    @app.post("/api/sync/remote/s3")
+    def sync_add_s3_remote(payload: dict):
+        from .. import rclone_setup
+        try:
+            path = rclone_setup.add_s3_remote(
+                name=payload.get("name", ""),
+                access_key_id=payload.get("access_key_id", ""),
+                secret_access_key=payload.get("secret_access_key", ""),
+                region=payload.get("region", ""),
+                endpoint=payload.get("endpoint", ""),
+                provider=payload.get("provider", "Other"),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "conf_path": str(path)}
+
+    @app.post("/api/sync/remote/webdav")
+    def sync_add_webdav_remote(payload: dict):
+        from .. import rclone_setup
+        try:
+            path = rclone_setup.add_webdav_remote(
+                name=payload.get("name", ""),
+                url=payload.get("url", ""),
+                user=payload.get("user", ""),
+                password=payload.get("password", ""),
+                vendor=payload.get("vendor", "other"),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "conf_path": str(path)}
+
+    @app.post("/api/sync/remote/sftp")
+    def sync_add_sftp_remote(payload: dict):
+        from .. import rclone_setup
+        try:
+            path = rclone_setup.add_sftp_remote(
+                name=payload.get("name", ""),
+                host=payload.get("host", ""),
+                user=payload.get("user", ""),
+                port=int(payload.get("port", 22) or 22),
+                password=payload.get("password", ""),
+                key_file=payload.get("key_file", ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "conf_path": str(path)}
+
+    @app.delete("/api/sync/remote/{name}")
+    def sync_delete_remote(name: str):
+        from .. import rclone_setup
+        ok = rclone_setup.remove_remote(name)
+        if not ok:
+            raise HTTPException(404, f"remote {name!r} not found in rclone.conf")
+        return {"ok": True}
+
+    @app.post("/api/sync/test/{name}")
+    def sync_test_remote(name: str):
+        from .. import rclone_setup
+        return rclone_setup.test_remote(name)
+
+    # ---------- Setup wizard + Settings page ----------
+    @app.get("/setup", response_class=HTMLResponse)
+    def setup_page(request: Request):
+        return templates.TemplateResponse(
+            request, "setup.html",
+            {**base_ctx(request),
+             "providers": list(PROVIDERS),
+             "configured": is_configured(settings),
+             "current_provider": settings.ai.provider,
+             "current_model": settings.ai.model,
+             "current_base_url": settings.ai.base_url,
+             "library_path": str(settings.paths.library),
+             "inbox_path": str(settings.paths.inbox)},
+        )
+
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_page(request: Request):
+        from .. import rclone_setup
+        # Build a per-provider "do we have a key?" map covering BOTH the
+        # secrets.yaml store and legacy env vars (ANTHROPIC_API_KEY etc.) so
+        # an instance configured the old way doesn't show "no key stored".
+        masked: dict[str, str] = {}
+        for prov in PROVIDERS:
+            key = get_api_key(settings, prov)
+            if key:
+                tail = key[-4:] if len(key) > 4 else ""
+                masked[f"{prov}_api_key"] = ("•" * 8 + tail) if tail else ("•" * len(key))
+        return templates.TemplateResponse(
+            request, "settings.html",
+            {**base_ctx(request),
+             "providers": list(PROVIDERS),
+             "current_provider": settings.ai.provider,
+             "current_model": settings.ai.model,
+             "current_base_url": settings.ai.base_url,
+             "library_path": str(settings.paths.library),
+             "inbox_path": str(settings.paths.inbox),
+             "stored_secrets": masked,
+             "sync_enabled":     settings.sync.enabled,
+             "sync_target_type": settings.sync.target_type,
+             "sync_local_path":  settings.sync.local_path,
+             "sync_remote":      settings.sync.remote,
+             "sync_source":      settings.sync.source,
+             "rclone_installed": rclone_setup.rclone_available(),
+             "rclone_version":   rclone_setup.rclone_version(),
+             "rclone_remotes":   rclone_setup.list_remotes(),
+             "supported_backends": list(rclone_setup.SUPPORTED_BACKENDS),
+             "oauth_backends":   sorted(rclone_setup.OAUTH_BACKENDS)},
+        )
+
+    @app.post("/api/settings/ai")
+    def api_settings_ai(payload: dict):
+        from .. import settings_writer
+        provider = (payload.get("provider") or "").strip()
+        if provider not in PROVIDERS:
+            raise HTTPException(400, f"unknown provider: {provider}")
+        model = (payload.get("model") or "").strip()
+        if not model:
+            raise HTTPException(400, "model required")
+        base_url = (payload.get("base_url") or "").strip()
+        if provider == "openai_compat" and not base_url:
+            raise HTTPException(400, "openai_compat requires base_url")
+        api_key = payload.get("api_key")  # may be empty if user doesn't change it
+        if provider != "openai_compat" and api_key is not None and not api_key.strip():
+            # Allow blank when there's already a key — either in secrets.yaml
+            # or in the legacy environment variable (ANTHROPIC_API_KEY etc.).
+            if not get_api_key(settings, provider):
+                raise HTTPException(400, "api_key required for this provider")
+            api_key = None  # don't overwrite
+
+        settings_writer.update_ai(
+            provider=provider, model=model, base_url=base_url,
+            api_key=api_key, config_dir=settings.config_dir,
+        )
+        # Mirror into the live AppSettings so the next request sees the new
+        # values without a restart for read-only purposes (the running
+        # classifier still references the old provider — we expose a
+        # "restart required" flag so the UI can prompt).
+        settings.ai.provider = provider
+        settings.ai.model    = model
+        settings.ai.base_url = base_url
+        return {"ok": True, "restart_required": True}
+
+    @app.post("/api/settings/sync")
+    def api_settings_sync(payload: dict):
+        from .. import settings_writer
+        enabled     = bool(payload.get("enabled", False))
+        target_type = (payload.get("target_type") or "local").strip()
+        local_path  = (payload.get("local_path") or "").strip()
+        remote      = (payload.get("remote") or "").strip()
+        source      = (payload.get("source") or "library").strip()
+
+        if target_type not in ("local", "rclone"):
+            raise HTTPException(400, "target_type must be 'local' or 'rclone'")
+        if source not in ("library", "library_and_trash"):
+            raise HTTPException(400, "source must be 'library' or 'library_and_trash'")
+        if enabled and target_type == "local" and not local_path:
+            raise HTTPException(400, "local_path required when sync is enabled")
+        if enabled and target_type == "rclone" and not remote:
+            raise HTTPException(400, "remote required when sync is enabled")
+
+        # Validate the local path: must be writable and must NOT be the
+        # library itself (we'd be syncing onto our own source).
+        if target_type == "local" and local_path:
+            p = Path(local_path).expanduser()
+            try:
+                p.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise HTTPException(400, f"cannot create {p}: {exc}")
+            if p == settings.paths.library or settings.paths.library in p.parents:
+                raise HTTPException(400, f"target {p} overlaps the library — pick a different folder")
+
+        settings_writer.update_sync(
+            enabled=enabled, target_type=target_type, local_path=local_path,
+            remote=remote, source=source, config_dir=settings.config_dir,
+        )
+        settings.sync.enabled     = enabled
+        settings.sync.target_type = target_type
+        settings.sync.local_path  = local_path
+        settings.sync.remote      = remote
+        settings.sync.source      = source
+        return {"ok": True}
+
+    @app.get("/api/fs/list")
+    def api_fs_list(path: str = Query("/")):
+        """Browse server-side directories so the UI can offer a real folder
+        picker. Returns the absolute path, parent, and the immediate
+        subdirectories. Files are deliberately excluded — we're picking a
+        backup target, not an existing file.
+        """
+        try:
+            target = Path(path or "/").expanduser().resolve()
+        except Exception as exc:
+            raise HTTPException(400, f"invalid path: {exc}")
+        if not target.exists():
+            # Fall back to the closest existing ancestor — useful when the
+            # user pastes a path that doesn't exist yet.
+            candidate = target
+            while candidate != candidate.parent and not candidate.exists():
+                candidate = candidate.parent
+            target = candidate
+        if not target.is_dir():
+            target = target.parent
+
+        entries: list[dict] = []
+        try:
+            for child in sorted(target.iterdir(), key=lambda p: p.name.lower()):
+                if child.name.startswith("."):
+                    continue
+                try:
+                    if child.is_dir():
+                        entries.append({"name": child.name, "path": str(child)})
+                except OSError:
+                    pass  # broken symlink / permission issue — skip silently
+        except PermissionError:
+            return {
+                "path": str(target),
+                "parent": str(target.parent) if target != target.parent else "",
+                "entries": [],
+                "error": "permission denied",
+                "shortcuts": _fs_shortcuts(settings),
+            }
+        return {
+            "path": str(target),
+            "parent": str(target.parent) if target != target.parent else "",
+            "entries": entries,
+            "shortcuts": _fs_shortcuts(settings),
+        }
+
+    @app.post("/api/sync/check-path")
+    def api_sync_check_path(payload: dict):
+        """Quickly probe whether a path is writable, so the UI can give live
+        feedback as the user types or picks a folder."""
+        path = (payload.get("path") or "").strip()
+        if not path:
+            return {"ok": False, "error": "no path"}
+        p = Path(path).expanduser()
+        if p == settings.paths.library or settings.paths.library in p.parents:
+            return {"ok": False, "error": "overlaps library"}
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        # Try a tiny touch-and-delete to confirm writability.
+        probe = p / ".docusort-probe"
+        try:
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+        except OSError as exc:
+            return {"ok": False, "error": f"not writable: {exc}"}
+        try:
+            usage = shutil.disk_usage(p)
+            return {"ok": True, "free_bytes": usage.free, "total_bytes": usage.total}
+        except OSError:
+            return {"ok": True}
+
+    @app.post("/api/settings/language")
+    def api_settings_language(payload: dict):
+        from .. import settings_writer
+        lang = (payload.get("default_language") or "").strip()
+        if lang not in SUPPORTED:
+            raise HTTPException(400, f"unsupported language: {lang}")
+        settings_writer.update_web(
+            default_language=lang, config_dir=settings.config_dir,
+        )
+        settings.web.default_language = lang
+        return {"ok": True}
+
+    @app.get("/api/setup/state")
+    def api_setup_state():
+        return {
+            "configured": is_configured(settings),
+            "provider":   settings.ai.provider,
+            "model":      settings.ai.model,
+            "has_api_key": bool(get_api_key(settings)),
+        }
+
+    @app.post("/api/setup/restart")
+    def api_setup_restart():
+        """Trigger the same systemd restart path the auto-updater uses, so
+        the wizard can hand over to a fully reloaded process running with
+        the new provider config."""
+        from .. import updater
+        return updater.restart_service()
 
     # ---------- Retry failed / review docs ----------
     @app.post("/api/document/{doc_id}/retry")

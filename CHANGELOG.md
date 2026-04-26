@@ -2,6 +2,158 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.11.3] – 2026-04-26
+
+### Changed
+
+- **Settings page now uses the full container width.** Previously
+  capped at `max-w-3xl` (768px), so it looked narrower than the rest of
+  the app. Now it uses the same `max-w-6xl` (1152px) the dashboard and
+  library use, with cards stacked single-column inside.
+
+### Fixed
+
+- **CSS cache busting.** `<link rel="stylesheet" href="/static/tailwind.css">`
+  now carries a `?v={{ version }}` query so a fresh build is picked up on
+  the next page load instead of needing a hard reload.
+
+## [0.11.2] – 2026-04-26
+
+### Added
+
+- **Folder picker modal** for the local backup path. Browse the
+  server-side filesystem, jump to common roots (Home, /mnt, /media,
+  /tmp, /data) and pick a folder visually instead of typing a path. Backed
+  by a new `GET /api/fs/list?path=...` endpoint that lists directories,
+  reports the parent for back-navigation, and gracefully falls back to
+  the closest existing ancestor when the path doesn't exist.
+- **Cloud-sync section reorganised by friction.** WebDAV / SFTP / S3 are
+  now the primary tiles ("simple options — no OAuth needed"); Drive,
+  Dropbox and OneDrive are folded behind a "Show OAuth providers"
+  reveal with a yellow notice that they need a one-time token dance on
+  a separate machine.
+
+### Fixed
+
+- **Legacy `ANTHROPIC_API_KEY` env var was not detected by /settings.**
+  The page reported "no key stored" even when the env var was clearly
+  set; the AI form rejected blank submissions for that reason. Both
+  paths now consult `get_api_key()`, which checks `secrets.yaml` *and*
+  falls back to the legacy env vars.
+
+## [0.11.1] – 2026-04-26
+
+### Added
+
+- **Local-folder backup (rsync).** A new `target_type: local` mode for
+  `sync.*` mirrors the library to any path on the host — a mounted USB
+  stick, NAS share, NFS/SMB mount, second disk. No tokens, no OAuth,
+  no rclone needed for this path. Uses `rsync -a --delete --delete-excluded`
+  with `_Trash/` excluded; falls back to a pure-Python copy when rsync
+  isn't on PATH.
+- **`POST /api/sync/check-path`** quickly probes a candidate target:
+  validates it isn't inside the library (would self-overwrite), checks
+  writability with a touch+delete, and returns free disk space so the
+  UI can show "Path ready · 78.2 GB free" while the user types.
+- **Broken-remote detection.** `list_remotes()` now returns
+  `{healthy, problem}` per remote — OAuth backends with an empty
+  `token` field surface as `problem: "empty_token"`. The settings page
+  badges them red and offers a one-click **Reconnect** button that
+  opens the token-paste form pre-filled with the remote's name.
+- **`POST /api/sync/run`** now dispatches between the rclone path and
+  the local rsync path based on `sync.target_type`. Status surface
+  includes the new fields (`target_type`, `local_path`, `rsync_installed`).
+
+### Changed
+
+- **Backup section UI redesigned.** Two big tiles up front: 📁
+  "Local folder / NAS mount" (badged "Recommended") and ☁️
+  "Cloud storage (rclone)" (badged "Advanced"). Setup wizard step 3
+  follows the same pattern with local as the default.
+- **`SyncSettings`** gained `target_type: str` and `local_path: str`,
+  defaulting to `local` and `""` respectively. The legacy `remote`
+  field is preserved for the rclone path.
+
+## [0.11.0] – 2026-04-26
+
+### Added
+
+- **Multi-provider AI classifier.** A new `docusort/providers/`
+  package abstracts the model call so DocuSort can talk to Anthropic
+  Claude, OpenAI GPT, Google Gemini, or any OpenAI-Chat-Completions-
+  compatible endpoint (Ollama, Groq, xAI, Mistral, Together,
+  OpenRouter, …). Provider selection lives in `config.yaml` under
+  `ai.provider` / `ai.model` / `ai.base_url`; the legacy `claude:`
+  block is still honoured.
+- **Local AI via Ollama.** Pick `provider: openai_compat` with
+  `base_url: http://localhost:11434/v1` and a model name like
+  `llama3.1` or `qwen2.5` — DocuSort talks to the local engine via the
+  same OpenAI-compat path used for cloud providers. Cost is recorded
+  as 0 for local models since there's no per-token charge.
+- **Cross-provider pricing table** in `providers/pricing.py` covers
+  Anthropic (with cache write/read multipliers), OpenAI (with cached
+  prompt-token discount), and Gemini. `db.calculate_cost(model, …)`
+  still works for legacy callers — it infers the provider from the
+  model name and dispatches to the new table.
+- **Setup wizard** at `/setup` — four-step flow (language → provider
+  + token → backup → done) with provider cards, model defaults per
+  provider, and a final "Restart & open" button that triggers the
+  systemd restart hook.
+- **Settings page** at `/settings`, always reachable from the header
+  cog. Same fields as the wizard but as a single page; provider
+  switch is non-destructive — each provider's API key keeps its own
+  slot in `secrets.yaml`, so flipping back and forth doesn't lose
+  anything.
+- **First-run gate.** When no provider is configured, every request
+  except `/setup`, `/static/*`, and a small allow-list of setup APIs
+  redirects to the wizard. JSON callers get HTTP 503 with a clear
+  message instead of an HTML page. The watcher logs and skips
+  classification until the wizard is finished.
+- **Headless rclone remote setup.** Instead of running `rclone config`
+  on the headless box (which tries to open a browser and fails),
+  DocuSort writes `rclone.conf` directly. For OAuth backends
+  (Drive / Dropbox / OneDrive) the user runs `rclone authorize "drive"`
+  on a laptop and pastes the resulting JSON token into a textarea.
+  S3-compatibles, WebDAV, and SFTP get plain forms (access keys, URL,
+  user/password). All managed via new endpoints under
+  `/api/sync/remote/*` and `/api/sync/remotes`.
+- **API key storage in `config/secrets.yaml`.** Written with mode 0600
+  by `save_secrets()`, read back at runtime by `get_api_key()`. Also
+  honours the legacy `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+  `GEMINI_API_KEY` env vars as a fallback.
+- **`PyPI`: `openai>=1.50` and `google-genai>=0.3`** added to
+  `requirements.txt` (lazy-imported, so users who only run Anthropic
+  don't pay an import cost).
+
+### Changed
+
+- **`config.AppSettings.ai`** replaces `claude` (kept as a property
+  alias). Same fields — `provider`, `model`, `base_url`,
+  `max_text_chars`, `min_confidence`, `timeout_seconds`.
+- **`Classifier.__init__`** takes `AISettings` and an optional
+  `Provider` instance (built via `build_provider()` if omitted).
+  The classify path is unchanged otherwise — same prompt, same
+  validation, same return type.
+- **`/api/pricing`** now flattens all provider tables into one map so
+  the dashboard JS doesn't need to know about provider names.
+- **i18n: 81 new keys × 5 languages** for wizard/settings/local-sync
+  copy.
+
+## [0.10.2] – 2026-04-26
+
+### Fixed
+
+- **"Year = —" tree bucket was unreachable.** Documents without a
+  `doc_date` were grouped under a "—" year in the library tree, but
+  clicking the link sent `?year=—` which the filter translated to
+  `substr(doc_date, 1, 4) = '—'` — matched nothing. The bucket now
+  carries a separate `key: "unknown"` field; URLs use that, and
+  `list_documents()` translates `year="unknown"` to
+  `(doc_date IS NULL OR doc_date = '')`.
+- **Empty-trash button left the user staring at raw JSON.** The form
+  POSTed to `/api/trash/empty`, which returns `{"purged": N}`, and the
+  browser navigated to that response. Now done via fetch + reload.
+
 ## [0.10.1] – 2026-04-25
 
 ### Fixed

@@ -1,0 +1,688 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.settings') }} · DocuSort{% endblock %}
+{% block content %}
+
+<div x-data="settingsPage()">
+  <div class="mb-6">
+    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('nav.settings') }}</h1>
+    <p class="text-ink-400 mt-1 text-sm">{{ t('settings.subtitle') }}</p>
+  </div>
+
+  <!-- Single column, full container width (matches Library/Dashboard) -->
+  <div class="space-y-6">
+
+  <!-- ===== AI provider ===== -->
+  <section class="card p-6">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.ai.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.ai.subtitle') }}</p>
+
+    <label class="block text-sm font-medium mb-2">{{ t('setup.step_ai.provider') }}</label>
+    <select x-model="ai.provider" @change="onProviderChange()"
+            class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-4">
+      <option value="anthropic">Anthropic Claude</option>
+      <option value="openai">OpenAI GPT</option>
+      <option value="gemini">Google Gemini</option>
+      <option value="openai_compat">{{ t('setup.provider.compat_label') }}</option>
+    </select>
+
+    <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.model') }}</label>
+    <input x-model="ai.model" type="text"
+           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-4 font-mono">
+
+    <template x-if="ai.provider === 'openai_compat'">
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.base_url') }}</label>
+        <input x-model="ai.base_url" type="url" placeholder="http://localhost:11434/v1"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+    </template>
+
+    <template x-if="ai.provider !== 'openai_compat'">
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.api_key') }}</label>
+        <div class="text-xs text-ink-500 mb-1" x-text="storedHint"></div>
+        <input x-model="ai.api_key" type="password" autocomplete="off"
+               :placeholder="storedKey ? T['settings.ai.key_keep'] : T['settings.ai.key_paste']"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+    </template>
+
+    <div x-show="ai.message" x-cloak class="text-sm rounded-lg px-3 py-2 mb-3"
+         :class="ai.ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="ai.message"></div>
+
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-ink-500" x-show="ai.restartHint" x-cloak>
+        {{ t('settings.ai.restart_hint') }}
+      </p>
+      <div class="ml-auto flex gap-2">
+        <button type="button" @click="saveAi()" :disabled="ai.saving" class="btn-primary"
+                :class="ai.saving ? 'opacity-50 cursor-not-allowed' : ''">
+          <span x-show="!ai.saving">{{ t('settings.save') }}</span>
+          <span x-show="ai.saving" x-cloak>{{ t('setup.saving') }}</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Backup ===== -->
+  <section class="card p-6" x-data="syncSettings()">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.sync.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.sync.subtitle_v2') }}</p>
+
+    <!-- Big tile chooser: local vs cloud -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+      <button type="button" @click="targetType = 'local'"
+              :class="targetType === 'local' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+              class="rounded-xl border p-4 text-left transition">
+        <div class="flex items-center gap-2 mb-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5 text-emerald-300">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="font-medium">{{ t('settings.sync.local_title') }}</span>
+          <span class="ml-auto text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
+            {{ t('settings.sync.recommended') }}
+          </span>
+        </div>
+        <p class="text-xs text-ink-400">{{ t('settings.sync.local_hint') }}</p>
+      </button>
+
+      <button type="button" @click="targetType = 'rclone'"
+              :class="targetType === 'rclone' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+              class="rounded-xl border p-4 text-left transition">
+        <div class="flex items-center gap-2 mb-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5 text-sky-300">
+            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+          </svg>
+          <span class="font-medium">{{ t('settings.sync.cloud_title') }}</span>
+          <span class="ml-auto text-[10px] uppercase tracking-wider bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">
+            {{ t('settings.sync.advanced') }}
+          </span>
+        </div>
+        <p class="text-xs text-ink-400">{{ t('settings.sync.cloud_hint') }}</p>
+      </button>
+    </div>
+
+    <!-- ===== LOCAL target ===== -->
+    <template x-if="targetType === 'local'">
+      <div>
+        <label class="block text-sm font-medium mb-1">{{ t('settings.sync.local_path') }}</label>
+        <div class="flex gap-2 mb-2">
+          <input x-model="localPath" type="text"
+                 @input.debounce.500ms="checkPath()"
+                 placeholder="/mnt/backup/docusort"
+                 class="flex-1 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+          <button type="button" @click="openPicker()"
+                  class="btn-secondary whitespace-nowrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            {{ t('settings.sync.browse') }}
+          </button>
+        </div>
+        <div class="text-xs text-ink-500 mb-2">{{ t('settings.sync.local_path_hint') }}</div>
+
+        <div x-show="pathFeedback.shown" x-cloak class="text-xs rounded-lg px-3 py-2 mb-3"
+             :class="pathFeedback.ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+             x-text="pathFeedback.text"></div>
+
+        <label class="flex items-center gap-2 mb-3 text-sm">
+          <input x-model="enabled" type="checkbox" class="rounded">
+          {{ t('settings.sync.enabled') }}
+        </label>
+
+        <div class="flex gap-2">
+          <button type="button" @click="saveTarget()" :disabled="savingTarget" class="btn-primary"
+                  :class="savingTarget ? 'opacity-50 cursor-not-allowed' : ''">
+            {{ t('settings.save') }}
+          </button>
+          <button type="button" @click="runNow()" :disabled="!enabled || !localPath"
+                  class="btn-secondary"
+                  :class="(!enabled || !localPath) ? 'opacity-50 cursor-not-allowed' : ''">
+            {{ t('settings.sync.run_now') }}
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <!-- ===== CLOUD target ===== -->
+    <template x-if="targetType === 'rclone'">
+      <div>
+        {% if not rclone_installed %}
+          <div class="rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 mb-4 text-sm">
+            <strong class="text-amber-200">{{ t('setup.step_sync.no_rclone_title') }}</strong>
+            <p class="text-amber-100/80 mt-1">{{ t('setup.step_sync.no_rclone_hint') }}</p>
+            <code class="block mt-2 bg-ink-900/60 rounded px-2 py-1 text-xs">sudo apt install rclone</code>
+          </div>
+        {% else %}
+          <div class="text-xs text-ink-500 mb-4">rclone {{ rclone_version }}</div>
+
+          <h3 class="text-sm font-medium mb-2">{{ t('settings.sync.remotes') }}</h3>
+          {% if rclone_remotes %}
+          <div class="space-y-2 mb-4">
+            {% for r in rclone_remotes %}
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="font-mono truncate">{{ r.name }}</span>
+                <span class="text-ink-500">({{ r.type }})</span>
+                {% if not r.healthy %}
+                  <span class="text-[10px] uppercase tracking-wider bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded">
+                    {{ t('settings.sync.broken') }}
+                  </span>
+                {% endif %}
+              </div>
+              <div class="flex gap-1 flex-wrap">
+                {% if not r.healthy and r.type in oauth_backends %}
+                  <button type="button" @click="reconnectRemote('{{ r.name }}', '{{ r.type }}')"
+                          class="btn-ghost text-xs text-amber-300 hover:bg-amber-500/10">
+                    {{ t('settings.sync.reconnect') }}
+                  </button>
+                {% endif %}
+                <button type="button" @click="testRemote('{{ r.name }}')" class="btn-ghost text-xs">
+                  {{ t('settings.sync.test') }}
+                </button>
+                <button type="button" @click="deleteRemote('{{ r.name }}')"
+                        class="btn-ghost text-xs text-rose-300 hover:bg-rose-500/10">
+                  {{ t('settings.sync.delete') }}
+                </button>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+            <p class="text-sm text-ink-500 mb-4">{{ t('settings.sync.no_remotes') }}</p>
+          {% endif %}
+
+          <details class="mb-5" x-bind:open="reconnectName !== ''">
+            <summary class="cursor-pointer text-sm text-emerald-300 hover:text-emerald-200">
+              <span x-show="!reconnectName">+ {{ t('settings.sync.add_remote') }}</span>
+              <span x-show="reconnectName" x-cloak x-text="T['settings.sync.reconnect_heading'].replace('{name}', reconnectName)"></span>
+            </summary>
+            <div class="mt-3 rounded-xl bg-ink-900/40 border border-ink-700 p-4">
+              <template x-if="!reconnectName">
+                <div>
+                  <p class="text-xs text-ink-400 mb-2">{{ t('settings.sync.simple_first') }}</p>
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+                    <button type="button" @click="newBackend = 'webdav'"
+                            :class="newBackend === 'webdav' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                            class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+                      <div class="font-medium">WebDAV / Nextcloud</div>
+                      <div class="text-xs text-ink-400">{{ t('settings.sync.webdav_hint') }}</div>
+                    </button>
+                    <button type="button" @click="newBackend = 'sftp'"
+                            :class="newBackend === 'sftp' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                            class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+                      <div class="font-medium">SFTP</div>
+                      <div class="text-xs text-ink-400">{{ t('settings.sync.sftp_hint') }}</div>
+                    </button>
+                    <button type="button" @click="newBackend = 's3'"
+                            :class="newBackend === 's3' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                            class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+                      <div class="font-medium">S3 / R2 / MinIO</div>
+                      <div class="text-xs text-ink-400">{{ t('settings.sync.s3_hint') }}</div>
+                    </button>
+                  </div>
+
+                  <details>
+                    <summary class="cursor-pointer text-xs text-ink-400 hover:text-ink-200">
+                      {{ t('settings.sync.show_oauth') }}
+                    </summary>
+                    <div class="mt-3 rounded-lg bg-amber-500/5 border border-amber-500/20 p-3">
+                      <p class="text-xs text-amber-200/80 mb-2">{{ t('settings.sync.oauth_warning') }}</p>
+                      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button type="button" @click="newBackend = 'drive'"
+                                :class="newBackend === 'drive' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                                class="rounded-xl border px-3 py-2.5 text-left text-sm transition">Google Drive</button>
+                        <button type="button" @click="newBackend = 'dropbox'"
+                                :class="newBackend === 'dropbox' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                                class="rounded-xl border px-3 py-2.5 text-left text-sm transition">Dropbox</button>
+                        <button type="button" @click="newBackend = 'onedrive'"
+                                :class="newBackend === 'onedrive' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                                class="rounded-xl border px-3 py-2.5 text-left text-sm transition">OneDrive</button>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </template>
+
+              <template x-if="newBackend">
+                <div class="space-y-3">
+                  <template x-if="!reconnectName">
+                    <input x-model="newName" placeholder="remote name"
+                           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                  </template>
+
+                  <template x-if="['drive','dropbox','onedrive'].includes(newBackend)">
+                    <div>
+                      <div class="text-xs text-ink-400 mb-2">{{ t('setup.step_sync.oauth_intro') }}</div>
+                      <code class="block bg-ink-950 rounded px-2 py-1 text-xs font-mono select-all mb-2"
+                            x-text="'rclone authorize \"' + newBackend + '\"'"></code>
+                      <textarea x-model="newToken" rows="3" placeholder='{"access_token":"...","refresh_token":"..."}'
+                                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-xs font-mono"></textarea>
+                    </div>
+                  </template>
+
+                  <template x-if="newBackend === 's3'">
+                    <div class="grid grid-cols-2 gap-2">
+                      <input x-model="s3.access_key_id"     placeholder="Access key ID" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      <input x-model="s3.secret_access_key" type="password" placeholder="Secret" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      <input x-model="s3.region"            placeholder="Region" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      <input x-model="s3.endpoint"          placeholder="Endpoint" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                    </div>
+                  </template>
+
+                  <template x-if="newBackend === 'webdav'">
+                    <div class="space-y-2">
+                      <input x-model="webdav.url"      placeholder="URL" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      <div class="grid grid-cols-2 gap-2">
+                        <input x-model="webdav.user"     placeholder="user"     class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                        <input x-model="webdav.password" type="password" placeholder="password" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      </div>
+                    </div>
+                  </template>
+
+                  <template x-if="newBackend === 'sftp'">
+                    <div class="space-y-2">
+                      <div class="grid grid-cols-2 gap-2">
+                        <input x-model="sftp.host" placeholder="host" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                        <input x-model.number="sftp.port" type="number" placeholder="22" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                        <input x-model="sftp.user" placeholder="user" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                        <input x-model="sftp.password" type="password" placeholder="password (or blank for key)" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      </div>
+                      <input x-model="sftp.key_file" placeholder="path to private key (optional)" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                    </div>
+                  </template>
+
+                  <div class="flex gap-2">
+                    <button type="button" @click="addRemote()" :disabled="adding" class="btn-primary"
+                            :class="adding ? 'opacity-50 cursor-not-allowed' : ''">
+                      <span x-show="!reconnectName">{{ t('settings.sync.add_button') }}</span>
+                      <span x-show="reconnectName" x-cloak>{{ t('settings.sync.reconnect_button') }}</span>
+                    </button>
+                    <button type="button" x-show="reconnectName" @click="cancelReconnect()" class="btn-ghost">
+                      {{ t('setup.back') }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+
+              <div x-show="message" x-cloak class="mt-3 text-sm rounded-lg px-3 py-2"
+                   :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+                   x-text="message"></div>
+            </div>
+          </details>
+
+          <div class="border-t border-ink-700/50 pt-4">
+            <h3 class="text-sm font-medium mb-2">{{ t('settings.sync.target') }}</h3>
+            <label class="flex items-center gap-2 mb-3 text-sm">
+              <input x-model="enabled" type="checkbox" class="rounded">
+              {{ t('settings.sync.enabled') }}
+            </label>
+            <input x-model="remote" placeholder="remote-name:path"
+                   class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono mb-2">
+            <p class="text-xs text-ink-500 mb-3">{{ t('settings.sync.remote_hint') }}</p>
+            <div class="flex gap-2">
+              <button type="button" @click="saveTarget()" :disabled="savingTarget" class="btn-primary"
+                      :class="savingTarget ? 'opacity-50 cursor-not-allowed' : ''">
+                {{ t('settings.save') }}
+              </button>
+              <button type="button" @click="runNow()" :disabled="!enabled || !remote"
+                      class="btn-secondary"
+                      :class="(!enabled || !remote) ? 'opacity-50 cursor-not-allowed' : ''">
+                {{ t('settings.sync.run_now') }}
+              </button>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </template>
+
+    <!-- Folder picker modal — must live inside the syncSettings() scope -->
+    <div x-show="picker.open" x-cloak
+         @keydown.escape.window="picker.open = false"
+         class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/60">
+      <div class="w-full max-w-xl rounded-2xl bg-ink-900 border border-ink-700 shadow-2xl"
+           @click.outside="picker.open = false">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-ink-700">
+          <div class="font-medium text-sm">{{ t('settings.sync.picker_title') }}</div>
+          <button type="button" @click="picker.open = false" class="btn-ghost text-xs">✕</button>
+        </div>
+
+        <div class="px-4 py-3 border-b border-ink-700">
+          <div class="text-xs text-ink-400 mb-1">{{ t('settings.sync.current_path') }}</div>
+          <div class="font-mono text-xs text-emerald-300 truncate" x-text="picker.path || '/'"></div>
+        </div>
+
+        <div class="px-4 py-2 border-b border-ink-700 flex flex-wrap gap-1">
+          <template x-for="s in picker.shortcuts" :key="s.path">
+            <button type="button" @click="loadPicker(s.path)"
+                    class="text-xs px-2 py-1 rounded-md bg-ink-800 hover:bg-ink-700"
+                    x-text="s.label"></button>
+          </template>
+        </div>
+
+        <div class="max-h-80 overflow-y-auto">
+          <button type="button" x-show="picker.parent" @click="loadPicker(picker.parent)"
+                  class="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-ink-800/50 text-ink-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+              <path d="m9 18-6-6 6-6"/>
+            </svg>
+            ..
+          </button>
+          <template x-if="picker.error">
+            <div class="px-4 py-3 text-xs text-rose-300" x-text="picker.error"></div>
+          </template>
+          <template x-for="d in picker.entries" :key="d.path">
+            <button type="button" @click="loadPicker(d.path)"
+                    class="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-ink-800/50">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4 text-emerald-300">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span x-text="d.name"></span>
+            </button>
+          </template>
+          <template x-if="!picker.entries.length && !picker.error">
+            <div class="px-4 py-6 text-center text-xs text-ink-500">{{ t('settings.sync.empty_dir') }}</div>
+          </template>
+        </div>
+
+        <div class="px-4 py-3 border-t border-ink-700 flex justify-end gap-2">
+          <button type="button" @click="picker.open = false" class="btn-ghost text-sm">{{ t('setup.back') }}</button>
+          <button type="button" @click="pickCurrent()" class="btn-primary text-sm">
+            {{ t('settings.sync.pick_this') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Library paths (read-only display) ===== -->
+  <section class="card p-6">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.paths.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-4">{{ t('settings.paths.subtitle') }}</p>
+    <div class="space-y-2 text-sm">
+      <div class="flex items-center justify-between rounded-lg bg-ink-900/60 px-3 py-2">
+        <span class="text-ink-400">{{ t('settings.paths.library') }}</span>
+        <code class="font-mono text-emerald-300">{{ library_path }}</code>
+      </div>
+      <div class="flex items-center justify-between rounded-lg bg-ink-900/60 px-3 py-2">
+        <span class="text-ink-400">{{ t('settings.paths.inbox') }}</span>
+        <code class="font-mono text-emerald-300">{{ inbox_path }}</code>
+      </div>
+    </div>
+    <p class="text-xs text-ink-500 mt-3">{{ t('settings.paths.hint') }}</p>
+  </section>
+
+  </div><!-- /grid -->
+</div>
+
+<script>
+function settingsPage() {
+  return {
+    storedKey: '{{ stored_secrets.get(current_provider + "_api_key", "") }}',
+    storedHint: '',
+    ai: {
+      provider:  '{{ current_provider }}',
+      model:     '{{ current_model }}',
+      base_url:  '{{ current_base_url }}',
+      api_key:   '',
+      saving:    false,
+      message:   '',
+      ok:        false,
+      restartHint: false,
+    },
+    init() {
+      this.updateStoredHint();
+    },
+    updateStoredHint() {
+      this.storedHint = this.storedKey
+        ? T['settings.ai.key_stored'].replace('{key}', this.storedKey)
+        : T['settings.ai.key_none'];
+    },
+    onProviderChange() {
+      // Refetch the masked stored key for the newly chosen provider.
+      const stored = {{ stored_secrets | tojson }};
+      this.storedKey = stored[this.ai.provider + '_api_key'] || '';
+      this.updateStoredHint();
+    },
+    async saveAi() {
+      this.ai.message = '';
+      this.ai.saving  = true;
+      try {
+        const r = await fetch('/api/settings/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: this.ai.provider,
+            model: this.ai.model,
+            base_url: this.ai.base_url,
+            api_key: this.ai.api_key,
+          }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        const d = await r.json();
+        this.ai.ok = true;
+        this.ai.message = T['settings.ai.saved'];
+        this.ai.restartHint = !!d.restart_required;
+        this.ai.api_key = '';
+      } catch (e) {
+        this.ai.ok = false;
+        this.ai.message = e.message || String(e);
+      } finally {
+        this.ai.saving = false;
+      }
+    },
+  };
+}
+
+function syncSettings() {
+  return {
+    targetType:  '{{ sync_target_type }}' || 'local',
+    enabled:     {{ sync_enabled | tojson }},
+    localPath:   '{{ sync_local_path }}',
+    remote:      '{{ sync_remote }}',
+    pathFeedback: { shown: false, ok: false, text: '' },
+    savingTarget: false,
+
+    // Cloud — add new / reconnect
+    newBackend: '',
+    newName:    'cloud',
+    newToken:   '',
+    reconnectName: '',  // when set, we're updating an existing OAuth remote
+    s3:     { access_key_id: '', secret_access_key: '', region: '', endpoint: '' },
+    webdav: { url: '', user: '', password: '' },
+    sftp:   { host: '', port: 22, user: '', password: '', key_file: '' },
+    adding: false,
+    message: '',
+    ok: false,
+
+    // Folder picker state
+    picker: { open: false, path: '/', parent: '', entries: [], shortcuts: [], error: '' },
+
+    init() {
+      if (this.localPath) this.checkPath();
+    },
+
+    async openPicker() {
+      const start = this.localPath || '/';
+      this.picker.open = true;
+      await this.loadPicker(start);
+    },
+    async loadPicker(path) {
+      try {
+        const r = await fetch('/api/fs/list?path=' + encodeURIComponent(path));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.picker.error = d.detail || ('HTTP ' + r.status);
+          return;
+        }
+        this.picker.path      = d.path;
+        this.picker.parent    = d.parent;
+        this.picker.entries   = d.entries || [];
+        this.picker.shortcuts = d.shortcuts || [];
+        this.picker.error     = d.error || '';
+      } catch (e) {
+        this.picker.error = String(e);
+      }
+    },
+    pickCurrent() {
+      this.localPath = this.picker.path;
+      this.picker.open = false;
+      this.checkPath();
+    },
+
+    async checkPath() {
+      if (!this.localPath) { this.pathFeedback.shown = false; return; }
+      try {
+        const r = await fetch('/api/sync/check-path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: this.localPath }),
+        });
+        const d = await r.json().catch(() => ({}));
+        this.pathFeedback.shown = true;
+        if (d.ok) {
+          this.pathFeedback.ok = true;
+          if (d.free_bytes != null) {
+            const gb = (d.free_bytes / 1024 / 1024 / 1024).toFixed(1);
+            this.pathFeedback.text = T['settings.sync.path_ok'].replace('{free}', gb);
+          } else {
+            this.pathFeedback.text = T['settings.sync.path_ok_short'];
+          }
+        } else {
+          this.pathFeedback.ok = false;
+          this.pathFeedback.text = T['settings.sync.path_bad'] + ' ' + (d.error || '');
+        }
+      } catch (e) {
+        this.pathFeedback.shown = true;
+        this.pathFeedback.ok = false;
+        this.pathFeedback.text = String(e);
+      }
+    },
+
+    reconnectRemote(name, type) {
+      this.reconnectName = name;
+      this.newName = name;
+      this.newBackend = type;
+      this.newToken = '';
+      this.message = '';
+      // Auto-scroll to the form so the user sees the textarea.
+      setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50);
+    },
+
+    cancelReconnect() {
+      this.reconnectName = '';
+      this.newBackend = '';
+      this.newToken = '';
+    },
+
+    async addRemote() {
+      this.message = '';
+      this.adding = true;
+      try {
+        let r;
+        if (['drive','dropbox','onedrive'].includes(this.newBackend)) {
+          r = await fetch('/api/sync/remote/oauth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newName, backend: this.newBackend, token: this.newToken }),
+          });
+        } else if (this.newBackend === 's3') {
+          r = await fetch('/api/sync/remote/s3', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newName, ...this.s3 }),
+          });
+        } else if (this.newBackend === 'webdav') {
+          r = await fetch('/api/sync/remote/webdav', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newName, ...this.webdav }),
+          });
+        } else if (this.newBackend === 'sftp') {
+          r = await fetch('/api/sync/remote/sftp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newName, ...this.sftp }),
+          });
+        } else {
+          throw new Error('Choose a backend first');
+        }
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        this.ok = true;
+        const tplKey = this.reconnectName
+          ? 'settings.sync.reconnected'
+          : 'settings.sync.added';
+        this.message = T[tplKey].replace('{name}', this.newName);
+        setTimeout(() => location.reload(), 800);
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally {
+        this.adding = false;
+      }
+    },
+
+    async testRemote(name) {
+      const r = await fetch('/api/sync/test/' + encodeURIComponent(name), { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      alert(d.ok
+        ? T['settings.sync.test_ok'].replace('{name}', name)
+        : T['settings.sync.test_fail'].replace('{name}', name) + '\n' + (d.error || ''));
+    },
+
+    async deleteRemote(name) {
+      if (!confirm(T['settings.sync.confirm_delete'].replace('{name}', name))) return;
+      const r = await fetch('/api/sync/remote/' + encodeURIComponent(name), { method: 'DELETE' });
+      if (r.ok) location.reload();
+      else alert('HTTP ' + r.status);
+    },
+
+    async saveTarget() {
+      this.savingTarget = true;
+      try {
+        const body = {
+          enabled: this.enabled,
+          target_type: this.targetType,
+          local_path: this.localPath,
+          remote: this.remote,
+          source: 'library',
+        };
+        const r = await fetch('/api/settings/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        alert(T['settings.sync.target_saved']);
+      } catch (e) {
+        alert(e.message || String(e));
+      } finally {
+        this.savingTarget = false;
+      }
+    },
+
+    async runNow() {
+      try {
+        const r = await fetch('/api/sync/run', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        alert(T['settings.sync.started']);
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    },
+  };
+}
+</script>
+
+{% endblock %}

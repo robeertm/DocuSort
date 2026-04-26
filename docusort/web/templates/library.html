@@ -15,14 +15,17 @@
   </div>
   <div class="flex items-center gap-2">
     {% if trash %}
-      <form method="post" action="/api/trash/empty" onsubmit="return confirm('{{ t('trash.confirm_empty') }}');">
-        <button type="submit" class="btn-ghost text-rose-300 hover:bg-rose-500/10">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
-          </svg>
-          {{ t('trash.empty_all') }}
-        </button>
-      </form>
+      <button type="button" x-data
+              @click="if (confirm('{{ t('trash.confirm_empty') }}')) {
+                fetch('/api/trash/empty', { method: 'POST' })
+                  .then(r => r.ok ? location.reload() : r.json().then(d => alert(d.detail || ('HTTP '+r.status))));
+              }"
+              class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+        </svg>
+        {{ t('trash.empty_all') }}
+      </button>
     {% else %}
       <a href="/api/export.zip{% if filter.year %}?year={{ filter.year }}{% if filter.category %}&category={{ filter.category }}{% endif %}{% elif filter.category %}?category={{ filter.category }}{% endif %}"
          class="btn-secondary">
@@ -72,7 +75,7 @@
   {% if filter.year %}
     <a href="/library?{% if filter.category %}category={{ filter.category }}&{% endif %}{% if filter.status %}status={{ filter.status }}&{% endif %}{% if filter.q %}q={{ filter.q }}{% endif %}"
        class="chip bg-ink-700/60 text-ink-100 hover:bg-ink-600">
-      {{ filter.year }} <span class="text-ink-400 ml-1">✕</span>
+      {% if filter.year == 'unknown' %}—{% else %}{{ filter.year }}{% endif %} <span class="text-ink-400 ml-1">✕</span>
     </a>
   {% endif %}
   {% if filter.category %}
@@ -111,10 +114,10 @@
     </div>
 
     {% for y in tree.years %}
-      {% set y_open = (filter.year == y.year) %}
+      {% set y_open = (filter.year == y.key) %}
       <div x-data="{ open: {{ y_open | tojson }} }" class="mb-0.5">
         <div class="flex items-center rounded-lg hover:bg-ink-700/30"
-             :class="'{{ y.year }}' === currentYear && !currentCategory ? 'bg-emerald-500/15 text-emerald-200' : ''">
+             :class="'{{ y.key }}' === currentYear && !currentCategory ? 'bg-emerald-500/15 text-emerald-200' : ''">
           <button type="button" @click="open = !open"
                   class="p-1.5 text-ink-500 hover:text-ink-200 shrink-0">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -124,7 +127,7 @@
               <path d="m9 18 6-6-6-6"/>
             </svg>
           </button>
-          <a href="/library?year={{ y.year }}" class="flex-1 flex items-center justify-between py-1.5 pr-2 text-sm">
+          <a href="/library?year={{ y.key }}" class="flex-1 flex items-center justify-between py-1.5 pr-2 text-sm">
             <span class="font-medium">{{ y.year }}</span>
             <span class="tabular-nums text-xs text-ink-400">{{ y.count }}</span>
           </a>
@@ -132,9 +135,9 @@
         <div x-show="open" class="pl-7 pr-1 space-y-0.5"
              {% if not y_open %}style="display: none"{% endif %}>
           {% for c in y.categories %}
-            <a href="/library?year={{ y.year }}&category={{ c.name }}"
+            <a href="/library?year={{ y.key }}&category={{ c.name }}"
                class="flex items-center justify-between rounded-md px-2 py-1 text-sm hover:bg-ink-700/30"
-               :class="'{{ y.year }}' === currentYear && '{{ c.name }}' === currentCategory ? 'bg-emerald-500/15 text-emerald-200' : 'text-ink-300'">
+               :class="'{{ y.key }}' === currentYear && '{{ c.name }}' === currentCategory ? 'bg-emerald-500/15 text-emerald-200' : 'text-ink-300'">
               <span class="truncate">{{ cat(c.name) }}</span>
               <span class="tabular-nums text-xs text-ink-500">{{ c.count }}</span>
             </a>

@@ -53,16 +53,23 @@ def rclone_available() -> bool:
     return shutil.which("rclone") is not None
 
 
+def rsync_available() -> bool:
+    return shutil.which("rsync") is not None
+
+
 def status(settings: AppSettings) -> dict[str, Any]:
     with _state_lock:
         snapshot = dict(_state)
     cfg = getattr(settings, "sync", None)
     return {
         **snapshot,
-        "enabled": bool(cfg.enabled) if cfg else False,
-        "remote": cfg.remote if cfg else None,
-        "source": cfg.source if cfg else None,
+        "enabled":     bool(cfg.enabled) if cfg else False,
+        "target_type": cfg.target_type if cfg else "local",
+        "local_path":  cfg.local_path if cfg else "",
+        "remote":      cfg.remote if cfg else None,
+        "source":      cfg.source if cfg else None,
         "rclone_installed": rclone_available(),
+        "rsync_installed":  rsync_available(),
     }
 
 
@@ -105,28 +112,52 @@ def _parse_rclone_stats(lines: list[str]) -> dict[str, Any]:
 
 
 def run_sync(settings: AppSettings) -> dict[str, Any]:
-    """Execute `rclone sync` once. Blocks until finished. Updates the shared
-    state dict. Returns the final state snapshot."""
+    """Execute one sync run. Dispatches between the rclone backend and the
+    rsync-based local-folder backend based on settings.sync.target_type.
+    Blocks until finished, updates the shared state dict, returns a result
+    snapshot."""
     cfg = getattr(settings, "sync", None)
     if not cfg or not cfg.enabled:
         return {"ok": False, "error": "sync disabled in config"}
-    if not cfg.remote:
-        return {"ok": False, "error": "no remote configured"}
-    if not rclone_available():
-        return {"ok": False, "error": "rclone not installed on PATH"}
 
     src = _source_path(settings)
     if not src.exists():
         return {"ok": False, "error": f"source missing: {src}"}
 
-    started = time.monotonic()
-    started_at = datetime.now().isoformat(timespec="seconds")
     with _state_lock:
         if _state["running"]:
             return {"ok": False, "error": "a sync is already running"}
         _state["running"] = True
-        _state["last_started_at"] = started_at
+        _state["last_started_at"] = datetime.now().isoformat(timespec="seconds")
 
+    if cfg.target_type == "local":
+        return _run_local_sync(cfg, src)
+    return _run_rclone_sync(cfg, src)
+
+
+def _finalise_state(*, ok: bool, message: str, duration: float,
+                    stats: dict[str, Any] | None = None) -> None:
+    with _state_lock:
+        _state["running"] = False
+        _state["last_finished_at"] = datetime.now().isoformat(timespec="seconds")
+        _state["last_duration_seconds"] = duration
+        _state["last_result"] = "ok" if ok else "error"
+        _state["last_message"] = message
+        if stats:
+            _state["last_transferred"] = stats.get("transferred")
+            _state["last_files"]       = stats.get("files")
+            _state["last_errors"]      = stats.get("errors")
+
+
+def _run_rclone_sync(cfg, src) -> dict[str, Any]:
+    if not cfg.remote:
+        _finalise_state(ok=False, message="no remote configured", duration=0)
+        return {"ok": False, "error": "no remote configured"}
+    if not rclone_available():
+        _finalise_state(ok=False, message="rclone not installed", duration=0)
+        return {"ok": False, "error": "rclone not installed on PATH"}
+
+    started = time.monotonic()
     cmd = [
         "rclone", "sync",
         str(src), cfg.remote,
@@ -134,39 +165,134 @@ def run_sync(settings: AppSettings) -> dict[str, Any]:
         "--stats=5s", "--stats-one-line",
     ] + list(cfg.extra_flags or [])
 
-    logger.info("Running: %s", " ".join(cmd))
+    logger.info("Running rclone: %s", " ".join(cmd))
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=cfg.timeout_seconds,
         )
-        duration = round(time.monotonic() - started, 1)
-        ok = (result.returncode == 0)
-        stats = _parse_rclone_stats(result.stderr.splitlines()[-50:])
-        with _state_lock:
-            _state["running"] = False
-            _state["last_finished_at"] = datetime.now().isoformat(timespec="seconds")
-            _state["last_duration_seconds"] = duration
-            _state["last_result"] = "ok" if ok else "error"
-            _state["last_message"] = (
-                "synced" if ok else (result.stderr or "unknown error")[-800:]
-            )
-            _state["last_transferred"] = stats.get("transferred")
-            _state["last_files"] = stats.get("files")
-            _state["last_errors"] = stats.get("errors")
-        return {"ok": ok, **stats, "duration_seconds": duration}
     except subprocess.TimeoutExpired:
-        with _state_lock:
-            _state["running"] = False
-            _state["last_result"] = "error"
-            _state["last_message"] = "timeout"
+        _finalise_state(ok=False, message="timeout", duration=cfg.timeout_seconds)
         return {"ok": False, "error": "rclone sync timed out"}
     except Exception as exc:
         logger.exception("rclone sync failed")
-        with _state_lock:
-            _state["running"] = False
-            _state["last_result"] = "error"
-            _state["last_message"] = str(exc)
+        _finalise_state(ok=False, message=str(exc), duration=round(time.monotonic()-started,1))
         return {"ok": False, "error": str(exc)}
+
+    duration = round(time.monotonic() - started, 1)
+    ok = (result.returncode == 0)
+    stats = _parse_rclone_stats(result.stderr.splitlines()[-50:])
+    _finalise_state(
+        ok=ok,
+        message="synced" if ok else (result.stderr or "unknown error")[-800:],
+        duration=duration, stats=stats,
+    )
+    return {"ok": ok, **stats, "duration_seconds": duration}
+
+
+def _run_local_sync(cfg, src) -> dict[str, Any]:
+    """Mirror the library to a local path with rsync. Falls back to a pure-
+    Python copy when rsync isn't available (slower but works everywhere)."""
+    target = cfg.local_path.strip() if cfg.local_path else ""
+    if not target:
+        _finalise_state(ok=False, message="no local target path", duration=0)
+        return {"ok": False, "error": "sync.local_path is empty"}
+    target_path = Path(target).expanduser()
+
+    # Refuse to sync onto the library itself or any of its parents — that
+    # would either be a no-op (same path) or destroy unrelated files.
+    try:
+        if target_path == src or src in target_path.parents or target_path in src.parents:
+            _finalise_state(ok=False, message="target overlaps source", duration=0)
+            return {"ok": False, "error":
+                    f"target {target_path} overlaps source {src}"}
+    except Exception:
+        pass
+
+    try:
+        target_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _finalise_state(ok=False, message=f"cannot create target: {exc}", duration=0)
+        return {"ok": False, "error": str(exc)}
+
+    started = time.monotonic()
+
+    if rsync_available():
+        # Trailing slash on src means "copy contents of src into target",
+        # not "copy src dir into target". --delete-excluded removes files
+        # that no longer exist in the source so the mirror stays clean.
+        cmd = [
+            "rsync", "-a", "--delete", "--delete-excluded",
+            "--exclude=_Trash/", "--exclude=_Trash/**",
+            "--info=stats2",
+            f"{src}/", f"{target_path}/",
+        ]
+        logger.info("Running rsync: %s", " ".join(cmd))
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=cfg.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            _finalise_state(ok=False, message="timeout", duration=cfg.timeout_seconds)
+            return {"ok": False, "error": "local sync timed out"}
+        duration = round(time.monotonic() - started, 1)
+        ok = (result.returncode == 0)
+        stats = _parse_rsync_stats(result.stdout)
+        _finalise_state(
+            ok=ok,
+            message="synced" if ok else (result.stderr or "rsync failed")[-800:],
+            duration=duration, stats=stats,
+        )
+        return {"ok": ok, **stats, "duration_seconds": duration}
+
+    # Pure-Python fallback — copytree with dirs_exist_ok. Slower and not
+    # incremental; only used when rsync isn't available (rare on Linux/Mac).
+    logger.warning("rsync not found — falling back to shutil.copytree (slower)")
+    try:
+        for child in target_path.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+        copied = 0
+        for entry in src.rglob("*"):
+            if entry.is_dir():
+                continue
+            if "_Trash" in entry.relative_to(src).parts:
+                continue
+            dest = target_path / entry.relative_to(src)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(entry, dest)
+            copied += 1
+        duration = round(time.monotonic() - started, 1)
+        _finalise_state(
+            ok=True, message="synced (python fallback)", duration=duration,
+            stats={"files": copied, "errors": 0},
+        )
+        return {"ok": True, "files": copied, "duration_seconds": duration}
+    except Exception as exc:
+        logger.exception("local sync (python fallback) failed")
+        _finalise_state(ok=False, message=str(exc),
+                        duration=round(time.monotonic()-started, 1))
+        return {"ok": False, "error": str(exc)}
+
+
+def _parse_rsync_stats(stdout: str) -> dict[str, Any]:
+    """Pull the few numbers we care about out of `rsync --info=stats2`."""
+    info: dict[str, Any] = {}
+    for line in stdout.splitlines():
+        line = line.strip()
+        if line.startswith("Number of regular files transferred:"):
+            try:
+                info["files"] = int(line.split(":")[1].strip().replace(",", ""))
+            except Exception:
+                pass
+        elif line.startswith("Total transferred file size:"):
+            try:
+                info["transferred"] = line.split(":", 1)[1].split("(")[0].strip()
+            except Exception:
+                pass
+    info.setdefault("errors", 0)
+    return info
 
 
 def run_sync_async(settings: AppSettings) -> dict[str, str]:

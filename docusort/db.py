@@ -20,16 +20,29 @@ from typing import Any, Iterable
 logger = logging.getLogger("docusort.db")
 
 
-# Anthropic public list pricing (USD per 1M tokens, input / output).
-# Keyed by model prefix — dated suffixes like "-20251001" match via startswith.
-# Cache read/write multipliers are the documented ephemeral-cache factors.
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-haiku-4-5":  (1.0,  5.0),
-    "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-opus-4-7":  (15.0, 75.0),
-}
-CACHE_WRITE_MULTIPLIER = 1.25  # 5-minute ephemeral cache write surcharge
-CACHE_READ_MULTIPLIER  = 0.10  # cached token read factor
+# Cost calculation lives in providers.pricing now (so each provider can
+# contribute its own model table). We keep these names exported as legacy
+# aliases for the dashboard UI, retry.py, etc.
+from .providers.pricing import (  # noqa: E402
+    all_pricing as _all_pricing,
+    calculate_cost as _provider_calc_cost,
+)
+
+CACHE_WRITE_MULTIPLIER = 1.25
+CACHE_READ_MULTIPLIER  = 0.10
+
+
+def _provider_for_model(model: str) -> str:
+    """Infer the provider from a model string for legacy callers that only
+    have the model name available (e.g. dashboard cost recompute)."""
+    m = (model or "").lower()
+    if m.startswith("claude"):
+        return "anthropic"
+    if m.startswith(("gpt", "o1", "o3", "o4", "chatgpt")):
+        return "openai"
+    if m.startswith("gemini"):
+        return "gemini"
+    return "openai_compat"
 
 
 def calculate_cost(
@@ -40,16 +53,22 @@ def calculate_cost(
     cache_write: int = 0,
     cache_read: int = 0,
 ) -> float:
-    for prefix, (in_price, out_price) in MODEL_PRICING.items():
-        if model.startswith(prefix):
-            return (
-                input_tokens  * in_price
-                + output_tokens * out_price
-                + cache_write   * in_price * CACHE_WRITE_MULTIPLIER
-                + cache_read    * in_price * CACHE_READ_MULTIPLIER
-            ) / 1_000_000
-    logger.warning("Unknown model %s – cost will be recorded as 0", model)
-    return 0.0
+    return _provider_calc_cost(
+        _provider_for_model(model), model, input_tokens, output_tokens,
+        cache_write=cache_write, cache_read=cache_read,
+    )
+
+
+# Flat dict for the /api/pricing endpoint — flattens all provider tables
+# into one map so the JS frontend keeps working unchanged.
+def _flatten_pricing() -> dict[str, tuple[float, float]]:
+    flat: dict[str, tuple[float, float]] = {}
+    for table in _all_pricing().values():
+        flat.update(table)
+    return flat
+
+
+MODEL_PRICING: dict[str, tuple[float, float]] = _flatten_pricing()
 
 
 @dataclass
@@ -352,7 +371,9 @@ class Database:
             if status:
                 sql += " AND d.status = ?"
                 params.append(status)
-            if year:
+            if year == "unknown":
+                sql += " AND (d.doc_date IS NULL OR d.doc_date = '')"
+            elif year:
                 sql += " AND substr(d.doc_date, 1, 4) = ?"
                 params.append(year)
             sql += " ORDER BY rank LIMIT ? OFFSET ?"
@@ -371,7 +392,9 @@ class Database:
             if status:
                 where.append("status = ?")
                 params.append(status)
-            if year:
+            if year == "unknown":
+                where.append("(doc_date IS NULL OR doc_date = '')")
+            elif year:
                 where.append("substr(doc_date, 1, 4) = ?")
                 params.append(year)
             where_sql = " WHERE " + " AND ".join(where)
@@ -529,7 +552,10 @@ class Database:
         by_year: dict[str, dict[str, Any]] = {}
         for r in rows:
             y = r["year"] or "—"
-            bucket = by_year.setdefault(y, {"year": y, "count": 0, "cost_usd": 0.0, "categories": []})
+            key = "unknown" if y == "—" else y
+            bucket = by_year.setdefault(
+                y, {"year": y, "key": key, "count": 0, "cost_usd": 0.0, "categories": []}
+            )
             bucket["count"] += int(r["n"])
             bucket["cost_usd"] += float(r["cost_usd"] or 0)
             bucket["categories"].append({

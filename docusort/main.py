@@ -24,7 +24,7 @@ from pathlib import Path
 
 from . import __version__
 from .classifier import Classification, Classifier
-from .config import AppSettings, get_api_key, load_config
+from .config import AppSettings, get_api_key, is_configured, load_config
 from .db import Database, DocumentRecord, open_db
 from .logger import setup_logger
 from .ocr import OcrResult, extract_text, is_supported
@@ -40,12 +40,16 @@ def _sha256(path: Path, chunk_size: int = 1 << 16) -> str:
     return h.hexdigest()
 
 
-def _build_pipeline(settings: AppSettings, classifier: Classifier, db: Database):
+def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Database):
     log = logging.getLogger("docusort.pipeline")
     sem = threading.BoundedSemaphore(max(1, settings.ocr.max_parallel))
 
     def process(path: Path) -> None:
         if not path.exists() or not is_supported(path):
+            return
+        if classifier is None:
+            log.info("Skipping %s — AI provider not configured. "
+                     "Finish /setup, then restart docusort.", path.name)
             return
         with sem:
             _process_one(path)
@@ -274,14 +278,25 @@ def main(argv: list[str] | None = None) -> int:
 
     _ensure_dirs(settings)
 
-    try:
-        api_key = get_api_key()
-    except RuntimeError as exc:
-        log.error("%s", exc)
-        return 2
-
     db = open_db(settings.paths.db)
-    classifier = Classifier(api_key, settings.claude, settings.categories)
+
+    classifier: Classifier | None = None
+    if is_configured(settings):
+        try:
+            api_key = get_api_key(settings)
+            classifier = Classifier(api_key, settings.ai, settings.categories)
+        except Exception as exc:
+            log.error("Classifier init failed (provider=%s): %s",
+                      settings.ai.provider, exc)
+            classifier = None
+    else:
+        log.warning("AI provider not configured — web UI starts in setup mode, "
+                    "watcher will skip classification until /setup is completed.")
+
+    if (args.backfill_tags or args.backfill_dry_run) and classifier is None:
+        log.error("Cannot run backfill: AI provider not configured. "
+                  "Open the web UI and finish /setup first.")
+        return 2
 
     if args.backfill_tags or args.backfill_dry_run:
         from . import backfill as backfill_mod

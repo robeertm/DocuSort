@@ -1,9 +1,14 @@
-"""Claude-powered document classifier.
+"""AI-powered document classifier.
 
-Given the extracted text of a document, asks Claude to return structured
-metadata:  category, document date, sender, short subject and a confidence
-score. Responses are forced into JSON via a strong system prompt and parsed
-defensively – any parsing failure routes the document to the review folder.
+Given the extracted text of a document, asks the configured AI provider to
+return structured metadata: category, document date, sender, short subject
+and a confidence score. Responses are forced into JSON via a strong system
+prompt and parsed defensively — any parsing failure routes the document to
+the review folder.
+
+Provider selection (Anthropic / OpenAI / Gemini / Ollama) lives in
+docusort/providers/. The classifier just speaks to the abstract
+`Provider` interface.
 """
 
 from __future__ import annotations
@@ -15,10 +20,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from anthropic import Anthropic
-
-from .config import ClaudeSettings
-from .db import calculate_cost
+from .config import AISettings
+from .providers import Provider, ProviderError, build_provider
 
 
 logger = logging.getLogger("docusort.classifier")
@@ -359,11 +362,17 @@ def _parse_response(raw: str) -> dict[str, Any]:
 
 
 class Classifier:
-    def __init__(self, api_key: str, settings: ClaudeSettings,
-                 categories: list[dict[str, Any]]):
-        self.client = Anthropic(api_key=api_key, timeout=settings.timeout_seconds)
+    def __init__(self, api_key: str, settings: AISettings,
+                 categories: list[dict[str, Any]],
+                 provider: Provider | None = None):
         self.settings = settings
         self.categories = categories
+        self.provider: Provider = provider or build_provider(
+            settings.provider,
+            api_key=api_key,
+            base_url=settings.base_url,
+            timeout=settings.timeout_seconds,
+        )
         self._allowed_names = {c["name"] for c in categories}
         self._allowed_subs: dict[str, set[str]] = {
             c["name"]: set(c.get("subcategories") or []) for c in categories
@@ -372,26 +381,21 @@ class Classifier:
 
     def classify(self, text: str) -> Classification:
         user = _build_user_message(text, self.settings.max_text_chars)
-        logger.debug("Calling Claude model=%s, text_len=%d",
-                     self.settings.model, len(text))
+        logger.debug("Calling %s model=%s, text_len=%d",
+                     self.provider.name, self.settings.model, len(text))
 
-        # Mark the system prompt as cacheable. Haiku requires ~2048 tokens to
-        # cache; our beefed-up prompt sits just above that, so after the first
-        # call the prompt is billed at 0.1x instead of 1.0x.
-        resp = self.client.messages.create(
-            model=self.settings.model,
-            max_tokens=600,
-            system=[{
-                "type": "text",
-                "text": self._system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }],
-            messages=[{"role": "user", "content": user}],
-        )
-        raw = "".join(
-            block.text for block in resp.content if getattr(block, "type", "") == "text"
-        )
-        data = _parse_response(raw)
+        try:
+            resp = self.provider.classify(
+                system_prompt=self._system_prompt,
+                user_prompt=user,
+                model=self.settings.model,
+                max_output_tokens=600,
+            )
+        except ProviderError as exc:
+            logger.error("Provider %s failed: %s", self.provider.name, exc)
+            raise
+
+        data = _parse_response(resp.raw_text)
 
         category = str(data.get("category", "Sonstiges")).strip()
         if category not in self._allowed_names:
@@ -419,17 +423,6 @@ class Classifier:
                 if len(tags) >= 3:
                     break
 
-        u = resp.usage
-        in_tok = int(getattr(u, "input_tokens", 0) or 0)
-        out_tok = int(getattr(u, "output_tokens", 0) or 0)
-        cache_write = int(getattr(u, "cache_creation_input_tokens", 0) or 0)
-        cache_read  = int(getattr(u, "cache_read_input_tokens", 0) or 0)
-
-        cost = calculate_cost(
-            self.settings.model, in_tok, out_tok,
-            cache_write=cache_write, cache_read=cache_read,
-        )
-
         return Classification(
             category=category,
             subcategory=subcategory,
@@ -439,10 +432,10 @@ class Classifier:
             subject=str(data.get("subject", "")).strip() or "Dokument",
             confidence=float(data.get("confidence", 0.5)),
             reasoning=str(data.get("reasoning", "")).strip(),
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cache_creation_tokens=cache_write,
-            cache_read_tokens=cache_read,
-            cost_usd=cost,
-            model=self.settings.model,
+            input_tokens=resp.input_tokens,
+            output_tokens=resp.output_tokens,
+            cache_creation_tokens=resp.cache_creation_tokens,
+            cache_read_tokens=resp.cache_read_tokens,
+            cost_usd=resp.cost_usd,
+            model=resp.model,
         )
