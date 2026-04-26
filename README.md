@@ -351,4 +351,15 @@ For scheduled sync, point a systemd timer at
 
 ## License
 
-MIT – see `LICENSE`.
+Proprietary — see [`LICENSE`](LICENSE).
+
+DocuSort is source-available but not open source. You may download, install
+and run it for personal, non-commercial use, and read the source code for
+inspection and security review. Modification, redistribution, derivative
+works, and commercial use require prior written permission from the
+copyright holder.
+
+Versions up to and including **v0.12.3 are still available under the MIT
+License** for anyone who obtained a copy of those releases — that does
+not change retroactively. The proprietary terms apply to v0.12.4 and
+later.

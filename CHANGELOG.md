@@ -2,6 +2,21 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.12.4] – 2026-04-26
+
+### Changed
+
+- **License changed from MIT to a proprietary "Use, don't modify" license.**
+  Personal use and source inspection remain permitted; modification,
+  redistribution, derivative works, and commercial use now require prior
+  written permission. All rights reserved by Robert Manuwald.
+  Versions up to and including v0.12.3 remain available under the MIT
+  License for anyone who already obtained a copy of those releases —
+  this change is not retroactive.
+- `__license__` in `docusort/__init__.py` updated from `MIT` to
+  `Proprietary`.
+- README license section rewritten accordingly.
+
 ## [0.12.3] – 2026-04-26
 
 ### Fixed
