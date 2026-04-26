@@ -37,14 +37,32 @@ ALLOWED_SUFFIXES = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 def _fs_shortcuts(settings) -> list[dict]:
     """Quick-jump targets shown above the directory list. Each shortcut is
     only included when it actually exists and is readable — irrelevant entries
-    just hide themselves rather than rendering as broken jumps."""
+    just hide themselves rather than rendering as broken jumps. The library's
+    parent directory is included so the user can drop a backup folder right
+    next to where the library already lives, without navigating through the
+    whole filesystem."""
+    home = Path.home()
     candidates: list[tuple[str, str]] = [
-        ("Home",   str(Path.home())),
+        ("Home", str(home)),
+    ]
+
+    # Add the library's parent — useful default location for a sibling
+    # backup folder. We label it with the parent's basename so the user
+    # immediately recognises it as "next to my library".
+    try:
+        lib_parent = settings.paths.library.parent
+        if lib_parent.is_dir() and lib_parent != home:
+            candidates.append((lib_parent.name or str(lib_parent), str(lib_parent)))
+    except (AttributeError, OSError):
+        pass
+
+    candidates += [
         ("/mnt",   "/mnt"),
         ("/media", "/media"),
         ("/tmp",   "/tmp"),
         ("/data",  "/data"),
     ]
+
     out = []
     seen: set[str] = set()
     for label, path in candidates:
@@ -856,14 +874,19 @@ def create_app(
         return {"ok": True}
 
     @app.get("/api/fs/list")
-    def api_fs_list(path: str = Query("/")):
+    def api_fs_list(path: str = Query("")):
         """Browse server-side directories so the UI can offer a real folder
         picker. Returns the absolute path, parent, and the immediate
         subdirectories. Files are deliberately excluded — we're picking a
         backup target, not an existing file.
+
+        Default path is the user's home directory — `/` is rarely a useful
+        starting point for picking a backup target (it's full of system
+        directories the user doesn't care about).
         """
         try:
-            target = Path(path or "/").expanduser().resolve()
+            start = (path or str(Path.home())).strip()
+            target = Path(start).expanduser().resolve()
         except Exception as exc:
             raise HTTPException(400, f"invalid path: {exc}")
         if not target.exists():

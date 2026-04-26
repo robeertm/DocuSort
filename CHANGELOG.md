@@ -2,6 +2,29 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.12.2] – 2026-04-26
+
+### Fixed
+
+- **Folder picker's "Diesen Ordner wählen" button could be cut off
+  below the viewport.** The modal had no height cap, so on shorter
+  windows the directory list pushed the action bar past the visible
+  area. Modal is now `max-h-[calc(100vh-2rem)]` flex-column with a
+  scrollable list region (`flex-1 min-h-0 overflow-y-auto`), so the
+  Pick / Back buttons stay glued to the bottom of the modal at all
+  viewport heights.
+
+### Changed
+
+- **Folder picker no longer opens at `/`.** Defaults to the user's home
+  directory so the first thing visible is something the user owns,
+  not the system root with `bin/`, `boot/`, `dev/`, `etc/`, `lib/`,
+  `lost+found/` etc. — none of which are meaningful as backup targets.
+- **Library parent dir added as a quick-jump shortcut** in the picker.
+  Most users want their backup folder right next to the library, and
+  navigating from `/` → `home` → `<user>` → `<library-parent>` for
+  every fresh setup is friction.
+
 ## [0.12.1] – 2026-04-26
 
 ### Fixed

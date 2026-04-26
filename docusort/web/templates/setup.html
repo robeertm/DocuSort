@@ -328,24 +328,24 @@
   <div x-show="picker.open" x-cloak
        @keydown.escape.window="picker.open = false"
        class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/60">
-    <div class="w-full max-w-xl rounded-2xl bg-ink-900 border border-ink-700 shadow-2xl"
+    <div class="w-full max-w-xl max-h-[calc(100vh-2rem)] flex flex-col rounded-2xl bg-ink-900 border border-ink-700 shadow-2xl overflow-hidden"
          @click.outside="picker.open = false">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-ink-700">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-ink-700 shrink-0">
         <div class="font-medium text-sm">{{ t('settings.sync.picker_title') }}</div>
         <button type="button" @click="picker.open = false" class="btn-ghost text-xs">✕</button>
       </div>
-      <div class="px-4 py-3 border-b border-ink-700">
+      <div class="px-4 py-3 border-b border-ink-700 shrink-0">
         <div class="text-xs text-ink-400 mb-1">{{ t('settings.sync.current_path') }}</div>
         <div class="font-mono text-xs text-emerald-300 truncate" x-text="picker.path || '/'"></div>
       </div>
-      <div class="px-4 py-2 border-b border-ink-700 flex flex-wrap gap-1">
+      <div class="px-4 py-2 border-b border-ink-700 flex flex-wrap gap-1 shrink-0">
         <template x-for="s in picker.shortcuts" :key="s.path">
           <button type="button" @click="loadPicker(s.path)"
                   class="text-xs px-2 py-1 rounded-md bg-ink-800 hover:bg-ink-700"
                   x-text="s.label"></button>
         </template>
       </div>
-      <div class="max-h-80 overflow-y-auto">
+      <div class="flex-1 overflow-y-auto min-h-0">
         <button type="button" x-show="picker.parent" @click="loadPicker(picker.parent)"
                 class="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-ink-800/50 text-ink-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
@@ -368,7 +368,7 @@
           <div class="px-4 py-6 text-center text-xs text-ink-500">{{ t('settings.sync.empty_dir') }}</div>
         </template>
       </div>
-      <div class="px-4 py-3 border-t border-ink-700 flex justify-end gap-2">
+      <div class="px-4 py-3 border-t border-ink-700 flex justify-end gap-2 shrink-0 bg-ink-900">
         <button type="button" @click="picker.open = false" class="btn-ghost text-sm">{{ t('setup.back') }}</button>
         <button type="button" @click="pickCurrent()" class="btn-primary text-sm">
           {{ t('settings.sync.pick_this') }}
@@ -485,8 +485,9 @@ function setupWizard() {
     picker: { open: false, path: '/', parent: '', entries: [], shortcuts: [], error: '' },
 
     async openPicker() {
+      // Empty string → backend defaults to user's home directory.
       this.picker.open = true;
-      await this.loadPicker(this.localPath || '/');
+      await this.loadPicker(this.localPath || '');
     },
     async loadPicker(path) {
       try {
