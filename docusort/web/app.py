@@ -231,8 +231,10 @@ def create_app(
         if not doc:
             raise HTTPException(404, "Document not found")
         _decode_tags(doc)
+        receipt = db.get_receipt(doc_id) if doc.get("category") == "Kassenzettel" else None
         return templates.TemplateResponse(
-            request, "document.html", {**base_ctx(request), "doc": doc},
+            request, "document.html",
+            {**base_ctx(request), "doc": doc, "receipt": receipt},
         )
 
     @app.get("/document/{doc_id}/file")
@@ -402,6 +404,86 @@ def create_app(
             samesite="lax", httponly=False, path="/",
         )
         return resp
+
+    # ---------- Receipts (Kassenzettel) ----------
+    @app.get("/analytics", response_class=HTMLResponse)
+    def analytics_page(
+        request: Request,
+        shop_type: str | None = Query(None),
+        start: str | None = Query(None),
+        end: str | None = Query(None),
+        q: str | None = Query(None),
+    ):
+        from ..receipts import SHOP_TYPES, ITEM_CATEGORIES
+        summary  = db.receipt_summary()
+        monthly  = db.receipt_monthly(months=12)
+        receipts = db.receipts_list(shop_type=shop_type, start=start, end=end, limit=50)
+        items    = db.receipt_items_search(query=q, shop_type=shop_type,
+                                            start=start, end=end, limit=200)
+        top      = db.top_items(limit=15)
+        return templates.TemplateResponse(
+            request, "analytics.html",
+            {**base_ctx(request),
+             "summary": summary, "monthly": monthly,
+             "receipts": receipts, "items": items, "top_items": top,
+             "shop_types": list(SHOP_TYPES),
+             "item_categories": list(ITEM_CATEGORIES),
+             "filter": {"shop_type": shop_type, "start": start, "end": end, "q": q}},
+        )
+
+    @app.get("/api/receipts/stats")
+    def api_receipts_stats():
+        return {
+            "summary": db.receipt_summary(),
+            "monthly": db.receipt_monthly(months=12),
+            "top_items": db.top_items(limit=15),
+        }
+
+    @app.get("/api/receipts/items")
+    def api_receipts_items(
+        q: str | None = Query(None),
+        item_category: str | None = Query(None),
+        shop_type: str | None = Query(None),
+        start: str | None = Query(None),
+        end: str | None = Query(None),
+        limit: int = Query(200),
+    ):
+        return {"items": db.receipt_items_search(
+            query=q, item_category=item_category, shop_type=shop_type,
+            start=start, end=end, limit=limit,
+        )}
+
+    @app.post("/api/document/{doc_id}/receipt/extract")
+    def api_extract_receipt(doc_id: int):
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        doc = db.get(doc_id)
+        if not doc:
+            raise HTTPException(404, "document not found")
+        text = doc.get("extracted_text") or ""
+        if not text:
+            raise HTTPException(400, "no OCR text stored — re-classify the document first")
+        from ..receipts import ReceiptExtractor
+        extractor = ReceiptExtractor(
+            classifier.provider, settings.ai.model,
+            max_text_chars=settings.ai.max_text_chars,
+        )
+        try:
+            r = extractor.extract(text)
+        except Exception as exc:
+            logger.exception("Receipt extract failed for %d", doc_id)
+            raise HTTPException(500, f"extract failed: {exc}")
+        db.upsert_receipt(
+            doc_id,
+            shop_name=r.shop_name, shop_type=r.shop_type,
+            payment_method=r.payment_method, total_amount=r.total_amount,
+            currency=r.currency,
+            receipt_date=r.receipt_date or doc.get("doc_date") or "",
+            items=[i.as_dict() for i in r.items],
+            extra_json=r.raw_response,
+        )
+        return {"ok": True, "items": len(r.items),
+                "total": r.total_amount, "shop": r.shop_name}
 
     # ---------- Bulk operations ----------
     @app.post("/api/bulk/delete")

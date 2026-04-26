@@ -90,6 +90,14 @@ categories:
       Streamingdienste mit Hobby-Bezug (Spiele, Sport).
     subcategories: ["Sport", "Musik", "Sammeln", "Sonstiges"]
 
+  - name: "Kassenzettel"
+    description: >
+      Kassenbons, Quittungen, Bewirtungsbelege — typisch ein schmaler Zettel
+      mit einem Shop-Header, mehreren Artikelzeilen mit Preisen und einer
+      Summe. NICHT für Online-Rechnungen oder Versorger-Rechnungen — die
+      gehen unter Rechnungen. Subcategory richtet sich nach dem Shop-Typ.
+    subcategories: ["Supermarkt", "Drogerie", "Baumarkt", "Restaurant", "Cafe", "Tankstelle", "Apotheke", "Bekleidung", "Elektronik", "Buecher", "Moebel", "Versand", "Sonstiges"]
+
   - name: "Sonstiges"
     description: >
       Alles, was in keine andere Kategorie passt. Auch Fallback bei Unsicherheit.

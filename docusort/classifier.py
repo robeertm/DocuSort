@@ -139,6 +139,20 @@ NOTE: Reiseversicherung → Versicherung/Reise.
 ## Hobby  →  Sport | Musik | Sammeln | Sonstiges
 Vereins-Mitgliedschaften, Trainings-Rechnungen, Hobby-Abos, Sammlerkäufe, Musik- und Konzerttickets (sofern nicht als Reise klassifiziert).
 
+## Kassenzettel  →  Supermarkt | Drogerie | Baumarkt | Restaurant | Cafe | Tankstelle | Apotheke | Bekleidung | Elektronik | Buecher | Moebel | Versand | Sonstiges
+Klassische Kassenbons / Quittungen — typisch ein schmaler Zettel mit Shop-Header, mehreren Artikelzeilen mit Einzelpreisen und einer Summe am Ende. Subcategory richtet sich nach dem Shop-Typ:
+- Supermarkt: REWE, EDEKA, Aldi, Lidl, Kaufland, Penny, Netto, dm-Markt mit Lebensmitteln
+- Drogerie: dm, Rossmann, Müller (wenn überwiegend Körperpflege/Drogerie), Budni
+- Baumarkt: Obi, Bauhaus, Hornbach, Hagebau, Toom
+- Restaurant / Cafe: Bewirtungsbeleg, Restaurantrechnung, Kaffeebon
+- Tankstelle: Tankquittung mit Liter/Preis-pro-Liter, Aral, Shell, Total, Esso
+- Apotheke: Apothekenkassenbon mit OTC-Medikamenten (Rezeptbelege gehören NICHT hierher → Gesundheit/Apotheke)
+- Bekleidung / Elektronik / Buecher / Moebel: Einzelhandel
+- Versand: Online-Shop-Versandbeleg ohne explizites "Rechnung" (Amazon-Lieferschein, Zalando-Retoure)
+- Sonstiges: alles andere
+NOTE: Wenn auf dem Beleg explizit "Rechnung" steht und es eine Rechnungsnummer gibt → eher Rechnungen. Wenn ein offener "Bewirtungsbeleg" für Geschäftsessen → Kassenzettel/Restaurant. Apothekenrechnungen mit Rezept gehen nach Gesundheit/Apotheke.
+Signals: "Bon-Nr.", "Kasse 03", "Kassierer", "BAR", "EC-Karte", "girocard", "MwSt.", einzelne Artikelzeilen mit Preis, Trennstrich gefolgt von SUMME.
+
 ## Sonstiges  (no subcategories)
 Fallback for anything that genuinely doesn't match the other buckets — newsletters, club newsletters ohne Mitgliedschaft, sonstige private Korrespondenz. Also the safe choice when confidence is low.
 
@@ -255,6 +269,22 @@ Input (excerpt):
 
 Output:
 {"category":"Reise","subcategory":"Hotel","tags":["buchung"],"date":"2026-07-22","sender":"Booking.com","subject":"Hotelbuchung Mayrhofen Juli 2026","confidence":0.94,"reasoning":"Hotel-Reservierungsbestaetigung mit Buchungsnummer."}
+
+## Example 15a — Supermarkt-Kassenzettel
+
+Input (excerpt):
+"REWE Markt GmbH · Königsbrücker Str. 78 · 01099 Dresden · Bon-Nr. 4711 · Kasse 02 · Datum 12.04.2026 17:42 · Bio Vollmilch 1L 1,29 · Vollkornbrot 2,49 · Tomaten 500g 1,79 · ... SUMME 23,87 EUR · girocard"
+
+Output:
+{"category":"Kassenzettel","subcategory":"Supermarkt","tags":["lebensmittel"],"date":"2026-04-12","sender":"REWE","subject":"Einkauf REWE Dresden 23,87 EUR","confidence":0.95,"reasoning":"Klassischer Supermarkt-Kassenbon mit Artikelzeilen und SUMME."}
+
+## Example 15b — Tankquittung
+
+Input (excerpt):
+"Aral Tankstelle · Bautzner Landstr. · Beleg-Nr. 8821 · 18.03.2026 09:12 · Super E10 41,32 L à 1,789 EUR/L · 73,93 EUR · EC"
+
+Output:
+{"category":"Kassenzettel","subcategory":"Tankstelle","tags":["sprit"],"date":"2026-03-18","sender":"Aral","subject":"Tanken Aral 73,93 EUR","confidence":0.96,"reasoning":"Tankquittung mit Liter-Angabe und Preis pro Liter."}
 
 ## Example 15 — Erbauseinandersetzungsvertrag
 

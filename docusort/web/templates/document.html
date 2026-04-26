@@ -127,6 +127,107 @@
     </div>
     {% endif %}
 
+    {% if receipt %}
+    <div class="card p-5" x-data="{ extracting: false, message: '', ok: false }">
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('receipt.heading') }}</h2>
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm">
+            {% if receipt.shop_name %}
+              <span class="font-medium">{{ receipt.shop_name }}</span>
+            {% endif %}
+            {% if receipt.shop_type %}
+              <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">
+                {{ t('receipt.shop.' + receipt.shop_type) }}
+              </span>
+            {% endif %}
+            {% if receipt.payment_method %}
+              <span class="chip bg-ink-700/60 text-ink-200">
+                {{ t('receipt.payment.' + receipt.payment_method) }}
+              </span>
+            {% endif %}
+          </div>
+        </div>
+        <button type="button" @click="
+          extracting = true; message = '';
+          fetch('/api/document/{{ doc.id }}/receipt/extract', { method: 'POST' })
+            .then(r => r.json().then(d => ({ ok: r.ok, d })))
+            .then(({ok, d}) => {
+              if (!ok) throw new Error(d.detail || 'failed');
+              location.reload();
+            })
+            .catch(e => { message = e.message; ok = false; })
+            .finally(() => extracting = false)"
+          :disabled="extracting"
+          class="btn-ghost text-xs"
+          :class="extracting ? 'opacity-50 cursor-not-allowed' : ''"
+          x-text="extracting ? T['receipt.reextracting'] : T['receipt.reextract']"></button>
+      </div>
+
+      {% if receipt.total_amount is not none %}
+        <div class="text-2xl font-semibold text-emerald-300 mb-3">
+          {{ "%.2f"|format(receipt.total_amount) }} {{ receipt.currency }}
+        </div>
+      {% endif %}
+
+      {% if receipt['items'] %}
+      <div class="overflow-x-auto -mx-5">
+        <table class="w-full text-sm">
+          <thead class="text-xs uppercase tracking-wider text-ink-500">
+            <tr>
+              <th class="text-left px-5 py-1 font-medium">{{ t('receipt.col_item') }}</th>
+              <th class="text-right px-2 py-1 font-medium">{{ t('receipt.col_qty') }}</th>
+              <th class="text-right px-2 py-1 font-medium">{{ t('receipt.col_unit') }}</th>
+              <th class="text-right px-5 py-1 font-medium">{{ t('receipt.col_total') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for it in receipt['items'] %}
+            <tr class="border-t border-ink-800/50">
+              <td class="px-5 py-1.5">
+                <span>{{ it.name }}</span>
+                {% if it.item_category %}
+                  <span class="ml-2 text-[10px] uppercase tracking-wider text-ink-500">
+                    {{ t('receipt.cat.' + it.item_category) }}
+                  </span>
+                {% endif %}
+              </td>
+              <td class="px-2 py-1.5 text-right tabular-nums text-ink-400">
+                {% if it.quantity is not none %}{{ "%g"|format(it.quantity) }}{% else %}—{% endif %}
+              </td>
+              <td class="px-2 py-1.5 text-right tabular-nums text-ink-400">
+                {% if it.unit_price is not none %}{{ "%.2f"|format(it.unit_price) }}{% else %}—{% endif %}
+              </td>
+              <td class="px-5 py-1.5 text-right tabular-nums {% if it.total_price is not none and it.total_price < 0 %}text-rose-300{% endif %}">
+                {% if it.total_price is not none %}{{ "%.2f"|format(it.total_price) }}{% else %}—{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-sm text-ink-500 italic">{{ t('receipt.no_items') }}</p>
+      {% endif %}
+
+      <div x-show="message" x-cloak class="mt-3 text-sm rounded-lg px-3 py-2 bg-rose-500/10 text-rose-200" x-text="message"></div>
+    </div>
+    {% elif doc.category == 'Kassenzettel' %}
+    <div class="card p-5">
+      <h2 class="font-semibold mb-2 text-sm uppercase tracking-wide text-ink-400">{{ t('receipt.heading') }}</h2>
+      <p class="text-sm text-ink-400 mb-3">{{ t('receipt.not_extracted_yet') }}</p>
+      <button type="button"
+              x-data="{ extracting: false }"
+              @click="extracting = true;
+                fetch('/api/document/{{ doc.id }}/receipt/extract', { method: 'POST' })
+                  .then(r => r.ok ? location.reload() : alert('Extraction failed'))
+                  .finally(() => extracting = false)"
+              :disabled="extracting"
+              class="btn-primary text-sm"
+              x-text="extracting ? T['receipt.reextracting'] : T['receipt.extract_now']"></button>
+    </div>
+    {% endif %}
+
     {% if doc.status in ('review', 'failed') %}
     <div class="card p-5">
       <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('retry.heading') }}</h2>

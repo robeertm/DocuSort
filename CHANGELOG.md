@@ -2,6 +2,48 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.12.0] – 2026-04-26
+
+### Added — Receipt scanner & analytics
+
+- **Kassenzettel category** with shop-type subcategories (Supermarkt,
+  Drogerie, Baumarkt, Restaurant, Cafe, Tankstelle, Apotheke,
+  Bekleidung, Elektronik, Buecher, Moebel, Versand, Sonstiges). The
+  classifier now recognises receipts and routes them via two new
+  few-shot examples (Supermarkt, Tankquittung).
+- **Second-pass line-item extractor** (`docusort/receipts.py`). When
+  the main classifier marks a doc as Kassenzettel, a follow-up LLM
+  call pulls out shop name + type, payment method, total, currency,
+  date, and per-line `{name, quantity, unit_price, total_price,
+  item_category}`. Item categories normalised to a fixed list
+  (lebensmittel, getraenke, haushalt, koerperpflege, elektronik,
+  bekleidung, buecher, essen-trinken-aussehaus, transport, baumarkt,
+  tabak, pfand, rabatt, sonstiges). Discounts and Pfand rows are
+  preserved with negative `total_price`.
+- **`receipts` + `receipt_items` SQLite tables** with cascade-on-delete
+  trigger. New `Database` methods: `upsert_receipt`, `get_receipt`,
+  `delete_receipt`, `receipt_summary`, `receipt_monthly`,
+  `receipts_list`, `receipt_items_search`, `top_items`.
+- **Analytics dashboard at `/analytics`** — top-line stats (total spent,
+  receipt count, item count, avg per receipt), 12-month spend chart,
+  by-shop-type bar chart, by-item-category bar chart, top-15 most-bought
+  items, recent receipts list, and an item search with shop-type +
+  date-range filters. Empty-state with a CTA to upload the first receipt.
+- **Receipt section on the document detail page**: shop badge, payment
+  method badge, big total, item table (with negative-amount rows in
+  rose). "Extract now" button when no receipt was extracted yet,
+  "Re-extract" button to redo the LLM call.
+- **`POST /api/document/{id}/receipt/extract`** for manual (re)extraction
+  using the stored OCR text — no new OCR cost.
+- **`GET /api/receipts/stats`** and **`GET /api/receipts/items`** so the
+  data is consumable from outside the UI too (e.g. external dashboards).
+- **`python -m docusort --backfill-receipts`** extracts line items from
+  every existing Kassenzettel document that doesn't have a receipt yet.
+  Reads cached OCR text — only the LLM call is billed.
+- **Analytics nav link** in the header. **82 new i18n keys × 5 languages**
+  for shop types, item categories, payment methods, analytics labels,
+  and the receipt section.
+
 ## [0.11.3] – 2026-04-26
 
 ### Changed

@@ -15,6 +15,11 @@ Built for a Synology NAS in Docker, but runs anywhere Docker runs.
   fully local classification
 - **Subcategories + free-form tags** — files land at
   `Library/YYYY/Category/Subcategory/` and carry up to 8 lowercase labels
+- **Receipt scanner + analytics** — Kassenzettel are recognised
+  automatically. A second-pass LLM extracts shop name + type, payment
+  method, total, and per-line items with prices and item categories.
+  Browse aggregated spend per month, by shop type and item category,
+  search line items, see your most-bought items at `/analytics`.
 - **OCR** for scanned PDFs and images (Tesseract `deu+eng`)
 - **Backup** to a local folder (rsync, no setup) or to the cloud via rclone
   (Drive · Dropbox · OneDrive · S3 · WebDAV · SFTP). Headless-friendly:

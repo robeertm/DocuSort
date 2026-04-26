@@ -175,6 +175,37 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             log.info("DB row %d written for %s", doc_id, target.name)
         except Exception as exc:
             log.exception("DB insert failed for %s: %s", target.name, exc)
+            return
+
+        # Receipts get a second-pass LLM extraction for the line items so
+        # the analytics dashboard can do per-item aggregation. We only run
+        # this for category=Kassenzettel to keep the cost bounded.
+        if cls.category == "Kassenzettel" and ocr_res.text:
+            try:
+                from .receipts import ReceiptExtractor
+                extractor = ReceiptExtractor(
+                    classifier.provider, settings.ai.model,
+                    max_text_chars=settings.ai.max_text_chars,
+                )
+                receipt = extractor.extract(ocr_res.text)
+                db.upsert_receipt(
+                    doc_id,
+                    shop_name=receipt.shop_name,
+                    shop_type=receipt.shop_type,
+                    payment_method=receipt.payment_method,
+                    total_amount=receipt.total_amount,
+                    currency=receipt.currency,
+                    receipt_date=receipt.receipt_date or cls.date,
+                    items=[i.as_dict() for i in receipt.items],
+                    extra_json=receipt.raw_response,
+                )
+                log.info(
+                    "Receipt extracted for %s: shop=%s items=%d total=%s",
+                    target.name, receipt.shop_name, len(receipt.items),
+                    receipt.total_amount,
+                )
+            except Exception as exc:
+                log.warning("Receipt extraction failed for %d: %s", doc_id, exc)
 
     return process
 
@@ -239,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Re-classify existing docs to attach subcategory + tags, then exit")
     parser.add_argument("--backfill-dry-run", action="store_true",
                         help="Same as --backfill-tags but only prints what would change")
+    parser.add_argument("--backfill-receipts", action="store_true",
+                        help="Extract line items from existing Kassenzettel docs that don't have them yet")
     parser.add_argument("--version", action="version", version=f"docusort {__version__}")
     args = parser.parse_args(argv)
 
@@ -293,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("AI provider not configured — web UI starts in setup mode, "
                     "watcher will skip classification until /setup is completed.")
 
-    if (args.backfill_tags or args.backfill_dry_run) and classifier is None:
+    if (args.backfill_tags or args.backfill_dry_run or args.backfill_receipts) and classifier is None:
         log.error("Cannot run backfill: AI provider not configured. "
                   "Open the web UI and finish /setup first.")
         return 2
@@ -305,6 +338,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         log.info("Backfill done: %s", result)
         print(json.dumps(result, indent=2))
+        return 0
+
+    if args.backfill_receipts:
+        from .receipts import backfill_receipts
+        result = backfill_receipts(settings, db, classifier, dry_run=False)
+        log.info("Receipt backfill done: %s", result)
+        print(json.dumps(result, indent=2, default=str))
         return 0
 
     pipeline = _build_pipeline(settings, classifier, db)

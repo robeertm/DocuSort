@@ -156,6 +156,53 @@ CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
     INSERT INTO documents_fts(rowid, filename, sender, subject, reasoning, extracted_text)
     VALUES (new.id, new.filename, new.sender, new.subject, new.reasoning, new.extracted_text);
 END;
+
+-- Receipts (Kassenzettel) — one row per document classified as Kassenzettel.
+-- Line items live in receipt_items, FK-linked. Both cascade on document
+-- deletion via the trigger below (SQLite FKs only fire on direct deletes
+-- of the parent table, but we delete via the documents row, so we use a
+-- trigger to keep things in sync).
+CREATE TABLE IF NOT EXISTS receipts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id        INTEGER NOT NULL UNIQUE,
+    shop_name     TEXT,
+    shop_type     TEXT,         -- supermarkt | drogerie | restaurant | tankstelle | ...
+    payment_method TEXT,        -- bar | girocard | kreditkarte | paypal | sonstiges
+    total_amount  REAL,
+    currency      TEXT DEFAULT 'EUR',
+    receipt_date  TEXT,         -- ISO date; usually mirrors documents.doc_date
+    extra_json    TEXT,         -- raw extractor output for debugging
+    created_at    TEXT NOT NULL,
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipts_doc        ON receipts(doc_id);
+CREATE INDEX IF NOT EXISTS idx_receipts_shop_type  ON receipts(shop_type);
+CREATE INDEX IF NOT EXISTS idx_receipts_date       ON receipts(receipt_date);
+
+CREATE TABLE IF NOT EXISTS receipt_items (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    receipt_id    INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    quantity      REAL,
+    unit_price    REAL,
+    total_price   REAL,
+    item_category TEXT,         -- lebensmittel | getraenke | haushalt | ...
+    line_no       INTEGER,      -- preserve original ordering on the receipt
+    FOREIGN KEY (receipt_id) REFERENCES receipts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipt_items_receipt  ON receipt_items(receipt_id);
+CREATE INDEX IF NOT EXISTS idx_receipt_items_name     ON receipt_items(name);
+CREATE INDEX IF NOT EXISTS idx_receipt_items_category ON receipt_items(item_category);
+
+-- Cascade receipts when a document is deleted. SQLite enforces FK cascades
+-- only when PRAGMA foreign_keys=ON (we do that on connect), but the trigger
+-- guards against the rare case of a soft-delete without a real DELETE.
+CREATE TRIGGER IF NOT EXISTS receipts_cascade_on_doc_delete
+AFTER DELETE ON documents BEGIN
+    DELETE FROM receipts WHERE doc_id = old.id;
+END;
 """
 
 
@@ -570,6 +617,234 @@ class Database:
             "statuses": {r["status"]: int(r["n"]) for r in status_rows},
             "trash": int(trash_row["n"]) if trash_row else 0,
         }
+
+    # ---------- Receipts (Kassenzettel) ----------
+
+    def upsert_receipt(
+        self,
+        doc_id: int,
+        *,
+        shop_name: str = "",
+        shop_type: str = "",
+        payment_method: str = "",
+        total_amount: float | None = None,
+        currency: str = "EUR",
+        receipt_date: str = "",
+        items: list[dict] | None = None,
+        extra_json: str = "",
+    ) -> int:
+        """Create or replace the receipt + line items for a document.
+
+        Existing items get wiped and re-inserted (callers pass the full new
+        list). Returns the receipt row id."""
+        import json as _json
+        items = items or []
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT id FROM receipts WHERE doc_id = ?", (doc_id,)
+            ).fetchone()
+            if existing:
+                receipt_id = int(existing["id"])
+                self._conn.execute(
+                    """UPDATE receipts SET shop_name=?, shop_type=?, payment_method=?,
+                       total_amount=?, currency=?, receipt_date=?, extra_json=?
+                       WHERE id=?""",
+                    (shop_name, shop_type, payment_method, total_amount,
+                     currency, receipt_date, extra_json, receipt_id),
+                )
+                self._conn.execute(
+                    "DELETE FROM receipt_items WHERE receipt_id = ?", (receipt_id,)
+                )
+            else:
+                cur = self._conn.execute(
+                    """INSERT INTO receipts
+                       (doc_id, shop_name, shop_type, payment_method,
+                        total_amount, currency, receipt_date, extra_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (doc_id, shop_name, shop_type, payment_method,
+                     total_amount, currency, receipt_date, extra_json, now),
+                )
+                receipt_id = cur.lastrowid or 0
+            for i, it in enumerate(items):
+                self._conn.execute(
+                    """INSERT INTO receipt_items
+                       (receipt_id, name, quantity, unit_price, total_price,
+                        item_category, line_no)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (receipt_id, it.get("name") or "", it.get("quantity"),
+                     it.get("unit_price"), it.get("total_price"),
+                     it.get("item_category") or "", i),
+                )
+        return receipt_id
+
+    def get_receipt(self, doc_id: int) -> dict[str, Any] | None:
+        """Return the receipt + items for a document, or None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM receipts WHERE doc_id = ?", (doc_id,)
+            ).fetchone()
+            if not row:
+                return None
+            items = self._conn.execute(
+                "SELECT * FROM receipt_items WHERE receipt_id = ? ORDER BY line_no, id",
+                (row["id"],),
+            ).fetchall()
+        receipt = dict(row)
+        receipt["items"] = [dict(i) for i in items]
+        return receipt
+
+    def delete_receipt(self, doc_id: int) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM receipts WHERE doc_id = ?", (doc_id,))
+            return cur.rowcount > 0
+
+    def receipt_summary(self) -> dict[str, Any]:
+        """Top-level numbers for the analytics dashboard."""
+        with self._lock:
+            tot = self._conn.execute(
+                """SELECT COUNT(*) AS n, COALESCE(SUM(total_amount), 0) AS total
+                   FROM receipts r
+                   JOIN documents d ON d.id = r.doc_id
+                   WHERE d.deleted_at IS NULL"""
+            ).fetchone()
+            item_count = self._conn.execute(
+                """SELECT COUNT(*) AS n FROM receipt_items i
+                   JOIN receipts r ON r.id = i.receipt_id
+                   JOIN documents d ON d.id = r.doc_id
+                   WHERE d.deleted_at IS NULL"""
+            ).fetchone()
+            shops = self._conn.execute(
+                """SELECT shop_type AS type, COUNT(*) AS n,
+                          COALESCE(SUM(total_amount), 0) AS total
+                   FROM receipts r
+                   JOIN documents d ON d.id = r.doc_id
+                   WHERE d.deleted_at IS NULL AND shop_type != ''
+                   GROUP BY shop_type ORDER BY total DESC"""
+            ).fetchall()
+            cats = self._conn.execute(
+                """SELECT item_category AS category, COUNT(*) AS n,
+                          COALESCE(SUM(total_price), 0) AS total
+                   FROM receipt_items i
+                   JOIN receipts r ON r.id = i.receipt_id
+                   JOIN documents d ON d.id = r.doc_id
+                   WHERE d.deleted_at IS NULL AND item_category != ''
+                   GROUP BY item_category ORDER BY total DESC"""
+            ).fetchall()
+        return {
+            "receipt_count": int(tot["n"]) if tot else 0,
+            "item_count":    int(item_count["n"]) if item_count else 0,
+            "total_spent":   float(tot["total"]) if tot else 0.0,
+            "by_shop_type":  [dict(r) for r in shops],
+            "by_item_category": [dict(r) for r in cats],
+        }
+
+    def receipt_monthly(self, months: int = 12) -> list[dict[str, Any]]:
+        """Spend per month for the last N months, oldest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT substr(receipt_date, 1, 7) AS month,
+                          COUNT(*) AS receipts,
+                          COALESCE(SUM(total_amount), 0) AS total
+                   FROM receipts r
+                   JOIN documents d ON d.id = r.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND receipt_date IS NOT NULL AND receipt_date != ''
+                   GROUP BY month
+                   ORDER BY month DESC
+                   LIMIT ?""",
+                (months,),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def receipts_list(
+        self,
+        *,
+        shop_type: str | None = None,
+        start: str | None = None,    # ISO date inclusive
+        end: str | None = None,      # ISO date inclusive
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        where = ["d.deleted_at IS NULL"]
+        params: list[Any] = []
+        if shop_type:
+            where.append("r.shop_type = ?")
+            params.append(shop_type)
+        if start:
+            where.append("r.receipt_date >= ?")
+            params.append(start)
+        if end:
+            where.append("r.receipt_date <= ?")
+            params.append(end)
+        sql = (
+            "SELECT r.*, d.subject AS doc_subject, d.library_path "
+            "FROM receipts r JOIN documents d ON d.id = r.doc_id "
+            "WHERE " + " AND ".join(where) +
+            " ORDER BY r.receipt_date DESC, r.id DESC LIMIT ?"
+        )
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def receipt_items_search(
+        self,
+        *,
+        query: str | None = None,
+        item_category: str | None = None,
+        shop_type: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        where = ["d.deleted_at IS NULL"]
+        params: list[Any] = []
+        if query:
+            where.append("i.name LIKE ?")
+            params.append(f"%{query}%")
+        if item_category:
+            where.append("i.item_category = ?")
+            params.append(item_category)
+        if shop_type:
+            where.append("r.shop_type = ?")
+            params.append(shop_type)
+        if start:
+            where.append("r.receipt_date >= ?")
+            params.append(start)
+        if end:
+            where.append("r.receipt_date <= ?")
+            params.append(end)
+        sql = (
+            "SELECT i.*, r.shop_name, r.shop_type, r.receipt_date, r.doc_id "
+            "FROM receipt_items i "
+            "JOIN receipts r ON r.id = i.receipt_id "
+            "JOIN documents d ON d.id = r.doc_id "
+            "WHERE " + " AND ".join(where) +
+            " ORDER BY r.receipt_date DESC, i.line_no LIMIT ?"
+        )
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def top_items(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Most-bought item names with aggregate counts and spend."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT i.name,
+                          COUNT(*)               AS times,
+                          COALESCE(SUM(i.total_price), 0) AS spent,
+                          COALESCE(AVG(i.unit_price),  0) AS avg_unit
+                   FROM receipt_items i
+                   JOIN receipts r ON r.id = i.receipt_id
+                   JOIN documents d ON d.id = r.doc_id
+                   WHERE d.deleted_at IS NULL AND i.name != ''
+                   GROUP BY LOWER(i.name)
+                   ORDER BY times DESC, spent DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
 _db_singleton: Database | None = None
