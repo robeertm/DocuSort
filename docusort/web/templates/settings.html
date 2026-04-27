@@ -103,6 +103,54 @@
     </div>
   </section>
 
+  <!-- ===== Finance privacy ===== -->
+  <section class="card p-6" id="finance" x-data="financeSettings()">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.finance.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.finance.subtitle') }}</p>
+
+    <div class="space-y-3 mb-4">
+      <label class="flex items-start gap-3 cursor-pointer p-3 rounded-xl border"
+             :class="!localOnly ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-ink-700 hover:border-ink-600'">
+        <input type="radio" :checked="!localOnly" @change="localOnly = false"
+               class="mt-1 accent-emerald-500">
+        <div class="min-w-0">
+          <div class="font-medium text-sm">{{ t('settings.finance.cloud_label') }}</div>
+          <div class="text-xs text-ink-400 mt-0.5">{{ t('settings.finance.cloud_hint') }}</div>
+          <label class="flex items-center gap-2 mt-2 text-xs text-ink-300" x-show="!localOnly" x-cloak>
+            <input type="checkbox" x-model="pseudonymize" class="accent-emerald-500">
+            <span>{{ t('settings.finance.pseudo_label') }}</span>
+          </label>
+        </div>
+      </label>
+
+      <label class="flex items-start gap-3 cursor-pointer p-3 rounded-xl border"
+             :class="localOnly ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-ink-700 hover:border-ink-600'">
+        <input type="radio" :checked="localOnly" @change="localOnly = true"
+               class="mt-1 accent-emerald-500">
+        <div class="min-w-0">
+          <div class="font-medium text-sm">{{ t('settings.finance.local_label') }}</div>
+          <div class="text-xs text-ink-400 mt-0.5">{{ t('settings.finance.local_hint') }}</div>
+          {% if not has_local_provider %}
+            <div class="text-xs text-amber-300 mt-2" x-show="localOnly" x-cloak>
+              {{ t('settings.finance.no_local_provider') }}
+            </div>
+          {% endif %}
+        </div>
+      </label>
+    </div>
+
+    <div x-show="message" x-cloak class="text-sm rounded-lg px-3 py-2 mb-3"
+         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="message"></div>
+
+    <div class="flex items-center justify-end">
+      <button type="button" @click="save()" :disabled="saving" class="btn-primary"
+              :class="saving ? 'opacity-50 cursor-not-allowed' : ''">
+        {{ t('settings.save') }}
+      </button>
+    </div>
+  </section>
+
   <!-- ===== Backup ===== -->
   <section class="card p-6" x-data="syncSettings()">
     <h2 class="text-lg font-semibold mb-1">{{ t('settings.sync.heading') }}</h2>
@@ -549,6 +597,38 @@ function webSettings() {
         this.ok = true;
         this.message = T['settings.web.saved'];
         this.restartHint = !!d.restart_required;
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally {
+        this.saving = false;
+      }
+    },
+  };
+}
+
+function financeSettings() {
+  return {
+    localOnly:    {{ finance_local_only | tojson }},
+    pseudonymize: {{ finance_pseudonymize | tojson }},
+    saving: false, message: '', ok: false,
+    async save() {
+      this.message = ''; this.saving = true;
+      try {
+        const r = await fetch('/api/settings/finance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            local_only:   this.localOnly,
+            pseudonymize: this.pseudonymize,
+          }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        this.ok = true;
+        this.message = T['settings.finance.saved'] || T['settings.web.saved'];
       } catch (e) {
         this.ok = false;
         this.message = e.message || String(e);

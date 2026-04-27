@@ -568,6 +568,156 @@ def create_app(
         )
         return {"ok": True, "items": len(items), "total": total_amount}
 
+    # ---------- Finance (Kontoauszüge) ----------
+    @app.get("/finance", response_class=HTMLResponse)
+    def finance_page(
+        request: Request,
+        account_id: int | None = Query(None),
+        category: str | None = Query(None),
+        direction: str | None = Query(None),
+        start: str | None = Query(None),
+        end: str | None = Query(None),
+        q: str | None = Query(None),
+    ):
+        from ..finance.categories import TX_CATEGORIES, TX_TYPES
+        summary       = db.finance_summary()
+        monthly       = db.finance_monthly(months=12)
+        accounts      = db.list_accounts()
+        top_outgoing  = db.finance_top_counterparties(direction="expense", limit=10)
+        top_incoming  = db.finance_top_counterparties(direction="income",  limit=10)
+        recurring     = db.finance_recurring(min_months=3, limit=20)
+        transactions  = db.transactions_list(
+            account_id=account_id, category=category, direction=direction,
+            start=start, end=end, query=q, limit=200,
+        )
+        # Inspect the privacy mode of the most recent statement so the
+        # header badge tells the user how their last upload was handled.
+        with db._lock:
+            last_mode_row = db._conn.execute(
+                "SELECT privacy_mode FROM statements ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        privacy_mode = (last_mode_row["privacy_mode"] if last_mode_row else "") or ""
+        return templates.TemplateResponse(
+            request, "finance.html",
+            {**base_ctx(request),
+             "summary": summary, "monthly": monthly, "accounts": accounts,
+             "top_outgoing": top_outgoing, "top_incoming": top_incoming,
+             "recurring": recurring, "transactions": transactions,
+             "tx_categories": list(TX_CATEGORIES),
+             "tx_types": list(TX_TYPES),
+             "privacy_mode": privacy_mode,
+             "filter": {"account_id": account_id, "category": category,
+                        "direction": direction, "start": start, "end": end, "q": q}},
+        )
+
+    @app.get("/api/finance/stats")
+    def api_finance_stats():
+        return {
+            "summary": db.finance_summary(),
+            "monthly": db.finance_monthly(months=12),
+            "accounts": db.list_accounts(),
+            "recurring": db.finance_recurring(),
+        }
+
+    @app.get("/api/finance/transactions")
+    def api_finance_transactions(
+        account_id: int | None = Query(None),
+        category: str | None = Query(None),
+        direction: str | None = Query(None),
+        start: str | None = Query(None),
+        end: str | None = Query(None),
+        q: str | None = Query(None),
+        limit: int = Query(200),
+    ):
+        return {"transactions": db.transactions_list(
+            account_id=account_id, category=category, direction=direction,
+            start=start, end=end, query=q, limit=limit,
+        )}
+
+    @app.post("/api/settings/finance")
+    def api_save_finance(payload: dict):
+        """Persist the privacy toggles. Local-only forces statement
+        extraction to skip when no local provider is configured."""
+        from ..settings_writer import update_finance
+        local_only   = bool(payload.get("local_only", False))
+        pseudonymize = bool(payload.get("pseudonymize", True))
+        update_finance(
+            local_only=local_only,
+            pseudonymize=pseudonymize,
+            config_dir=settings.config_dir,
+        )
+        # Reflect the change in-process so the next pipeline run picks
+        # it up without a service restart.
+        settings.finance.local_only   = local_only
+        settings.finance.pseudonymize = pseudonymize
+        return {"ok": True, "local_only": local_only, "pseudonymize": pseudonymize}
+
+    @app.post("/api/document/{doc_id}/statement/extract")
+    def api_extract_statement(doc_id: int):
+        """Manually re-trigger statement extraction for a Kontoauszug
+        document — useful after a config change or when the first run
+        failed."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        doc = db.get(doc_id)
+        if not doc:
+            raise HTTPException(404, "document not found")
+        text = doc.get("extracted_text") or ""
+        if not text:
+            raise HTTPException(400, "no OCR text stored — re-classify the document first")
+        from ..finance import StatementExtractor
+        from hashlib import sha256
+        is_local = settings.ai.provider == "openai_compat"
+        if settings.finance.local_only and not is_local:
+            raise HTTPException(
+                403,
+                "finance.local_only is enabled but the active provider is not local. "
+                "Switch to a local provider in /setup or turn off local-only.",
+            )
+        do_pseudo = settings.finance.pseudonymize and not is_local
+        extractor = StatementExtractor(
+            classifier.provider, settings.ai.model,
+            max_text_chars=max(settings.ai.max_text_chars, 24000),
+        )
+        try:
+            stmt = extractor.extract(text, pseudonymize=do_pseudo)
+        except Exception as exc:
+            logger.exception("Statement extract failed for %d", doc_id)
+            raise HTTPException(500, f"extract failed: {exc}")
+        account_id = None
+        if stmt.iban_hash:
+            account_id = db.upsert_account(
+                bank_name=stmt.bank_name or "Unbekannt",
+                iban=stmt.iban, iban_last4=stmt.iban_last4,
+                iban_hash=stmt.iban_hash, account_holder=stmt.account_holder,
+                currency=stmt.currency,
+            )
+        tx_payload = []
+        for tx in stmt.transactions:
+            key = (
+                (stmt.iban_hash or "no-iban") + "|" + tx.booking_date + "|"
+                + f"{tx.amount:.2f}" + "|" + tx.purpose
+            )
+            d = tx.as_dict()
+            d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
+            tx_payload.append(d)
+        db.upsert_statement(
+            doc_id, account_id=account_id,
+            period_start=stmt.period_start, period_end=stmt.period_end,
+            statement_no=stmt.statement_no,
+            opening_balance=stmt.opening_balance,
+            closing_balance=stmt.closing_balance,
+            currency=stmt.currency, file_hash="",
+            privacy_mode=stmt.privacy_mode,
+            transactions=tx_payload, extra_json=stmt.raw_response,
+        )
+        return {
+            "ok": True, "transactions": len(stmt.transactions),
+            "bank": stmt.bank_name,
+            "period": [stmt.period_start, stmt.period_end],
+            "privacy_mode": stmt.privacy_mode,
+        }
+
     # ---------- Bulk operations ----------
     @app.post("/api/bulk/delete")
     def bulk_delete(payload: dict):
@@ -867,7 +1017,10 @@ def create_app(
              "rclone_version":   rclone_setup.rclone_version(),
              "rclone_remotes":   rclone_setup.list_remotes(),
              "supported_backends": list(rclone_setup.SUPPORTED_BACKENDS),
-             "oauth_backends":   sorted(rclone_setup.OAUTH_BACKENDS)},
+             "oauth_backends":   sorted(rclone_setup.OAUTH_BACKENDS),
+             "finance_local_only":   settings.finance.local_only,
+             "finance_pseudonymize": settings.finance.pseudonymize,
+             "has_local_provider":   settings.ai.provider == "openai_compat"},
         )
 
     @app.post("/api/settings/ai")

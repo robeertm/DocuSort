@@ -31,7 +31,8 @@
     <div class="flex-1"></div>
     <a href="/library" class="hidden sm:inline-flex btn-ghost">{{ t('nav.library') }}</a>
     <a href="/library?status=review" class="hidden sm:inline-flex btn-ghost">{{ t('nav.review') }}</a>
-    <a href="/analytics" class="hidden sm:inline-flex btn-ghost">{{ t('nav.analytics') }}</a>
+    <a href="/analytics" class="hidden md:inline-flex btn-ghost">{{ t('nav.analytics') }}</a>
+    <a href="/finance" class="hidden md:inline-flex btn-ghost">{{ t('nav.finance') }}</a>
     <a href="/settings" class="hidden sm:inline-flex btn-ghost" :aria-label="'{{ t('nav.settings') }}'">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
         <circle cx="12" cy="12" r="3"/>
@@ -75,6 +76,7 @@
     <a href="/library" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.library') }}</a>
     <a href="/library?status=review" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.review') }}</a>
     <a href="/analytics" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.analytics') }}</a>
+    <a href="/finance" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.finance') }}</a>
     <a href="/settings" class="btn-ghost flex-1 justify-center whitespace-nowrap">{{ t('nav.settings') }}</a>
   </nav>
 </header>

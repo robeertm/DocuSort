@@ -207,6 +207,93 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             except Exception as exc:
                 log.warning("Receipt extraction failed for %d: %s", doc_id, exc)
 
+        # Bank statements get the same second-pass treatment, with the
+        # privacy twist: by default we pseudonymise IBANs / addresses /
+        # holder names before sending text to a cloud provider. Users
+        # who flipped finance.local_only get statement extraction skipped
+        # if the active provider isn't local.
+        if cls.category == "Kontoauszug" and ocr_res.text:
+            local_providers = ("openai_compat",)
+            is_local = settings.ai.provider in local_providers
+            if settings.finance.local_only and not is_local:
+                log.warning(
+                    "Skipping statement extraction for %s: finance.local_only=true "
+                    "but active provider %s is not local",
+                    target.name, settings.ai.provider,
+                )
+            else:
+                try:
+                    from .finance import StatementExtractor
+                    from hashlib import sha256
+                    extractor = StatementExtractor(
+                        classifier.provider, settings.ai.model,
+                        max_text_chars=max(settings.ai.max_text_chars, 24000),
+                    )
+                    # Pseudonymise unless we're already on a local provider
+                    # (no leak risk) OR the user explicitly turned it off.
+                    do_pseudo = settings.finance.pseudonymize and not is_local
+                    stmt = extractor.extract(ocr_res.text, pseudonymize=do_pseudo)
+
+                    account_id: int | None = None
+                    if stmt.iban_hash:
+                        account_id = db.upsert_account(
+                            bank_name=stmt.bank_name or "Unbekannt",
+                            iban=stmt.iban,
+                            iban_last4=stmt.iban_last4,
+                            iban_hash=stmt.iban_hash,
+                            account_holder=stmt.account_holder,
+                            currency=stmt.currency,
+                        )
+
+                    # Per-tx hash for dedup against overlapping statements.
+                    tx_payload: list[dict] = []
+                    for tx in stmt.transactions:
+                        key = (
+                            (stmt.iban_hash or "no-iban") + "|" +
+                            tx.booking_date + "|" +
+                            f"{tx.amount:.2f}" + "|" +
+                            tx.purpose
+                        )
+                        tx_hash_val = sha256(key.encode("utf-8")).hexdigest()
+                        d = tx.as_dict()
+                        d["tx_hash"] = tx_hash_val
+                        tx_payload.append(d)
+
+                    # File-level dedup: if a statement with the same PDF
+                    # bytes already exists, the document layer already
+                    # rejected it; we only see new docs here. We still
+                    # record the file hash so /finance can show "this
+                    # statement is the original of these other docs".
+                    file_hash = ""
+                    try:
+                        with open(target, "rb") as fh:
+                            file_hash = sha256(fh.read()).hexdigest()
+                    except OSError:
+                        pass
+
+                    db.upsert_statement(
+                        doc_id,
+                        account_id=account_id,
+                        period_start=stmt.period_start,
+                        period_end=stmt.period_end,
+                        statement_no=stmt.statement_no,
+                        opening_balance=stmt.opening_balance,
+                        closing_balance=stmt.closing_balance,
+                        currency=stmt.currency,
+                        file_hash=file_hash,
+                        privacy_mode=stmt.privacy_mode,
+                        transactions=tx_payload,
+                        extra_json=stmt.raw_response,
+                    )
+                    log.info(
+                        "Statement extracted for %s: bank=%s period=%s..%s tx=%d privacy=%s",
+                        target.name, stmt.bank_name, stmt.period_start,
+                        stmt.period_end, len(stmt.transactions),
+                        stmt.privacy_mode,
+                    )
+                except Exception as exc:
+                    log.warning("Statement extraction failed for %d: %s", doc_id, exc)
+
     return process
 
 
@@ -272,6 +359,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Same as --backfill-tags but only prints what would change")
     parser.add_argument("--backfill-receipts", action="store_true",
                         help="Extract line items from existing Kassenzettel docs that don't have them yet")
+    parser.add_argument("--backfill-statements", action="store_true",
+                        help="Extract transactions from existing Kontoauszug docs that don't have them yet")
     parser.add_argument("--version", action="version", version=f"docusort {__version__}")
     args = parser.parse_args(argv)
 
@@ -326,7 +415,8 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("AI provider not configured — web UI starts in setup mode, "
                     "watcher will skip classification until /setup is completed.")
 
-    if (args.backfill_tags or args.backfill_dry_run or args.backfill_receipts) and classifier is None:
+    if (args.backfill_tags or args.backfill_dry_run
+            or args.backfill_receipts or args.backfill_statements) and classifier is None:
         log.error("Cannot run backfill: AI provider not configured. "
                   "Open the web UI and finish /setup first.")
         return 2
@@ -344,6 +434,16 @@ def main(argv: list[str] | None = None) -> int:
         from .receipts import backfill_receipts
         result = backfill_receipts(settings, db, classifier, dry_run=False)
         log.info("Receipt backfill done: %s", result)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+
+    if args.backfill_statements:
+        from .finance.extractor import backfill_statements
+        local_only = settings.finance.local_only and settings.ai.provider == "openai_compat"
+        result = backfill_statements(
+            settings, db, classifier, dry_run=False, local_only=local_only,
+        )
+        log.info("Statement backfill done: %s", result)
         print(json.dumps(result, indent=2, default=str))
         return 0
 

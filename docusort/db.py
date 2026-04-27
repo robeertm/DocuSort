@@ -203,6 +203,75 @@ CREATE TRIGGER IF NOT EXISTS receipts_cascade_on_doc_delete
 AFTER DELETE ON documents BEGIN
     DELETE FROM receipts WHERE doc_id = old.id;
 END;
+
+-- Finance: bank accounts, statements (Kontoauszüge), and transactions.
+-- An account is identified by iban_hash (SHA256 of normalised IBAN) so
+-- two statements from the same account auto-merge even if one was
+-- pseudonymised before extraction.
+CREATE TABLE IF NOT EXISTS accounts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_name       TEXT NOT NULL,
+    iban            TEXT,                  -- nullable if user opts out of storing
+    iban_last4      TEXT,                  -- 'DE89...0123'  for display
+    iban_hash       TEXT UNIQUE,           -- SHA256 of normalised IBAN; dedup key
+    account_holder  TEXT,
+    currency        TEXT DEFAULT 'EUR',
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_accounts_iban_hash ON accounts(iban_hash);
+
+CREATE TABLE IF NOT EXISTS statements (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id          INTEGER NOT NULL UNIQUE,
+    account_id      INTEGER,
+    period_start    TEXT,                   -- ISO date inclusive
+    period_end      TEXT,                   -- ISO date inclusive
+    statement_no    TEXT,                   -- bank-assigned statement number
+    opening_balance REAL,
+    closing_balance REAL,
+    currency        TEXT DEFAULT 'EUR',
+    file_hash       TEXT,                   -- SHA256 of the PDF; identical files dedup
+    privacy_mode    TEXT,                   -- 'pseudonymize' | 'local' | 'plain'
+    extra_json      TEXT,                   -- raw extractor output for debugging
+    created_at      TEXT NOT NULL,
+    FOREIGN KEY (doc_id)     REFERENCES documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)  ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_statements_doc       ON statements(doc_id);
+CREATE INDEX IF NOT EXISTS idx_statements_account   ON statements(account_id);
+CREATE INDEX IF NOT EXISTS idx_statements_period    ON statements(period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_statements_file_hash ON statements(file_hash);
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    statement_id    INTEGER NOT NULL,
+    account_id      INTEGER,
+    booking_date    TEXT,
+    value_date      TEXT,
+    amount          REAL NOT NULL,           -- negative = outgoing
+    currency        TEXT DEFAULT 'EUR',
+    counterparty    TEXT,
+    counterparty_iban TEXT,                 -- masked or empty after pseudonymisation
+    purpose         TEXT,
+    tx_type         TEXT,                   -- ueberweisung | lastschrift | gehalt | ...
+    category        TEXT,                   -- miete | lebensmittel | mobilitaet | ...
+    tx_hash         TEXT UNIQUE,            -- account+date+amount+purpose hash for dedup
+    line_no         INTEGER,
+    FOREIGN KEY (statement_id) REFERENCES statements(id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id)   REFERENCES accounts(id)   ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_stmt     ON transactions(statement_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_account  ON transactions(account_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_date     ON transactions(booking_date);
+CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
+
+CREATE TRIGGER IF NOT EXISTS statements_cascade_on_doc_delete
+AFTER DELETE ON documents BEGIN
+    DELETE FROM statements WHERE doc_id = old.id;
+END;
 """
 
 
@@ -821,6 +890,337 @@ class Database:
             "JOIN documents d ON d.id = r.doc_id "
             "WHERE " + " AND ".join(where) +
             " ORDER BY r.receipt_date DESC, i.line_no LIMIT ?"
+        )
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---------- Finance (bank statements / Kontoauszüge) ----------
+
+    def upsert_account(
+        self,
+        *,
+        bank_name: str,
+        iban_hash: str,
+        iban: str = "",
+        iban_last4: str = "",
+        account_holder: str = "",
+        currency: str = "EUR",
+    ) -> int:
+        """Idempotent: returns id, creating the row if needed. iban_hash is
+        the dedup key — same IBAN seen via two different statements lands on
+        the same account row even if one was pseudonymised."""
+        if not iban_hash:
+            raise ValueError("iban_hash is required")
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM accounts WHERE iban_hash = ?", (iban_hash,)
+            ).fetchone()
+            if row:
+                acct_id = int(row["id"])
+                # Backfill missing display fields if a later, less-redacted
+                # statement gives us better data.
+                self._conn.execute(
+                    """UPDATE accounts SET
+                         bank_name      = COALESCE(NULLIF(?, ''), bank_name),
+                         iban           = COALESCE(NULLIF(?, ''), iban),
+                         iban_last4     = COALESCE(NULLIF(?, ''), iban_last4),
+                         account_holder = COALESCE(NULLIF(?, ''), account_holder),
+                         currency       = COALESCE(NULLIF(?, ''), currency)
+                       WHERE id = ?""",
+                    (bank_name, iban, iban_last4, account_holder, currency, acct_id),
+                )
+                return acct_id
+            cur = self._conn.execute(
+                """INSERT INTO accounts
+                     (bank_name, iban, iban_last4, iban_hash, account_holder, currency, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (bank_name, iban, iban_last4, iban_hash, account_holder, currency, now),
+            )
+            return cur.lastrowid or 0
+
+    def list_accounts(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT a.*,
+                          (SELECT COUNT(*) FROM statements   WHERE account_id = a.id) AS statement_count,
+                          (SELECT COUNT(*) FROM transactions WHERE account_id = a.id) AS tx_count
+                   FROM accounts a
+                   ORDER BY a.bank_name, a.id"""
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def find_statement_by_file_hash(self, file_hash: str) -> dict[str, Any] | None:
+        if not file_hash:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM statements WHERE file_hash = ? LIMIT 1", (file_hash,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_statement(
+        self,
+        doc_id: int,
+        *,
+        account_id: int | None,
+        period_start: str = "",
+        period_end: str = "",
+        statement_no: str = "",
+        opening_balance: float | None = None,
+        closing_balance: float | None = None,
+        currency: str = "EUR",
+        file_hash: str = "",
+        privacy_mode: str = "",
+        transactions: list[dict] | None = None,
+        extra_json: str = "",
+    ) -> int:
+        """Replace the statement + transactions for a document.
+
+        Transactions get inserted with INSERT OR IGNORE on tx_hash so that
+        a second statement covering an overlapping period does not create
+        duplicate rows for the same booking. Returns the statement row id."""
+        transactions = transactions or []
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT id FROM statements WHERE doc_id = ?", (doc_id,)
+            ).fetchone()
+            if existing:
+                stmt_id = int(existing["id"])
+                self._conn.execute(
+                    """UPDATE statements SET account_id=?, period_start=?, period_end=?,
+                         statement_no=?, opening_balance=?, closing_balance=?,
+                         currency=?, file_hash=?, privacy_mode=?, extra_json=?
+                       WHERE id=?""",
+                    (account_id, period_start, period_end, statement_no,
+                     opening_balance, closing_balance, currency, file_hash,
+                     privacy_mode, extra_json, stmt_id),
+                )
+                self._conn.execute(
+                    "DELETE FROM transactions WHERE statement_id = ?", (stmt_id,)
+                )
+            else:
+                cur = self._conn.execute(
+                    """INSERT INTO statements
+                         (doc_id, account_id, period_start, period_end,
+                          statement_no, opening_balance, closing_balance,
+                          currency, file_hash, privacy_mode, extra_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (doc_id, account_id, period_start, period_end,
+                     statement_no, opening_balance, closing_balance,
+                     currency, file_hash, privacy_mode, extra_json, now),
+                )
+                stmt_id = cur.lastrowid or 0
+            for i, tx in enumerate(transactions):
+                # INSERT OR IGNORE: if a tx with the same tx_hash already
+                # exists (= same booking from an overlapping statement),
+                # skip silently. The dedup is still account-scoped because
+                # tx_hash is computed from the IBAN hash + booking line.
+                self._conn.execute(
+                    """INSERT OR IGNORE INTO transactions
+                         (statement_id, account_id, booking_date, value_date,
+                          amount, currency, counterparty, counterparty_iban,
+                          purpose, tx_type, category, tx_hash, line_no)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (stmt_id, account_id, tx.get("booking_date") or "",
+                     tx.get("value_date") or "",
+                     float(tx.get("amount") or 0.0), tx.get("currency") or currency,
+                     tx.get("counterparty") or "", tx.get("counterparty_iban") or "",
+                     tx.get("purpose") or "", tx.get("tx_type") or "",
+                     tx.get("category") or "", tx.get("tx_hash") or "", i),
+                )
+        return stmt_id
+
+    def get_statement(self, doc_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT s.*, a.bank_name, a.iban_last4, a.account_holder
+                   FROM statements s
+                   LEFT JOIN accounts a ON a.id = s.account_id
+                   WHERE s.doc_id = ?""", (doc_id,)
+            ).fetchone()
+            if not row:
+                return None
+            txs = self._conn.execute(
+                """SELECT * FROM transactions
+                   WHERE statement_id = ?
+                   ORDER BY booking_date, line_no, id""",
+                (row["id"],),
+            ).fetchall()
+        out = dict(row)
+        out["transactions"] = [dict(t) for t in txs]
+        return out
+
+    def finance_summary(self) -> dict[str, Any]:
+        """Top-level cashflow numbers across all non-deleted statements."""
+        with self._lock:
+            tot = self._conn.execute(
+                """SELECT
+                     COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS income,
+                     COALESCE(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS expense,
+                     COUNT(*) AS tx_count
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL"""
+            ).fetchone()
+            stmt_count = self._conn.execute(
+                """SELECT COUNT(*) AS n FROM statements s
+                   JOIN documents d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL"""
+            ).fetchone()
+            acct_count = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM accounts"
+            ).fetchone()
+            cats = self._conn.execute(
+                """SELECT t.category AS category,
+                          COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS income,
+                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN t.amount ELSE 0 END), 0) AS expense,
+                          COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL AND t.category != ''
+                   GROUP BY t.category
+                   ORDER BY expense ASC, income DESC"""
+            ).fetchall()
+        return {
+            "income":          float(tot["income"]) if tot else 0.0,
+            "expense":         float(tot["expense"]) if tot else 0.0,
+            "net":             float((tot["income"] if tot else 0) + (tot["expense"] if tot else 0)),
+            "tx_count":        int(tot["tx_count"]) if tot else 0,
+            "statement_count": int(stmt_count["n"]) if stmt_count else 0,
+            "account_count":   int(acct_count["n"]) if acct_count else 0,
+            "by_category":     [dict(r) for r in cats],
+        }
+
+    def finance_monthly(self, months: int = 12) -> list[dict[str, Any]]:
+        """Income + expense per month for the last N months, oldest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT substr(t.booking_date, 1, 7) AS month,
+                          COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS income,
+                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN t.amount ELSE 0 END), 0) AS expense,
+                          COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                   GROUP BY month
+                   ORDER BY month DESC
+                   LIMIT ?""",
+                (months,),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def finance_top_counterparties(
+        self, *, direction: str = "expense", limit: int = 15,
+    ) -> list[dict[str, Any]]:
+        """Top counterparties by total spend or income.
+
+        direction='expense' returns the largest outflows (most negative
+        sum first); 'income' the largest inflows."""
+        op = "<" if direction == "expense" else ">"
+        order = "ASC" if direction == "expense" else "DESC"
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT t.counterparty AS counterparty,
+                           COUNT(*) AS times,
+                           COALESCE(SUM(t.amount), 0) AS total
+                    FROM transactions t
+                    JOIN statements   s ON s.id = t.statement_id
+                    JOIN documents    d ON d.id = s.doc_id
+                    WHERE d.deleted_at IS NULL
+                      AND t.amount {op} 0
+                      AND t.counterparty != ''
+                    GROUP BY LOWER(t.counterparty)
+                    ORDER BY total {order}
+                    LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def finance_recurring(self, *, min_months: int = 3, limit: int = 30) -> list[dict[str, Any]]:
+        """Counterparties that show up in at least N distinct months with
+        amounts within ±15% of each other — typical for subscriptions,
+        rent, insurance, gym memberships, etc."""
+        with self._lock:
+            rows = self._conn.execute(
+                """WITH cp_monthly AS (
+                       SELECT LOWER(t.counterparty) AS cp_key,
+                              t.counterparty AS counterparty,
+                              substr(t.booking_date, 1, 7) AS month,
+                              AVG(t.amount) AS avg_amount,
+                              COUNT(*) AS n
+                       FROM transactions t
+                       JOIN statements   s ON s.id = t.statement_id
+                       JOIN documents    d ON d.id = s.doc_id
+                       WHERE d.deleted_at IS NULL
+                         AND t.counterparty != ''
+                         AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                       GROUP BY cp_key, month
+                   )
+                   SELECT counterparty,
+                          COUNT(DISTINCT month) AS months,
+                          AVG(avg_amount) AS amount,
+                          MIN(avg_amount) AS min_amount,
+                          MAX(avg_amount) AS max_amount
+                   FROM cp_monthly
+                   GROUP BY cp_key
+                   HAVING months >= ?
+                          AND ABS(MAX(avg_amount) - MIN(avg_amount)) <=
+                              ABS(AVG(avg_amount)) * 0.15
+                   ORDER BY months DESC, ABS(amount) DESC
+                   LIMIT ?""",
+                (min_months, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def transactions_list(
+        self,
+        *,
+        account_id: int | None = None,
+        category: str | None = None,
+        direction: str | None = None,   # 'income' | 'expense' | None
+        start: str | None = None,
+        end: str | None = None,
+        query: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        where = ["d.deleted_at IS NULL"]
+        params: list[Any] = []
+        if account_id is not None:
+            where.append("t.account_id = ?")
+            params.append(account_id)
+        if category:
+            where.append("t.category = ?")
+            params.append(category)
+        if direction == "income":
+            where.append("t.amount > 0")
+        elif direction == "expense":
+            where.append("t.amount < 0")
+        if start:
+            where.append("t.booking_date >= ?")
+            params.append(start)
+        if end:
+            where.append("t.booking_date <= ?")
+            params.append(end)
+        if query:
+            where.append("(t.counterparty LIKE ? OR t.purpose LIKE ?)")
+            q = f"%{query}%"
+            params += [q, q]
+        sql = (
+            "SELECT t.*, s.doc_id, a.bank_name, a.iban_last4 "
+            "FROM transactions t "
+            "JOIN statements   s ON s.id = t.statement_id "
+            "JOIN documents    d ON d.id = s.doc_id "
+            "LEFT JOIN accounts a ON a.id = t.account_id "
+            "WHERE " + " AND ".join(where) +
+            " ORDER BY t.booking_date DESC, t.id DESC LIMIT ?"
         )
         params.append(limit)
         with self._lock:

@@ -82,6 +82,22 @@ class SyncSettings:
 
 
 @dataclass
+class FinanceSettings:
+    """How bank-statement extraction handles privacy."""
+    # When True, statements never go to a cloud LLM. Extraction is
+    # routed to the user's local provider (openai_compat / Ollama). If
+    # no local provider is configured, statement extraction is skipped
+    # rather than silently leaking data.
+    local_only: bool = False
+
+    # When False (default), pseudonymisation is OFF — only choose this if
+    # local_only is True OR the user has explicitly opted in to plain
+    # transmission. The web UI defaults to pseudonymisation ON for cloud
+    # providers and exposes the toggle in /settings.
+    pseudonymize: bool = True
+
+
+@dataclass
 class AppSettings:
     paths: Paths
     categories: list[dict[str, Any]]
@@ -89,6 +105,7 @@ class AppSettings:
     ai: AISettings
     web: WebSettings = field(default_factory=WebSettings)
     sync: SyncSettings = field(default_factory=SyncSettings)
+    finance: FinanceSettings = field(default_factory=FinanceSettings)
     keep_original: bool = True
     filename_template: str = "{date}_{category}_{sender}_{subject}"
     max_filename_length: int = 120
@@ -175,6 +192,12 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         timeout_seconds=int(sync_cfg.get("timeout_seconds", 1800)),
     )
 
+    fin_cfg = cfg.get("finance", {})
+    finance = FinanceSettings(
+        local_only=bool(fin_cfg.get("local_only", False)),
+        pseudonymize=bool(fin_cfg.get("pseudonymize", True)),
+    )
+
     return AppSettings(
         paths=paths,
         categories=cats.get("categories", []),
@@ -182,6 +205,7 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         ai=ai,
         web=web,
         sync=sync,
+        finance=finance,
         keep_original=cfg.get("keep_original", True),
         filename_template=cfg.get(
             "filename_template", "{date}_{category}_{sender}_{subject}"

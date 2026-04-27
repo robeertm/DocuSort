@@ -2,6 +2,63 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.13.0] – 2026-04-27
+
+### Added — Bank-statement analysis (`/finance`)
+
+- **New top-level category `Kontoauszug`** (Girokonto, Tagesgeld,
+  Kreditkarte, Depot, PayPal, Sonstiges). Statements are detected
+  automatically by the classifier — no manual flagging needed.
+- **Statement extractor** (`docusort.finance.StatementExtractor`):
+  second-pass LLM that pulls bank name, period, opening/closing
+  balance, and every transaction (booking date, amount with sign,
+  counterparty, IBAN, purpose, type, category) out of OCR text.
+- **`accounts` / `statements` / `transactions` tables** in SQLite,
+  plus aggregation methods: `finance_summary`, `finance_monthly`,
+  `finance_top_counterparties`, `finance_recurring`,
+  `transactions_list`. `iban_hash` is the dedup key so multiple
+  statements for the same account auto-merge into one.
+- **Cross-statement transaction dedup** via `tx_hash` (account +
+  booking date + amount + purpose) — overlapping monthly + quarterly
+  statements no longer double-count the same booking.
+- **Pseudonymisation layer** (`docusort.finance.Pseudonymizer`): IBANs,
+  emails, addresses, and the account holder's name are replaced with
+  stable tokens (`IBAN_001`, `NAME_002`, `ADDR_003`) before any cloud
+  LLM sees the OCR text. After the JSON response comes back, tokens
+  are restored locally and `SHA256(IBAN)` is used as the account dedup
+  key. Counterparty names (Lidl, Stadtwerke, …) are kept verbatim so
+  categorisation still works.
+- **`/finance` page** with cashflow chart (income up / expense down),
+  per-account list, by-category breakdown, top
+  outgoing/incoming counterparties, recurring-transaction detection
+  (subscriptions: ≥3 months, ±15% amount drift), and a filtered
+  transaction table with search + account/category/direction/date
+  filters.
+- **Privacy controls in `/settings`**: choose between cloud-with-
+  pseudonymisation (default) and local-only processing. Local-only
+  refuses to extract statements unless the active provider is local
+  (Ollama / OpenAI-compatible) — no silent leak. The current privacy
+  mode of the most recent statement is shown as a badge on `/finance`.
+- **`POST /api/document/{id}/statement/extract`** to manually
+  re-trigger extraction after a config change.
+- **`POST /api/settings/finance`** to toggle `local_only` /
+  `pseudonymize` from the UI without a service restart.
+- **`docusort --backfill-statements`** to extract transactions from
+  existing Kontoauszug docs that don't have them yet (re-uses stored
+  OCR text, no re-OCR cost).
+- **Privacy notice in the LLM prompt**: the system prompt explicitly
+  tells the model "tokens like IBAN_001 are masked — keep them
+  verbatim" so the JSON round-trip preserves the reverse map.
+
+### Changed
+
+- `nav.finance` is a new top-level navigation entry. On mobile it
+  shares the horizontal scroll bar with the other tabs.
+- `WebSettings`-style `FinanceSettings(local_only, pseudonymize)`
+  added to `AppSettings`. Reads from the new `finance:` block in
+  `config.yaml`; missing block falls back to the safe defaults
+  (`local_only=false, pseudonymize=true`).
+
 ## [0.12.7] – 2026-04-27
 
 ### Added

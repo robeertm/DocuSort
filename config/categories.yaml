@@ -98,6 +98,18 @@ categories:
       gehen unter Rechnungen. Subcategory richtet sich nach dem Shop-Typ.
     subcategories: ["Supermarkt", "Drogerie", "Baumarkt", "Restaurant", "Cafe", "Tankstelle", "Apotheke", "Bekleidung", "Elektronik", "Buecher", "Moebel", "Versand", "Sonstiges"]
 
+  - name: "Kontoauszug"
+    description: >
+      Kontoauszug eines Giro-, Tagesgeld-, Kreditkarten- oder PayPal-Kontos.
+      Erkennungsmerkmale: IBAN am Kopf, Banklogo (Sparkasse, DKB, ING,
+      Commerzbank, Volksbank, Postbank, comdirect, N26, Revolut, PayPal,
+      …), Buchungstabelle mit Datum / Verwendungszweck / Betrag, Anfangs-
+      und Endsaldo. Auch Kreditkartenabrechnungen und PayPal-Übersichten
+      gehören hierher. NICHT für einzelne Überweisungsbelege oder
+      Geldautomaten-Quittungen — die gehen unter Rechnungen oder
+      Kassenzettel. Subcategory ist der Bank-Typ.
+    subcategories: ["Girokonto", "Tagesgeld", "Kreditkarte", "Depot", "PayPal", "Sonstiges"]
+
   - name: "Sonstiges"
     description: >
       Alles, was in keine andere Kategorie passt. Auch Fallback bei Unsicherheit.

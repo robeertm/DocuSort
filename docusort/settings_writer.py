@@ -136,6 +136,23 @@ def update_sync(
     return _write_raw(cfg, config_dir)
 
 
+def update_finance(
+    *,
+    local_only: bool | None = None,
+    pseudonymize: bool | None = None,
+    config_dir: Path | None = None,
+) -> Path:
+    """Persist the finance privacy toggles to config.yaml."""
+    cfg = _read_raw(config_dir)
+    fin = cfg.get("finance") or {}
+    if local_only is not None:
+        fin["local_only"] = bool(local_only)
+    if pseudonymize is not None:
+        fin["pseudonymize"] = bool(pseudonymize)
+    cfg["finance"] = fin
+    return _write_raw(cfg, config_dir)
+
+
 def remove_secret(provider: str, config_dir: Path | None = None) -> None:
     secrets = load_secrets(config_dir)
     secrets.pop(f"{provider}_api_key", None)
