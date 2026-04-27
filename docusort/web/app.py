@@ -250,10 +250,23 @@ def create_app(
             raise HTTPException(404, "Document not found")
         _decode_tags(doc)
         receipt = db.get_receipt(doc_id) if doc.get("category") == "Kassenzettel" else None
+        # Statement card surfaces for Kontoauszug AND any legacy Bank
+        # document (the classifier picked Bank for actual statements
+        # before v0.13.0, sometimes with subcategory=Konto, sometimes
+        # without — depending on which categories.yaml was active at
+        # the time). Either way the user gets the manual "extract"
+        # button and the privacy preview. Non-statement Bank docs (a
+        # contract, a Wertpapier-Abrechnung, …) just return zero
+        # transactions on extract — wasted LLM call but not harmful.
+        is_statement_candidate = doc.get("category") in ("Kontoauszug", "Bank")
+        statement = db.get_statement(doc_id) if is_statement_candidate else None
         from ..receipts import SHOP_TYPES, ITEM_CATEGORIES, PAYMENT_METHODS
         return templates.TemplateResponse(
             request, "document.html",
             {**base_ctx(request), "doc": doc, "receipt": receipt,
+             "statement": statement,
+             "is_statement_candidate": is_statement_candidate,
+             "ai_provider": settings.ai.provider,
              "shop_types": list(SHOP_TYPES),
              "item_categories": list(ITEM_CATEGORIES),
              "payment_methods": list(PAYMENT_METHODS)},
@@ -651,6 +664,64 @@ def create_app(
         settings.finance.local_only   = local_only
         settings.finance.pseudonymize = pseudonymize
         return {"ok": True, "local_only": local_only, "pseudonymize": pseudonymize}
+
+    @app.get("/api/document/{doc_id}/statement/preview")
+    def api_statement_preview(doc_id: int):
+        """Show the user EXACTLY what would leave the box for this
+        document if they triggered statement extraction right now.
+
+        Returns the pseudonymised OCR text (the bytes that hit the LLM),
+        plus the reverse map and counts of each token kind. Cheap: no
+        LLM call, just runs the local pseudonymiser on stored OCR text.
+
+        The reverse map values are the user's REAL data, so this
+        endpoint stays local-only by design — the values are never
+        included in any API call to a third party."""
+        from ..finance import Pseudonymizer
+        doc = db.get(doc_id)
+        if not doc:
+            raise HTTPException(404, "document not found")
+        text = doc.get("extracted_text") or ""
+        if not text:
+            raise HTTPException(400, "no OCR text stored — re-classify first")
+
+        is_local = settings.ai.provider == "openai_compat"
+        will_pseudonymize = settings.finance.pseudonymize and not is_local
+        will_skip = settings.finance.local_only and not is_local
+
+        if will_pseudonymize:
+            pseudo = Pseudonymizer()
+            pseudo_text = pseudo.pseudonymize(text)
+            counts: dict[str, int] = {}
+            for tok in pseudo.reverse_map:
+                kind = tok.split("_")[0]
+                counts[kind] = counts.get(kind, 0) + 1
+            return {
+                "privacy_mode": "pseudonymize",
+                "provider": settings.ai.provider,
+                "model": settings.ai.model,
+                "will_skip": will_skip,
+                "char_count_original":      len(text),
+                "char_count_to_be_sent":    len(pseudo_text),
+                "text_to_be_sent":          pseudo_text,
+                "reverse_map":              pseudo.reverse_map,
+                "token_counts":             counts,
+                "ibans_detected":           pseudo.ibans,
+            }
+        # Either local-only or pseudonymisation disabled — be honest
+        # about what travels.
+        return {
+            "privacy_mode": "local" if is_local else "plain",
+            "provider": settings.ai.provider,
+            "model": settings.ai.model,
+            "will_skip": will_skip,
+            "char_count_original":   len(text),
+            "char_count_to_be_sent": len(text),
+            "text_to_be_sent":       text,
+            "reverse_map":           {},
+            "token_counts":          {},
+            "ibans_detected":        [],
+        }
 
     @app.post("/api/document/{doc_id}/statement/extract")
     def api_extract_statement(doc_id: int):

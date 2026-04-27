@@ -56,9 +56,12 @@ categories:
 
   - name: "Bank"
     description: >
-      Kontoauszüge, Depotauszüge, Kreditverträge, Darlehen, Zinsabrechnungen,
-      Wertpapierabrechnungen, Bankbescheinigungen, Kreditkartenabrechnungen.
-    subcategories: ["Konto", "Kredit", "Wertpapiere", "Karte"]
+      Bankunterlagen die KEINE laufenden Auszüge sind — Kreditverträge,
+      Darlehen, Wertpapierabrechnungen, Depot-Eröffnung, Bankbescheinigungen,
+      Kontoeröffnungs-Unterlagen, Kündigungen. Laufende Kontoauszüge,
+      PayPal-Übersichten und Kreditkartenabrechnungen gehen unter
+      "Kontoauszug", nicht hier.
+    subcategories: ["Kredit", "Wertpapiere", "Vertrag", "Sonstiges"]
 
   - name: "Auto"
     description: >

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,6 +34,20 @@ from .pseudonymizer import Pseudonymizer, iban_hash
 
 
 logger = logging.getLogger("docusort.finance.extractor")
+
+
+# A pseudonym token that survived the restore step is a sign the LLM
+# hallucinated a reference (= emitted "NAME_001" without us ever having
+# masked anything as NAME_001). Storing such a value would mean the
+# user sees `NAME_001` as the account holder, which is worse than
+# admitting we don't know.
+_RESIDUAL_TOKEN_RE = re.compile(r"^(IBAN|NAME|ADDR|EMAIL)_\d+$")
+
+
+def _scrub_residual(value: str) -> str:
+    if isinstance(value, str) and _RESIDUAL_TOKEN_RE.match(value.strip()):
+        return ""
+    return value
 
 
 @dataclass
@@ -300,8 +315,8 @@ def _normalise_tx(d: dict[str, Any]) -> Transaction | None:
         value_date=str(d.get("value_date") or "").strip()[:10],
         amount=amount,
         currency=str(d.get("currency") or "EUR").strip().upper()[:8] or "EUR",
-        counterparty=str(d.get("counterparty") or "").strip()[:200],
-        counterparty_iban=str(d.get("counterparty_iban") or "").strip()[:34],
+        counterparty=_scrub_residual(str(d.get("counterparty") or "").strip()[:200]),
+        counterparty_iban=_scrub_residual(str(d.get("counterparty_iban") or "").strip()[:34]),
         purpose=str(d.get("purpose") or "").strip()[:500],
         tx_type=typ,
         category=cat,
@@ -350,9 +365,11 @@ class StatementExtractor:
 
         # Keep token-named columns optional in the schema; once restored
         # they'll be plain values, but the schema names still carry the
-        # "_token" suffix on the way through the LLM.
-        iban       = str(data.get("account_iban_token")    or data.get("account_iban")    or "").strip()
-        holder     = str(data.get("account_holder_token")  or data.get("account_holder")  or "").strip()
+        # "_token" suffix on the way through the LLM. Residual tokens
+        # (e.g. the LLM emitted "NAME_001" without us actually masking
+        # anything as NAME_001) get blanked rather than stored as-is.
+        iban       = _scrub_residual(str(data.get("account_iban_token")    or data.get("account_iban")    or "").strip())
+        holder     = _scrub_residual(str(data.get("account_holder_token")  or data.get("account_holder")  or "").strip())
         # If the token was empty in JSON but we did detect at least one
         # IBAN in the source text, prefer the first detected IBAN as the
         # account IBAN — common when the model omits the token field.
@@ -406,11 +423,28 @@ def backfill_statements(settings, db, classifier, *, dry_run: bool = False,
         classifier.provider, settings.ai.model,
         max_text_chars=settings.ai.max_text_chars,
     )
+    # Also catch legacy bank docs that were filed under category=Bank
+    # before v0.13.0 added "Kontoauszug" as a top-level category. We
+    # filter on subject keywords ("kontoauszug", "auszug", "girokonto",
+    # "tagesgeld", "kreditkarte") rather than subcategory because the
+    # classifier has used various subcategories ("Konto", "" …) over
+    # versions. After successful extraction the doc gets promoted to
+    # category=Kontoauszug so /finance can find it.
     rows = db._conn.execute(
-        """SELECT id, extracted_text, doc_date FROM documents
-           WHERE category = 'Kontoauszug' AND deleted_at IS NULL
+        """SELECT id, category, subcategory, extracted_text, doc_date, subject
+           FROM documents
+           WHERE deleted_at IS NULL
+             AND extracted_text IS NOT NULL AND extracted_text != ''
              AND id NOT IN (SELECT doc_id FROM statements)
-             AND extracted_text IS NOT NULL AND extracted_text != ''"""
+             AND (category = 'Kontoauszug'
+                  OR (category = 'Bank' AND (
+                      subcategory = 'Konto'
+                      OR LOWER(COALESCE(subject,'')) LIKE '%kontoauszug%'
+                      OR LOWER(COALESCE(subject,'')) LIKE '%girokonto%'
+                      OR LOWER(COALESCE(subject,'')) LIKE '%tagesgeld%'
+                      OR LOWER(COALESCE(subject,'')) LIKE '%kreditkart%'
+                      OR LOWER(COALESCE(subject,'')) LIKE '%paypal%auszug%'
+                  )))"""
     ).fetchall()
     processed: list[int] = []
     failed: list[dict] = []
@@ -427,6 +461,17 @@ def backfill_statements(settings, db, classifier, *, dry_run: bool = False,
                         doc_id, stmt.bank_name, len(stmt.transactions))
             processed.append(doc_id)
             continue
+        # Promote the document to category=Kontoauszug if it was filed
+        # under the legacy Bank category. Without this, /finance ignores
+        # it and the user has to wonder why their data isn't showing up.
+        # Skip the promotion if the extractor came back empty — that
+        # was likely a non-statement Bank doc (a contract or something)
+        # picked up by the subject heuristic.
+        if r["category"] == "Bank" and stmt.transactions:
+            db._conn.execute(
+                "UPDATE documents SET category = 'Kontoauszug', subcategory = '' WHERE id = ?",
+                (doc_id,),
+            )
         # Compute / lookup the account using iban_hash so multiple
         # statements for the same account auto-merge.
         account_id: int | None = None

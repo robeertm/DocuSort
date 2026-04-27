@@ -66,6 +66,30 @@ _HOLDER_LINE_RE = re.compile(
     r"(?im)^[ \t]*(Kontoinhaber|Kunde|Inhaber|Auftraggeber|Empfänger)\s*[:：][ \t]*([^\n\r]+)$"
 )
 
+# German Anrede-style address block, common at the top of bank
+# statements:
+#
+#     Herrn und Frau
+#     Robert Manuwald
+#     Steffi Manuwald
+#     Musterstraße 12
+#     01099 Dresden
+#
+# After the salutation line we mask up to four following lines that
+# look like "FirstName LastName" (one or two words, both capitalised).
+# The Strasse / zip-city lines are caught by the existing _STREET_RE
+# and _ZIP_CITY_RE so we stop the scan as soon as we hit a digit.
+_NAME_LINE = (
+    r"[ \t]*"                                  # leading space
+    r"[A-ZÄÖÜ][A-Za-zäöüß\-]+"                 # FirstName
+    r"(?:[ \t]+[A-ZÄÖÜ][A-Za-zäöüß\-]+){0,3}"  # 0-3 more capitalised words
+    r"[ \t]*"
+)
+_SALUTATION_BLOCK_RE = re.compile(
+    r"(?im)^[ \t]*(Herrn und Frau|Herr und Frau|Eheleute|Familie|Herrn|Herr|Frau)[ \t]*\r?\n"
+    r"((?:" + _NAME_LINE + r"\r?\n){1,4})"
+)
+
 
 def _normalise_iban(raw: str) -> str:
     """Strip whitespace / dots and uppercase. Used for stable hashing
@@ -148,16 +172,73 @@ class Pseudonymizer:
             return f"{label}: {tok}"
         return _HOLDER_LINE_RE.sub(repl, text)
 
+    def _mask_salutation_block(self, text: str) -> str:
+        # German bank statements typically start with a multi-line
+        # address block: "Herrn und Frau\nRobert Manuwald\nSteffi
+        # Manuwald\n…". The "Herr/Frau" salutation gets kept as
+        # context; the name lines (1-4 of them) are each replaced
+        # with their own NAME token so the LLM still sees that there
+        # are N people on this account.
+        def repl(m: re.Match[str]) -> str:
+            salutation = m.group(1)
+            block = m.group(2)
+            masked_lines: list[str] = []
+            for line in block.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    masked_lines.append(line)
+                    continue
+                tok = self._token_for("NAME", stripped)
+                # Preserve the original line's leading whitespace.
+                lead = line[: len(line) - len(line.lstrip())]
+                masked_lines.append(f"{lead}{tok}")
+            return f"{salutation}\n" + "\n".join(masked_lines) + ("\n" if block.endswith("\n") else "")
+        return _SALUTATION_BLOCK_RE.sub(repl, text)
+
     # ----- public -----
 
     def pseudonymize(self, text: str) -> str:
         """Run all maskers in a deterministic order. Returns the
-        token-masked text safe to send to a third-party LLM."""
+        token-masked text safe to send to a third-party LLM.
+
+        Order matters: salutation block first so multi-line names get
+        captured before the line-based street / zip-city patterns
+        consume them piecewise. After the structured maskers run, we
+        do a sweep pass that replaces every remaining occurrence of
+        each captured NAME / ADDR value with its token — bank
+        statements often repeat the holder's name inside transaction
+        descriptions ("ROBERT MANUWALD Konto …"), and we don't want
+        those un-masked just because they're not in a structured
+        block.
+        """
         out = self._mask_iban(text)
         out = self._mask_email(out)
+        out = self._mask_salutation_block(out)
         out = self._mask_holder_line(out)
         out = self._mask_street(out)
         out = self._mask_zip_city(out)
+        out = self._sweep_known_values(out)
+        return out
+
+    def _sweep_known_values(self, text: str) -> str:
+        """Second pass: each value already in the reverse map gets
+        replaced wherever else it appears (case-insensitive for NAME
+        tokens — banks sometimes UPPERCASE names inside booking
+        descriptions). Order by descending length so a name like
+        "Robert Manuwald" is handled before its component "Robert"."""
+        # Build (value, token) list, longest first.
+        pairs = [(v, t) for t, v in self.reverse_map.items()
+                 if t.startswith(("NAME_", "ADDR_"))]
+        pairs.sort(key=lambda p: len(p[0]), reverse=True)
+        out = text
+        for value, token in pairs:
+            if not value:
+                continue
+            # Case-insensitive replace so "ROBERT MANUWALD" inside a
+            # transaction description matches "Robert Manuwald" from
+            # the address block.
+            pattern = re.compile(re.escape(value), re.IGNORECASE)
+            out = pattern.sub(token, out)
         return out
 
     def restore(self, value: Any) -> Any:

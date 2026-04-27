@@ -2,6 +2,37 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.13.1] – 2026-04-27
+
+### Added — Privacy transparency
+
+- **"Was wird an die KI gesendet?"** expandable on every Kontoauszug
+  document detail page. Click to load (no LLM call, no cost) and see
+  exactly what bytes leave the box: privacy mode badge, provider/model,
+  payload size in characters, count of masked tokens by kind (IBANs,
+  Names, Addresses, Emails), the **full pseudonymised text** as it would
+  hit the API, and the **local reverse map** (token → real value) that
+  never leaves your server. Translates the abstract privacy promise
+  into something the user can audit.
+- **`GET /api/document/{doc_id}/statement/preview`** powers the above —
+  pure local computation, no third-party network.
+- **Statement card on document detail**: bank name, period, opening /
+  closing balance, transaction list (sticky-header table with up to
+  40vh scroll), privacy badge, manual extract / re-extract button.
+  Surfaces for both `Kontoauszug` and legacy `Bank/Konto` documents.
+
+### Fixed
+
+- **Bank category description no longer claims Kontoauszüge.** Before
+  this, the classifier was torn between `Bank/Konto` and `Kontoauszug`
+  and (deterministically) picked `Bank` for actual statements. Bank now
+  covers contracts / Wertpapiere / loans only; current statements
+  always go to `Kontoauszug`.
+- **`--backfill-statements` now also processes legacy `Bank/Konto`
+  documents** that were filed there before v0.13.0 added the new
+  category. After successful extraction, the document is auto-promoted
+  to `category=Kontoauszug` so it appears in `/finance` going forward.
+
 ## [0.13.0] – 2026-04-27
 
 ### Added — Bank-statement analysis (`/finance`)
