@@ -128,89 +128,162 @@
     {% endif %}
 
     {% if receipt %}
-    <div class="card p-5" x-data="{ extracting: false, message: '', ok: false }">
+    <div class="card p-5" x-data='receiptEditor({{ doc.id }}, {{ {
+            "shop_name": receipt.shop_name or "",
+            "shop_type": receipt.shop_type or "",
+            "payment_method": receipt.payment_method or "",
+            "total_amount": receipt.total_amount,
+            "currency": receipt.currency or "EUR",
+            "receipt_date": receipt.receipt_date or (doc.doc_date or ""),
+            "items": receipt["items"],
+        } | tojson }}, {{ shop_types | tojson }}, {{ item_categories | tojson }}, {{ payment_methods | tojson }})'>
       <div class="flex items-start justify-between gap-3 mb-3">
-        <div>
+        <div class="min-w-0">
           <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('receipt.heading') }}</h2>
-          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm">
-            {% if receipt.shop_name %}
-              <span class="font-medium">{{ receipt.shop_name }}</span>
-            {% endif %}
-            {% if receipt.shop_type %}
-              <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">
-                {{ t('receipt.shop.' + receipt.shop_type) }}
-              </span>
-            {% endif %}
-            {% if receipt.payment_method %}
-              <span class="chip bg-ink-700/60 text-ink-200">
-                {{ t('receipt.payment.' + receipt.payment_method) }}
-              </span>
-            {% endif %}
-          </div>
+          <p class="text-xs text-ink-500 mt-0.5">{{ t('receipt.edit_hint') }}</p>
         </div>
-        <button type="button" @click="
-          extracting = true; message = '';
-          fetch('/api/document/{{ doc.id }}/receipt/extract', { method: 'POST' })
-            .then(r => r.json().then(d => ({ ok: r.ok, d })))
-            .then(({ok, d}) => {
-              if (!ok) throw new Error(d.detail || 'failed');
-              location.reload();
-            })
-            .catch(e => { message = e.message; ok = false; })
-            .finally(() => extracting = false)"
-          :disabled="extracting"
-          class="btn-ghost text-xs"
-          :class="extracting ? 'opacity-50 cursor-not-allowed' : ''"
-          x-text="extracting ? T['receipt.reextracting'] : T['receipt.reextract']"></button>
+        <button type="button" @click="reextract()" :disabled="busy"
+                class="btn-ghost text-xs shrink-0"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                x-text="reextracting ? T['receipt.reextracting'] : T['receipt.reextract']"></button>
       </div>
 
-      {% if receipt.total_amount is not none %}
-        <div class="text-2xl font-semibold text-emerald-300 mb-3">
-          {{ "%.2f"|format(receipt.total_amount) }} {{ receipt.currency }}
-        </div>
-      {% endif %}
+      <!-- Header row: shop, type, payment -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+        <label class="block">
+          <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_shop') }}</span>
+          <input type="text" x-model="header.shop_name" maxlength="200"
+                 class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm">
+        </label>
+        <label class="block">
+          <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_shop_type') }}</span>
+          <select x-model="header.shop_type"
+                  class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm">
+            <option value="">—</option>
+            <template x-for="st in shopTypes" :key="st">
+              <option :value="st" x-text="T['receipt.shop.' + st] || st"></option>
+            </template>
+          </select>
+        </label>
+        <label class="block">
+          <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_payment') }}</span>
+          <select x-model="header.payment_method"
+                  class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm">
+            <option value="">—</option>
+            <template x-for="pm in paymentMethods" :key="pm">
+              <option :value="pm" x-text="T['receipt.payment.' + pm] || pm"></option>
+            </template>
+          </select>
+        </label>
+        <label class="block">
+          <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_date') }}</span>
+          <input type="date" x-model="header.receipt_date"
+                 class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm tabular-nums">
+        </label>
+      </div>
 
-      {% if receipt['items'] %}
+      <!-- Items table (editable) -->
       <div class="overflow-x-auto -mx-5">
         <table class="w-full text-sm">
           <thead class="text-xs uppercase tracking-wider text-ink-500">
             <tr>
               <th class="text-left px-5 py-1 font-medium">{{ t('receipt.col_item') }}</th>
-              <th class="text-right px-2 py-1 font-medium">{{ t('receipt.col_qty') }}</th>
-              <th class="text-right px-2 py-1 font-medium">{{ t('receipt.col_unit') }}</th>
-              <th class="text-right px-5 py-1 font-medium">{{ t('receipt.col_total') }}</th>
+              <th class="text-right px-1 py-1 font-medium w-14">{{ t('receipt.col_qty') }}</th>
+              <th class="text-right px-1 py-1 font-medium w-20">{{ t('receipt.col_unit') }}</th>
+              <th class="text-right px-1 py-1 font-medium w-20">{{ t('receipt.col_total') }}</th>
+              <th class="px-2 py-1 w-8"></th>
             </tr>
           </thead>
           <tbody>
-            {% for it in receipt['items'] %}
-            <tr class="border-t border-ink-800/50">
-              <td class="px-5 py-1.5">
-                <span>{{ it.name }}</span>
-                {% if it.item_category %}
-                  <span class="ml-2 text-[10px] uppercase tracking-wider text-ink-500">
-                    {{ t('receipt.cat.' + it.item_category) }}
-                  </span>
-                {% endif %}
-              </td>
-              <td class="px-2 py-1.5 text-right tabular-nums text-ink-400">
-                {% if it.quantity is not none %}{{ "%g"|format(it.quantity) }}{% else %}—{% endif %}
-              </td>
-              <td class="px-2 py-1.5 text-right tabular-nums text-ink-400">
-                {% if it.unit_price is not none %}{{ "%.2f"|format(it.unit_price) }}{% else %}—{% endif %}
-              </td>
-              <td class="px-5 py-1.5 text-right tabular-nums {% if it.total_price is not none and it.total_price < 0 %}text-rose-300{% endif %}">
-                {% if it.total_price is not none %}{{ "%.2f"|format(it.total_price) }}{% else %}—{% endif %}
-              </td>
+            <template x-for="(it, idx) in items" :key="idx">
+              <tr class="border-t border-ink-800/50 align-top">
+                <td class="px-5 py-1">
+                  <input type="text" x-model="it.name" maxlength="200"
+                         class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-0 py-1 text-sm focus:outline-none focus:ring-0"
+                         :placeholder="T['receipt.col_item']">
+                  <select x-model="it.item_category"
+                          class="block mt-1 w-full bg-transparent border-0 px-0 py-0 text-[10px] uppercase tracking-wider text-ink-500 focus:outline-none focus:ring-0 cursor-pointer">
+                    <option value="">—</option>
+                    <template x-for="cat in itemCategories" :key="cat">
+                      <option :value="cat" x-text="T['receipt.cat.' + cat] || cat"></option>
+                    </template>
+                  </select>
+                </td>
+                <td class="px-1 py-1">
+                  <input type="number" step="any" x-model.number="it.quantity"
+                         class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0">
+                </td>
+                <td class="px-1 py-1">
+                  <input type="number" step="0.01" x-model.number="it.unit_price"
+                         class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0">
+                </td>
+                <td class="px-1 py-1">
+                  <input type="number" step="0.01" x-model.number="it.total_price"
+                         class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0"
+                         :class="(it.total_price !== null && it.total_price < 0) ? 'text-rose-300' : ''">
+                </td>
+                <td class="px-2 py-1 text-right">
+                  <button type="button" @click="removeItem(idx)"
+                          class="text-ink-500 hover:text-rose-300 p-1" :title="T['receipt.remove_item']">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+                    </svg>
+                  </button>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="items.length === 0" class="border-t border-ink-800/50">
+              <td colspan="5" class="px-5 py-3 text-sm text-ink-500 italic">{{ t('receipt.no_items') }}</td>
             </tr>
-            {% endfor %}
           </tbody>
+          <tfoot class="border-t-2 border-ink-700/60">
+            <tr>
+              <td colspan="3" class="px-5 py-2 text-right text-xs uppercase tracking-wider text-ink-400">
+                {{ t('receipt.total') }}
+              </td>
+              <td class="px-1 py-2">
+                <div class="flex items-center gap-1">
+                  <input type="number" step="0.01" x-model.number="header.total_amount"
+                         class="w-full bg-ink-900/60 border border-ink-700 rounded px-1.5 py-1 text-sm text-right tabular-nums font-semibold text-emerald-300 focus:outline-none focus:ring-1 focus:ring-emerald-500/40">
+                  <input type="text" x-model="header.currency" maxlength="4"
+                         class="w-12 bg-transparent border-0 px-0 py-1 text-xs text-ink-400 uppercase focus:outline-none focus:ring-0">
+                </div>
+              </td>
+              <td></td>
+            </tr>
+            <tr x-show="computedSum !== null" x-cloak>
+              <td colspan="3" class="px-5 py-1 text-right text-[11px] text-ink-500">
+                {{ t('receipt.computed_sum') }}
+              </td>
+              <td class="px-1 py-1 text-right text-xs tabular-nums text-ink-400"
+                  :class="totalMismatch ? 'text-amber-300' : ''"
+                  x-text="computedSum !== null ? computedSum.toFixed(2) + ' ' + (header.currency || 'EUR') : ''"></td>
+              <td></td>
+            </tr>
+          </tfoot>
         </table>
       </div>
-      {% else %}
-      <p class="text-sm text-ink-500 italic">{{ t('receipt.no_items') }}</p>
-      {% endif %}
 
-      <div x-show="message" x-cloak class="mt-3 text-sm rounded-lg px-3 py-2 bg-rose-500/10 text-rose-200" x-text="message"></div>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" @click="addItem()" class="btn-ghost text-xs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          {{ t('receipt.add_item') }}
+        </button>
+        <span x-show="totalMismatch" x-cloak class="text-xs text-amber-300">
+          {{ t('receipt.total_mismatch') }}
+        </span>
+        <div class="flex-1"></div>
+        <button type="button" @click="save()" :disabled="busy"
+                class="btn-primary text-sm"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                x-text="saving ? T['receipt.saving'] : T['receipt.save']"></button>
+      </div>
+
+      <div x-show="message" x-cloak class="mt-3 text-sm rounded-lg px-3 py-2"
+           :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+           x-text="message"></div>
     </div>
     {% elif doc.category == 'Kassenzettel' %}
     <div class="card p-5">
@@ -372,6 +445,76 @@ function retryWidget(docId) {
         this.isError = true;
         this.message = tr('retry.failed') + ' ' + (e.message || e);
       } finally { this.busy = false; }
+    },
+  };
+}
+
+function receiptEditor(docId, initial, shopTypes, itemCategories, paymentMethods) {
+  return {
+    docId, shopTypes, itemCategories, paymentMethods,
+    header: {
+      shop_name:      initial.shop_name      || '',
+      shop_type:      initial.shop_type      || '',
+      payment_method: initial.payment_method || '',
+      total_amount:   initial.total_amount,
+      currency:       initial.currency       || 'EUR',
+      receipt_date:   initial.receipt_date   || '',
+    },
+    items: (initial.items || []).map(it => ({
+      name: it.name || '',
+      quantity:      it.quantity      ?? null,
+      unit_price:    it.unit_price    ?? null,
+      total_price:   it.total_price   ?? null,
+      item_category: it.item_category || '',
+    })),
+    saving: false, reextracting: false, message: '', ok: false,
+    get busy() { return this.saving || this.reextracting; },
+    get computedSum() {
+      const sum = this.items.reduce((acc, it) =>
+        acc + (typeof it.total_price === 'number' && !isNaN(it.total_price) ? it.total_price : 0), 0);
+      return this.items.length ? Math.round(sum * 100) / 100 : null;
+    },
+    get totalMismatch() {
+      if (this.computedSum === null) return false;
+      if (this.header.total_amount === null || this.header.total_amount === undefined || isNaN(this.header.total_amount)) return false;
+      return Math.abs(this.computedSum - this.header.total_amount) > 0.01;
+    },
+    addItem() {
+      this.items.push({ name: '', quantity: null, unit_price: null, total_price: null, item_category: '' });
+    },
+    removeItem(idx) {
+      this.items.splice(idx, 1);
+    },
+    async save() {
+      this.saving = true; this.message = ''; this.ok = false;
+      try {
+        const payload = {
+          ...this.header,
+          items: this.items.filter(it => (it.name || '').trim()),
+        };
+        const r = await fetch('/api/document/' + this.docId + '/receipt', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        this.ok = true; this.message = T['receipt.saved'];
+      } catch (e) {
+        this.ok = false; this.message = (e.message || String(e));
+      } finally { this.saving = false; }
+    },
+    async reextract() {
+      if (!confirm(T['receipt.reextract_confirm'])) return;
+      this.reextracting = true; this.message = ''; this.ok = false;
+      try {
+        const r = await fetch('/api/document/' + this.docId + '/receipt/extract', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        location.reload();
+      } catch (e) {
+        this.ok = false; this.message = (e.message || String(e));
+      } finally { this.reextracting = false; }
     },
   };
 }

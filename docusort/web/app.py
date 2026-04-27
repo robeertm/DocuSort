@@ -250,9 +250,13 @@ def create_app(
             raise HTTPException(404, "Document not found")
         _decode_tags(doc)
         receipt = db.get_receipt(doc_id) if doc.get("category") == "Kassenzettel" else None
+        from ..receipts import SHOP_TYPES, ITEM_CATEGORIES, PAYMENT_METHODS
         return templates.TemplateResponse(
             request, "document.html",
-            {**base_ctx(request), "doc": doc, "receipt": receipt},
+            {**base_ctx(request), "doc": doc, "receipt": receipt,
+             "shop_types": list(SHOP_TYPES),
+             "item_categories": list(ITEM_CATEGORIES),
+             "payment_methods": list(PAYMENT_METHODS)},
         )
 
     @app.get("/document/{doc_id}/file")
@@ -502,6 +506,67 @@ def create_app(
         )
         return {"ok": True, "items": len(r.items),
                 "total": r.total_amount, "shop": r.shop_name}
+
+    @app.patch("/api/document/{doc_id}/receipt")
+    def api_patch_receipt(doc_id: int, payload: dict):
+        """Manual edit: header fields + full items list, atomic replace.
+
+        The frontend always submits the whole list (no per-row PATCH) so we
+        keep line ordering deterministic and avoid drift between client and
+        server. OCR errors on totals or item names get fixed here without
+        a re-extract round trip."""
+        from ..receipts import SHOP_TYPES, ITEM_CATEGORIES, PAYMENT_METHODS
+        if not db.get(doc_id):
+            raise HTTPException(404, "document not found")
+
+        def _opt_float(value, name):
+            if value in (None, ""):
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"{name} must be a number")
+
+        shop_name = (payload.get("shop_name") or "").strip()[:200]
+        shop_type = (payload.get("shop_type") or "").strip().lower()
+        if shop_type and shop_type not in SHOP_TYPES:
+            raise HTTPException(400, f"shop_type must be one of {list(SHOP_TYPES)}")
+        payment_method = (payload.get("payment_method") or "").strip().lower()
+        if payment_method and payment_method not in PAYMENT_METHODS:
+            raise HTTPException(400, f"payment_method must be one of {list(PAYMENT_METHODS)}")
+        total_amount = _opt_float(payload.get("total_amount"), "total_amount")
+        currency = (payload.get("currency") or "EUR").strip()[:8] or "EUR"
+        receipt_date = (payload.get("receipt_date") or "").strip()[:10]
+
+        raw_items = payload.get("items") or []
+        if not isinstance(raw_items, list):
+            raise HTTPException(400, "items must be a list")
+        items = []
+        for idx, it in enumerate(raw_items):
+            if not isinstance(it, dict):
+                raise HTTPException(400, f"item {idx} must be an object")
+            name = (it.get("name") or "").strip()[:200]
+            if not name:
+                continue   # skip blank rows silently
+            cat = (it.get("item_category") or "").strip().lower()
+            if cat and cat not in ITEM_CATEGORIES:
+                raise HTTPException(400, f"item_category must be one of {list(ITEM_CATEGORIES)}")
+            items.append({
+                "name": name,
+                "quantity":     _opt_float(it.get("quantity"),    f"items[{idx}].quantity"),
+                "unit_price":   _opt_float(it.get("unit_price"),  f"items[{idx}].unit_price"),
+                "total_price":  _opt_float(it.get("total_price"), f"items[{idx}].total_price"),
+                "item_category": cat,
+            })
+
+        db.upsert_receipt(
+            doc_id,
+            shop_name=shop_name, shop_type=shop_type,
+            payment_method=payment_method, total_amount=total_amount,
+            currency=currency, receipt_date=receipt_date,
+            items=items, extra_json="manual_edit",
+        )
+        return {"ok": True, "items": len(items), "total": total_amount}
 
     # ---------- Bulk operations ----------
     @app.post("/api/bulk/delete")

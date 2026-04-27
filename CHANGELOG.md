@@ -2,6 +2,27 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.12.7] – 2026-04-27
+
+### Added
+
+- **Receipts are now editable.** Click any field on the receipt card to
+  fix what OCR got wrong — shop name, type, payment method, date,
+  every line item (name, qty, unit price, total, category), and the
+  total amount. A live "sum of items" subtotal flags mismatches between
+  the line items and the printed total.
+- **`PATCH /api/document/{doc_id}/receipt`** accepts the full receipt
+  (header + items) and replaces it atomically. Whitelists shop type,
+  payment method, and item category so bad input fails loud.
+- **Re-extract guard.** The "neu auswerten" button now confirms before
+  overwriting manual edits.
+
+### Changed
+
+- **Tab renamed: "Auswertung" → "Kassenzettel"** in all five languages
+  (Receipts / Tickets de caisse / Scontrini / Recibos). The route stays
+  `/analytics` for now.
+
 ## [0.12.6] – 2026-04-26
 
 ### Added
