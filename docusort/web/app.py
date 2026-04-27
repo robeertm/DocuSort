@@ -609,6 +609,25 @@ def create_app(
             last_mode_row = db._conn.execute(
                 "SELECT privacy_mode FROM statements ORDER BY id DESC LIMIT 1"
             ).fetchone()
+            # Surface "needs review" docs prominently — the user expects
+            # every uploaded Kontoauszug to be evaluated, so empties get
+            # called out instead of silently inflating the statement
+            # count.
+            empty_stmts = db._conn.execute(
+                """SELECT s.doc_id, COALESCE(d.subject, d.filename) AS subject,
+                          d.doc_date, a.bank_name
+                   FROM statements s
+                   JOIN documents d ON d.id = s.doc_id
+                   LEFT JOIN accounts a ON a.id = s.account_id
+                   WHERE d.deleted_at IS NULL
+                     AND s.id NOT IN (SELECT statement_id FROM transactions)
+                   ORDER BY d.doc_date DESC, d.id DESC
+                   LIMIT 20"""
+            ).fetchall()
+            kontoauszug_total = db._conn.execute(
+                """SELECT COUNT(*) FROM documents
+                   WHERE category = 'Kontoauszug' AND deleted_at IS NULL"""
+            ).fetchone()[0]
         privacy_mode = (last_mode_row["privacy_mode"] if last_mode_row else "") or ""
         return templates.TemplateResponse(
             request, "finance.html",
@@ -619,6 +638,8 @@ def create_app(
              "tx_categories": list(TX_CATEGORIES),
              "tx_types": list(TX_TYPES),
              "privacy_mode": privacy_mode,
+             "empty_statements":   [dict(r) for r in empty_stmts],
+             "kontoauszug_total":  int(kontoauszug_total),
              "filter": {"account_id": account_id, "category": category,
                         "direction": direction, "start": start, "end": end, "q": q}},
         )
@@ -631,6 +652,150 @@ def create_app(
             "accounts": db.list_accounts(),
             "recurring": db.finance_recurring(),
         }
+
+    @app.get("/api/finance/diagnostics")
+    def api_finance_diagnostics():
+        """Surface statements that came back without any transactions —
+        the user wants every uploaded Kontoauszug in the evaluation, so
+        we list the gaps explicitly rather than burying them in the
+        aggregate counts."""
+        with db._lock:
+            empty = db._conn.execute(
+                """SELECT s.id AS stmt_id, s.doc_id, a.bank_name,
+                          s.period_start, s.period_end, s.account_id,
+                          d.subject, d.doc_date, d.created_at
+                   FROM statements s
+                   JOIN documents d ON d.id = s.doc_id
+                   LEFT JOIN accounts a ON a.id = s.account_id
+                   WHERE d.deleted_at IS NULL
+                     AND s.id NOT IN (SELECT statement_id FROM transactions)
+                   ORDER BY d.doc_date DESC, d.id DESC"""
+            ).fetchall()
+            unattached = db._conn.execute(
+                """SELECT COUNT(*) FROM statements s
+                   JOIN documents d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL AND s.account_id IS NULL"""
+            ).fetchone()[0]
+            kontoauszug_total = db._conn.execute(
+                """SELECT COUNT(*) FROM documents
+                   WHERE category = 'Kontoauszug' AND deleted_at IS NULL"""
+            ).fetchone()[0]
+            statements_total = db._conn.execute(
+                """SELECT COUNT(*) FROM statements s
+                   JOIN documents d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL"""
+            ).fetchone()[0]
+        return {
+            "kontoauszug_docs":       int(kontoauszug_total),
+            "statements_extracted":   int(statements_total),
+            "without_transactions":   [dict(r) for r in empty],
+            "without_account":        int(unattached),
+        }
+
+    @app.post("/api/finance/reextract-empty")
+    def api_reextract_empty():
+        """One-click bulk re-extraction for every statement that came
+        back without any transactions. Cheaper than --backfill-statements
+        because it doesn't touch already-extracted statements; uses the
+        stored OCR text so no re-OCR cost either."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        is_local = settings.ai.provider == "openai_compat"
+        if settings.finance.local_only and not is_local:
+            raise HTTPException(
+                403,
+                "finance.local_only is enabled but the active provider is not local.",
+            )
+        do_pseudo = settings.finance.pseudonymize and not is_local
+
+        from ..finance import StatementExtractor
+        from hashlib import sha256
+        import time as _time
+
+        extractor = StatementExtractor(
+            classifier.provider, settings.ai.model,
+            max_text_chars=max(settings.ai.max_text_chars, 32000),
+        )
+
+        with db._lock:
+            empty_rows = db._conn.execute(
+                """SELECT s.doc_id, d.extracted_text
+                   FROM statements s
+                   JOIN documents d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND s.id NOT IN (SELECT statement_id FROM transactions)
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+            ).fetchall()
+
+        recovered: list[int] = []
+        still_empty: list[int] = []
+        failed: list[dict] = []
+        for idx, row in enumerate(empty_rows):
+            if idx > 0:
+                _time.sleep(1.5)   # gentle pacing for rate limits
+            doc_id = int(row["doc_id"])
+            try:
+                stmt = extractor.extract(row["extracted_text"], pseudonymize=do_pseudo)
+            except Exception as exc:
+                failed.append({"doc_id": doc_id, "error": str(exc)})
+                continue
+            if not stmt.transactions:
+                still_empty.append(doc_id)
+                continue
+            account_id = None
+            if stmt.iban_hash:
+                account_id = db.upsert_account(
+                    bank_name=stmt.bank_name or "Unbekannt",
+                    iban=stmt.iban, iban_last4=stmt.iban_last4,
+                    iban_hash=stmt.iban_hash, account_holder=stmt.account_holder,
+                    currency=stmt.currency,
+                )
+            tx_payload = []
+            for tx in stmt.transactions:
+                key = (
+                    (stmt.iban_hash or "no-iban") + "|" + tx.booking_date + "|"
+                    + f"{tx.amount:.2f}" + "|" + tx.purpose
+                )
+                d = tx.as_dict()
+                d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
+                tx_payload.append(d)
+            db.upsert_statement(
+                doc_id, account_id=account_id,
+                period_start=stmt.period_start, period_end=stmt.period_end,
+                statement_no=stmt.statement_no,
+                opening_balance=stmt.opening_balance,
+                closing_balance=stmt.closing_balance,
+                currency=stmt.currency, file_hash="",
+                privacy_mode=stmt.privacy_mode,
+                transactions=tx_payload, extra_json=stmt.raw_response,
+            )
+            recovered.append(doc_id)
+        return {
+            "found": len(empty_rows),
+            "recovered": recovered,
+            "still_empty": still_empty,
+            "failed": failed,
+        }
+
+    @app.delete("/api/finance/account/{account_id}")
+    def api_delete_account(account_id: int):
+        """Delete a bogus account (typically the "Unbekannt" entry that
+        came from a counterparty IBAN being mistakenly used as the user's
+        account in older versions). Statements currently pointing at this
+        account get their `account_id` set to NULL via the FK ON DELETE
+        SET NULL — they stay in the DB so re-extraction can re-attach
+        them properly."""
+        with db._lock:
+            row = db._conn.execute(
+                "SELECT id FROM accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(404, "account not found")
+            tx_count = db._conn.execute(
+                "SELECT COUNT(*) FROM transactions WHERE account_id = ?", (account_id,)
+            ).fetchone()[0]
+            db._conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+        return {"ok": True, "deleted_account_id": account_id, "freed_transactions": int(tx_count)}
 
     @app.get("/api/finance/transactions")
     def api_finance_transactions(

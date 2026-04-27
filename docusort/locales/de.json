@@ -552,5 +552,15 @@
   "statement.preview.kind.IBAN": "IBANs",
   "statement.preview.kind.NAME": "Namen",
   "statement.preview.kind.ADDR": "Adressen",
-  "statement.preview.kind.EMAIL": "E-Mails"
+  "statement.preview.kind.EMAIL": "E-Mails",
+  "finance.diag.title": "{empty} von {total} Kontoauszügen ohne Buchungen erkannt",
+  "finance.diag.hint": "Klick auf „Erneut auswerten\" — die Auszüge werden mit dem aktuellen Extractor erneut analysiert. Kein neues OCR, nur LLM-Aufruf.",
+  "finance.diag.show_list": "Welche Auszüge?",
+  "finance.diag.button": "Erneut auswerten",
+  "finance.diag.running": "Werte aus…",
+  "finance.diag.done": "{recovered} von {found} Auszügen mit Buchungen befüllt. {still} bleiben leer (PDF prüfen / OCR-Qualität).",
+  "finance.account_delete": "Konto löschen",
+  "finance.account_delete_confirm": "Konto „{label}\" löschen? Buchungen bleiben erhalten und können bei der nächsten Auswertung erneut zugeordnet werden.",
+  "finance.transfer_internal": "interne Überträge",
+  "finance.transfer_excluded_hint": "Eigene Überträge zwischen Konten zählen NICHT zu Einnahmen / Ausgaben — die würden den Cashflow sonst dominieren."
 }

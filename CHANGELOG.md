@@ -2,6 +2,77 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.13.2] – 2026-04-27
+
+### Headline cashflow excludes internal transfers
+
+Income / expense / net on `/finance` no longer include `category=uebertrag`
+transactions — money the user moves between their own accounts.
+Previously a single €90,000 internal transfer (closing a Tagesgeldkonto
+and crediting the Girokonto) dwarfed every real transaction in the
+chart. Internal transfers now show as a small italic chip on the
+"Buchungen" stat card ("+36 interne Überträge") and stay in the
+category breakdown, but don't pollute the income/expense numbers.
+
+### Auto-detect internal transfers
+
+The extractor checks each transaction's counterparty against the
+account holder's name; lines whose counterparty contains the holder
+name (and possibly a partner's name on a joint account, e.g. "Robert
+Manuwald Steffi Manuwald" when the holder is "Robert Manuwald") get
+auto-promoted to `category=uebertrag`. Catches the common Sparkasse
+pattern where internal transfers are printed without an obvious
+"Übertrag" label.
+
+### Added — coverage + cleanup tools
+
+- **Diagnostics banner on `/finance`** that names every uploaded
+  Kontoauszug whose extraction came back without transactions, with
+  a one-click "Erneut auswerten" button that re-runs the LLM call on
+  just those documents. Drives the user's "all uploads must be in
+  the evaluation" requirement instead of letting empties hide in the
+  aggregate counts.
+- **`POST /api/finance/reextract-empty`** powers the bulk re-extract.
+  Re-uses stored OCR text (no re-OCR cost), paces 1.5s between LLM
+  calls to stay below the Anthropic Tier-1 token-per-minute limit.
+- **`DELETE /api/finance/account/{id}`** plus a delete button on the
+  accounts list — needed to clean up the bogus "Unbekannt …xxxx"
+  account that earlier versions could create when the IBAN fallback
+  picked a counterparty IBAN by mistake. Statements stay in the DB
+  with `account_id=NULL` and re-attach correctly on the next
+  extraction.
+
+### Fixed
+
+- **No more bogus accounts from the IBAN fallback.** When the LLM
+  returns an empty `account_iban_token`, we now leave the account
+  unattached rather than guessing the first IBAN seen in the text —
+  on multi-IBAN statements that "first" was usually a counterparty
+  IBAN, creating a single fake account that swallowed every
+  unsure-account statement.
+- **Period start/end auto-flip.** If the LLM returns
+  `period_start > period_end` (typically because it confused the
+  document-issue date with the booking range), the values get
+  swapped before they hit the DB. Prompt also tightened to spell out
+  "earliest BOOKING DATE inside the table, not the page header
+  date."
+- **Anthropic 429 retry-with-backoff.** When the API returns the
+  rate-limit error ("50,000 input tokens per minute, please wait"),
+  the provider now reads the `retry-after` header and retries up to
+  four times with exponential backoff. Previously the user saw a
+  hard error and the document went unprocessed.
+- **Statement extractor reads more OCR text.** Default
+  `max_text_chars` for `StatementExtractor` is now 32000 (up from
+  24000), and `--backfill-statements` enforces a floor of 32000 even
+  when `ai.max_text_chars` is configured lower. Multi-page Sparkasse
+  statements with long booking tables no longer truncate before the
+  LLM sees them.
+
+### i18n
+
+8 new strings × 5 languages for the diagnostics banner, the bulk
+re-extract button, and the account-delete confirmation.
+
 ## [0.13.1] – 2026-04-27
 
 ### Added — Privacy transparency

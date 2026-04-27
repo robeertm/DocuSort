@@ -136,8 +136,8 @@ Schema:
   "bank_name": string,            // canonical bank name (e.g. "Sparkasse", "DKB", "ING", "PayPal", "Commerzbank")
   "account_iban_token": string,   // the IBAN_xxx token belonging to the user (the account this statement is FOR), or "" if absent
   "account_holder_token": string, // NAME_xxx token of the account holder, or ""
-  "period_start": string,         // ISO YYYY-MM-DD; first day of statement period
-  "period_end": string,           // ISO YYYY-MM-DD; last day
+  "period_start": string,         // ISO YYYY-MM-DD — earliest BOOKING DATE inside the table (NOT the document's issue / generation date at the top of the page!)
+  "period_end": string,           // ISO YYYY-MM-DD — latest booking date inside the table; ALWAYS >= period_start
   "statement_no": string,         // bank-assigned number / "Auszug-Nr.", or ""
   "opening_balance": number | null,  // "Anfangssaldo" / "alter Saldo" / "Übertrag"
   "closing_balance": number | null,  // "Endsaldo" / "neuer Saldo"
@@ -196,8 +196,9 @@ Schema:
   - GAA / Bargeldauszahlung → bargeld
   - bank fees / Kontoführung → gebuehr
   - everything else → sonstiges
-- account_iban_token: the IBAN that THIS statement is for. Usually printed at the top alongside the holder name, NOT inside transaction lines. Pick the IBAN that appears near "Konto-Nr." / "IBAN" / "Konto" / "Konto/IBAN" header — NOT the IBAN of a transaction counterparty.
+- account_iban_token: the IBAN that THIS statement is for. ALWAYS printed near the top of the page next to "IBAN", "Konto-Nr.", "Konto/IBAN", or right after the bank logo and account-type label ("Tagesgeldkonto 1234567, IBAN_001"). Counterparty IBANs appear INSIDE individual transaction rows (next to "BIC / IBAN:") — those go into `counterparty_iban_token`, NEVER into `account_iban_token`. If you can't tell with confidence which IBAN is the user's account, return "" — empty is better than a wrong assignment.
 - counterparty_iban_token: the OTHER party's IBAN if the bank prints it on the line, else "".
+- period_start / period_end: bracket the actual booking dates that appear in the transaction table. The "Auszug-Nr.", "ausgestellt am", or page-header date is the document creation date — do NOT use that for period_start/end. Example: a Sparkasse "Kontoauszug 1/2025" generated on "1. November 2025" with bookings between 10.10.2025 and 30.10.2025 → period_start=2025-10-10, period_end=2025-10-30.
 - Skip pure layout: page numbers, "Bitte beachten Sie", footer disclaimers, BIC-only lines, "Übertrag" line that is just a balance carry-over (already captured in opening/closing).
 - If you can't determine a value, return "" or null — never guess.
 
@@ -331,7 +332,7 @@ class StatementExtractor:
     provider where data never leaves the box."""
 
     def __init__(self, provider: Provider, model: str,
-                 max_text_chars: int = 24000):
+                 max_text_chars: int = 32000):
         self.provider = provider
         self.model = model
         self.max_text_chars = max_text_chars
@@ -370,11 +371,14 @@ class StatementExtractor:
         # anything as NAME_001) get blanked rather than stored as-is.
         iban       = _scrub_residual(str(data.get("account_iban_token")    or data.get("account_iban")    or "").strip())
         holder     = _scrub_residual(str(data.get("account_holder_token")  or data.get("account_holder")  or "").strip())
-        # If the token was empty in JSON but we did detect at least one
-        # IBAN in the source text, prefer the first detected IBAN as the
-        # account IBAN — common when the model omits the token field.
-        if not iban and pseudo is not None and pseudo.ibans:
-            iban = pseudo.ibans[0]
+        # NOTE: removed in 0.13.2 — earlier versions fell back to
+        # pseudo.ibans[0] when the token field came back empty, but on
+        # multi-IBAN statements (counterparty IBAN appears in transaction
+        # lines) "first detected" is often a *counterparty* IBAN, not the
+        # user's. The fallback then created a bogus account ("Unbekannt
+        # …xxxx") that swallowed every statement where the LLM was unsure.
+        # Better: leave iban empty so the doc lands without an account
+        # association, and surface a "needs review" indicator in /finance.
 
         bank = str(data.get("bank_name") or "").strip()[:128]
 
@@ -394,14 +398,48 @@ class StatementExtractor:
                 if tx is not None:
                     txs.append(tx)
 
+        # Sanity-check the period: if the LLM returns a swapped pair
+        # (start > end), flip them. Happens when the model conflates
+        # the document-generation date with the booking-period range.
+        period_start = str(data.get("period_start") or "").strip()[:10]
+        period_end   = str(data.get("period_end")   or "").strip()[:10]
+        if period_start and period_end and period_start > period_end:
+            period_start, period_end = period_end, period_start
+
+        # Auto-promote transactions where the counterparty matches the
+        # account holder name to category=uebertrag. The LLM often gets
+        # this wrong on Sparkasse statements where internal transfers
+        # appear as "Robert Manuwald Steffi Manuwald Sonst. Gutschrift"
+        # with a generic booking line — easy for it to land on
+        # "sonstiges" when it's really an internal move that shouldn't
+        # be counted as income / expense in the headline numbers.
+        if holder:
+            import re as _re
+            holder_tokens = {tok.lower() for tok in _re.split(r"[,\s]+", holder) if len(tok) > 2}
+            if holder_tokens:
+                for tx in txs:
+                    cp_tokens = {tok.lower() for tok in _re.split(r"[,\s]+", tx.counterparty or "") if len(tok) > 2}
+                    # If the counterparty contains the holder's full name
+                    # (possibly alongside a partner's name on a joint
+                    # account, e.g. "Robert Manuwald Steffi Manuwald"
+                    # when the holder is "Robert Manuwald"), it's an
+                    # internal transfer. Direction: holder_tokens MUST
+                    # be a subset of counterparty_tokens — getting this
+                    # backwards meant the heuristic never fired on
+                    # joint-account statements.
+                    if cp_tokens and holder_tokens.issubset(cp_tokens):
+                        tx.category = "uebertrag"
+                        if not tx.tx_type or tx.tx_type == "sonstiges":
+                            tx.tx_type = "uebertrag"
+
         return Statement(
             bank_name=bank,
             iban=iban,
             iban_hash=iban_hash(iban) if iban else "",
             iban_last4=(iban[-4:] if len(iban) >= 4 else ""),
             account_holder=holder[:200],
-            period_start=str(data.get("period_start") or "").strip()[:10],
-            period_end=str(data.get("period_end")     or "").strip()[:10],
+            period_start=period_start,
+            period_end=period_end,
             statement_no=str(data.get("statement_no") or "").strip()[:64],
             opening_balance=opening,
             closing_balance=closing,
@@ -413,7 +451,8 @@ class StatementExtractor:
 
 
 def backfill_statements(settings, db, classifier, *, dry_run: bool = False,
-                        local_only: bool = False) -> dict:
+                        local_only: bool = False,
+                        inter_request_delay_s: float = 1.5) -> dict:
     """Re-extract statements for every Kontoauszug doc that doesn't have
     one yet. Reads the stored OCR text, no new OCR cost incurred.
 
@@ -421,7 +460,7 @@ def backfill_statements(settings, db, classifier, *, dry_run: bool = False,
     """
     extractor = StatementExtractor(
         classifier.provider, settings.ai.model,
-        max_text_chars=settings.ai.max_text_chars,
+        max_text_chars=max(settings.ai.max_text_chars, 32000),
     )
     # Also catch legacy bank docs that were filed under category=Bank
     # before v0.13.0 added "Kontoauszug" as a top-level category. We
@@ -446,16 +485,30 @@ def backfill_statements(settings, db, classifier, *, dry_run: bool = False,
                       OR LOWER(COALESCE(subject,'')) LIKE '%paypal%auszug%'
                   )))"""
     ).fetchall()
+    import time as _time
     processed: list[int] = []
     failed: list[dict] = []
-    for r in rows:
+    empty: list[int] = []
+    for idx, r in enumerate(rows):
         doc_id = int(r["id"])
+        # Throttle between LLM calls. Anthropic Tier-1 caps at 50k input
+        # tokens per minute; with our ~3-6k tokens per statement that's
+        # roughly 8-15 statements/minute before we hit a 429. The
+        # 1.5s default keeps us comfortably below that.
+        if idx > 0 and inter_request_delay_s > 0:
+            _time.sleep(inter_request_delay_s)
         try:
             stmt = extractor.extract(r["extracted_text"], pseudonymize=not local_only)
         except Exception as exc:
             failed.append({"doc_id": doc_id, "error": str(exc)})
             logger.warning("Backfill: doc %d failed: %s", doc_id, exc)
             continue
+        if not stmt.transactions:
+            # Mark as empty so the caller can surface "needs review" docs
+            # — but still write the (header-only) statement row so the
+            # /finance diagnostics can list it without re-trying every
+            # backfill round.
+            empty.append(doc_id)
         if dry_run:
             logger.info("Backfill (dry-run): doc %d → bank=%s tx=%d",
                         doc_id, stmt.bank_name, len(stmt.transactions))
@@ -515,6 +568,7 @@ def backfill_statements(settings, db, classifier, *, dry_run: bool = False,
     return {
         "found": len(rows),
         "processed": processed,
+        "empty": empty,
         "failed": failed,
         "dry_run": dry_run,
     }

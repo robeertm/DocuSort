@@ -552,5 +552,15 @@
   "statement.preview.kind.IBAN": "IBAN",
   "statement.preview.kind.NAME": "Noms",
   "statement.preview.kind.ADDR": "Adresses",
-  "statement.preview.kind.EMAIL": "E-mails"
+  "statement.preview.kind.EMAIL": "E-mails",
+  "finance.diag.title": "{empty} sur {total} relevés sans opérations extraites",
+  "finance.diag.hint": "Clique sur « Ré-extraire » — ces relevés seront ré-analysés avec l'extracteur actuel. Pas de nouvelle OCR, juste l'appel IA.",
+  "finance.diag.show_list": "Quels relevés ?",
+  "finance.diag.button": "Ré-extraire",
+  "finance.diag.running": "Extraction…",
+  "finance.diag.done": "{recovered} sur {found} relevés remplis. {still} restent vides — vérifie le PDF / la qualité OCR.",
+  "finance.account_delete": "Supprimer le compte",
+  "finance.account_delete_confirm": "Supprimer le compte « {label} » ? Les opérations restent en base et peuvent être réattachées à la prochaine extraction.",
+  "finance.transfer_internal": "virements internes",
+  "finance.transfer_excluded_hint": "Les virements entre tes propres comptes ne comptent PAS comme revenus / dépenses — sinon ils domineraient le graphique."
 }

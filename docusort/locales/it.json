@@ -552,5 +552,15 @@
   "statement.preview.kind.IBAN": "IBAN",
   "statement.preview.kind.NAME": "Nomi",
   "statement.preview.kind.ADDR": "Indirizzi",
-  "statement.preview.kind.EMAIL": "Email"
+  "statement.preview.kind.EMAIL": "Email",
+  "finance.diag.title": "{empty} di {total} estratti senza movimenti estratti",
+  "finance.diag.hint": "Clicca \"Ri-estrai\" — questi estratti vengono rianalizzati con l'estrattore corrente. Nessun nuovo OCR, solo chiamata IA.",
+  "finance.diag.show_list": "Quali estratti?",
+  "finance.diag.button": "Ri-estrai",
+  "finance.diag.running": "Estrazione…",
+  "finance.diag.done": "{recovered} di {found} estratti popolati. {still} restano vuoti — controlla PDF / qualità OCR.",
+  "finance.account_delete": "Elimina conto",
+  "finance.account_delete_confirm": "Eliminare il conto \"{label}\"? I movimenti restano nel DB e possono essere riassociati alla prossima estrazione.",
+  "finance.transfer_internal": "giroconti interni",
+  "finance.transfer_excluded_hint": "I giroconti tra conti propri NON contano come entrate / uscite — altrimenti dominerebbero il grafico."
 }

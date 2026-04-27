@@ -1055,7 +1055,15 @@ class Database:
         return out
 
     def finance_summary(self) -> dict[str, Any]:
-        """Top-level cashflow numbers across all non-deleted statements."""
+        """Top-level cashflow numbers across all non-deleted statements.
+
+        Internal transfers (category=uebertrag) — money the user moves
+        between their own accounts — are excluded from the headline
+        income / expense numbers since they otherwise dominate the
+        chart with figures that aren't real cashflow ("€90,000 income"
+        from closing a Tagesgeld and crediting the Girokonto). The
+        full numbers including transfers stay accessible via the
+        category breakdown."""
         with self._lock:
             tot = self._conn.execute(
                 """SELECT
@@ -1065,7 +1073,20 @@ class Database:
                    FROM transactions t
                    JOIN statements   s ON s.id = t.statement_id
                    JOIN documents    d ON d.id = s.doc_id
-                   WHERE d.deleted_at IS NULL"""
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'"""
+            ).fetchone()
+            # Separate "transfers" total so the UI can show it as a
+            # neutral chip ("€110,000 zwischen eigenen Konten verschoben").
+            transfers = self._conn.execute(
+                """SELECT
+                     COALESCE(SUM(amount), 0) AS net,
+                     COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category = 'uebertrag'"""
             ).fetchone()
             stmt_count = self._conn.execute(
                 """SELECT COUNT(*) AS n FROM statements s
@@ -1095,10 +1116,17 @@ class Database:
             "statement_count": int(stmt_count["n"]) if stmt_count else 0,
             "account_count":   int(acct_count["n"]) if acct_count else 0,
             "by_category":     [dict(r) for r in cats],
+            "transfer_count":  int(transfers["n"]) if transfers else 0,
+            "transfer_volume": float(transfers["net"]) if transfers else 0.0,
         }
 
     def finance_monthly(self, months: int = 12) -> list[dict[str, Any]]:
-        """Income + expense per month for the last N months, oldest first."""
+        """Income + expense per month for the last N months, oldest first.
+
+        Excludes internal transfers (category=uebertrag) for the same
+        reason as `finance_summary`: a single big move between own
+        accounts would dwarf every other month and make the chart
+        useless."""
         with self._lock:
             rows = self._conn.execute(
                 """SELECT substr(t.booking_date, 1, 7) AS month,
@@ -1110,6 +1138,7 @@ class Database:
                    JOIN documents    d ON d.id = s.doc_id
                    WHERE d.deleted_at IS NULL
                      AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                     AND t.category != 'uebertrag'
                    GROUP BY month
                    ORDER BY month DESC
                    LIMIT ?""",
@@ -1137,6 +1166,7 @@ class Database:
                     WHERE d.deleted_at IS NULL
                       AND t.amount {op} 0
                       AND t.counterparty != ''
+                      AND t.category != 'uebertrag'
                     GROUP BY LOWER(t.counterparty)
                     ORDER BY total {order}
                     LIMIT ?""",

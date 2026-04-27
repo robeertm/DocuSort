@@ -552,5 +552,15 @@
   "statement.preview.kind.IBAN": "IBAN",
   "statement.preview.kind.NAME": "Nombres",
   "statement.preview.kind.ADDR": "Direcciones",
-  "statement.preview.kind.EMAIL": "Correos"
+  "statement.preview.kind.EMAIL": "Correos",
+  "finance.diag.title": "{empty} de {total} extractos sin movimientos extraídos",
+  "finance.diag.hint": "Pulsa \"Reextraer\" — esos extractos se reanalizan con el extractor actual. Sin nuevo OCR, solo llamada a IA.",
+  "finance.diag.show_list": "¿Qué extractos?",
+  "finance.diag.button": "Reextraer",
+  "finance.diag.running": "Extrayendo…",
+  "finance.diag.done": "{recovered} de {found} extractos rellenos. {still} siguen vacíos — revisa el PDF / la calidad del OCR.",
+  "finance.account_delete": "Eliminar cuenta",
+  "finance.account_delete_confirm": "Eliminar la cuenta \"{label}\"? Los movimientos permanecen en la base de datos y pueden re-asociarse en la próxima extracción.",
+  "finance.transfer_internal": "traspasos internos",
+  "finance.transfer_excluded_hint": "Los traspasos entre tus propias cuentas NO cuentan como ingresos / gastos — si no, dominarían el gráfico."
 }

@@ -35,6 +35,48 @@
     {% endif %}
   </div>
 
+  <!-- Coverage / diagnostics banner — empty statements get called out -->
+  {% if empty_statements %}
+  <div class="card p-4 mb-6 border-amber-500/30 bg-amber-500/5"
+       x-data="financeDiag()">
+    <div class="flex items-start gap-3">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-amber-300 shrink-0 mt-0.5">
+        <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium">
+          {{ t('finance.diag.title')
+              .replace('{empty}', empty_statements | length | string)
+              .replace('{total}', kontoauszug_total | string) }}
+        </div>
+        <p class="text-xs text-ink-400 mt-1">{{ t('finance.diag.hint') }}</p>
+        <details class="mt-2">
+          <summary class="cursor-pointer text-xs text-ink-300 hover:text-ink-100 select-none">
+            {{ t('finance.diag.show_list') }}
+          </summary>
+          <ul class="mt-2 space-y-0.5 text-xs">
+            {% for s in empty_statements %}
+              <li class="flex items-baseline gap-2">
+                <span class="text-ink-500 tabular-nums">{{ s.doc_date or '—' }}</span>
+                <a href="/document/{{ s.doc_id }}" class="text-ink-200 hover:text-emerald-300 truncate">
+                  {{ s.subject or 'doc ' ~ s.doc_id }}
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        </details>
+      </div>
+      <button type="button" @click="reextract()" :disabled="busy"
+              class="btn-secondary text-xs shrink-0"
+              :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+              x-text="busy ? T['finance.diag.running'] : T['finance.diag.button']"></button>
+    </div>
+    <div x-show="result" x-cloak class="mt-3 text-xs rounded px-3 py-2"
+         :class="resultOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="result"></div>
+  </div>
+  {% endif %}
+
   {% if summary.statement_count == 0 %}
     <div class="card p-10 text-center">
       <div class="inline-flex h-14 w-14 items-center justify-center rounded-full bg-ink-700/40 text-ink-400 mb-4">
@@ -75,6 +117,11 @@
       <div class="text-xs text-ink-500 mt-1">
         {{ summary.statement_count }} {{ t('finance.statements') }} · {{ summary.account_count }} {{ t('finance.accounts') }}
       </div>
+      {% if summary.transfer_count %}
+        <div class="text-[11px] text-ink-500 mt-1.5 italic" title="{{ t('finance.transfer_excluded_hint') }}">
+          + {{ summary.transfer_count }} {{ t('finance.transfer_internal') }}
+        </div>
+      {% endif %}
     </div>
   </div>
 
@@ -115,24 +162,34 @@
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
 
     <!-- Accounts -->
-    <div class="card p-5">
+    <div class="card p-5" x-data="accountList()">
       <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.accounts_heading') }}</h2>
       {% if accounts %}
         <div class="space-y-2">
           {% for a in accounts %}
-            <a href="/finance?account_id={{ a.id }}" class="block group rounded-lg p-2 -mx-2 hover:bg-ink-800/40">
-              <div class="flex justify-between items-baseline gap-3">
-                <div class="min-w-0">
-                  <div class="font-medium group-hover:text-emerald-300 truncate">{{ a.bank_name }}{% if a.iban_last4 %} · …{{ a.iban_last4 }}{% endif %}</div>
-                  {% if a.account_holder %}
-                    <div class="text-xs text-ink-500 truncate">{{ a.account_holder }}</div>
-                  {% endif %}
+            <div class="flex items-stretch gap-2 group">
+              <a href="/finance?account_id={{ a.id }}" class="block flex-1 min-w-0 rounded-lg p-2 -mx-2 hover:bg-ink-800/40">
+                <div class="flex justify-between items-baseline gap-3">
+                  <div class="min-w-0">
+                    <div class="font-medium group-hover:text-emerald-300 truncate">{{ a.bank_name }}{% if a.iban_last4 %} · …{{ a.iban_last4 }}{% endif %}</div>
+                    {% if a.account_holder %}
+                      <div class="text-xs text-ink-500 truncate">{{ a.account_holder }}</div>
+                    {% endif %}
+                  </div>
+                  <div class="text-xs text-ink-500 tabular-nums shrink-0">
+                    {{ a.tx_count }} {{ t('finance.tx_short') }} · {{ a.statement_count }} {{ t('finance.stmt_short') }}
+                  </div>
                 </div>
-                <div class="text-xs text-ink-500 tabular-nums shrink-0">
-                  {{ a.tx_count }} {{ t('finance.tx_short') }} · {{ a.statement_count }} {{ t('finance.stmt_short') }}
-                </div>
-              </div>
-            </a>
+              </a>
+              <button type="button" @click="del({{ a.id }}, '{{ a.bank_name }}{% if a.iban_last4 %} …{{ a.iban_last4 }}{% endif %}')"
+                      :disabled="deleting === {{ a.id }}"
+                      class="opacity-0 group-hover:opacity-100 transition btn-ghost text-rose-300 hover:bg-rose-500/10 !px-2"
+                      :title="T['finance.account_delete']">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+                </svg>
+              </button>
+            </div>
           {% endfor %}
         </div>
       {% else %}
@@ -330,6 +387,49 @@
 
 <script>
 function financePage() { return {}; }
+
+function financeDiag() {
+  return {
+    busy: false, result: '', resultOk: false,
+    async reextract() {
+      this.busy = true; this.result = '';
+      try {
+        const r = await fetch('/api/finance/reextract-empty', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.resultOk = true;
+        this.result = (T['finance.diag.done'] || 'Recovered {recovered} of {found} statements.')
+          .replace('{recovered}', d.recovered.length)
+          .replace('{found}', d.found)
+          .replace('{still}', d.still_empty.length);
+        setTimeout(() => location.reload(), 1500);
+      } catch (e) {
+        this.resultOk = false;
+        this.result = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+  };
+}
+
+function accountList() {
+  return {
+    deleting: null,
+    async del(id, label) {
+      if (!confirm((T['finance.account_delete_confirm'] || 'Delete account {label}?').replace('{label}', label))) return;
+      this.deleting = id;
+      try {
+        const r = await fetch('/api/finance/account/' + id, { method: 'DELETE' });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || 'HTTP ' + r.status);
+        }
+        location.reload();
+      } catch (e) {
+        alert(e.message || String(e));
+      } finally { this.deleting = null; }
+    },
+  };
+}
 </script>
 
 {% endblock %}

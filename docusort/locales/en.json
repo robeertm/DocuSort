@@ -552,5 +552,15 @@
   "statement.preview.kind.IBAN": "IBANs",
   "statement.preview.kind.NAME": "Names",
   "statement.preview.kind.ADDR": "Addresses",
-  "statement.preview.kind.EMAIL": "Emails"
+  "statement.preview.kind.EMAIL": "Emails",
+  "finance.diag.title": "{empty} of {total} bank statements have no transactions extracted",
+  "finance.diag.hint": "Click \"Re-extract\" — those statements get re-analysed with the current extractor. No re-OCR, just the LLM call.",
+  "finance.diag.show_list": "Which statements?",
+  "finance.diag.button": "Re-extract",
+  "finance.diag.running": "Extracting…",
+  "finance.diag.done": "Filled {recovered} of {found} statements. {still} stayed empty — check the PDF / OCR quality.",
+  "finance.account_delete": "Delete account",
+  "finance.account_delete_confirm": "Delete account \"{label}\"? Transactions stay in the DB and can be re-attached on the next extraction.",
+  "finance.transfer_internal": "internal transfers",
+  "finance.transfer_excluded_hint": "Transfers between your own accounts do NOT count as income / expense — they would otherwise dominate the cashflow chart."
 }

@@ -2,8 +2,22 @@
 
 from __future__ import annotations
 
+import logging
+import time
+
 from .base import Provider, ProviderError, ProviderResponse
 from .pricing import calculate_cost
+
+
+logger = logging.getLogger("docusort.providers.anthropic")
+
+
+# Tier-1 input-tokens-per-minute is 50k by default. A burst (e.g. backfill
+# of 20 statements at once) can push past that and Anthropic returns 429
+# with a `retry-after` header indicating how long to wait. We respect the
+# header and retry rather than failing the whole pipeline.
+_MAX_RATE_LIMIT_RETRIES = 4
+_DEFAULT_RETRY_AFTER_S  = 30.0
 
 
 class AnthropicProvider(Provider):
@@ -18,19 +32,66 @@ class AnthropicProvider(Provider):
 
     def classify(self, *, system_prompt, user_prompt, model,
                  max_output_tokens: int = 600) -> ProviderResponse:
-        try:
-            resp = self.client.messages.create(
-                model=model,
-                max_tokens=max_output_tokens,
-                system=[{
-                    "type": "text",
-                    "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
-                }],
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-        except Exception as exc:
-            raise ProviderError(f"Anthropic API call failed: {exc}") from exc
+        # Late import so the type can be referenced even when handling errors.
+        from anthropic import RateLimitError, APIStatusError
+
+        attempt = 0
+        while True:
+            try:
+                resp = self.client.messages.create(
+                    model=model,
+                    max_tokens=max_output_tokens,
+                    system=[{
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                break
+            except (RateLimitError, APIStatusError) as exc:
+                # APIStatusError covers 429 too; prefer the structured
+                # status_code over fragile string matching.
+                status = getattr(exc, "status_code", None)
+                msg = str(exc)
+                # Some 400 errors are actually account-level spending caps
+                # ("You have reached your specified API usage limits.
+                # You will regain access on YYYY-MM-DD"). Retrying won't
+                # help — surface the date so the user can plan.
+                if "specified API usage limits" in msg or "regain access" in msg:
+                    raise ProviderError(
+                        "Anthropic spending limit reached. Check your "
+                        "API console (Settings → Limits) — the cap "
+                        "resets on the date Anthropic gave in the "
+                        "error message.  Original error: " + msg
+                    ) from exc
+                if not isinstance(exc, RateLimitError) and status != 429:
+                    raise ProviderError(f"Anthropic API call failed: {exc}") from exc
+                if attempt >= _MAX_RATE_LIMIT_RETRIES:
+                    raise ProviderError(
+                        f"Anthropic rate-limited after {attempt} retries: {exc}"
+                    ) from exc
+                # Honour the retry-after header when present (seconds or
+                # HTTP-date). Anthropic typically returns seconds.
+                retry_after = _DEFAULT_RETRY_AFTER_S
+                response_headers = getattr(getattr(exc, "response", None), "headers", {}) or {}
+                ra_raw = response_headers.get("retry-after")
+                if ra_raw:
+                    try:
+                        retry_after = float(ra_raw)
+                    except (TypeError, ValueError):
+                        pass
+                # Exponential backoff floor so a short server-side hint
+                # doesn't put us in a tight retry loop.
+                wait_s = max(retry_after, 5.0 * (2 ** attempt))
+                attempt += 1
+                logger.warning(
+                    "Anthropic 429 (attempt %d/%d). Sleeping %.1fs (retry-after=%s).",
+                    attempt, _MAX_RATE_LIMIT_RETRIES, wait_s, ra_raw or "—",
+                )
+                time.sleep(wait_s)
+            except Exception as exc:
+                raise ProviderError(f"Anthropic API call failed: {exc}") from exc
 
         raw = "".join(
             b.text for b in resp.content if getattr(b, "type", "") == "text"
