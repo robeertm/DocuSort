@@ -692,6 +692,48 @@ def create_app(
             "without_account":        int(unattached),
         }
 
+    @app.post("/api/finance/reocr-all")
+    def api_reocr_all():
+        """Re-read every Kontoauszug / Bank PDF and refresh the stored
+        OCR text. Pure local work — no LLM call, no cost. Fixes
+        truncated text from earlier installs that capped at the
+        classifier's input limit, leaving the booking table in
+        multi-page statements unreadable to the second-pass extractor."""
+        from ..ocr import extract_text as _extract_text
+        with db._lock:
+            rows = db._conn.execute(
+                """SELECT id, library_path, length(extracted_text) AS old_len
+                   FROM documents
+                   WHERE deleted_at IS NULL
+                     AND category IN ('Kontoauszug', 'Bank')
+                     AND library_path IS NOT NULL"""
+            ).fetchall()
+        refreshed: list[dict] = []
+        failed: list[dict] = []
+        for r in rows:
+            doc_id = int(r["id"])
+            path = Path(r["library_path"])
+            if not path.exists():
+                failed.append({"doc_id": doc_id, "error": "file missing"})
+                continue
+            try:
+                ocr_res = _extract_text(path, settings.ocr)
+            except Exception as exc:
+                failed.append({"doc_id": doc_id, "error": str(exc)})
+                continue
+            new_text = ocr_res.text[:200_000]
+            with db._lock:
+                db._conn.execute(
+                    "UPDATE documents SET extracted_text = ?, ocr_used = ? WHERE id = ?",
+                    (new_text, 1 if ocr_res.ocr_used else 0, doc_id),
+                )
+            refreshed.append({
+                "doc_id": doc_id,
+                "old_len": int(r["old_len"] or 0),
+                "new_len": len(new_text),
+            })
+        return {"found": len(rows), "refreshed": refreshed, "failed": failed}
+
     @app.post("/api/finance/reextract-empty")
     def api_reextract_empty():
         """One-click bulk re-extraction for every statement that came

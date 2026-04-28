@@ -168,7 +168,16 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             cost_usd=cls.cost_usd,
             status=status,
             content_hash=content_hash,
-            extracted_text=ocr_res.text[: settings.claude.max_text_chars],
+            # Store the full OCR text rather than truncating at the
+            # LLM-input limit. Keeping more characters in the DB lets
+            # second-pass extractors (Kontoauszug, Kassenzettel) work
+            # on multi-page documents whose booking tables would
+            # otherwise sit past the cutoff. The LLM call itself still
+            # truncates to settings.ai.max_text_chars at send time.
+            # We cap at a generous 200k-char ceiling to bound runaway
+            # rows; a single bank statement is typically well under
+            # that.
+            extracted_text=ocr_res.text[:200_000],
         )
         try:
             doc_id = db.insert_document(rec)
@@ -361,6 +370,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Extract line items from existing Kassenzettel docs that don't have them yet")
     parser.add_argument("--backfill-statements", action="store_true",
                         help="Extract transactions from existing Kontoauszug docs that don't have them yet")
+    parser.add_argument("--reocr-statements", action="store_true",
+                        help="Re-read PDFs for Kontoauszug/Bank docs and refresh stored OCR text — fixes truncated text from earlier installs")
     parser.add_argument("--version", action="version", version=f"docusort {__version__}")
     args = parser.parse_args(argv)
 
@@ -434,6 +445,50 @@ def main(argv: list[str] | None = None) -> int:
         from .receipts import backfill_receipts
         result = backfill_receipts(settings, db, classifier, dry_run=False)
         log.info("Receipt backfill done: %s", result)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+
+    if args.reocr_statements:
+        # No LLM call here — pure local re-OCR. Walks every Kontoauszug
+        # / Bank document, re-reads the PDF, and overwrites the stored
+        # OCR text with the full content. Earlier installs truncated at
+        # ~12k chars, which cut off the booking table in multi-page
+        # statements; refreshing the text unblocks --backfill-statements
+        # and the /finance "re-extract empty" button.
+        from .ocr import extract_text as _extract_text
+        rows = db._conn.execute(
+            """SELECT id, library_path, length(extracted_text) AS old_len
+               FROM documents
+               WHERE deleted_at IS NULL
+                 AND category IN ('Kontoauszug', 'Bank')
+                 AND library_path IS NOT NULL"""
+        ).fetchall()
+        processed: list[dict] = []
+        failed: list[dict] = []
+        for r in rows:
+            doc_id = int(r["id"])
+            path = Path(r["library_path"])
+            if not path.exists():
+                failed.append({"doc_id": doc_id, "error": f"file missing: {path}"})
+                continue
+            try:
+                ocr_res = _extract_text(path, settings.ocr)
+            except Exception as exc:
+                failed.append({"doc_id": doc_id, "error": str(exc)})
+                continue
+            new_text = ocr_res.text[:200_000]
+            db._conn.execute(
+                "UPDATE documents SET extracted_text = ?, ocr_used = ? WHERE id = ?",
+                (new_text, 1 if ocr_res.ocr_used else 0, doc_id),
+            )
+            processed.append({
+                "doc_id": doc_id,
+                "old_len": int(r["old_len"] or 0),
+                "new_len": len(new_text),
+                "ocr_used": ocr_res.ocr_used,
+            })
+        result = {"processed": processed, "failed": failed, "found": len(rows)}
+        log.info("Re-OCR done: %s", result)
         print(json.dumps(result, indent=2, default=str))
         return 0
 

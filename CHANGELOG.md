@@ -2,6 +2,28 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.13.5] – 2026-04-28
+
+### Fixed
+
+- **Bank statements no longer get truncated mid-table.** New uploads
+  used to store only the leading section of a multi-page statement,
+  enough for category classification but too short to capture the
+  full booking table. The booking section now lands in the database
+  intact, so the second-pass extractor for Kontoauszüge sees the
+  whole document.
+
+### Added
+
+- **Refresh OCR for existing statements** without paying for a new
+  AI pass: the new `docusort --reocr-statements` command (also
+  exposed as `POST /api/finance/reocr-all`) walks every Kontoauszug
+  / Bank document, re-reads the PDF, and overwrites the stored OCR
+  text with the full content. Pure local work — fixes documents
+  that were imported before the truncation change without a
+  re-upload. After it runs, the existing "Erneut auswerten" button
+  on `/finance` can finish what was previously stuck.
+
 ## [0.13.4] – 2026-04-28
 
 ### Changed
