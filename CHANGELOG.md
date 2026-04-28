@@ -2,164 +2,171 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.13.3] – 2026-04-28
+
+### Geändert
+
+- Changelog auf Deutsch umgestellt und von Zahlen-Spam befreit. Die
+  Einträge beschreiben jetzt was sich aus Nutzersicht ändert, nicht
+  wieviele Tokens, Sekunden oder Zeilen drumherum verschoben wurden.
+
 ## [0.13.2] – 2026-04-27
 
-### Headline cashflow excludes internal transfers
+### Geändert
 
-Income / expense / net on `/finance` no longer include `category=uebertrag`
-transactions — money the user moves between their own accounts.
-Previously a single €90,000 internal transfer (closing a Tagesgeldkonto
-and crediting the Girokonto) dwarfed every real transaction in the
-chart. Internal transfers now show as a small italic chip on the
-"Buchungen" stat card ("+36 interne Überträge") and stay in the
-category breakdown, but don't pollute the income/expense numbers.
+- **Cashflow-Anzeige auf `/finance` rechnet interne Überträge raus.**
+  Wer Geld zwischen eigenen Konten verschiebt (Tagesgeld → Giro
+  beim Auflösen, Sparbatzen aufs Tagesgeld zurück), sieht das nicht
+  mehr als „Einnahme" oder „Ausgabe". Diese Vorgänge erscheinen als
+  separater Hinweis auf der Buchungs-Karte und bleiben in der
+  Kategorie-Aufschlüsselung sichtbar — aber sie verzerren den Chart
+  nicht mehr.
+- **Auto-Erkennung interner Überträge.** Stimmt der Empfänger einer
+  Buchung mit dem Kontoinhaber überein (auch bei Gemeinschaftskonten
+  mit Partner-Name auf der Buchungszeile), markiert der Extractor
+  die Buchung selbst als Übertrag. Damit fängt er den verbreiteten
+  Sparkasse-Stil ein, bei dem interne Verschiebungen ohne
+  „Übertrag"-Label gedruckt werden.
+- **Lange Auszüge werden komplett gelesen.** Mehrseitige PDFs mit
+  großen Buchungstabellen wurden vorher abgeschnitten bevor die KI
+  überhaupt die zweite Seite sah. Das Limit ist jetzt großzügig
+  genug, dass typische Monats- und Quartals­auszüge vollständig
+  ankommen.
+- **Buchungszeitraum nicht mehr verdreht.** Wenn die KI Anfangs- und
+  Enddatum vertauscht — typischer Fehler weil oben das Auszug-Datum
+  steht und unten der Buchungs­zeitraum — werden die beiden
+  automatisch wieder in die richtige Reihenfolge gebracht. Der
+  Prompt sagt der KI jetzt auch klarer dass das Datum vom Briefkopf
+  nicht der Buchungszeitraum ist.
 
-### Auto-detect internal transfers
+### Hinzugefügt
 
-The extractor checks each transaction's counterparty against the
-account holder's name; lines whose counterparty contains the holder
-name (and possibly a partner's name on a joint account, e.g. "Robert
-Manuwald Steffi Manuwald" when the holder is "Robert Manuwald") get
-auto-promoted to `category=uebertrag`. Catches the common Sparkasse
-pattern where internal transfers are printed without an obvious
-"Übertrag" label.
+- **Diagnose-Banner auf `/finance`**: zeigt namentlich welche
+  hochgeladenen Kontoauszüge ohne Buchungen extrahiert wurden, mit
+  einem Knopf für eine erneute Auswertung dieser Liste. Damit
+  verschwinden Lücken nicht im Mittel der Gesamtzahlen, sondern
+  werden sichtbar und behebbar gemacht.
+- **Konto löschen direkt auf `/finance`.** Wer durch den alten
+  IBAN-Fallback ein „Unbekannt …xxxx" Konto bekommen hat (siehe
+  unten), kann es jetzt mit einem Klick wegwerfen. Die Buchungen
+  bleiben erhalten und werden bei der nächsten Auswertung dem
+  richtigen Konto zugeordnet.
 
-### Added — coverage + cleanup tools
+### Behoben
 
-- **Diagnostics banner on `/finance`** that names every uploaded
-  Kontoauszug whose extraction came back without transactions, with
-  a one-click "Erneut auswerten" button that re-runs the LLM call on
-  just those documents. Drives the user's "all uploads must be in
-  the evaluation" requirement instead of letting empties hide in the
-  aggregate counts.
-- **`POST /api/finance/reextract-empty`** powers the bulk re-extract.
-  Re-uses stored OCR text (no re-OCR cost), paces 1.5s between LLM
-  calls to stay below the Anthropic Tier-1 token-per-minute limit.
-- **`DELETE /api/finance/account/{id}`** plus a delete button on the
-  accounts list — needed to clean up the bogus "Unbekannt …xxxx"
-  account that earlier versions could create when the IBAN fallback
-  picked a counterparty IBAN by mistake. Statements stay in the DB
-  with `account_id=NULL` and re-attach correctly on the next
-  extraction.
+- **Keine Geister-Konten durch IBAN-Fallback mehr.** Wenn die KI
+  unsicher war welche IBAN das eigene Konto ist, hatte DocuSort
+  bisher die erste IBAN aus dem Text geraten — das war auf
+  Auszügen mit Gegenkonten-Angaben oft die falsche, und alle
+  unsicheren Auszüge landeten in einem einzigen Sammel-Konto.
+  Jetzt bleibt das Konto leer wenn die Zuordnung nicht eindeutig
+  ist; die Buchungen können später richtig nachverknüpft werden.
+- **Anthropic-Rate-Limit fängt sich von selbst.** Die „bitte
+  warte"-Meldung der API führte vorher zum harten Abbruch — jetzt
+  hält DocuSort die vom Server vorgegebene Wartezeit ein und macht
+  danach automatisch weiter, mehrfach hintereinander.
+- **Spending-Limit der Anthropic-Konsole wird klar gemeldet.** Wer
+  sein selbst gesetztes Ausgaben­limit erreicht hat, sieht jetzt
+  eine eindeutige Fehlermeldung mit dem Verweis auf die
+  Limit-Einstellung in der Anthropic-Konsole, statt einen
+  irreführenden Rate-Limit-Hinweis.
+- **Backfill bremst sich selbst.** Beim Stapelverarbeiten vorhandener
+  Auszüge legt DocuSort kleine Pausen zwischen den KI-Aufrufen ein,
+  damit das Tier-1-Limit der API nicht in Sekunden abgebrannt wird.
 
-### Fixed
+### Übersetzungen
 
-- **No more bogus accounts from the IBAN fallback.** When the LLM
-  returns an empty `account_iban_token`, we now leave the account
-  unattached rather than guessing the first IBAN seen in the text —
-  on multi-IBAN statements that "first" was usually a counterparty
-  IBAN, creating a single fake account that swallowed every
-  unsure-account statement.
-- **Period start/end auto-flip.** If the LLM returns
-  `period_start > period_end` (typically because it confused the
-  document-issue date with the booking range), the values get
-  swapped before they hit the DB. Prompt also tightened to spell out
-  "earliest BOOKING DATE inside the table, not the page header
-  date."
-- **Anthropic 429 retry-with-backoff.** When the API returns the
-  rate-limit error ("50,000 input tokens per minute, please wait"),
-  the provider now reads the `retry-after` header and retries up to
-  four times with exponential backoff. Previously the user saw a
-  hard error and the document went unprocessed.
-- **Statement extractor reads more OCR text.** Default
-  `max_text_chars` for `StatementExtractor` is now 32000 (up from
-  24000), and `--backfill-statements` enforces a floor of 32000 even
-  when `ai.max_text_chars` is configured lower. Multi-page Sparkasse
-  statements with long booking tables no longer truncate before the
-  LLM sees them.
-
-### i18n
-
-8 new strings × 5 languages for the diagnostics banner, the bulk
-re-extract button, and the account-delete confirmation.
+- Neue Texte für den Diagnose-Banner, das Lösch-Konto-Dialog und den
+  Hinweis zu internen Überträgen — in allen fünf Sprachen.
 
 ## [0.13.1] – 2026-04-27
 
-### Added — Privacy transparency
+### Hinzugefügt — Datenschutz-Transparenz
 
-- **"Was wird an die KI gesendet?"** expandable on every Kontoauszug
-  document detail page. Click to load (no LLM call, no cost) and see
-  exactly what bytes leave the box: privacy mode badge, provider/model,
-  payload size in characters, count of masked tokens by kind (IBANs,
-  Names, Addresses, Emails), the **full pseudonymised text** as it would
-  hit the API, and the **local reverse map** (token → real value) that
-  never leaves your server. Translates the abstract privacy promise
-  into something the user can audit.
-- **`GET /api/document/{doc_id}/statement/preview`** powers the above —
-  pure local computation, no third-party network.
-- **Statement card on document detail**: bank name, period, opening /
-  closing balance, transaction list (sticky-header table with up to
-  40vh scroll), privacy badge, manual extract / re-extract button.
-  Surfaces for both `Kontoauszug` and legacy `Bank/Konto` documents.
+- **„Was wird an die KI gesendet?"** ist jetzt aufklappbar auf
+  jeder Kontoauszug-Detailseite. Ein Klick zeigt — lokal berechnet,
+  ohne KI-Aufruf, ohne Kosten — was tatsächlich übertragen würde:
+  Datenschutz-Modus, Anbieter und Modell, Größe der Übertragung,
+  wieviele IBANs / Namen / Adressen / E-Mails maskiert wurden, den
+  vollständigen pseudonymisierten Text wie ihn die KI sieht, und
+  die Übersetzungstabelle Token → echter Wert die deinen Server
+  nie verlässt. Aus dem abstrakten Datenschutz-Versprechen wird
+  etwas das man selbst nachprüfen kann.
+- **Statement-Karte auf der Dokumentenseite**: Bank, Zeitraum,
+  Anfangs- und Endsaldo, Buchungstabelle, Datenschutz-Badge,
+  manuelle Auswerten- bzw. Neu-Auswerten-Knopf. Erscheint sowohl
+  bei expliziten Kontoauszug-Dokumenten als auch bei älteren
+  Bank/Konto-Dokumenten aus früheren Versionen.
 
-### Fixed
+### Behoben
 
-- **Bank category description no longer claims Kontoauszüge.** Before
-  this, the classifier was torn between `Bank/Konto` and `Kontoauszug`
-  and (deterministically) picked `Bank` for actual statements. Bank now
-  covers contracts / Wertpapiere / loans only; current statements
-  always go to `Kontoauszug`.
-- **`--backfill-statements` now also processes legacy `Bank/Konto`
-  documents** that were filed there before v0.13.0 added the new
-  category. After successful extraction, the document is auto-promoted
-  to `category=Kontoauszug` so it appears in `/finance` going forward.
+- **Klassifizierung erkennt Kontoauszüge zuverlässiger.** Die
+  Bank-Kategorie hatte bisher in ihrer Beschreibung „Kontoauszüge"
+  mit aufgeführt — die KI war dadurch hin- und hergerissen und
+  packte echte Auszüge oft fälschlich unter Bank/Konto. Bank deckt
+  jetzt nur noch Verträge, Wertpapiere und Darlehen ab; aktuelle
+  Auszüge gehen sauber in die neue Kontoauszug-Kategorie.
+- **Backfill greift auch auf Alt-Bestand zu.** Auszüge die vor
+  Einführung der Kontoauszug-Kategorie unter Bank/Konto gelandet
+  sind werden vom Stapel-Backfill mitgenommen und nach
+  erfolgreicher Auswertung in die richtige Kategorie verschoben.
+- **Pseudonymisierung schärfer.** Der mehrzeilige Adressblock am
+  Anfang deutscher Bankauszüge („Herrn und Frau / Vorname Nachname
+  / Straße / PLZ Ort") wird jetzt vollständig erkannt und maskiert,
+  und alle weiteren Erwähnungen des Namens innerhalb der
+  Buchungszeilen werden im selben Durchgang ersetzt — auch in
+  GROSSBUCHSTABEN wie Banken sie gerne in Buchungstexten drucken.
+  Wer „NAME_001" als Inhaber sah weil die KI ohne echtes Backing
+  ein Token erfunden hat: das wird jetzt ausgefiltert.
 
 ## [0.13.0] – 2026-04-27
 
-### Added — Bank-statement analysis (`/finance`)
+### Hinzugefügt — Kontoauszug-Auswertung (`/finance`)
 
-- **New top-level category `Kontoauszug`** (Girokonto, Tagesgeld,
-  Kreditkarte, Depot, PayPal, Sonstiges). Statements are detected
-  automatically by the classifier — no manual flagging needed.
-- **Statement extractor** (`docusort.finance.StatementExtractor`):
-  second-pass LLM that pulls bank name, period, opening/closing
-  balance, and every transaction (booking date, amount with sign,
-  counterparty, IBAN, purpose, type, category) out of OCR text.
-- **`accounts` / `statements` / `transactions` tables** in SQLite,
-  plus aggregation methods: `finance_summary`, `finance_monthly`,
-  `finance_top_counterparties`, `finance_recurring`,
-  `transactions_list`. `iban_hash` is the dedup key so multiple
-  statements for the same account auto-merge into one.
-- **Cross-statement transaction dedup** via `tx_hash` (account +
-  booking date + amount + purpose) — overlapping monthly + quarterly
-  statements no longer double-count the same booking.
-- **Pseudonymisation layer** (`docusort.finance.Pseudonymizer`): IBANs,
-  emails, addresses, and the account holder's name are replaced with
-  stable tokens (`IBAN_001`, `NAME_002`, `ADDR_003`) before any cloud
-  LLM sees the OCR text. After the JSON response comes back, tokens
-  are restored locally and `SHA256(IBAN)` is used as the account dedup
-  key. Counterparty names (Lidl, Stadtwerke, …) are kept verbatim so
-  categorisation still works.
-- **`/finance` page** with cashflow chart (income up / expense down),
-  per-account list, by-category breakdown, top
-  outgoing/incoming counterparties, recurring-transaction detection
-  (subscriptions: ≥3 months, ±15% amount drift), and a filtered
-  transaction table with search + account/category/direction/date
-  filters.
-- **Privacy controls in `/settings`**: choose between cloud-with-
-  pseudonymisation (default) and local-only processing. Local-only
-  refuses to extract statements unless the active provider is local
-  (Ollama / OpenAI-compatible) — no silent leak. The current privacy
-  mode of the most recent statement is shown as a badge on `/finance`.
-- **`POST /api/document/{id}/statement/extract`** to manually
-  re-trigger extraction after a config change.
-- **`POST /api/settings/finance`** to toggle `local_only` /
-  `pseudonymize` from the UI without a service restart.
-- **`docusort --backfill-statements`** to extract transactions from
-  existing Kontoauszug docs that don't have them yet (re-uses stored
-  OCR text, no re-OCR cost).
-- **Privacy notice in the LLM prompt**: the system prompt explicitly
-  tells the model "tokens like IBAN_001 are masked — keep them
-  verbatim" so the JSON round-trip preserves the reverse map.
+- **Neue Top-Level-Kategorie Kontoauszug** für Giro-, Tagesgeld-,
+  Kreditkarten-, Depot- und PayPal-Auszüge. Wird vom Klassifikator
+  automatisch erkannt — keine manuelle Markierung nötig.
+- **Eigener Tab `/finance`** mit Cashflow-Chart (Einnahmen oben
+  grün, Ausgaben unten rot, gleicher Maßstab), Konten-Liste,
+  Aufschlüsselung nach Kategorien, Top-Empfänger ein- und
+  ausgehend, Erkennung wiederkehrender Buchungen (Abos, Miete,
+  Versicherungen) und einer durchsuchbar­filterbaren
+  Buchungstabelle.
+- **Erkennung von Konten und Buchungen aus dem Auszugstext.** Eine
+  zweite KI-Runde holt aus dem OCR-Text Bank, Zeitraum, Anfangs-
+  und Endsaldo sowie alle Buchungen mit Datum, Betrag (vorzeichen­
+  richtig), Empfänger, IBAN, Verwendungszweck, Buchungstyp und
+  Kategorie. Mehrere Auszüge desselben Kontos werden über einen
+  Hash der IBAN automatisch zu einem Konto zusammengeführt — ohne
+  je die echte IBAN preiszugeben.
+- **Doppelt­erkennung über Auszüge hinweg.** Wenn sich Monats- und
+  Quartals­auszug überschneiden, wird jede Buchung trotzdem nur
+  einmal gezählt. Identische PDFs werden gar nicht erst doppelt
+  importiert.
+- **Pseudonymisierung vor jedem Cloud-KI-Aufruf.** IBANs,
+  E-Mail-Adressen, Adressen und der Name des Kontoinhabers werden
+  durch stabile Tokens ersetzt bevor der OCR-Text das Haus
+  verlässt. Empfängernamen wie Lidl oder Stadtwerke bleiben
+  sichtbar — sonst kann die KI nicht kategorisieren. Nach dem
+  Antwort-Eingang werden die Tokens lokal wieder durch die echten
+  Werte ersetzt.
+- **Datenschutz-Einstellungen unter `/settings`**: Wahl zwischen
+  Cloud-KI mit Pseudonymisierung (Standard) und reinem
+  Lokal-Modus. Lokal-Modus weigert sich Auszüge zu verarbeiten
+  wenn kein lokaler Provider eingerichtet ist — keine
+  versehentliche Cloud-Übertragung. Der Modus des zuletzt
+  verarbeiteten Auszugs wird als Badge auf `/finance` angezeigt.
+- **Neuer Befehl `docusort --backfill-statements`** holt aus
+  vorhandenen Kontoauszug-Dokumenten die Buchungen nach. Verwendet
+  den bereits gespeicherten OCR-Text, kostet also nur den KI-Call,
+  kein neues OCR.
 
-### Changed
+### Geändert
 
-- `nav.finance` is a new top-level navigation entry. On mobile it
-  shares the horizontal scroll bar with the other tabs.
-- `WebSettings`-style `FinanceSettings(local_only, pseudonymize)`
-  added to `AppSettings`. Reads from the new `finance:` block in
-  `config.yaml`; missing block falls back to the safe defaults
-  (`local_only=false, pseudonymize=true`).
+- Neuer Navigations-Eintrag „Finanzen" in der Hauptnavigation, auch
+  in der mobilen Scrollleiste verfügbar.
+- Privacy-Einstellungen lassen sich live umschalten ohne den Dienst
+  neu zu starten.
 
 ## [0.12.7] – 2026-04-27
 
