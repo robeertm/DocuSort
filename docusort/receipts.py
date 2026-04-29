@@ -265,6 +265,8 @@ def backfill_receipts(settings, db, classifier, *, dry_run: bool = False) -> dic
     extractor = ReceiptExtractor(
         classifier.provider, settings.ai.model,
         max_text_chars=settings.ai.max_text_chars,
+        holder_names=settings.finance.holder_names,
+        pseudonymize=settings.finance.pseudonymize,
     )
     rows = db._conn.execute(
         """SELECT id, extracted_text, doc_date FROM documents
@@ -304,19 +306,34 @@ def backfill_receipts(settings, db, classifier, *, dry_run: bool = False) -> dic
     }
 
 
+_LOCAL_PROVIDERS = ("openai_compat",)
+
+
 class ReceiptExtractor:
     """Wraps a Provider to extract structured receipts from OCR text."""
 
     def __init__(self, provider: Provider, model: str,
-                 max_text_chars: int = 12000):
+                 max_text_chars: int = 12000,
+                 holder_names: list[str] | None = None,
+                 pseudonymize: bool = True):
         self.provider = provider
         self.model = model
         self.max_text_chars = max_text_chars
+        self.holder_names = list(holder_names or [])
+        self.pseudonymize = pseudonymize
 
     def extract(self, ocr_text: str) -> Receipt:
         if not ocr_text:
             raise ValueError("no OCR text provided")
         body = ocr_text[: self.max_text_chars]
+
+        is_local = self.provider.name in _LOCAL_PROVIDERS
+        do_pseudo = self.pseudonymize and not is_local
+        pseudo = None
+        if do_pseudo:
+            from .finance.pseudonymizer import pseudonymize_for_cloud
+            body, pseudo = pseudonymize_for_cloud(body, self.holder_names)
+
         try:
             resp = self.provider.classify(
                 system_prompt=SYSTEM_PROMPT,
@@ -329,6 +346,8 @@ class ReceiptExtractor:
             raise
 
         data = _parse_response(resp.raw_text)
+        if pseudo is not None:
+            data = pseudo.restore(data)
 
         shop_type = str(data.get("shop_type") or "").strip().lower()
         if shop_type and shop_type not in SHOP_TYPES:

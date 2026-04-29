@@ -18,7 +18,7 @@ Users who want zero cloud exposure can flip the
 statements to a local provider (Ollama / openai-compat) instead.
 """
 
-from .pseudonymizer import Pseudonymizer
+from .pseudonymizer import Pseudonymizer, pseudonymize_for_cloud
 from .categories import (
     TX_CATEGORIES,
     TX_TYPES,
@@ -32,6 +32,7 @@ from .extractor import (
 
 __all__ = [
     "Pseudonymizer",
+    "pseudonymize_for_cloud",
     "StatementExtractor",
     "Statement",
     "Transaction",

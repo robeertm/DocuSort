@@ -195,6 +195,8 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                 extractor = ReceiptExtractor(
                     classifier.provider, settings.ai.model,
                     max_text_chars=settings.ai.max_text_chars,
+                    holder_names=settings.finance.holder_names,
+                    pseudonymize=settings.finance.pseudonymize,
                 )
                 receipt = extractor.extract(ocr_res.text)
                 db.upsert_receipt(
@@ -418,7 +420,11 @@ def main(argv: list[str] | None = None) -> int:
     if is_configured(settings):
         try:
             api_key = get_api_key(settings)
-            classifier = Classifier(api_key, settings.ai, settings.categories)
+            classifier = Classifier(
+                api_key, settings.ai, settings.categories,
+                holder_names=settings.finance.holder_names,
+                pseudonymize=settings.finance.pseudonymize,
+            )
         except Exception as exc:
             log.error("Classifier init failed (provider=%s): %s",
                       settings.ai.provider, exc)

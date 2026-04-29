@@ -391,10 +391,15 @@ def _parse_response(raw: str) -> dict[str, Any]:
     raise ValueError(f"No valid JSON object in model reply: {raw[:200]!r}")
 
 
+_LOCAL_PROVIDERS = ("openai_compat",)
+
+
 class Classifier:
     def __init__(self, api_key: str, settings: AISettings,
                  categories: list[dict[str, Any]],
-                 provider: Provider | None = None):
+                 provider: Provider | None = None,
+                 holder_names: list[str] | None = None,
+                 pseudonymize: bool = True):
         self.settings = settings
         self.categories = categories
         self.provider: Provider = provider or build_provider(
@@ -408,11 +413,27 @@ class Classifier:
             c["name"]: set(c.get("subcategories") or []) for c in categories
         }
         self._system_prompt = _build_system_prompt(categories)
+        self.holder_names = list(holder_names or [])
+        self.pseudonymize = pseudonymize
 
     def classify(self, text: str) -> Classification:
-        user = _build_user_message(text, self.settings.max_text_chars)
-        logger.debug("Calling %s model=%s, text_len=%d",
-                     self.provider.name, self.settings.model, len(text))
+        # Pseudonymise OCR text before it leaves the box, the same way
+        # the bank-statement extractor does. Names from
+        # `finance.holder_names`, plus structurally-detected addresses
+        # / IBANs / emails, get replaced with stable tokens. The
+        # response fields are restored locally before storage.
+        is_local = self.provider.name in _LOCAL_PROVIDERS
+        do_pseudo = self.pseudonymize and not is_local
+        body = text
+        pseudo = None
+        if do_pseudo:
+            from .finance.pseudonymizer import pseudonymize_for_cloud
+            body, pseudo = pseudonymize_for_cloud(text, self.holder_names)
+
+        user = _build_user_message(body, self.settings.max_text_chars)
+        logger.debug("Calling %s model=%s, text_len=%d, pseudo=%s",
+                     self.provider.name, self.settings.model, len(text),
+                     bool(pseudo))
 
         try:
             resp = self.provider.classify(
@@ -426,6 +447,8 @@ class Classifier:
             raise
 
         data = _parse_response(resp.raw_text)
+        if pseudo is not None:
+            data = pseudo.restore(data)
 
         category = str(data.get("category", "Sonstiges")).strip()
         if category not in self._allowed_names:

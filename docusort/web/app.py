@@ -502,6 +502,8 @@ def create_app(
         extractor = ReceiptExtractor(
             classifier.provider, settings.ai.model,
             max_text_chars=settings.ai.max_text_chars,
+            holder_names=settings.finance.holder_names,
+            pseudonymize=settings.finance.pseudonymize,
         )
         try:
             r = extractor.extract(text)

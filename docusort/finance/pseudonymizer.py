@@ -389,3 +389,20 @@ class Pseudonymizer:
         """Reverse-lookup helper for callers that already know which
         token references the user's primary account."""
         return self.reverse_map.get(token, "")
+
+
+def pseudonymize_for_cloud(
+    text: str, holder_names: list[str] | None = None,
+) -> tuple[str, "Pseudonymizer"]:
+    """Convenience wrapper used by every cloud-bound LLM call site
+    (classifier, receipt extractor, statement extractor) that wants to
+    apply the same masking before letting OCR text leave the box.
+
+    Returns the masked text plus the populated Pseudonymizer instance —
+    the caller passes the instance to `.restore()` on the model's
+    response fields before storing them in the DB.
+    """
+    pseudo = Pseudonymizer()
+    if holder_names:
+        pseudo.seed_household_names(holder_names)
+    return pseudo.pseudonymize(text), pseudo

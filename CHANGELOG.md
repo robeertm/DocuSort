@@ -2,6 +2,38 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.15.0] – 2026-04-29
+
+### Changed — pseudonymisation now covers every cloud AI call
+
+Until now, only bank-statement extraction ran OCR text through the
+pseudonymiser before sending it to a cloud provider. The first-pass
+classifier (run on every incoming document) and the receipt-line
+extractor sent plaintext, which meant household names, addresses and
+email addresses on letters, contracts, doctor reports and shopping
+receipts could still reach the cloud model.
+
+- The classifier now masks IBANs, addresses, emails and configured
+  household names before the document text leaves the box, then
+  restores any tokens that come back inside the model's `sender`,
+  `subject` or `reasoning` fields.
+- The receipt extractor applies the same masking before sending OCR
+  text and restores tokens in the parsed JSON before storage.
+- Behaviour is gated by the existing `finance.pseudonymize` switch and
+  the `finance.holder_names` list — the same controls already used for
+  bank statements. A local provider (Ollama / OpenAI-compatible) skips
+  masking, since data never leaves the box anyway.
+- Settings page heading and subtitle reworded to reflect that the
+  switch now governs every AI call, not just statements.
+
+### Fixed
+
+- The "names always masked" textarea on `/settings` no longer needs a
+  matching structured cue inside the document — names from this list
+  are masked even on classifier-only documents like Arztbriefe or
+  Versicherungspolicen where the holder block lives in a layout the
+  auto-detector doesn't know about.
+
 ## [0.14.1] – 2026-04-28
 
 ### Fixed
