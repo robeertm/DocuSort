@@ -33,7 +33,12 @@ class OpenAICompatProvider(Provider):
         self.timeout = timeout
 
     def classify(self, *, system_prompt, user_prompt, model,
-                 max_output_tokens: int = 600) -> ProviderResponse:
+                 max_output_tokens: int = 600,
+                 timeout: float | None = None) -> ProviderResponse:
+        # urllib's urlopen takes a per-call timeout — use the override
+        # when given (long extractions on a local Ollama can take
+        # several minutes).
+        request_timeout = timeout if timeout is not None else self.timeout
         body: dict[str, Any] = {
             "model": model,
             "max_tokens": max_output_tokens,
@@ -55,7 +60,7 @@ class OpenAICompatProvider(Provider):
             method="POST",
         )
         try:
-            with request.urlopen(req, timeout=self.timeout) as resp:
+            with request.urlopen(req, timeout=request_timeout) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:400]

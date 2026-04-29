@@ -17,9 +17,11 @@ class OpenAIProvider(Provider):
         self.client = OpenAI(api_key=api_key, timeout=timeout)
 
     def classify(self, *, system_prompt, user_prompt, model,
-                 max_output_tokens: int = 600) -> ProviderResponse:
+                 max_output_tokens: int = 600,
+                 timeout: float | None = None) -> ProviderResponse:
+        client = self.client.with_options(timeout=timeout) if timeout is not None else self.client
         try:
-            resp = self.client.chat.completions.create(
+            resp = client.chat.completions.create(
                 model=model,
                 max_tokens=max_output_tokens,
                 response_format={"type": "json_object"},

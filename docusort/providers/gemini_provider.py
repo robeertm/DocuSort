@@ -22,7 +22,13 @@ class GeminiProvider(Provider):
         self.timeout = timeout
 
     def classify(self, *, system_prompt, user_prompt, model,
-                 max_output_tokens: int = 600) -> ProviderResponse:
+                 max_output_tokens: int = 600,
+                 timeout: float | None = None) -> ProviderResponse:
+        # Gemini SDK doesn't expose per-call timeout the same way; we
+        # accept the parameter for interface parity but currently don't
+        # plumb it through to google.genai. Long-output requests on
+        # Gemini are uncommon for this app right now.
+        _ = timeout
         from google.genai import types
         try:
             resp = self.client.models.generate_content(

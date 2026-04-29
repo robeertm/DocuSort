@@ -352,13 +352,40 @@ class StatementExtractor:
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=_USER_TEMPLATE.format(text=body),
                 model=self.model,
-                max_output_tokens=4000,
+                # Multi-page Privatgirokonto statements can carry many
+                # bookings; the JSON response with all of them easily
+                # outgrows a small output cap. When the response gets
+                # truncated mid-string, the JSON parser can't find a
+                # closing brace for the outer object and falls back to
+                # whichever inner transaction dict happens to be
+                # fully-formed at that point — which leaves bank /
+                # period / transactions all empty. Generous ceiling so
+                # the model has room to emit every booking on a
+                # twelve-page statement.
+                max_output_tokens=16000,
+                # Generating that much output takes well past the
+                # default 60 s. Five minutes covers the worst-case
+                # Privatgirokonto with hundreds of bookings on Anthropic
+                # Haiku-class models.
+                timeout=300.0,
             )
         except ProviderError as exc:
             logger.error("Statement extractor: provider call failed: %s", exc)
             raise
 
         data = _parse_response(resp.raw_text)
+        # Sanity check: if we ended up parsing a single transaction-
+        # shaped inner object instead of the outer statement object,
+        # the response was truncated. Log loud so the user can tell
+        # the difference between "no bookings on this statement" and
+        # "the response got cut off and we lost everything".
+        if isinstance(data, dict) and "transactions" not in data and "booking_date" in data:
+            logger.warning(
+                "Statement extractor for %s: response looks truncated "
+                "(parsed inner-tx object, no outer 'transactions' field). "
+                "Try a model with a larger output budget.",
+                self.model,
+            )
 
         # Restore pseudonymised tokens before we copy fields out.
         if pseudo is not None:
@@ -445,7 +472,7 @@ class StatementExtractor:
             closing_balance=closing,
             currency=str(data.get("currency") or "EUR").strip().upper()[:8] or "EUR",
             transactions=txs,
-            raw_response=resp.raw_text[:8000],
+            raw_response=resp.raw_text[:64000],
             privacy_mode="pseudonymize" if pseudonymize else "local",
         )
 

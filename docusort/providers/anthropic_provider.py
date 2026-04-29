@@ -31,14 +31,26 @@ class AnthropicProvider(Provider):
         self.client = Anthropic(api_key=api_key, timeout=timeout)
 
     def classify(self, *, system_prompt, user_prompt, model,
-                 max_output_tokens: int = 600) -> ProviderResponse:
+                 max_output_tokens: int = 600,
+                 timeout: float | None = None) -> ProviderResponse:
         # Late import so the type can be referenced even when handling errors.
         from anthropic import RateLimitError, APIStatusError
+
+        # Per-request timeout overrides the client default. Long
+        # extractions (many transactions, big output budget) push past
+        # 60 s easily; the default stays small for cheap classifier
+        # calls. Anthropic also recommends streaming for very long
+        # responses — we use plain create() because the bumped timeout
+        # is enough for current statement sizes.
+        if timeout is not None:
+            client = self.client.with_options(timeout=timeout)
+        else:
+            client = self.client
 
         attempt = 0
         while True:
             try:
-                resp = self.client.messages.create(
+                resp = client.messages.create(
                     model=model,
                     max_tokens=max_output_tokens,
                     system=[{

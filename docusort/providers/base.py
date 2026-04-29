@@ -33,5 +33,14 @@ class Provider:
         user_prompt: str,
         model: str,
         max_output_tokens: int = 600,
+        timeout: float | None = None,
     ) -> ProviderResponse:
+        """Run a single LLM call.
+
+        `timeout` is a per-request timeout in seconds. None falls back
+        to whatever the provider was constructed with — useful default
+        for the classifier's small responses, but second-pass
+        extractors that ask for many transactions in one go need a
+        much larger budget than the default 60 s.
+        """
         raise NotImplementedError

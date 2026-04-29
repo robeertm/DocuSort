@@ -2,6 +2,31 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.13.6] – 2026-04-28
+
+### Fixed
+
+- **Statements with many bookings extract correctly.** The
+  Kontoauszug extractor was capped at a small output budget that
+  multi-page Privatgirokonto statements blew past — the AI would
+  start emitting the booking list, get cut off mid-string, and the
+  parser would fall back to a single inner booking object that
+  carried no `transactions` field. Result: a statement that
+  silently saved with empty bank, empty period, zero bookings.
+  Output budget is now generous enough for a year of card
+  payments, so the AI emits valid JSON to the end.
+- **Long statement calls don't time out.** Generating that much
+  output runs past the default per-call timeout. The provider now
+  accepts a per-request timeout override and the statement
+  extractor uses it; long extractions stay open instead of
+  reporting a network timeout halfway through.
+
+### Changed
+
+- All providers gained an optional `timeout` parameter on `classify`
+  for the same reason — short classification calls stay snappy,
+  heavy extraction calls get the time they need.
+
 ## [0.13.5] – 2026-04-28
 
 ### Fixed
