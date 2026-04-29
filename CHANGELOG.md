@@ -2,6 +2,24 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.17.0] – 2026-04-29
+
+### Added — light / dark mode toggle
+
+A sun / moon button next to the language picker flips the entire UI
+between the original dark theme and a fresh light palette. The
+choice is persisted in localStorage and applied before the first
+paint so there's no flash. The initial value falls back to the
+system colour-scheme preference, and stays on dark when neither a
+preference nor a saved choice is available — so existing installs
+keep the look they're used to.
+
+The light palette is implemented as a stack of CSS overrides keyed
+on `html[data-theme="light"]` that re-map every `ink-*` shade to a
+tone-flipped value. Cards, buttons, headers and form inputs all get
+matched overrides so the page reads cleanly on a light background
+and shadows are bumped up so cards keep a sense of elevation.
+
 ## [0.16.2] – 2026-04-29
 
 ### Fixed — chart cards now have proportional height

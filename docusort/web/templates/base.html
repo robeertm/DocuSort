@@ -5,9 +5,128 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f172a">
 <title>{% block title %}DocuSort{% endblock %}</title>
+<script>
+  // Resolve theme before paint to avoid a dark→light flash on light-mode loads.
+  // Persisted in localStorage; falls back to the system preference; defaults to dark
+  // (the original DocuSort look) when neither is available.
+  (function () {
+    try {
+      var saved = localStorage.getItem('docusort-theme');
+      var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      var theme = saved || (prefers ? 'light' : 'dark');
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]').setAttribute(
+        'content', theme === 'light' ? '#f1f5f9' : '#0f172a'
+      );
+    } catch (e) { /* dark default */ }
+  })();
+</script>
 <style>
   html { background: #0b1220; }
+  html[data-theme="light"] { background: #f1f5f9; }
   [x-cloak] { display: none !important; }
+
+  /* ============================================================
+     Light-theme palette overrides.
+     The dark theme is the precompiled Tailwind output (ink-* maps
+     to slate-*). For light, we re-map every ink-* utility actually
+     used in the templates to a tone-flipped value. Order matters:
+     these rules sit AFTER the Tailwind bundle so they win.
+     ============================================================ */
+  html[data-theme="light"] body {
+    background: linear-gradient(to bottom, #ffffff, #f1f5f9, #e2e8f0);
+    color: rgb(15 23 42 / var(--tw-text-opacity, 1));
+  }
+
+  /* Backgrounds */
+  html[data-theme="light"] .bg-ink-950        { background-color: #ffffff; }
+  html[data-theme="light"] .bg-ink-950\/80    { background-color: rgb(255 255 255 / 0.8); }
+  html[data-theme="light"] .bg-ink-900        { background-color: #f1f5f9; }
+  html[data-theme="light"] .bg-ink-900\/95    { background-color: rgb(241 245 249 / 0.95); }
+  html[data-theme="light"] .bg-ink-900\/70    { background-color: rgb(255 255 255 / 0.85); }
+  html[data-theme="light"] .bg-ink-900\/60    { background-color: rgb(241 245 249 / 0.6); }
+  html[data-theme="light"] .bg-ink-900\/40    { background-color: rgb(241 245 249 / 0.4); }
+  html[data-theme="light"] .bg-ink-800        { background-color: #e2e8f0; }
+  html[data-theme="light"] .bg-ink-800\/80    { background-color: rgb(226 232 240 / 0.8); }
+  html[data-theme="light"] .bg-ink-800\/50    { background-color: rgb(226 232 240 / 0.5); }
+  html[data-theme="light"] .bg-ink-800\/40    { background-color: rgb(226 232 240 / 0.4); }
+  html[data-theme="light"] .bg-ink-800\/30    { background-color: rgb(226 232 240 / 0.3); }
+  html[data-theme="light"] .bg-ink-700        { background-color: #cbd5e1; }
+  html[data-theme="light"] .bg-ink-700\/60    { background-color: rgb(203 213 225 / 0.6); }
+  html[data-theme="light"] .bg-ink-700\/50    { background-color: rgb(203 213 225 / 0.5); }
+  html[data-theme="light"] .bg-ink-700\/40    { background-color: rgb(203 213 225 / 0.4); }
+  html[data-theme="light"] .bg-ink-700\/30    { background-color: rgb(203 213 225 / 0.3); }
+  html[data-theme="light"] .bg-ink-600        { background-color: #94a3b8; }
+  html[data-theme="light"] .bg-ink-600\/70    { background-color: rgb(148 163 184 / 0.7); }
+
+  /* Text */
+  html[data-theme="light"] .text-ink-50       { color: #020617; }
+  html[data-theme="light"] .text-ink-100      { color: #0f172a; }
+  html[data-theme="light"] .text-ink-200      { color: #1e293b; }
+  html[data-theme="light"] .text-ink-300      { color: #334155; }
+  html[data-theme="light"] .text-ink-400      { color: #475569; }
+  html[data-theme="light"] .text-ink-500      { color: #64748b; }
+  html[data-theme="light"] .text-ink-600      { color: #94a3b8; }
+  html[data-theme="light"] .text-ink-950      { color: #f1f5f9; }
+
+  /* Borders + dividers + ring */
+  html[data-theme="light"] .border-ink-500    { border-color: #94a3b8; }
+  html[data-theme="light"] .border-ink-600    { border-color: #cbd5e1; }
+  html[data-theme="light"] .border-ink-700    { border-color: #cbd5e1; }
+  html[data-theme="light"] .border-ink-700\/60{ border-color: rgb(203 213 225 / 0.6); }
+  html[data-theme="light"] .border-ink-700\/50{ border-color: rgb(203 213 225 / 0.5); }
+  html[data-theme="light"] .border-ink-800    { border-color: #e2e8f0; }
+  html[data-theme="light"] .border-ink-800\/50{ border-color: rgb(226 232 240 / 0.5); }
+  html[data-theme="light"] .border-ink-800\/40{ border-color: rgb(226 232 240 / 0.4); }
+  html[data-theme="light"] .border-ink-800\/30{ border-color: rgb(226 232 240 / 0.3); }
+  html[data-theme="light"] .divide-ink-700\/50 > :not([hidden]) ~ :not([hidden]) {
+    border-color: rgb(203 213 225 / 0.5);
+  }
+
+  /* Gradient stops (header, body, hero) */
+  html[data-theme="light"] .from-ink-950      { --tw-gradient-from: #ffffff var(--tw-gradient-from-position); --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+  html[data-theme="light"] .via-ink-900       { --tw-gradient-via-position:  ; --tw-gradient-to: rgb(241 245 249 / 0)  var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), #f1f5f9 var(--tw-gradient-via-position), var(--tw-gradient-to); }
+  html[data-theme="light"] .to-ink-950        { --tw-gradient-to: #e2e8f0 var(--tw-gradient-to-position); }
+
+  /* The default tailwind shadow uses dark rgba; on light it becomes invisible.
+     Slightly stronger in light mode so cards keep a sense of elevation. */
+  html[data-theme="light"] .card,
+  html[data-theme="light"] .shadow,
+  html[data-theme="light"] .shadow-xl {
+    box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 1px 3px 0 rgb(15 23 42 / 0.07);
+  }
+
+  /* The compiled .card / .btn-* shorthands hard-code dark-theme colours.
+     Override surface + text so they read on a light background. */
+  html[data-theme="light"] .card {
+    background-color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(203, 213, 225, 0.8);
+  }
+  html[data-theme="light"] .btn-secondary {
+    background-color: rgb(226 232 240 / var(--tw-bg-opacity, 1));
+    color: rgb(15 23 42 / var(--tw-text-opacity, 1));
+  }
+  html[data-theme="light"] .btn-ghost {
+    color: rgb(51 65 85 / var(--tw-text-opacity, 1));
+  }
+  html[data-theme="light"] .btn-ghost:hover {
+    background-color: rgb(226 232 240 / 0.6);
+  }
+  html[data-theme="light"] header {
+    background-color: rgb(255 255 255 / 0.85);
+    border-color: rgb(226 232 240);
+  }
+
+  /* Inputs / textareas use bg-ink-900 + border-ink-700 — invert for light. */
+  html[data-theme="light"] input[type="text"],
+  html[data-theme="light"] input[type="search"],
+  html[data-theme="light"] input[type="number"],
+  html[data-theme="light"] input[type="email"],
+  html[data-theme="light"] input[type="password"],
+  html[data-theme="light"] textarea,
+  html[data-theme="light"] select {
+    color: rgb(15 23 42);
+  }
 </style>
 <link rel="stylesheet" href="/static/tailwind.css?v={{ version }}">
 <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
@@ -40,6 +159,33 @@
       </svg>
       <span class="hidden md:inline">{{ t('nav.settings') }}</span>
     </a>
+
+    <!-- theme toggle -->
+    <button type="button"
+            x-data="{
+              theme: document.documentElement.dataset.theme || 'dark',
+              toggle() {
+                this.theme = this.theme === 'light' ? 'dark' : 'light';
+                document.documentElement.dataset.theme = this.theme;
+                try { localStorage.setItem('docusort-theme', this.theme); } catch(e) {}
+                document.querySelector('meta[name=\'theme-color\']').setAttribute(
+                  'content', this.theme === 'light' ? '#f1f5f9' : '#0f172a'
+                );
+              }
+            }"
+            @click="toggle()"
+            class="btn-ghost !px-2"
+            :aria-label="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'"
+            :title="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'">
+      {# Sun for light mode (click → goes dark), moon for dark mode (click → goes light) #}
+      <svg x-show="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+      </svg>
+      <svg x-show="theme === 'light'" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
 
     <!-- language picker -->
     <div class="relative" x-data="{ open: false }" @click.outside="open = false">

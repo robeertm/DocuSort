@@ -579,6 +579,8 @@
   "finance.catrend.range_all": "Alle",
   "finance.pie.spend_title": "Ausgaben nach Kategorie",
   "finance.pie.income_title": "Einnahmen nach Kategorie",
+  "nav.theme_light": "Hellmodus",
+  "nav.theme_dark": "Dunkelmodus",
   "finance.account_delete": "Konto löschen",
   "finance.account_delete_confirm": "Konto „{label}\" löschen? Buchungen bleiben erhalten und können bei der nächsten Auswertung erneut zugeordnet werden.",
   "finance.transfer_internal": "interne Überträge",

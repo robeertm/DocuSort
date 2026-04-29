@@ -579,6 +579,8 @@
   "finance.catrend.range_all": "All",
   "finance.pie.spend_title": "Spending by category",
   "finance.pie.income_title": "Income by category",
+  "nav.theme_light": "Light mode",
+  "nav.theme_dark": "Dark mode",
   "finance.account_delete": "Delete account",
   "finance.account_delete_confirm": "Delete account \"{label}\"? Transactions stay in the DB and can be re-attached on the next extraction.",
   "finance.transfer_internal": "internal transfers",
