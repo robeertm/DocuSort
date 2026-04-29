@@ -1794,10 +1794,13 @@ def create_app(
         return updater.version_info()
 
     @app.post("/api/update")
-    def api_update():
+    def api_update(tag: str | None = Query(None,
+                   description="Force-install this exact tag (e.g. 'v0.17.2'). "
+                               "Skips the GitHub release-info lookup, useful when "
+                               "the unauthenticated GitHub API is rate-limited.")):
         from .. import updater
         try:
-            result = updater.install_latest()
+            result = updater.install_latest(tag=tag)
         except Exception as exc:
             logger.exception("Update failed")
             raise HTTPException(500, f"Update failed: {exc}")

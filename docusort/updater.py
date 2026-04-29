@@ -66,13 +66,18 @@ def is_newer(candidate: str, base: str) -> bool:
 # ---------- release discovery ----------
 
 def fetch_latest_release() -> dict[str, Any]:
-    req = urllib.request.Request(
-        API_LATEST,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": f"docusort-updater/{__version__}",
-        },
-    )
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": f"docusort-updater/{__version__}",
+    }
+    # Optional auth — bumps the unauthenticated 60 req/hour limit to
+    # 5000/hour so the upgrade flow doesn't break when /api/version
+    # gets polled aggressively. The token is read from env at request
+    # time so secrets.yaml-driven setup also works without a restart.
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("DOCUSORT_GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token.strip()}"
+    req = urllib.request.Request(API_LATEST, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return json.load(r)
@@ -180,12 +185,25 @@ def _pip_sync(live_root: Path) -> str:
     return "ok"
 
 
-def install_latest(force: bool = False) -> dict[str, Any]:
-    info = version_info()
-    if info.get("error"):
-        raise RuntimeError(f"Cannot check for updates: {info['error']}")
-    if not info.get("has_update") and not force:
-        return {"updated": False, "reason": "already up to date", **info}
+def install_latest(force: bool = False, tag: str | None = None) -> dict[str, Any]:
+    """Install the latest release. When `tag` is given, skip the GitHub
+    release-info lookup and download that exact tag directly from
+    codeload.github.com — useful when the (unauthenticated) GitHub
+    REST API is rate-limited but the codeload CDN still serves
+    tarballs."""
+    if tag:
+        # Manual override path: trust the caller, skip the API check.
+        latest = tag.lstrip("v")
+        info = {
+            "current": __version__, "latest": latest, "has_update": True,
+            "tag": tag,
+        }
+    else:
+        info = version_info()
+        if info.get("error"):
+            raise RuntimeError(f"Cannot check for updates: {info['error']}")
+        if not info.get("has_update") and not force:
+            return {"updated": False, "reason": "already up to date", **info}
 
     tag = info.get("tag") or f"v{info.get('latest')}"
     live = project_root()

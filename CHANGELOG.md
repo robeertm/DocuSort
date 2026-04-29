@@ -2,6 +2,23 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.17.2] – 2026-04-29
+
+### Added — updater survives GitHub rate-limits
+
+The unauthenticated GitHub REST API allows 60 requests per hour per
+IP. Aggressive `/api/version` polling could exhaust the budget and
+then `/api/update` would refuse to install anything until the next
+reset window. Two ways out are now wired in:
+
+- `GITHUB_TOKEN` (or `DOCUSORT_GITHUB_TOKEN`) env vars get passed as
+  a Bearer header on the API call. Authenticated requests get
+  5000/hour instead of 60.
+- `/api/update?tag=vX.Y.Z` skips the API check entirely and pulls
+  the tarball straight from `codeload.github.com`, which serves
+  tarballs without rate limiting. Lets a rate-limited install still
+  upgrade as long as the user knows the target tag.
+
 ## [0.17.1] – 2026-04-29
 
 ### Fixed — /finance layout regressions
