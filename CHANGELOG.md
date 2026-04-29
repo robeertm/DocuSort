@@ -2,6 +2,27 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.18.2] – 2026-04-29
+
+### Changed — readable cashflow / category / heatmap charts
+
+The two-stack-of-bars cashflow chart and the absolute-scale stacked
+category-trend bars looked tiny on accounts with a few extreme
+months. The heatmap looked deserted because non-zero days sat in a
+sea of light-grey zero days. Three pragmatic redesigns:
+
+- **Cashflow** is now an SVG area+line plot with three series
+  (income, expense — net was dropped because the overlap got busy).
+  Lines stay readable across orders of magnitude even when one
+  month has €100k traffic and another has €11.
+- **Categories over time** is now a 100 %-stacked bar chart. Each
+  month's bar fills the chart height and the segments show what
+  share each top-category took. The absolute month-total sits above
+  the bar so the absolute scale isn't lost.
+- **Heatmap** zero-day cells fade to `bg-ink-900/40` (was
+  `bg-ink-800/50`) so the colour-coded busy days actually pop. The
+  legend swatch is updated to match.
+
 ## [0.18.1] – 2026-04-29
 
 ### Fixed — bank statements classified as `Bank` were silently skipped

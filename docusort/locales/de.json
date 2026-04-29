@@ -575,6 +575,8 @@
   "finance.heatmap.month_label": "Monat",
   "finance.heatmap.full_year": "Ganzes Jahr",
   "finance.heatmap.empty": "Keine Buchungen im gewählten Zeitraum.",
+  "finance.heatmap.hint": "Pro Tag: Summe aller Ausgaben (interne Überträge ausgeklammert). Klicke einen anderen Zeitraum oben um zwischen Jahren / Monaten zu wechseln.",
+  "finance.catrend.normalised_hint": "Jeder Monat füllt 100 % der Höhe — Segmente zeigen den Anteil der Top-Kategorien. Die absolute Summe steht über der Säule.",
   "finance.catrend.range_label": "Zeitraum",
   "finance.catrend.range_all": "Alle",
   "finance.pie.spend_title": "Ausgaben nach Kategorie",

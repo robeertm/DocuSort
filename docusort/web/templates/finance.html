@@ -200,33 +200,71 @@
     </div>
   </div>
 
-  <!-- Monthly cashflow chart -->
+  <!-- Monthly cashflow chart — three-series area+line plot (income,
+       expense, net). Bars-on-bars before this got squashed by the one
+       big month, lines stay readable across orders of magnitude. -->
   <div class="card p-5 mb-6">
     <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.last_12_months') }}</h2>
     {% if monthly %}
-      {% set max_in = (monthly | map(attribute='income') | max) or 0 %}
+      {% set n = monthly | length %}
+      {% set max_in  = (monthly | map(attribute='income')  | max) or 0 %}
       {% set max_out = -((monthly | map(attribute='expense') | min) or 0) %}
-      {% set scale = [max_in, max_out] | max %}
-      <div class="grid grid-cols-12 gap-1 items-stretch h-64 sm:h-80">
-        {% for m in monthly %}
-          {% set in_h  = (m.income / scale * 50) if scale > 0 else 0 %}
-          {% set out_h = (-m.expense / scale * 50) if scale > 0 else 0 %}
-          <div class="flex flex-col items-center justify-center group" title="{{ m.month }} · in {{ '%.0f'|format(m.income) }} € · out {{ '%.0f'|format(m.expense) }} €">
-            <div class="w-full flex flex-col justify-end" style="height: 50%;">
-              <div class="w-full bg-emerald-500/40 hover:bg-emerald-500/70 rounded-t transition"
-                   style="height: {{ in_h * 2 }}%;"></div>
-            </div>
-            <div class="w-full" style="height: 50%;">
-              <div class="w-full bg-rose-500/40 hover:bg-rose-500/70 rounded-b transition"
-                   style="height: {{ out_h * 2 }}%;"></div>
-            </div>
-            <div class="text-[10px] text-ink-500 truncate w-full text-center mt-1">{{ m.month[5:] }}/{{ m.month[2:4] }}</div>
-          </div>
-        {% endfor %}
+      {% set vmax = [max_in, max_out, 1] | max %}
+      {% set W = 1000 %}
+      {% set H = 220 %}
+      {% set step = (W - 60) / ([n - 1, 1] | max) %}
+      {% set ns = namespace(in_pts=[], out_pts=[], net_pts=[]) %}
+      {% for m in monthly %}
+        {% set x = 50 + loop.index0 * step %}
+        {% set y_in  = (H - 20) - (m.income / vmax) * (H - 40) %}
+        {% set y_out = (H - 20) - (-m.expense / vmax) * (H - 40) %}
+        {% set net = m.income + m.expense %}
+        {% set y_net = (H - 20) - ((net + vmax) / (2 * vmax)) * (H - 40) %}
+        {% set ns.in_pts  = ns.in_pts  + [(x, y_in)] %}
+        {% set ns.out_pts = ns.out_pts + [(x, y_out)] %}
+        {% set ns.net_pts = ns.net_pts + [(x, y_net)] %}
+      {% endfor %}
+      <div class="overflow-x-auto -mx-2 px-2">
+        <svg viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none"
+             class="w-full h-64 sm:h-80" style="min-width: 600px;">
+          <!-- y-axis grid lines -->
+          {% for frac in [0.0, 0.25, 0.5, 0.75, 1.0] %}
+            {% set y = 20 + frac * (H - 40) %}
+            <line x1="50" y1="{{ y }}" x2="{{ W - 10 }}" y2="{{ y }}"
+                  stroke="currentColor" class="text-ink-700" stroke-width="0.5" stroke-dasharray="2 4"/>
+          {% endfor %}
+          <!-- y-axis labels: vmax at top, 0 at bottom -->
+          <text x="44" y="24" text-anchor="end" class="fill-ink-500" font-size="10">{{ "%.0f"|format(vmax) }}</text>
+          <text x="44" y="{{ H - 18 }}" text-anchor="end" class="fill-ink-500" font-size="10">0</text>
+
+          <!-- income area -->
+          <path fill="rgb(16 185 129 / 0.15)" stroke="none"
+                d="M{{ ns.in_pts[0][0] }},{{ H - 20 }} {% for x,y in ns.in_pts %}L{{ x }},{{ y }} {% endfor %} L{{ ns.in_pts[-1][0] }},{{ H - 20 }} Z"/>
+          <!-- expense area -->
+          <path fill="rgb(244 63 94 / 0.12)" stroke="none"
+                d="M{{ ns.out_pts[0][0] }},{{ H - 20 }} {% for x,y in ns.out_pts %}L{{ x }},{{ y }} {% endfor %} L{{ ns.out_pts[-1][0] }},{{ H - 20 }} Z"/>
+
+          <!-- income line -->
+          <path fill="none" stroke="rgb(16 185 129)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+                d="M{% for x,y in ns.in_pts %}{% if loop.first %}{{ x }},{{ y }}{% else %} L{{ x }},{{ y }}{% endif %}{% endfor %}"/>
+          <!-- expense line -->
+          <path fill="none" stroke="rgb(244 63 94)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+                d="M{% for x,y in ns.out_pts %}{% if loop.first %}{{ x }},{{ y }}{% else %} L{{ x }},{{ y }}{% endif %}{% endfor %}"/>
+
+          <!-- per-point dots with native tooltips -->
+          {% for m in monthly %}
+            {% set x = 50 + loop.index0 * step %}
+            {% set y_in  = (H - 20) - (m.income / vmax) * (H - 40) %}
+            {% set y_out = (H - 20) - (-m.expense / vmax) * (H - 40) %}
+            <circle cx="{{ x }}" cy="{{ y_in }}" r="3" fill="rgb(16 185 129)"><title>{{ m.month }} · {{ "%.0f"|format(m.income) }} € rein</title></circle>
+            <circle cx="{{ x }}" cy="{{ y_out }}" r="3" fill="rgb(244 63 94)"><title>{{ m.month }} · {{ "%.0f"|format(-m.expense) }} € raus</title></circle>
+            <text x="{{ x }}" y="{{ H - 4 }}" text-anchor="middle" class="fill-ink-500" font-size="10">{{ m.month[5:] }}/{{ m.month[2:4] }}</text>
+          {% endfor %}
+        </svg>
       </div>
       <div class="flex gap-4 text-xs text-ink-500 mt-3 justify-end">
-        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 bg-emerald-500/50 rounded-sm"></span>{{ t('finance.income') }}</span>
-        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 bg-rose-500/50 rounded-sm"></span>{{ t('finance.expense') }}</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 bg-emerald-500 rounded-full"></span>{{ t('finance.income') }}</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 bg-rose-500 rounded-full"></span>{{ t('finance.expense') }}</span>
       </div>
     {% else %}
       <p class="text-sm text-ink-500">{{ t('finance.no_monthly_data') }}</p>
@@ -297,9 +335,10 @@
       </form>
     </div>
     {% if heatmap_grid.weeks %}
+    <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.heatmap.hint') }}</p>
     <div class="overflow-x-auto -mx-2 px-2">
       <div class="grid gap-[4px] text-[10px] text-ink-500 w-full"
-           style="grid-template-columns: 32px repeat({{ heatmap_grid.weeks | length }}, minmax(0, 1fr)); grid-auto-rows: 22px; min-width: {{ 32 + heatmap_grid.weeks | length * 14 }}px;">
+           style="grid-template-columns: 32px repeat({{ heatmap_grid.weeks | length }}, minmax(0, 1fr)); grid-auto-rows: 24px; min-width: {{ 32 + heatmap_grid.weeks | length * 14 }}px;">
         <!-- empty top-left cell + week labels (sparse: every 4th week) -->
         <div></div>
         {% for w in heatmap_grid.weeks %}
@@ -313,7 +352,7 @@
             {% if cell.spend is none %}
               <div class="rounded-[2px] bg-transparent"></div>
             {% elif cell.spend == 0 %}
-              <div class="rounded-[2px] bg-ink-800/50" title="{{ cell.date }} · 0 €"></div>
+              <div class="rounded-[2px] bg-ink-900/40" title="{{ cell.date }} · 0 €"></div>
             {% else %}
               {% set ratio = cell.spend / heatmap_grid.max_spend %}
               {% set bin = 1 if ratio < 0.15 else (2 if ratio < 0.35 else (3 if ratio < 0.6 else (4 if ratio < 0.85 else 5))) %}
@@ -331,7 +370,7 @@
     </div>
     <div class="flex items-center gap-2 text-[11px] text-ink-500 mt-3 justify-end">
       <span>{{ t('finance.heatmap.less') }}</span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-ink-800/50"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-ink-900/40"></span>
       <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-700/60"></span>
       <span class="inline-block h-3 w-3 rounded-[2px] bg-lime-500/70"></span>
       <span class="inline-block h-3 w-3 rounded-[2px] bg-amber-400/80"></span>
@@ -376,29 +415,34 @@
     {% if cat_monthly.matrix %}
     {% set all_cats = cat_monthly.categories %}
     {% set top_cats = all_cats[:6] %}
-    {% set palette  = ['bg-emerald-500/70','bg-sky-500/70','bg-amber-500/70','bg-rose-500/70','bg-violet-500/70','bg-teal-500/70','bg-ink-600/70'] %}
-    {% set max_total = cat_monthly.max_total %}
+    {% set palette  = ['bg-emerald-500/80','bg-sky-500/80','bg-amber-500/80','bg-rose-500/80','bg-violet-500/80','bg-teal-500/80','bg-ink-600/80'] %}
     {% set bar_count = cat_monthly.matrix | length %}
+    <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.catrend.normalised_hint') }}</p>
     <div class="overflow-x-auto -mx-1 px-1">
       <div class="flex gap-2 items-end h-72 sm:h-80"
            style="min-width: max({{ bar_count * 44 }}px, 100%);">
         {% for row in cat_monthly.matrix %}
           {% set month_total = row['values'] | sum %}
           <div class="flex flex-col group flex-1 min-w-[36px]" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
-            <div class="flex-1 flex flex-col-reverse w-full" style="min-height: 0;">
-              {% for c_idx in range(top_cats|length) %}
-                {% set v = row['values'][c_idx] %}
-                {% if v > 0 %}
-                  <div class="{{ palette[c_idx] }} hover:brightness-125"
-                       style="height: {{ (v / max_total * 100) if max_total > 0 else 0 }}%; min-height: 1px;"
-                       title="{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} €"></div>
+            {# Total above the bar so the absolute spend isn't hidden by the
+               100%-stacked normalisation. #}
+            <div class="text-[9px] text-ink-500 text-center tabular-nums mb-1 truncate">{{ "%.0f"|format(month_total) }}</div>
+            <div class="flex-1 flex flex-col-reverse w-full rounded-t overflow-hidden bg-ink-900/30" style="min-height: 0;">
+              {% if month_total > 0 %}
+                {% for c_idx in range(top_cats|length) %}
+                  {% set v = row['values'][c_idx] %}
+                  {% if v > 0 %}
+                    <div class="{{ palette[c_idx] }} hover:brightness-125"
+                         style="height: {{ v / month_total * 100 }}%; min-height: 1px;"
+                         title="{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} € · {{ '%.0f'|format(v / month_total * 100) }}%"></div>
+                  {% endif %}
+                {% endfor %}
+                {% set other = (row['values'][6:] | sum) %}
+                {% if other > 0 %}
+                  <div class="{{ palette[6] }}"
+                       style="height: {{ other / month_total * 100 }}%; min-height: 1px;"
+                       title="Andere · {{ '%.0f'|format(other) }} €"></div>
                 {% endif %}
-              {% endfor %}
-              {% set other = (row['values'][6:] | sum) %}
-              {% if other > 0 %}
-                <div class="{{ palette[6] }}"
-                     style="height: {{ (other / max_total * 100) if max_total > 0 else 0 }}%; min-height: 1px;"
-                     title="Andere · {{ '%.0f'|format(other) }} €"></div>
               {% endif %}
             </div>
             <div class="text-[10px] text-ink-500 text-center mt-1 truncate">{{ row.month[5:] }}/{{ row.month[2:4] }}</div>

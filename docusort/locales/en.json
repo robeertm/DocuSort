@@ -575,6 +575,8 @@
   "finance.heatmap.month_label": "Month",
   "finance.heatmap.full_year": "Full year",
   "finance.heatmap.empty": "No transactions in the selected range.",
+  "finance.heatmap.hint": "Per-day: sum of outgoing amounts (internal transfers excluded). Switch year / month above.",
+  "finance.catrend.normalised_hint": "Each month fills 100 % of the height — segments show top-category share. The absolute total sits above the column.",
   "finance.catrend.range_label": "Range",
   "finance.catrend.range_all": "All",
   "finance.pie.spend_title": "Spending by category",
