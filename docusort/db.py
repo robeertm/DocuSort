@@ -1257,6 +1257,327 @@ class Database:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    # ---------- Finance: charts & analytics ----------
+
+    def finance_heatmap(self, weeks: int = 26) -> list[dict[str, Any]]:
+        """Daily expense totals for the last N weeks of activity —
+        feeds the calendar heatmap (week × weekday grid). Anchored to
+        the most recent booking date in the database, not to "now",
+        so the heatmap stays useful even when the user uploads
+        historical statements long after they were issued. Internal
+        transfers are excluded so the heatmap reflects real spending
+        intensity, not bookkeeping moves between own accounts."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT t.booking_date AS date,
+                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
+                          COALESCE(SUM(CASE WHEN t.amount > 0 THEN  t.amount ELSE 0 END), 0) AS income,
+                          COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                     AND t.booking_date >= (
+                       SELECT date(MAX(booking_date), ?) FROM transactions
+                       WHERE booking_date IS NOT NULL AND booking_date != ''
+                     )
+                   GROUP BY t.booking_date
+                   ORDER BY t.booking_date""",
+                (f"-{weeks * 7} days",),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def finance_category_monthly(self, months: int = 12) -> dict[str, Any]:
+        """Per-category spend per month — feeds the stacked-area /
+        stacked-bar chart that shows how each category evolves over
+        time. Window is anchored on the latest booking date so it
+        stays informative when the dataset isn't current."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT substr(t.booking_date, 1, 7) AS month,
+                          COALESCE(NULLIF(t.category, ''), 'sonstiges') AS category,
+                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
+                          COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND t.amount < 0
+                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                     AND t.booking_date >= (
+                       SELECT date(MAX(booking_date), ?) FROM transactions
+                       WHERE booking_date IS NOT NULL AND booking_date != ''
+                     )
+                   GROUP BY month, t.category
+                   ORDER BY month ASC""",
+                (f"-{months * 31} days",),
+            ).fetchall()
+        # Restructure into months × categories matrix for easy template
+        # rendering. Categories ranked by total spend so the legend
+        # reads largest-first.
+        by_month: dict[str, dict[str, float]] = {}
+        cat_totals: dict[str, float] = {}
+        for r in rows:
+            m, c, s = r["month"], r["category"], float(r["spend"])
+            by_month.setdefault(m, {})[c] = s
+            cat_totals[c] = cat_totals.get(c, 0.0) + s
+        ranked_cats = [c for c, _ in sorted(cat_totals.items(), key=lambda kv: -kv[1])]
+        months_sorted = sorted(by_month.keys())
+        return {
+            "months": months_sorted,
+            "categories": ranked_cats,
+            "matrix": [
+                {"month": m, "values": [by_month[m].get(c, 0.0) for c in ranked_cats]}
+                for m in months_sorted
+            ],
+        }
+
+    def finance_by_weekday(self) -> list[dict[str, Any]]:
+        """Spend totals per day of week (0=Mon … 6=Sun for display).
+        SQLite's strftime('%w', …) returns 0=Sun … 6=Sat, we shift it
+        in the SELECT so Monday is the leftmost column in charts."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT ((CAST(strftime('%w', t.booking_date) AS INTEGER) + 6) % 7) AS dow,
+                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
+                          COALESCE(AVG(CASE WHEN t.amount < 0 THEN -t.amount ELSE NULL END), 0) AS avg_spend,
+                          COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                   GROUP BY dow
+                   ORDER BY dow"""
+            ).fetchall()
+        # Always return a row for every weekday so the chart has a fixed shape.
+        present = {int(r["dow"]): dict(r) for r in rows}
+        return [
+            present.get(d, {"dow": d, "spend": 0.0, "avg_spend": 0.0, "n": 0})
+            for d in range(7)
+        ]
+
+    def finance_by_day_of_month(self) -> list[dict[str, Any]]:
+        """Spend totals per day-of-month — surfaces "everything hits
+        on the 1st" patterns (rent, insurance, subscriptions). Always
+        returns rows 1–31 so the chart has a stable axis."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT CAST(strftime('%d', t.booking_date) AS INTEGER) AS dom,
+                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
+                          COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                   GROUP BY dom
+                   ORDER BY dom"""
+            ).fetchall()
+        present = {int(r["dom"]): dict(r) for r in rows}
+        return [
+            present.get(d, {"dom": d, "spend": 0.0, "n": 0})
+            for d in range(1, 32)
+        ]
+
+    def finance_by_tx_type(self) -> list[dict[str, Any]]:
+        """Total spend grouped by transaction type. Lets the user see
+        whether their money goes via card, direct debit, transfer,
+        cash withdrawals…"""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT COALESCE(NULLIF(t.tx_type, ''), 'sonstiges') AS tx_type,
+                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
+                          COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND t.amount < 0
+                   GROUP BY tx_type
+                   ORDER BY spend DESC"""
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def finance_largest_tx(self, limit: int = 15) -> list[dict[str, Any]]:
+        """Largest individual transactions by absolute amount. Useful
+        to spot the one-off €1200 dentist that shows up in the
+        category sums but isn't visible in monthly averages."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT t.booking_date, t.amount, t.counterparty, t.category, t.purpose,
+                          s.doc_id, a.bank_name, a.iban_last4
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   LEFT JOIN accounts a ON a.id = t.account_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                   ORDER BY ABS(t.amount) DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def finance_balance_history(self, account_id: int | None = None) -> list[dict[str, Any]]:
+        """Running balance per day, anchored to the earliest
+        statement's opening balance for the account. Returns daily
+        running totals for the line chart. We use the booking date
+        for ordering — value_date can be NULL or out of order on
+        Sparkasse statements."""
+        with self._lock:
+            # Pick the earliest statement (by period_start) per account
+            # that carries an opening_balance. SQLite's window functions
+            # let us do this without the aggregate-in-subquery trick
+            # that earlier failed.
+            anchor_sql = (
+                "SELECT account_id, opening_balance, period_start FROM ("
+                "  SELECT s.account_id, s.opening_balance, s.period_start, "
+                "         ROW_NUMBER() OVER ("
+                "           PARTITION BY s.account_id "
+                "           ORDER BY s.period_start ASC) AS rn "
+                "  FROM statements s "
+                "  WHERE s.opening_balance IS NOT NULL "
+                + ("AND s.account_id = ? " if account_id is not None else "")
+                + ") WHERE rn = 1"
+            )
+            anchors = {}
+            for r in self._conn.execute(
+                anchor_sql, (account_id,) if account_id is not None else ()
+            ).fetchall():
+                anchors[r["account_id"]] = (
+                    r["period_start"] or "",
+                    float(r["opening_balance"] or 0.0),
+                )
+
+            params: list[Any] = []
+            where = ["d.deleted_at IS NULL", "t.booking_date != ''"]
+            if account_id is not None:
+                where.append("t.account_id = ?")
+                params.append(account_id)
+            sql = (
+                "SELECT t.account_id, t.booking_date, SUM(t.amount) AS net "
+                "FROM transactions t "
+                "JOIN statements s ON s.id = t.statement_id "
+                "JOIN documents  d ON d.id = s.doc_id "
+                "WHERE " + " AND ".join(where) + " "
+                "GROUP BY t.account_id, t.booking_date "
+                "ORDER BY t.account_id, t.booking_date"
+            )
+            rows = self._conn.execute(sql, params).fetchall()
+
+        # Walk per-account, accumulating from the anchor opening balance.
+        out: list[dict[str, Any]] = []
+        running: dict[int | None, float] = {}
+        for r in rows:
+            acct = r["account_id"]
+            date = r["booking_date"]
+            if acct not in running:
+                anchor = anchors.get(acct, ("", 0.0))
+                running[acct] = anchor[1]
+            running[acct] = running[acct] + float(r["net"] or 0.0)
+            out.append({
+                "account_id": acct,
+                "date": date,
+                "balance": round(running[acct], 2),
+            })
+        return out
+
+    def finance_counterparty_treemap(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Top counterparties by absolute spend — feeds the treemap.
+        Counterparty names are normalised loosely (case-folded,
+        leading whitespace stripped) so 'REWE' and 'rewe markt' merge
+        into one entry."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT TRIM(LOWER(t.counterparty)) AS key,
+                          MAX(t.counterparty) AS counterparty,
+                          COUNT(*) AS times,
+                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
+                          MAX(COALESCE(NULLIF(t.category, ''), 'sonstiges')) AS dominant_category
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND t.counterparty != ''
+                     AND t.amount < 0
+                   GROUP BY key
+                   HAVING spend > 0
+                   ORDER BY spend DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def finance_kpis(self) -> dict[str, Any]:
+        """Single-number cards for the dashboard. Quick look-ups —
+        average daily spend, biggest single tx amount, busiest month
+        by tx count, busiest counterparty by tx count."""
+        with self._lock:
+            avg = self._conn.execute(
+                """SELECT
+                     COALESCE(AVG(daily.spend), 0) AS avg_daily_spend,
+                     COALESCE(MAX(daily.spend), 0) AS peak_daily_spend
+                   FROM (
+                     SELECT t.booking_date AS d,
+                            SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END) AS spend
+                     FROM transactions t
+                     JOIN statements s ON s.id = t.statement_id
+                     JOIN documents  d ON d.id = s.doc_id
+                     WHERE d.deleted_at IS NULL
+                       AND t.category != 'uebertrag'
+                       AND t.booking_date != ''
+                     GROUP BY t.booking_date
+                   ) daily"""
+            ).fetchone()
+            biggest = self._conn.execute(
+                """SELECT t.amount, t.counterparty
+                   FROM transactions t
+                   JOIN statements s ON s.id = t.statement_id
+                   JOIN documents  d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                   ORDER BY ABS(t.amount) DESC LIMIT 1"""
+            ).fetchone()
+            busiest_month = self._conn.execute(
+                """SELECT substr(t.booking_date, 1, 7) AS month, COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements s ON s.id = t.statement_id
+                   JOIN documents  d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND t.booking_date != ''
+                   GROUP BY month ORDER BY n DESC LIMIT 1"""
+            ).fetchone()
+            top_cp = self._conn.execute(
+                """SELECT t.counterparty, COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements s ON s.id = t.statement_id
+                   JOIN documents  d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND t.counterparty != ''
+                   GROUP BY LOWER(t.counterparty)
+                   ORDER BY n DESC LIMIT 1"""
+            ).fetchone()
+        return {
+            "avg_daily_spend":  float(avg["avg_daily_spend"]) if avg else 0.0,
+            "peak_daily_spend": float(avg["peak_daily_spend"]) if avg else 0.0,
+            "biggest_amount":   float(biggest["amount"]) if biggest else 0.0,
+            "biggest_counterparty": (biggest["counterparty"] if biggest else "") or "",
+            "busiest_month":    (busiest_month["month"] if busiest_month else "") or "",
+            "busiest_month_n":  int(busiest_month["n"]) if busiest_month else 0,
+            "top_counterparty": (top_cp["counterparty"] if top_cp else "") or "",
+            "top_counterparty_n": int(top_cp["n"]) if top_cp else 0,
+        }
+
     def top_items(self, limit: int = 10) -> list[dict[str, Any]]:
         """Most-bought item names with aggregate counts and spend."""
         with self._lock:

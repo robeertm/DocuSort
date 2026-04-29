@@ -140,6 +140,7 @@ def update_finance(
     *,
     local_only: bool | None = None,
     pseudonymize: bool | None = None,
+    holder_names: list[str] | None = None,
     config_dir: Path | None = None,
 ) -> Path:
     """Persist the finance privacy toggles to config.yaml."""
@@ -149,6 +150,17 @@ def update_finance(
         fin["local_only"] = bool(local_only)
     if pseudonymize is not None:
         fin["pseudonymize"] = bool(pseudonymize)
+    if holder_names is not None:
+        # Normalise: trim, drop empties, deduplicate while preserving
+        # entry order (so a YAML diff is stable).
+        seen: set[str] = set()
+        cleaned: list[str] = []
+        for n in holder_names:
+            n = (n or "").strip()
+            if n and n not in seen:
+                seen.add(n)
+                cleaned.append(n)
+        fin["holder_names"] = cleaned
     cfg["finance"] = fin
     return _write_raw(cfg, config_dir)
 

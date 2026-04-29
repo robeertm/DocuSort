@@ -63,7 +63,10 @@ _ZIP_CITY_RE = re.compile(r"\b(\d{5})[ \t ]+([A-ZÄÖÜ][A-Za-zäöüß\-]+(?:[
 # "Auftraggeber:" followed by 1-4 capitalised tokens. We mask everything
 # from the colon to the end of line.
 _HOLDER_LINE_RE = re.compile(
-    r"(?im)^[ \t]*(Kontoinhaber|Kunde|Inhaber|Auftraggeber|Empfänger)\s*[:：][ \t]*([^\n\r]+)$"
+    # MULTILINE only (no IGNORECASE) so the cue stays case-sensitive
+    # and the value can't slurp a sentence that happens to contain
+    # uppercase letters mid-line.
+    r"(?m)^[ \t]*(Kontoinhaber|Kunde|Inhaber|Auftraggeber|Empfänger)\s*[:：][ \t]*([^\n\r]+)$"
 )
 
 # German Anrede-style address block, common at the top of bank
@@ -86,7 +89,10 @@ _NAME_LINE = (
     r"[ \t]*"
 )
 _SALUTATION_BLOCK_RE = re.compile(
-    r"(?im)^[ \t]*(Herrn und Frau|Herr und Frau|Eheleute|Familie|Herrn|Herr|Frau)[ \t]*\r?\n"
+    # MULTILINE only — case-sensitive on purpose so the [A-ZÄÖÜ] in
+    # _NAME_LINE actually requires uppercase first letters and won't
+    # capture lowercase verbs / function words.
+    r"(?m)^[ \t]*(Herrn und Frau|Herr und Frau|Eheleute|Familie|Herrn|Herr|Frau)[ \t]*\r?\n"
     r"((?:" + _NAME_LINE + r"\r?\n){1,4})"
 )
 
@@ -197,6 +203,17 @@ class Pseudonymizer:
 
     # ----- public -----
 
+    def seed_household_names(self, names: list[str]) -> None:
+        """Pre-register household names so they get masked even if no
+        structured pattern in the OCR text captures them. Useful for
+        non-statement documents (Darlehensvertrag, Karteninhaber-
+        Schreiben) where the address block sits in a different layout
+        than the bank-statement format we know about."""
+        for name in names:
+            n = (name or "").strip()
+            if n:
+                self._token_for("NAME", n)
+
     def pseudonymize(self, text: str) -> str:
         """Run all maskers in a deterministic order. Returns the
         token-masked text safe to send to a third-party LLM.
@@ -204,40 +221,140 @@ class Pseudonymizer:
         Order matters: salutation block first so multi-line names get
         captured before the line-based street / zip-city patterns
         consume them piecewise. After the structured maskers run, we
-        do a sweep pass that replaces every remaining occurrence of
-        each captured NAME / ADDR value with its token — bank
-        statements often repeat the holder's name inside transaction
-        descriptions ("ROBERT MANUWALD Konto …"), and we don't want
-        those un-masked just because they're not in a structured
-        block.
+        decompose each captured full-name into its individual tokens
+        (so "Robert Manuwald" also masks "Manuwald" and "Robert" on
+        their own) and finally sweep the whole text replacing every
+        known value with its token. Without the token decomposition,
+        "Steffi Manuwald" would slip through whenever Steffi only
+        appears in a transaction line and the address block lists
+        Robert alone.
         """
         out = self._mask_iban(text)
         out = self._mask_email(out)
         out = self._mask_salutation_block(out)
         out = self._mask_holder_line(out)
+        out = self._mask_inline_salutation(out)
+        out = self._mask_inhaber_lines(out)
         out = self._mask_street(out)
         out = self._mask_zip_city(out)
+        self._decompose_name_tokens()
         out = self._sweep_known_values(out)
         return out
 
+    # Single-line "Herrn Robert Manuwald" / "Frau Steffi Manuwald"
+    # — common in card-issuance letters and credit contracts where
+    # the address block isn't a clean multi-line stack. Case-sensitive
+    # on purpose: "Herr" lowercase would also match German verbs and
+    # nouns ("herr" doesn't exist but case-insensitive matching brings
+    # in noise via the name-token capture below).
+    _INLINE_SALUTATION_RE = re.compile(
+        r"\b(Herrn|Herr|Frau|Familie)[ \t]+"
+        r"([A-ZÄÖÜ][a-zäöüß\-]{2,}(?:[ \t]+[A-ZÄÖÜ][a-zäöüß\-]{2,}){1,3})\b"
+    )
+
+    # Cue-driven name extraction: "Karteninhaber: X Y",
+    # "Gutschriftskontoinhaber: X Y" etc. We REQUIRE an explicit
+    # colon between the cue and the value so legal text patterns like
+    # "Hauptantragsteller zahlt das Darlehen" don't accidentally
+    # capture "zahlt das Darlehen" as a name. Cue list is also
+    # narrowed to formal-document anchors that always carry a colon
+    # in practice. Case-sensitive on the name part — without that,
+    # IGNORECASE turned the [A-ZÄÖÜ] start into "any letter" and the
+    # capture group would happily grab lowercase verbs.
+    _INHABER_CUE_RE = re.compile(
+        r"(?m)\b(Karteninhaber(?:/in|in)?|Kontoinhaber|"
+        r"Darlehensnehmer|Kreditnehmer|"
+        r"Gutschriftskontoinhaber|Mitkontoinhaber|Versicherungsnehmer)"
+        r"[ \t]*[:：][ \t\r\n]*"
+        r"([A-ZÄÖÜ][a-zäöüß\-]{2,}(?:[ \t]+[A-ZÄÖÜ][a-zäöüß\-]{2,}){0,2})"
+    )
+
+    def _mask_inline_salutation(self, text: str) -> str:
+        def repl(m: re.Match[str]) -> str:
+            salutation = m.group(1)
+            name = m.group(2)
+            tok = self._token_for("NAME", name)
+            return f"{salutation} {tok}"
+        return self._INLINE_SALUTATION_RE.sub(repl, text)
+
+    def _mask_inhaber_lines(self, text: str) -> str:
+        def repl(m: re.Match[str]) -> str:
+            cue = m.group(1)
+            name = m.group(2)
+            tok = self._token_for("NAME", name)
+            # Preserve the cue + "Inhaber:" formatting.
+            full = m.group(0)
+            return full.replace(name, tok)
+        return self._INHABER_CUE_RE.sub(repl, text)
+
+    def _decompose_name_tokens(self) -> None:
+        """For every captured NAME_xxx full-name, register each
+        sub-token (>= 4 chars, capitalised in the source value) as
+        its own NAME entry. This catches the case where one family
+        member is detected in the salutation block and another shows
+        up only in a body sentence — the common surname masks both
+        without us ever seeing the second person's full name in a
+        structured location.
+
+        We skip generic stop-words so common German words like
+        "Herrn" / "Steffi" (oh wait, Steffi is exactly what we want
+        to mask) — we only skip the very generic ones."""
+        # Words that are NEVER personal names even when they look
+        # capitalised in the source — keep this list short to avoid
+        # under-masking.
+        SKIP = {"Herr", "Herrn", "Frau", "Familie", "Eheleute", "und"}
+        new_values: list[str] = []
+        existing = set(self.reverse_map.values())
+        for tok, value in list(self.reverse_map.items()):
+            if not tok.startswith("NAME_"):
+                continue
+            for word in re.split(r"[\s,;]+", value):
+                word = word.strip().rstrip(".,;:")
+                if len(word) < 4:
+                    continue
+                if not word[0].isupper():
+                    continue
+                if word in SKIP:
+                    continue
+                if word in existing:
+                    continue
+                new_values.append(word)
+                existing.add(word)
+        for w in new_values:
+            self._token_for("NAME", w)
+
     def _sweep_known_values(self, text: str) -> str:
         """Second pass: each value already in the reverse map gets
-        replaced wherever else it appears (case-insensitive for NAME
-        tokens — banks sometimes UPPERCASE names inside booking
-        descriptions). Order by descending length so a name like
-        "Robert Manuwald" is handled before its component "Robert"."""
-        # Build (value, token) list, longest first.
+        replaced wherever else it appears (case-insensitive — banks
+        sometimes UPPERCASE names inside booking descriptions). Order
+        by descending length so a full name like "Robert Manuwald"
+        is handled before its component "Robert" / "Manuwald".
+
+        Boundary uses negative letter look-arounds rather than `\\b`.
+        `\\b` won't fire between a digit and a letter (both are word
+        chars to the regex engine), so a German booking line like
+        "MKTNR. 1220-1108-07MANUWALD BIC/IBAN…" would slip through
+        — the digit-letter run "07MANUWALD" has no `\\b` between
+        them. The custom boundary treats only letters as in-word, so
+        digits and punctuation count as separators while still
+        preventing "Manuwaldstrasse" from being mauled mid-word.
+        """
         pairs = [(v, t) for t, v in self.reverse_map.items()
                  if t.startswith(("NAME_", "ADDR_"))]
         pairs.sort(key=lambda p: len(p[0]), reverse=True)
+        # Letter boundary: any unicode-ish letter (Latin + German
+        # umlauts) should NOT be next to a name match. Digits,
+        # whitespace, punctuation are all valid neighbours.
         out = text
         for value, token in pairs:
             if not value:
                 continue
-            # Case-insensitive replace so "ROBERT MANUWALD" inside a
-            # transaction description matches "Robert Manuwald" from
-            # the address block.
-            pattern = re.compile(re.escape(value), re.IGNORECASE)
+            pattern = re.compile(
+                r"(?<![A-Za-zÄÖÜäöüß])"
+                + re.escape(value)
+                + r"(?![A-Za-zÄÖÜäöüß])",
+                re.IGNORECASE,
+            )
             out = pattern.sub(token, out)
         return out
 

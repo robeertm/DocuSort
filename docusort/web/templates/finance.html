@@ -158,6 +158,322 @@
     {% endif %}
   </div>
 
+  <!-- KPI strip: four single-figure cards under the cashflow chart -->
+  {% if kpis %}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+    <div class="card p-4">
+      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.kpi.avg_daily') }}</div>
+      <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums">
+        {{ "%.0f"|format(kpis.avg_daily_spend) }} €
+      </div>
+      <div class="text-[11px] text-ink-500 mt-1">{{ t('finance.kpi.avg_daily_hint') }}</div>
+    </div>
+    <div class="card p-4">
+      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.kpi.peak_daily') }}</div>
+      <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums text-rose-300">
+        {{ "%.0f"|format(kpis.peak_daily_spend) }} €
+      </div>
+    </div>
+    <div class="card p-4">
+      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.kpi.biggest_tx') }}</div>
+      <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums {% if kpis.biggest_amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
+        {% if kpis.biggest_amount > 0 %}+{% endif %}{{ "%.0f"|format(kpis.biggest_amount) }} €
+      </div>
+      <div class="text-[11px] text-ink-500 mt-1 truncate" title="{{ kpis.biggest_counterparty }}">{{ kpis.biggest_counterparty or '—' }}</div>
+    </div>
+    <div class="card p-4">
+      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.kpi.busiest_month') }}</div>
+      <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums">{{ kpis.busiest_month or '—' }}</div>
+      <div class="text-[11px] text-ink-500 mt-1">{{ kpis.busiest_month_n }} {{ t('finance.transactions') }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Calendar heatmap: weeks × weekdays grid coloured by daily spend -->
+  {% if heatmap_grid.weeks %}
+  <div class="card p-5 mb-6">
+    <div class="flex items-baseline justify-between mb-4">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.heatmap.title') }}</h2>
+      <span class="text-[11px] text-ink-500">{{ t('finance.heatmap.subtitle') }}</span>
+    </div>
+    <div class="overflow-x-auto -mx-2 px-2">
+      <div class="inline-grid gap-[3px] text-[10px] text-ink-500"
+           style="grid-template-columns: 22px repeat({{ heatmap_grid.weeks | length }}, 14px); grid-template-rows: 14px repeat(7, 14px);">
+        <!-- empty top-left cell + week labels (every 4th week) -->
+        <div></div>
+        {% for w in heatmap_grid.weeks %}
+          <div class="text-center {% if loop.index0 % 4 != 0 %}invisible{% endif %}">{{ w.label }}</div>
+        {% endfor %}
+        {% for dow_label in ['Mo','Di','Mi','Do','Fr','Sa','So'] %}
+          {% set d = loop.index0 %}
+          <div class="flex items-center justify-end pr-1 {% if d % 2 == 1 %}invisible{% endif %}">{{ dow_label }}</div>
+          {% for w in heatmap_grid.weeks %}
+            {% set cell = w.cells[d] %}
+            {% if cell.spend is none %}
+              <div class="rounded-[2px] bg-transparent"></div>
+            {% elif cell.spend == 0 %}
+              <div class="rounded-[2px] bg-ink-800/60" title="{{ cell.date }} · 0 €"></div>
+            {% else %}
+              {% set ratio = cell.spend / heatmap_grid.max_spend %}
+              {% set bin = 1 if ratio < 0.1 else (2 if ratio < 0.3 else (3 if ratio < 0.6 else 4)) %}
+              <div class="rounded-[2px]
+                {% if bin == 1 %}bg-emerald-900/70{% elif bin == 2 %}bg-emerald-700/80{% elif bin == 3 %}bg-emerald-500/90{% else %}bg-emerald-300{% endif %}"
+                title="{{ cell.date }} · {{ '%.0f'|format(cell.spend) }} €"></div>
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+    <div class="flex items-center gap-2 text-[11px] text-ink-500 mt-3 justify-end">
+      <span>{{ t('finance.heatmap.less') }}</span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-ink-800/60"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-900/70"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-700/80"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-500/90"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-300"></span>
+      <span>{{ t('finance.heatmap.more') }}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Category trends: stacked bar per month, top 6 categories + Other -->
+  {% if cat_monthly.matrix %}
+  <div class="card p-5 mb-6">
+    <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.catrend.title') }}</h2>
+    {% set all_cats = cat_monthly.categories %}
+    {% set top_cats = all_cats[:6] %}
+    {% set palette  = ['bg-emerald-500/70','bg-sky-500/70','bg-amber-500/70','bg-rose-500/70','bg-violet-500/70','bg-teal-500/70','bg-ink-600/70'] %}
+    {% set max_total = cat_monthly.max_total %}
+    <div class="grid grid-cols-12 gap-1 items-end h-48">
+      {% for row in cat_monthly.matrix[-12:] %}
+        {% set month_total = row['values'] | sum %}
+        <div class="flex flex-col group" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
+          <div class="flex-1 flex flex-col-reverse w-full" style="min-height: 0;">
+            {% for c_idx in range(top_cats|length) %}
+              {% set v = row['values'][c_idx] %}
+              {% if v > 0 %}
+                <div class="{{ palette[c_idx] }} hover:brightness-125"
+                     style="height: {{ (v / max_total * 100) if max_total > 0 else 0 }}%; min-height: 1px;"
+                     title="{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} €"></div>
+              {% endif %}
+            {% endfor %}
+            {% set other = (row['values'][6:] | sum) %}
+            {% if other > 0 %}
+              <div class="{{ palette[6] }}"
+                   style="height: {{ (other / max_total * 100) if max_total > 0 else 0 }}%; min-height: 1px;"
+                   title="Andere · {{ '%.0f'|format(other) }} €"></div>
+            {% endif %}
+          </div>
+          <div class="text-[10px] text-ink-500 text-center mt-1 truncate">{{ row.month[5:] }}/{{ row.month[2:4] }}</div>
+        </div>
+      {% endfor %}
+    </div>
+    <!-- Legend -->
+    <div class="flex flex-wrap gap-3 mt-4 text-[11px] text-ink-400">
+      {% for c in top_cats %}
+        <span class="inline-flex items-center gap-1.5">
+          <span class="inline-block h-3 w-3 rounded-sm {{ palette[loop.index0] }}"></span>
+          {{ t('finance.cat.' + c) }}
+        </span>
+      {% endfor %}
+      {% if all_cats|length > 6 %}
+        <span class="inline-flex items-center gap-1.5 italic">
+          <span class="inline-block h-3 w-3 rounded-sm {{ palette[6] }}"></span>
+          {{ t('finance.catrend.other') }} ({{ all_cats|length - 6 }})
+        </span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Side-by-side: weekday + day-of-month -->
+  {% if by_weekday or by_day_of_month %}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+
+    <div class="card p-5">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.weekday.title') }}</h2>
+      {% set wd_max = (by_weekday | map(attribute='spend') | max) or 1 %}
+      {% set wd_labels = ['Mo','Di','Mi','Do','Fr','Sa','So'] %}
+      <div class="space-y-2">
+        {% for r in by_weekday %}
+          <div class="flex items-center gap-3 text-sm">
+            <div class="w-8 text-ink-500 text-xs uppercase tracking-wider">{{ wd_labels[r.dow] }}</div>
+            <div class="flex-1 h-6 bg-ink-900/40 rounded overflow-hidden relative">
+              <div class="h-full bg-emerald-500/60 rounded"
+                   style="width: {{ (r.spend / wd_max * 100) if wd_max > 0 else 0 }}%;"></div>
+              <span class="absolute inset-0 flex items-center px-2 text-xs tabular-nums text-ink-200">
+                {{ "%.0f"|format(r.spend) }} €
+              </span>
+            </div>
+            <div class="w-10 text-right text-xs tabular-nums text-ink-500">{{ r.n }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card p-5">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.dom.title') }}</h2>
+      <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.dom.hint') }}</p>
+      {% set dom_max = (by_day_of_month | map(attribute='spend') | max) or 1 %}
+      <div class="grid grid-cols-31 gap-[2px] items-end h-32" style="grid-template-columns: repeat(31, minmax(0, 1fr));">
+        {% for r in by_day_of_month %}
+          <div class="flex flex-col items-center justify-end h-full group">
+            <div class="w-full bg-amber-500/40 hover:bg-amber-500/80 rounded-t transition"
+                 style="height: {{ (r.spend / dom_max * 100) if dom_max > 0 else 0 }}%; min-height: 1px;"
+                 title="{{ r.dom }}. · {{ '%.0f'|format(r.spend) }} € · {{ r.n }}×"></div>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="grid mt-1 text-[9px] text-ink-500 tabular-nums" style="grid-template-columns: repeat(31, minmax(0, 1fr));">
+        {% for d in range(1, 32) %}
+          <div class="text-center {% if d not in [1, 5, 10, 15, 20, 25, 30] %}invisible{% endif %}">{{ d }}</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Side-by-side: tx type + counterparty tile heap -->
+  {% if by_tx_type or cp_treemap %}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+
+    <div class="card p-5">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.txtype.title') }}</h2>
+      {% if by_tx_type %}
+        {% set tt_total = by_tx_type | map(attribute='spend') | sum %}
+        {% set tt_palette = ['bg-emerald-500/70','bg-sky-500/70','bg-amber-500/70','bg-rose-500/70','bg-violet-500/70','bg-teal-500/70','bg-fuchsia-500/70','bg-ink-600/70'] %}
+        <!-- Stacked horizontal bar -->
+        <div class="h-6 rounded overflow-hidden flex bg-ink-900/40 mb-3">
+          {% for r in by_tx_type %}
+            {% set pct = (r.spend / tt_total * 100) if tt_total > 0 else 0 %}
+            {% if pct > 0 %}
+              <div class="{{ tt_palette[loop.index0 % 8] }} h-full"
+                   style="width: {{ pct }}%;"
+                   title="{{ t('finance.type.' + r.tx_type) }} · {{ '%.0f'|format(r.spend) }} € ({{ '%.0f'|format(pct) }}%)"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <table class="w-full text-sm">
+          <tbody>
+            {% for r in by_tx_type %}
+              <tr class="border-t border-ink-800/40 first:border-t-0">
+                <td class="py-1.5 flex items-center gap-2">
+                  <span class="inline-block h-3 w-3 rounded-sm {{ tt_palette[loop.index0 % 8] }}"></span>
+                  {{ t('finance.type.' + r.tx_type) }}
+                </td>
+                <td class="py-1.5 text-right tabular-nums">{{ "%.0f"|format(r.spend) }} €</td>
+                <td class="py-1.5 text-right tabular-nums text-ink-500 text-xs w-12">{{ r.n }}×</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}<p class="text-sm text-ink-500">—</p>{% endif %}
+    </div>
+
+    <div class="card p-5">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.treemap.title') }}</h2>
+      {% if cp_treemap %}
+        {% set tm_total = cp_treemap | map(attribute='spend') | sum %}
+        <div class="flex flex-wrap gap-1">
+          {% for r in cp_treemap %}
+            {% set pct = (r.spend / tm_total * 100) if tm_total > 0 else 0 %}
+            {% set sz_class = 'flex-[3]' if pct >= 15 else ('flex-[2]' if pct >= 7 else ('flex-[1.3]' if pct >= 3 else 'flex-1')) %}
+            <a href="/finance?q={{ r.counterparty | urlencode }}"
+               class="{{ sz_class }} min-w-[80px] rounded-lg p-2 bg-emerald-500/15 hover:bg-emerald-500/25 ring-1 ring-emerald-500/20 transition text-xs leading-tight"
+               title="{{ r.counterparty }} · {{ '%.0f'|format(r.spend) }} € · {{ r.times }}×">
+              <div class="font-medium truncate">{{ r.counterparty }}</div>
+              <div class="text-[10px] text-emerald-300 tabular-nums mt-1">{{ "%.0f"|format(r.spend) }} €</div>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}<p class="text-sm text-ink-500">—</p>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Balance trajectory line chart per account -->
+  {% if balance_history %}
+  <div class="card p-5 mb-6">
+    <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.balance.title') }}</h2>
+    {% set bh_min = (balance_history | map(attribute='balance') | min) %}
+    {% set bh_max = (balance_history | map(attribute='balance') | max) %}
+    {% set bh_range = (bh_max - bh_min) if bh_max != bh_min else 1 %}
+    {% set acct_palette = ['#34d399','#60a5fa','#fbbf24','#f87171','#a78bfa'] %}
+    {% set acct_ids = balance_history | map(attribute='account_id') | unique | list %}
+    <svg viewBox="0 0 1000 200" class="w-full h-48" preserveAspectRatio="none">
+      <!-- zero line if range crosses zero -->
+      {% if bh_min < 0 < bh_max %}
+        {% set zero_y = 200 - ((0 - bh_min) / bh_range * 180) - 10 %}
+        <line x1="0" y1="{{ zero_y }}" x2="1000" y2="{{ zero_y }}" stroke="#64748b" stroke-width="0.5" stroke-dasharray="4 4"/>
+      {% endif %}
+      {% for acct_id in acct_ids %}
+        {% set acct_points = balance_history | selectattr("account_id", "equalto", acct_id) | list %}
+        {% if acct_points|length > 1 %}
+          {% set color = acct_palette[loop.index0 % 5] %}
+          {% set step = 1000 / (acct_points|length - 1) if acct_points|length > 1 else 0 %}
+          <polyline fill="none" stroke="{{ color }}" stroke-width="1.5" stroke-linejoin="round"
+            points="{% for p in acct_points %}{{ '%.1f'|format(loop.index0 * step) }},{{ '%.1f'|format(200 - ((p.balance - bh_min) / bh_range * 180) - 10) }} {% endfor %}"/>
+        {% endif %}
+      {% endfor %}
+    </svg>
+    <div class="flex flex-wrap items-baseline justify-between gap-3 mt-2 text-[11px] text-ink-500">
+      <div class="flex flex-wrap gap-3">
+        {% for acct_id in acct_ids %}
+          {% set color = acct_palette[loop.index0 % 5] %}
+          {% set acct = (accounts | selectattr("id", "equalto", acct_id) | list | first) %}
+          {% if acct %}
+            <span class="inline-flex items-center gap-1.5">
+              <span class="inline-block w-4 h-0.5" style="background: {{ color }};"></span>
+              {{ acct.bank_name }}{% if acct.iban_last4 %} …{{ acct.iban_last4 }}{% endif %}
+            </span>
+          {% endif %}
+        {% endfor %}
+      </div>
+      <div class="tabular-nums">{{ "%.0f"|format(bh_min) }} € … {{ "%.0f"|format(bh_max) }} €</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Largest single transactions -->
+  {% if largest_tx %}
+  <div class="card p-5 mb-6">
+    <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-3">{{ t('finance.largest.title') }}</h2>
+    <div class="overflow-x-auto -mx-5">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wider text-ink-500">
+          <tr>
+            <th class="text-left  px-5 py-2 font-medium">{{ t('document.date') }}</th>
+            <th class="text-left  px-2 py-2 font-medium">{{ t('finance.counterparty') }}</th>
+            <th class="text-left  px-2 py-2 font-medium">{{ t('finance.category') }}</th>
+            <th class="text-right px-5 py-2 font-medium">{{ t('finance.amount') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tx in largest_tx %}
+            <tr class="border-t border-ink-800/50 hover:bg-ink-800/30">
+              <td class="px-5 py-2 tabular-nums text-ink-300">{{ tx.booking_date or '—' }}</td>
+              <td class="px-2 py-2 font-medium">
+                <a href="/document/{{ tx.doc_id }}" class="hover:text-emerald-300">{{ tx.counterparty or '—' }}</a>
+                {% if tx.purpose %}
+                  <span class="block text-[11px] text-ink-500 truncate max-w-[260px]">{{ tx.purpose }}</span>
+                {% endif %}
+              </td>
+              <td class="px-2 py-2">
+                {% if tx.category %}
+                  <span class="chip bg-ink-700/60 text-ink-200 text-[11px]">{{ t('finance.cat.' + tx.category) }}</span>
+                {% endif %}
+              </td>
+              <td class="px-5 py-2 text-right tabular-nums {% if tx.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
+                {% if tx.amount > 0 %}+{% endif %}{{ "%.2f"|format(tx.amount) }} €
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Two-column grid: accounts / categories -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
 

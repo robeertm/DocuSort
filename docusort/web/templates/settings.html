@@ -139,6 +139,16 @@
       </label>
     </div>
 
+    <!-- Household names — always masked, even if no structured cue
+         in the document picks them up. One name per line. -->
+    <div class="mb-4" x-show="!localOnly && pseudonymize" x-cloak>
+      <label class="block text-sm font-medium mb-1">{{ t('settings.finance.holder_names_label') }}</label>
+      <p class="text-xs text-ink-500 mb-2">{{ t('settings.finance.holder_names_hint') }}</p>
+      <textarea x-model="holderNamesText" rows="3"
+                placeholder="Robert Manuwald&#10;Steffi Manuwald&#10;Manuwald"
+                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono"></textarea>
+    </div>
+
     <div x-show="message" x-cloak class="text-sm rounded-lg px-3 py-2 mb-3"
          :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
          x-text="message"></div>
@@ -609,8 +619,9 @@ function webSettings() {
 
 function financeSettings() {
   return {
-    localOnly:    {{ finance_local_only | tojson }},
-    pseudonymize: {{ finance_pseudonymize | tojson }},
+    localOnly:        {{ finance_local_only | tojson }},
+    pseudonymize:     {{ finance_pseudonymize | tojson }},
+    holderNamesText:  ({{ finance_holder_names | tojson }}).join('\n'),
     saving: false, message: '', ok: false,
     async save() {
       this.message = ''; this.saving = true;
@@ -621,6 +632,10 @@ function financeSettings() {
           body: JSON.stringify({
             local_only:   this.localOnly,
             pseudonymize: this.pseudonymize,
+            holder_names: this.holderNamesText
+              .split(/[\n,;]+/)
+              .map(s => s.trim())
+              .filter(Boolean),
           }),
         });
         if (!r.ok) {

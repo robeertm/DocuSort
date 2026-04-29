@@ -2,6 +2,87 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.14.0] – 2026-04-28
+
+### Added — eight new charts on `/finance`
+
+- **KPI strip**: average daily spend, peak daily spend, biggest
+  single transaction with counterparty, busiest month by booking
+  count.
+- **Activity heatmap**: GitHub-style calendar grid showing the last
+  several months of daily spending intensity. Empty days get a
+  neutral cell, busier days shade through emerald to bright green.
+  Anchored to the latest booking date in the database, so the chart
+  stays useful even when the most recent statement isn't from this
+  week.
+- **Categories over time**: stacked bar per month showing how spend
+  splits across the top categories. Smaller categories collapse into
+  an "Others" bucket with a count so the legend stays readable.
+- **Spend by weekday**: which day of the week eats the most money.
+  Bar per weekday with both total spend and booking count.
+- **Spend by day of month**: 31 narrow bars revealing the typical
+  rent / subscription cluster on the 1st and a smoother spread of
+  card payments throughout the month.
+- **Transaction type breakdown**: stacked horizontal bar plus a
+  legend showing how spend distributes across direct debit, card
+  payment, standing order, cash withdrawals, fees, etc.
+- **Counterparty heatmap**: top counterparties as a tile heap sized
+  proportionally to spend. Click a tile to filter the transaction
+  table by that counterparty.
+- **Balance trajectory**: SVG line chart per account showing the
+  running balance over time, anchored to the earliest statement's
+  opening balance and walked forward by every booking.
+- **Largest single bookings**: top fifteen transactions by absolute
+  amount, with counterparty, category and a short purpose snippet.
+
+### Added — household-name privacy setting
+
+- New `finance.holder_names` list in `config.yaml` and a textarea on
+  `/settings` to manage it. Every name in the list is always masked
+  before the OCR text reaches a cloud LLM, regardless of whether
+  the document has a structured cue (Kontoinhaber: …, Herrn und
+  Frau …) that the auto-detector would otherwise pick up. Lets the
+  user reliably mask family members who only appear in body text
+  of contracts and card-issuance letters.
+
+### Fixed — pseudonymisation was missing names in body text
+
+Investigated systematically across the user's full document set.
+Findings and fixes:
+
+- **Token decomposition**: when a full name like "Robert Manuwald"
+  was captured from the address block, the cross-text sweep
+  replaced "Robert Manuwald" everywhere — but a partner showing up
+  only as "Steffi Manuwald" in body text slipped through because
+  her full name was never captured. The pseudonymiser now also
+  registers each meaningful sub-token (the surname, the first
+  names) as its own mask entry, so the family surname masks every
+  family member's mention.
+- **Letter-boundary sweep**: the previous word-boundary regex didn't
+  fire between a digit and a letter, so booking lines like
+  "MKTNR. 1220-1108-07MANUWALD" leaked the name. The sweep now
+  uses negative letter look-arounds — digits, punctuation and
+  whitespace all count as separators while still preventing
+  mid-word substitutions.
+- **Inline salutation pattern**: catches "Herrn Robert Manuwald"
+  written on a single line, common in card-issuance letters where
+  the address block is one long flowing paragraph rather than a
+  clean stack.
+- **Inhaber-cue extraction with strict colon**: matches
+  "Karteninhaber: …", "Darlehensnehmer: …", "Gutschriftskonto­
+  inhaber: …" and similar formal-document cues. The previous
+  loose version captured German legal text like "Hauptantragsteller
+  zahlt das Darlehen" because IGNORECASE flipped its case-sensitive
+  capital-letter-start safeguard.
+- **Case-sensitive structured patterns**: dropped IGNORECASE from
+  the salutation, holder-line and inhaber regexes so the
+  capital-letter requirement on names actually filters out
+  lowercase verbs.
+
+Verified end-to-end across every Kontoauszug and Bank document on
+the user's instance: zero occurrences of the family's real names
+in any outbound payload.
+
 ## [0.13.6] – 2026-04-28
 
 ### Fixed

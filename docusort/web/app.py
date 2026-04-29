@@ -603,6 +603,74 @@ def create_app(
             account_id=account_id, category=category, direction=direction,
             start=start, end=end, query=q, limit=200,
         )
+        # Charts data — only computed when there's actually something
+        # to plot, otherwise the empty-state card on /finance covers it.
+        heatmap_grid: dict[str, Any] = {"weeks": [], "max_spend": 0.0}
+        if summary.get("tx_count", 0) > 0 or summary.get("transfer_count", 0) > 0:
+            heatmap          = db.finance_heatmap(weeks=26)
+            cat_monthly      = db.finance_category_monthly(months=12)
+            by_weekday       = db.finance_by_weekday()
+            by_day_of_month  = db.finance_by_day_of_month()
+            by_tx_type       = db.finance_by_tx_type()
+            largest_tx       = db.finance_largest_tx(limit=15)
+            balance_history  = db.finance_balance_history(account_id=account_id)
+            cp_treemap       = db.finance_counterparty_treemap(limit=24)
+            kpis             = db.finance_kpis()
+
+            # Reshape the daily heatmap rows into a fixed 26-week ×
+            # 7-weekday grid so the template can render it with a
+            # plain double loop. Anchor the right-most column on the
+            # ISO week of the latest booking date, walk backwards 25
+            # weeks. Empty cells get spend=0; "future" cells (past
+            # the anchor in the same week) get null so the renderer
+            # can grey them out instead of colouring them.
+            from datetime import date as _date, timedelta as _td
+            spend_by_date = {r["date"]: float(r["spend"]) for r in heatmap}
+            if heatmap:
+                anchor_iso = max(spend_by_date.keys())
+                anchor_y, anchor_m, anchor_d = (int(p) for p in anchor_iso.split("-"))
+                anchor_dt = _date(anchor_y, anchor_m, anchor_d)
+                # Walk back to Monday of the anchor's week.
+                anchor_monday = anchor_dt - _td(days=anchor_dt.weekday())
+                # Earliest displayed week is 25 weeks before that.
+                first_monday = anchor_monday - _td(weeks=25)
+                max_spend = max(spend_by_date.values()) if spend_by_date else 0.0
+
+                weeks = []
+                for w in range(26):
+                    week_start = first_monday + _td(weeks=w)
+                    cells = []
+                    for d in range(7):
+                        cell_date = week_start + _td(days=d)
+                        iso = cell_date.isoformat()
+                        if cell_date > anchor_dt:
+                            cells.append({"date": iso, "spend": None})
+                        else:
+                            cells.append({
+                                "date": iso,
+                                "spend": spend_by_date.get(iso, 0.0),
+                            })
+                    weeks.append({
+                        "label": week_start.strftime("%d.%m"),
+                        "cells": cells,
+                    })
+                heatmap_grid = {"weeks": weeks, "max_spend": max_spend}
+
+            # Pre-compute the max-month total for the stacked category
+            # chart so the template doesn't need a Jinja namespace just
+            # to track a max across an outer loop.
+            if cat_monthly["matrix"]:
+                cat_monthly["max_total"] = max(
+                    (sum(row["values"]) for row in cat_monthly["matrix"]),
+                    default=0.0,
+                )
+            else:
+                cat_monthly["max_total"] = 0.0
+        else:
+            heatmap = []; cat_monthly = {"months": [], "categories": [], "matrix": []}
+            by_weekday = []; by_day_of_month = []; by_tx_type = []
+            largest_tx = []; balance_history = []; cp_treemap = []
+            kpis = {}
         # Inspect the privacy mode of the most recent statement so the
         # header badge tells the user how their last upload was handled.
         with db._lock:
@@ -640,6 +708,16 @@ def create_app(
              "privacy_mode": privacy_mode,
              "empty_statements":   [dict(r) for r in empty_stmts],
              "kontoauszug_total":  int(kontoauszug_total),
+             "heatmap":         heatmap,
+             "heatmap_grid":    heatmap_grid,
+             "cat_monthly":     cat_monthly,
+             "by_weekday":      by_weekday,
+             "by_day_of_month": by_day_of_month,
+             "by_tx_type":      by_tx_type,
+             "largest_tx":      largest_tx,
+             "balance_history": balance_history,
+             "cp_treemap":      cp_treemap,
+             "kpis":            kpis,
              "filter": {"account_id": account_id, "category": category,
                         "direction": direction, "start": start, "end": end, "q": q}},
         )
@@ -757,6 +835,7 @@ def create_app(
         extractor = StatementExtractor(
             classifier.provider, settings.ai.model,
             max_text_chars=max(settings.ai.max_text_chars, 32000),
+            holder_names=settings.finance.holder_names,
         )
 
         with db._lock:
@@ -861,16 +940,36 @@ def create_app(
         from ..settings_writer import update_finance
         local_only   = bool(payload.get("local_only", False))
         pseudonymize = bool(payload.get("pseudonymize", True))
+        holder_names_raw = payload.get("holder_names")
+        # Accept the field as either a list (UI) or a comma/newline
+        # separated string (legacy clients) so the settings page can
+        # use whichever shape is more convenient.
+        holder_names: list[str] | None
+        if holder_names_raw is None:
+            holder_names = None
+        elif isinstance(holder_names_raw, list):
+            holder_names = [str(n) for n in holder_names_raw]
+        else:
+            import re as _re
+            holder_names = [s for s in _re.split(r"[\n,;]+", str(holder_names_raw))]
         update_finance(
             local_only=local_only,
             pseudonymize=pseudonymize,
+            holder_names=holder_names,
             config_dir=settings.config_dir,
         )
         # Reflect the change in-process so the next pipeline run picks
         # it up without a service restart.
         settings.finance.local_only   = local_only
         settings.finance.pseudonymize = pseudonymize
-        return {"ok": True, "local_only": local_only, "pseudonymize": pseudonymize}
+        if holder_names is not None:
+            settings.finance.holder_names = [n.strip() for n in holder_names if (n or "").strip()]
+        return {
+            "ok": True,
+            "local_only": local_only,
+            "pseudonymize": pseudonymize,
+            "holder_names": settings.finance.holder_names,
+        }
 
     @app.get("/api/document/{doc_id}/statement/preview")
     def api_statement_preview(doc_id: int):
@@ -898,6 +997,8 @@ def create_app(
 
         if will_pseudonymize:
             pseudo = Pseudonymizer()
+            if settings.finance.holder_names:
+                pseudo.seed_household_names(settings.finance.holder_names)
             pseudo_text = pseudo.pseudonymize(text)
             counts: dict[str, int] = {}
             for tok in pseudo.reverse_map:
@@ -955,7 +1056,8 @@ def create_app(
         do_pseudo = settings.finance.pseudonymize and not is_local
         extractor = StatementExtractor(
             classifier.provider, settings.ai.model,
-            max_text_chars=max(settings.ai.max_text_chars, 24000),
+            max_text_chars=max(settings.ai.max_text_chars, 32000),
+            holder_names=settings.finance.holder_names,
         )
         try:
             stmt = extractor.extract(text, pseudonymize=do_pseudo)
@@ -1298,6 +1400,7 @@ def create_app(
              "oauth_backends":   sorted(rclone_setup.OAUTH_BACKENDS),
              "finance_local_only":   settings.finance.local_only,
              "finance_pseudonymize": settings.finance.pseudonymize,
+             "finance_holder_names": list(settings.finance.holder_names),
              "has_local_provider":   settings.ai.provider == "openai_compat"},
         )
 

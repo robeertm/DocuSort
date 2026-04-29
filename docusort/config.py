@@ -96,6 +96,16 @@ class FinanceSettings:
     # providers and exposes the toggle in /settings.
     pseudonymize: bool = True
 
+    # Names of household members whose mention should always be masked
+    # before the OCR text reaches a cloud LLM, even if no structured
+    # detection pattern picks them up. Useful for documents like
+    # Darlehensverträge or Karteninhaber-Schreiben where a partner /
+    # child is named only in the body and never in a clean address
+    # block. Each entry is treated as a literal, case-insensitive
+    # whole-word match — so "Manuwald" masks both "Robert Manuwald"
+    # and "Steffi Manuwald" wherever they appear.
+    holder_names: list = field(default_factory=list)
+
 
 @dataclass
 class AppSettings:
@@ -196,6 +206,10 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
     finance = FinanceSettings(
         local_only=bool(fin_cfg.get("local_only", False)),
         pseudonymize=bool(fin_cfg.get("pseudonymize", True)),
+        holder_names=[
+            str(n).strip() for n in (fin_cfg.get("holder_names") or [])
+            if str(n).strip()
+        ],
     )
 
     return AppSettings(

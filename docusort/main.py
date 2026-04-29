@@ -236,7 +236,8 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                     from hashlib import sha256
                     extractor = StatementExtractor(
                         classifier.provider, settings.ai.model,
-                        max_text_chars=max(settings.ai.max_text_chars, 24000),
+                        max_text_chars=max(settings.ai.max_text_chars, 32000),
+                        holder_names=settings.finance.holder_names,
                     )
                     # Pseudonymise unless we're already on a local provider
                     # (no leak risk) OR the user explicitly turned it off.

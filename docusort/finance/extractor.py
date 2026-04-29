@@ -332,10 +332,16 @@ class StatementExtractor:
     provider where data never leaves the box."""
 
     def __init__(self, provider: Provider, model: str,
-                 max_text_chars: int = 32000):
+                 max_text_chars: int = 32000,
+                 holder_names: list[str] | None = None):
         self.provider = provider
         self.model = model
         self.max_text_chars = max_text_chars
+        # Pre-seeded household names always get masked, regardless of
+        # whether the document text contains a structured detection
+        # cue. See FinanceSettings.holder_names for the user-facing
+        # rationale.
+        self.holder_names = list(holder_names or [])
 
     def extract(self, ocr_text: str, *, pseudonymize: bool = True) -> Statement:
         if not ocr_text:
@@ -345,6 +351,8 @@ class StatementExtractor:
         pseudo: Pseudonymizer | None = None
         if pseudonymize:
             pseudo = Pseudonymizer()
+            if self.holder_names:
+                pseudo.seed_household_names(self.holder_names)
             body = pseudo.pseudonymize(body)
 
         try:
@@ -488,6 +496,7 @@ def backfill_statements(settings, db, classifier, *, dry_run: bool = False,
     extractor = StatementExtractor(
         classifier.provider, settings.ai.model,
         max_text_chars=max(settings.ai.max_text_chars, 32000),
+        holder_names=settings.finance.holder_names,
     )
     # Also catch legacy bank docs that were filed under category=Bank
     # before v0.13.0 added "Kontoauszug" as a top-level category. We
