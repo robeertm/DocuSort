@@ -2,6 +2,15 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.14.1] – 2026-04-28
+
+### Fixed
+
+- Replaced personal example names that had crept into code comments,
+  changelog entries, prompt few-shot examples and the settings
+  placeholder with the standard German placeholder names
+  ("Max Mustermann" / "Erika Mustermann"). No functional change.
+
 ## [0.14.0] – 2026-04-28
 
 ### Added — eight new charts on `/finance`
@@ -50,21 +59,21 @@ All notable changes to DocuSort will be documented in this file.
 Investigated systematically across the user's full document set.
 Findings and fixes:
 
-- **Token decomposition**: when a full name like "Robert Manuwald"
+- **Token decomposition**: when a full name like "Max Mustermann"
   was captured from the address block, the cross-text sweep
-  replaced "Robert Manuwald" everywhere — but a partner showing up
-  only as "Steffi Manuwald" in body text slipped through because
+  replaced "Max Mustermann" everywhere — but a partner showing up
+  only as "Erika Mustermann" in body text slipped through because
   her full name was never captured. The pseudonymiser now also
   registers each meaningful sub-token (the surname, the first
   names) as its own mask entry, so the family surname masks every
   family member's mention.
 - **Letter-boundary sweep**: the previous word-boundary regex didn't
   fire between a digit and a letter, so booking lines like
-  "MKTNR. 1220-1108-07MANUWALD" leaked the name. The sweep now
+  "MKTNR. 1220-1108-07MUSTERMANN" leaked the name. The sweep now
   uses negative letter look-arounds — digits, punctuation and
   whitespace all count as separators while still preventing
   mid-word substitutions.
-- **Inline salutation pattern**: catches "Herrn Robert Manuwald"
+- **Inline salutation pattern**: catches "Herrn Max Mustermann"
   written on a single line, common in card-issuance letters where
   the address block is one long flowing paragraph rather than a
   clean stack.
@@ -362,7 +371,7 @@ in any outbound payload.
 - **License changed from MIT to a proprietary "Use, don't modify" license.**
   Personal use and source inspection remain permitted; modification,
   redistribution, derivative works, and commercial use now require prior
-  written permission. All rights reserved by Robert Manuwald.
+  written permission. All rights reserved by Max Mustermann.
   Versions up to and including v0.12.3 remain available under the MIT
   License for anyone who already obtained a copy of those releases —
   this change is not retroactive.

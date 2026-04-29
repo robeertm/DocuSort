@@ -102,8 +102,8 @@ class FinanceSettings:
     # Darlehensverträge or Karteninhaber-Schreiben where a partner /
     # child is named only in the body and never in a clean address
     # block. Each entry is treated as a literal, case-insensitive
-    # whole-word match — so "Manuwald" masks both "Robert Manuwald"
-    # and "Steffi Manuwald" wherever they appear.
+    # whole-word match — so "Mustermann" masks both "Max Mustermann"
+    # and "Erika Mustermann" wherever they appear.
     holder_names: list = field(default_factory=list)
 
 

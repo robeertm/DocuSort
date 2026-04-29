@@ -169,7 +169,7 @@ Output:
 ## Example 2 — Arztbefund
 
 Input (excerpt):
-"Dr. med. Susanne Müller · Facharztpraxis für Innere Medizin · Arztbrief vom 03.01.2026 · Patient: Robert Manuwald · Diagnose: Blutbild unauffällig, Cholesterin leicht erhöht"
+"Dr. med. Susanne Müller · Facharztpraxis für Innere Medizin · Arztbrief vom 03.01.2026 · Patient: Max Mustermann · Diagnose: Blutbild unauffällig, Cholesterin leicht erhöht"
 
 Output:
 {"category":"Gesundheit","subcategory":"Arzt","tags":["befund"],"date":"2026-01-03","sender":"Praxis Dr. Müller","subject":"Arztbrief Blutbild","confidence":0.94,"reasoning":"Arztbrief mit Diagnose und Befund aus einer Facharztpraxis."}
@@ -185,7 +185,7 @@ Output:
 ## Example 4 — Niedrige Confidence
 
 Input (excerpt):
-"Sehr geehrter Herr Manuwald, anbei wie besprochen die Unterlagen. Mit freundlichen Grüßen."
+"Sehr geehrter Herr Mustermann, anbei wie besprochen die Unterlagen. Mit freundlichen Grüßen."
 
 Output:
 {"category":"Sonstiges","subcategory":"","tags":[],"date":"","sender":"Unbekannt","subject":"Kurzes Anschreiben ohne Inhalt","confidence":0.2,"reasoning":"Kein Absender, kein Datum, kein eindeutiger Dokumenttyp erkennbar."}
@@ -193,7 +193,7 @@ Output:
 ## Example 5 — Kontoauszug
 
 Input (excerpt):
-"Sparkasse Dresden · Kontoauszug Nr. 03/2026 · Konto-Inhaber: Robert Manuwald · IBAN DE12 8505 0300 0123 4567 89 · Buchungszeitraum 01.03.2026 bis 31.03.2026 · Saldo: 4.218,54 EUR"
+"Sparkasse Dresden · Kontoauszug Nr. 03/2026 · Konto-Inhaber: Max Mustermann · IBAN DE12 8505 0300 0123 4567 89 · Buchungszeitraum 01.03.2026 bis 31.03.2026 · Saldo: 4.218,54 EUR"
 
 Output:
 {"category":"Bank","subcategory":"Konto","tags":["kontoauszug"],"date":"2026-03-31","sender":"Sparkasse Dresden","subject":"Kontoauszug Marz 2026","confidence":0.96,"reasoning":"Kontoauszug der Sparkasse mit IBAN, Buchungszeitraum und Saldo."}
@@ -225,7 +225,7 @@ Output:
 ## Example 9 — Mietvertrag
 
 Input (excerpt):
-"Mietvertrag — Wohnung · Vermieter: Heinrich Berger, Dresdner Straße 45, 01454 Radeberg · Mieter: Robert Manuwald · Mietbeginn: 01.05.2026 · Kaltmiete 780,00 EUR · Nebenkostenvorauszahlung 180,00 EUR · Unterschriftsdatum 12.04.2026"
+"Mietvertrag — Wohnung · Vermieter: Heinrich Berger, Dresdner Straße 45, 01454 Radeberg · Mieter: Max Mustermann · Mietbeginn: 01.05.2026 · Kaltmiete 780,00 EUR · Nebenkostenvorauszahlung 180,00 EUR · Unterschriftsdatum 12.04.2026"
 
 Output:
 {"category":"Haus","subcategory":"Miete","tags":["vertrag"],"date":"2026-04-12","sender":"Heinrich Berger","subject":"Mietvertrag Wohnung Radeberg","confidence":0.96,"reasoning":"Unterschriebener Mietvertrag — Wohnen → Haus/Miete."}
@@ -233,10 +233,10 @@ Output:
 ## Example 10 — Kündigung Mobilfunk
 
 Input (excerpt):
-"An: Telefonica Germany GmbH · Betreff: Kündigung meines Mobilfunkvertrags zum nächstmöglichen Termin · Kundennummer 987654321 · Rufnummer 0175-1234567 · Datum 05.01.2026 · Robert Manuwald"
+"An: Telefonica Germany GmbH · Betreff: Kündigung meines Mobilfunkvertrags zum nächstmöglichen Termin · Kundennummer 987654321 · Rufnummer 0175-1234567 · Datum 05.01.2026 · Max Mustermann"
 
 Output:
-{"category":"Vertraege","subcategory":"","tags":["kuendigung","mobilfunk"],"date":"2026-01-05","sender":"Robert Manuwald","subject":"Kuendigung Mobilfunkvertrag Telefonica","confidence":0.93,"reasoning":"Kündigungsschreiben eines Mobilfunkvertrags."}
+{"category":"Vertraege","subcategory":"","tags":["kuendigung","mobilfunk"],"date":"2026-01-05","sender":"Max Mustermann","subject":"Kuendigung Mobilfunkvertrag Telefonica","confidence":0.93,"reasoning":"Kündigungsschreiben eines Mobilfunkvertrags."}
 
 ## Example 11 — Krankenkassen-Beitragsbescheid
 
@@ -289,10 +289,10 @@ Output:
 ## Example 15 — Erbauseinandersetzungsvertrag
 
 Input (excerpt):
-"Notar Dr. Braun · Erbauseinandersetzungsvertrag betreffend den Nachlass des Herrn Heinrich Manuwald, verstorben am 14.06.2024 · Datum 11.02.2026 · Beteiligte: Robert Manuwald, Steffi Manuwald"
+"Notar Dr. Braun · Erbauseinandersetzungsvertrag betreffend den Nachlass des Herrn Heinrich Mustermann, verstorben am 14.06.2024 · Datum 11.02.2026 · Beteiligte: Max Mustermann, Erika Mustermann"
 
 Output:
-{"category":"Familie","subcategory":"Erbe","tags":["vertrag","notar"],"date":"2026-02-11","sender":"Dr. Braun Notar","subject":"Erbauseinandersetzung Nachlass Manuwald","confidence":0.95,"reasoning":"Notarieller Erbauseinandersetzungsvertrag — Familie/Erbe."}
+{"category":"Familie","subcategory":"Erbe","tags":["vertrag","notar"],"date":"2026-02-11","sender":"Dr. Braun Notar","subject":"Erbauseinandersetzung Nachlass Mustermann","confidence":0.95,"reasoning":"Notarieller Erbauseinandersetzungsvertrag — Familie/Erbe."}
 
 # Processing notes
 

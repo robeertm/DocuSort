@@ -444,7 +444,7 @@ class StatementExtractor:
         # Auto-promote transactions where the counterparty matches the
         # account holder name to category=uebertrag. The LLM often gets
         # this wrong on Sparkasse statements where internal transfers
-        # appear as "Robert Manuwald Steffi Manuwald Sonst. Gutschrift"
+        # appear as "Max Mustermann Erika Mustermann Sonst. Gutschrift"
         # with a generic booking line — easy for it to land on
         # "sonstiges" when it's really an internal move that shouldn't
         # be counted as income / expense in the headline numbers.
@@ -456,8 +456,8 @@ class StatementExtractor:
                     cp_tokens = {tok.lower() for tok in _re.split(r"[,\s]+", tx.counterparty or "") if len(tok) > 2}
                     # If the counterparty contains the holder's full name
                     # (possibly alongside a partner's name on a joint
-                    # account, e.g. "Robert Manuwald Steffi Manuwald"
-                    # when the holder is "Robert Manuwald"), it's an
+                    # account, e.g. "Max Mustermann Erika Mustermann"
+                    # when the holder is "Max Mustermann"), it's an
                     # internal transfer. Direction: holder_tokens MUST
                     # be a subset of counterparty_tokens — getting this
                     # backwards meant the heuristic never fired on

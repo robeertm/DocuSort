@@ -73,8 +73,8 @@ _HOLDER_LINE_RE = re.compile(
 # statements:
 #
 #     Herrn und Frau
-#     Robert Manuwald
-#     Steffi Manuwald
+#     Max Mustermann
+#     Erika Mustermann
 #     Musterstraße 12
 #     01099 Dresden
 #
@@ -180,8 +180,8 @@ class Pseudonymizer:
 
     def _mask_salutation_block(self, text: str) -> str:
         # German bank statements typically start with a multi-line
-        # address block: "Herrn und Frau\nRobert Manuwald\nSteffi
-        # Manuwald\n…". The "Herr/Frau" salutation gets kept as
+        # address block: "Herrn und Frau\nMax Mustermann\nErika
+        # Mustermann\n…". The "Herr/Frau" salutation gets kept as
         # context; the name lines (1-4 of them) are each replaced
         # with their own NAME token so the LLM still sees that there
         # are N people on this account.
@@ -222,10 +222,10 @@ class Pseudonymizer:
         captured before the line-based street / zip-city patterns
         consume them piecewise. After the structured maskers run, we
         decompose each captured full-name into its individual tokens
-        (so "Robert Manuwald" also masks "Manuwald" and "Robert" on
+        (so "Max Mustermann" also masks "Mustermann" and "Robert" on
         their own) and finally sweep the whole text replacing every
         known value with its token. Without the token decomposition,
-        "Steffi Manuwald" would slip through whenever Steffi only
+        "Erika Mustermann" would slip through whenever Erika only
         appears in a transaction line and the address block lists
         Robert alone.
         """
@@ -241,7 +241,7 @@ class Pseudonymizer:
         out = self._sweep_known_values(out)
         return out
 
-    # Single-line "Herrn Robert Manuwald" / "Frau Steffi Manuwald"
+    # Single-line "Herrn Max Mustermann" / "Frau Erika Mustermann"
     # — common in card-issuance letters and credit contracts where
     # the address block isn't a clean multi-line stack. Case-sensitive
     # on purpose: "Herr" lowercase would also match German verbs and
@@ -297,7 +297,7 @@ class Pseudonymizer:
         structured location.
 
         We skip generic stop-words so common German words like
-        "Herrn" / "Steffi" (oh wait, Steffi is exactly what we want
+        "Herrn" / "Erika" (oh wait, Erika is exactly what we want
         to mask) — we only skip the very generic ones."""
         # Words that are NEVER personal names even when they look
         # capitalised in the source — keep this list short to avoid
@@ -327,17 +327,17 @@ class Pseudonymizer:
         """Second pass: each value already in the reverse map gets
         replaced wherever else it appears (case-insensitive — banks
         sometimes UPPERCASE names inside booking descriptions). Order
-        by descending length so a full name like "Robert Manuwald"
-        is handled before its component "Robert" / "Manuwald".
+        by descending length so a full name like "Max Mustermann"
+        is handled before its component "Robert" / "Mustermann".
 
         Boundary uses negative letter look-arounds rather than `\\b`.
         `\\b` won't fire between a digit and a letter (both are word
         chars to the regex engine), so a German booking line like
-        "MKTNR. 1220-1108-07MANUWALD BIC/IBAN…" would slip through
-        — the digit-letter run "07MANUWALD" has no `\\b` between
+        "MKTNR. 1220-1108-07MUSTERMANN BIC/IBAN…" would slip through
+        — the digit-letter run "07MUSTERMANN" has no `\\b` between
         them. The custom boundary treats only letters as in-word, so
         digits and punctuation count as separators while still
-        preventing "Manuwaldstrasse" from being mauled mid-word.
+        preventing "Mustermannstrasse" from being mauled mid-word.
         """
         pairs = [(v, t) for t, v in self.reverse_map.items()
                  if t.startswith(("NAME_", "ADDR_"))]
