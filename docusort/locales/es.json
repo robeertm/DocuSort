@@ -582,5 +582,7 @@
   "finance.balance.title": "Evolución del saldo",
   "finance.largest.title": "Mayores movimientos individuales",
   "settings.finance.holder_names_label": "Nombres siempre enmascarados",
-  "settings.finance.holder_names_hint": "Un nombre por línea. Sustituido por tokens antes de cualquier llamada a IA — útil para familiares que no aparecen en el bloque de dirección."
+  "settings.finance.holder_names_hint": "Un nombre por línea. Sustituido por tokens antes de cualquier llamada a IA — útil para familiares que no aparecen en el bloque de dirección.",
+  "settings.finance.review_label": "Revisar extractos antes de la llamada a IA",
+  "settings.finance.review_hint": "Cada nuevo extracto se pausa tras la OCR. En /finance puedes ver el texto pseudonimizado y aprobarlo o retenerlo."
 }

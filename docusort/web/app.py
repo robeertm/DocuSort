@@ -593,6 +593,10 @@ def create_app(
         start: str | None = Query(None),
         end: str | None = Query(None),
         q: str | None = Query(None),
+        heatmap_year:  str | None = Query(None),
+        heatmap_month: str | None = Query(None),
+        cat_start:     str | None = Query(None),
+        cat_end:       str | None = Query(None),
     ):
         from ..finance.categories import TX_CATEGORIES, TX_TYPES
         summary       = db.finance_summary()
@@ -605,12 +609,19 @@ def create_app(
             account_id=account_id, category=category, direction=direction,
             start=start, end=end, query=q, limit=200,
         )
+        periods = db.finance_available_periods()
         # Charts data — only computed when there's actually something
         # to plot, otherwise the empty-state card on /finance covers it.
-        heatmap_grid: dict[str, Any] = {"weeks": [], "max_spend": 0.0}
+        heatmap_grid: dict[str, Any] = {
+            "mode": "year", "year": "", "month": "",
+            "weeks": [], "max_spend": 0.0,
+        }
         if summary.get("tx_count", 0) > 0 or summary.get("transfer_count", 0) > 0:
-            heatmap          = db.finance_heatmap(weeks=26)
-            cat_monthly      = db.finance_category_monthly(months=12)
+            mode = "month" if heatmap_month else "year"
+            heatmap_data    = db.finance_heatmap(year=heatmap_year, month=heatmap_month)
+            cat_monthly     = db.finance_category_monthly(start=cat_start, end=cat_end)
+            cat_pie_spend   = db.finance_category_totals(start=cat_start, end=cat_end, direction="spend")
+            cat_pie_income  = db.finance_category_totals(start=cat_start, end=cat_end, direction="income")
             by_weekday       = db.finance_by_weekday()
             by_day_of_month  = db.finance_by_day_of_month()
             by_tx_type       = db.finance_by_tx_type()
@@ -619,44 +630,62 @@ def create_app(
             cp_treemap       = db.finance_counterparty_treemap(limit=24)
             kpis             = db.finance_kpis()
 
-            # Reshape the daily heatmap rows into a fixed 26-week ×
-            # 7-weekday grid so the template can render it with a
-            # plain double loop. Anchor the right-most column on the
-            # ISO week of the latest booking date, walk backwards 25
-            # weeks. Empty cells get spend=0; "future" cells (past
-            # the anchor in the same week) get null so the renderer
-            # can grey them out instead of colouring them.
+            # Reshape the daily heatmap rows into a week × weekday
+            # grid the template can render with a plain double loop.
+            # Year mode walks Jan 1 → Dec 31 of the chosen year;
+            # month mode walks the whole month with leading blanks
+            # so the first day lines up with its weekday column.
             from datetime import date as _date, timedelta as _td
-            spend_by_date = {r["date"]: float(r["spend"]) for r in heatmap}
-            if heatmap:
-                anchor_iso = max(spend_by_date.keys())
-                anchor_y, anchor_m, anchor_d = (int(p) for p in anchor_iso.split("-"))
-                anchor_dt = _date(anchor_y, anchor_m, anchor_d)
-                # Walk back to Monday of the anchor's week.
-                anchor_monday = anchor_dt - _td(days=anchor_dt.weekday())
-                # Earliest displayed week is 25 weeks before that.
-                first_monday = anchor_monday - _td(weeks=25)
-                max_spend = max(spend_by_date.values()) if spend_by_date else 0.0
+            spend_by_date = {r["date"]: float(r["spend"]) for r in heatmap_data["days"]}
+            heatmap_grid = {
+                "mode":  heatmap_data["mode"],
+                "year":  heatmap_data["year"],
+                "month": heatmap_data["month"],
+                "weeks": [], "max_spend": 0.0,
+            }
+            if heatmap_data["days"] or heatmap_data["year"]:
+                if heatmap_data["mode"] == "year" and heatmap_data["year"]:
+                    yr = int(heatmap_data["year"])
+                    start_dt = _date(yr, 1, 1)
+                    end_dt   = _date(yr, 12, 31)
+                elif heatmap_data["mode"] == "month" and heatmap_data["month"]:
+                    ym = heatmap_data["month"]
+                    yr_ = int(ym[:4]); mo_ = int(ym[5:7])
+                    start_dt = _date(yr_, mo_, 1)
+                    if mo_ == 12:
+                        end_dt = _date(yr_, 12, 31)
+                    else:
+                        end_dt = _date(yr_, mo_ + 1, 1) - _td(days=1)
+                else:
+                    start_dt = end_dt = None
 
-                weeks = []
-                for w in range(26):
-                    week_start = first_monday + _td(weeks=w)
-                    cells = []
-                    for d in range(7):
-                        cell_date = week_start + _td(days=d)
-                        iso = cell_date.isoformat()
-                        if cell_date > anchor_dt:
-                            cells.append({"date": iso, "spend": None})
-                        else:
-                            cells.append({
-                                "date": iso,
-                                "spend": spend_by_date.get(iso, 0.0),
-                            })
-                    weeks.append({
-                        "label": week_start.strftime("%d.%m"),
-                        "cells": cells,
-                    })
-                heatmap_grid = {"weeks": weeks, "max_spend": max_spend}
+                if start_dt and end_dt:
+                    first_monday = start_dt - _td(days=start_dt.weekday())
+                    last_sunday  = end_dt + _td(days=6 - end_dt.weekday())
+                    max_spend = max(spend_by_date.values()) if spend_by_date else 0.0
+                    weeks = []
+                    cur = first_monday
+                    while cur <= last_sunday:
+                        cells = []
+                        for d in range(7):
+                            cell_date = cur + _td(days=d)
+                            iso = cell_date.isoformat()
+                            if cell_date < start_dt or cell_date > end_dt:
+                                cells.append({"date": iso, "spend": None, "out": True})
+                            else:
+                                cells.append({
+                                    "date": iso,
+                                    "spend": spend_by_date.get(iso, 0.0),
+                                    "out": False,
+                                })
+                        weeks.append({
+                            "label": cur.strftime("%d.%m"),
+                            "month_label": cur.strftime("%b"),
+                            "cells": cells,
+                        })
+                        cur = cur + _td(weeks=1)
+                    heatmap_grid["weeks"]     = weeks
+                    heatmap_grid["max_spend"] = max_spend
 
             # Pre-compute the max-month total for the stacked category
             # chart so the template doesn't need a Jinja namespace just
@@ -669,7 +698,8 @@ def create_app(
             else:
                 cat_monthly["max_total"] = 0.0
         else:
-            heatmap = []; cat_monthly = {"months": [], "categories": [], "matrix": []}
+            cat_monthly = {"months": [], "categories": [], "matrix": [], "max_total": 0.0}
+            cat_pie_spend = []; cat_pie_income = []
             by_weekday = []; by_day_of_month = []; by_tx_type = []
             largest_tx = []; balance_history = []; cp_treemap = []
             kpis = {}
@@ -699,6 +729,15 @@ def create_app(
                 """SELECT COUNT(*) FROM documents
                    WHERE category = 'Kontoauszug' AND deleted_at IS NULL"""
             ).fetchone()[0]
+            pending_review = db._conn.execute(
+                """SELECT id AS doc_id, COALESCE(subject, filename) AS subject,
+                          doc_date, sender
+                   FROM documents
+                   WHERE status = 'pending_review'
+                     AND category = 'Kontoauszug'
+                     AND deleted_at IS NULL
+                   ORDER BY doc_date DESC, id DESC"""
+            ).fetchall()
         privacy_mode = (last_mode_row["privacy_mode"] if last_mode_row else "") or ""
         return templates.TemplateResponse(
             request, "finance.html",
@@ -711,9 +750,13 @@ def create_app(
              "privacy_mode": privacy_mode,
              "empty_statements":   [dict(r) for r in empty_stmts],
              "kontoauszug_total":  int(kontoauszug_total),
-             "heatmap":         heatmap,
+             "pending_review":     [dict(r) for r in pending_review],
              "heatmap_grid":    heatmap_grid,
+             "heatmap_periods": periods,
              "cat_monthly":     cat_monthly,
+             "cat_pie_spend":   cat_pie_spend,
+             "cat_pie_income":  cat_pie_income,
+             "cat_range":       {"start": cat_start, "end": cat_end},
              "by_weekday":      by_weekday,
              "by_day_of_month": by_day_of_month,
              "by_tx_type":      by_tx_type,
@@ -944,6 +987,7 @@ def create_app(
         from ..settings_writer import update_finance
         local_only   = bool(payload.get("local_only", False))
         pseudonymize = bool(payload.get("pseudonymize", True))
+        review_before_send = bool(payload.get("review_before_send", False))
         holder_names_raw = payload.get("holder_names")
         # Accept the field as either a list (UI) or a comma/newline
         # separated string (legacy clients) so the settings page can
@@ -960,12 +1004,14 @@ def create_app(
             local_only=local_only,
             pseudonymize=pseudonymize,
             holder_names=holder_names,
+            review_before_send=review_before_send,
             config_dir=settings.config_dir,
         )
         # Reflect the change in-process so the next pipeline run picks
         # it up without a service restart.
         settings.finance.local_only   = local_only
         settings.finance.pseudonymize = pseudonymize
+        settings.finance.review_before_send = review_before_send
         if holder_names is not None:
             settings.finance.holder_names = [n.strip() for n in holder_names if (n or "").strip()]
         return {
@@ -973,6 +1019,7 @@ def create_app(
             "local_only": local_only,
             "pseudonymize": pseudonymize,
             "holder_names": settings.finance.holder_names,
+            "review_before_send": review_before_send,
         }
 
     @app.get("/api/document/{doc_id}/statement/preview")
@@ -1095,11 +1142,88 @@ def create_app(
             privacy_mode=stmt.privacy_mode,
             transactions=tx_payload, extra_json=stmt.raw_response,
         )
+        # If this doc was waiting in the review queue, promote it to
+        # 'filed' now that the user has approved + extraction succeeded.
+        if (doc.get("status") or "") == "pending_review":
+            with db._lock:
+                db._conn.execute(
+                    "UPDATE documents SET status = 'filed' WHERE id = ?",
+                    (doc_id,),
+                )
         return {
             "ok": True, "transactions": len(stmt.transactions),
             "bank": stmt.bank_name,
             "period": [stmt.period_start, stmt.period_end],
             "privacy_mode": stmt.privacy_mode,
+        }
+
+    @app.post("/api/document/{doc_id}/statement/skip")
+    def api_skip_statement(doc_id: int):
+        """User opened the review preview, decided NOT to send this
+        statement to the AI, and wants it out of the queue. The doc
+        keeps its category but transitions to 'filed' so the pending
+        banner stops flagging it. No LLM call is made."""
+        doc = db.get(doc_id)
+        if not doc:
+            raise HTTPException(404, "document not found")
+        with db._lock:
+            db._conn.execute(
+                "UPDATE documents SET status = 'filed' WHERE id = ?",
+                (doc_id,),
+            )
+        return {"ok": True, "doc_id": doc_id, "status": "filed"}
+
+    @app.get("/api/finance/pending-review")
+    def api_pending_review():
+        """Lightweight polling endpoint: list of Kontoauszug docs that
+        are paused waiting for the user's approval. Powers the
+        self-refreshing banner on /finance."""
+        with db._lock:
+            rows = db._conn.execute(
+                """SELECT id AS doc_id, COALESCE(subject, filename) AS subject,
+                          doc_date, sender
+                   FROM documents
+                   WHERE status = 'pending_review'
+                     AND category = 'Kontoauszug'
+                     AND deleted_at IS NULL
+                   ORDER BY doc_date DESC, id DESC"""
+            ).fetchall()
+        return {"items": [dict(r) for r in rows]}
+
+    @app.post("/api/finance/approve-all-pending")
+    def api_approve_all_pending():
+        """Bulk-release every Kontoauszug currently in the review
+        queue: runs the extractor for each. Stops on the first failure
+        so the user can investigate before more LLM calls are billed."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        with db._lock:
+            rows = db._conn.execute(
+                """SELECT id FROM documents
+                   WHERE status = 'pending_review' AND deleted_at IS NULL
+                     AND category = 'Kontoauszug'
+                   ORDER BY created_at ASC"""
+            ).fetchall()
+        approved: list[int] = []
+        failed: list[dict] = []
+        import time as _time
+        for idx, row in enumerate(rows):
+            doc_id = int(row["id"])
+            if idx > 0:
+                _time.sleep(1.5)   # rate-limit pacing
+            try:
+                api_extract_statement(doc_id)
+                approved.append(doc_id)
+            except HTTPException as exc:
+                failed.append({"doc_id": doc_id, "error": exc.detail})
+                break
+            except Exception as exc:
+                failed.append({"doc_id": doc_id, "error": str(exc)})
+                break
+        return {
+            "found":    len(rows),
+            "approved": approved,
+            "failed":   failed,
         }
 
     # ---------- Bulk operations ----------
@@ -1405,6 +1529,7 @@ def create_app(
              "finance_local_only":   settings.finance.local_only,
              "finance_pseudonymize": settings.finance.pseudonymize,
              "finance_holder_names": list(settings.finance.holder_names),
+             "finance_review_before_send": settings.finance.review_before_send,
              "has_local_provider":   settings.ai.provider == "openai_compat"},
         )
 

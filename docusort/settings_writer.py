@@ -141,6 +141,7 @@ def update_finance(
     local_only: bool | None = None,
     pseudonymize: bool | None = None,
     holder_names: list[str] | None = None,
+    review_before_send: bool | None = None,
     config_dir: Path | None = None,
 ) -> Path:
     """Persist the finance privacy toggles to config.yaml."""
@@ -161,6 +162,8 @@ def update_finance(
                 seen.add(n)
                 cleaned.append(n)
         fin["holder_names"] = cleaned
+    if review_before_send is not None:
+        fin["review_before_send"] = bool(review_before_send)
     cfg["finance"] = fin
     return _write_raw(cfg, config_dir)
 

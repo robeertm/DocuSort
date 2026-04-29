@@ -465,10 +465,24 @@
       </details>
 
       <div class="mt-4 flex flex-wrap items-center gap-2">
-        <button type="button" @click="extract()" :disabled="extracting"
-                class="btn-primary text-sm"
-                :class="extracting ? 'opacity-50 cursor-not-allowed' : ''"
-                x-text="extracting ? T['statement.extracting'] : (hasStatement ? T['statement.reextract'] : T['statement.extract_now'])"></button>
+        {% if doc.status == 'pending_review' %}
+          <span class="chip bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/20 mr-1">
+            {{ t('doc.statement.pending_badge') }}
+          </span>
+          <button type="button" @click="extract()" :disabled="extracting || skipping"
+                  class="btn-primary text-sm"
+                  :class="(extracting || skipping) ? 'opacity-50 cursor-not-allowed' : ''"
+                  x-text="extracting ? T['doc.statement.sending'] : T['doc.statement.send']"></button>
+          <button type="button" @click="skip()" :disabled="extracting || skipping"
+                  class="btn-secondary text-sm"
+                  :class="(extracting || skipping) ? 'opacity-50 cursor-not-allowed' : ''"
+                  x-text="skipping ? T['doc.statement.skipping'] : T['doc.statement.skip']"></button>
+        {% else %}
+          <button type="button" @click="extract()" :disabled="extracting"
+                  class="btn-primary text-sm"
+                  :class="extracting ? 'opacity-50 cursor-not-allowed' : ''"
+                  x-text="extracting ? T['statement.extracting'] : (hasStatement ? T['statement.reextract'] : T['statement.extract_now'])"></button>
+        {% endif %}
         <span x-show="extractMessage" x-cloak class="text-xs"
               :class="extractOk ? 'text-emerald-300' : 'text-rose-300'"
               x-text="extractMessage"></span>
@@ -699,6 +713,7 @@ function statementCard(docId, hasStatement) {
     docId, hasStatement,
     preview: null, previewing: false, error: '',
     extracting: false, extractMessage: '', extractOk: false,
+    skipping: false,
     async loadPreview() {
       this.error = ''; this.previewing = true;
       try {
@@ -728,6 +743,21 @@ function statementCard(docId, hasStatement) {
         this.extractOk = false;
         this.extractMessage = e.message || String(e);
       } finally { this.extracting = false; }
+    },
+    async skip() {
+      if (!confirm(T['doc.statement.skip_confirm'] || 'File without AI extraction?')) return;
+      this.extractMessage = ''; this.skipping = true;
+      try {
+        const r = await fetch('/api/document/' + this.docId + '/statement/skip', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.extractOk = true;
+        this.extractMessage = T['doc.statement.skipped'] || 'Filed without AI.';
+        setTimeout(() => location.reload(), 800);
+      } catch (e) {
+        this.extractOk = false;
+        this.extractMessage = e.message || String(e);
+      } finally { this.skipping = false; }
     },
   };
 }

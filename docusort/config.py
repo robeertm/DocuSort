@@ -106,6 +106,14 @@ class FinanceSettings:
     # and "Erika Mustermann" wherever they appear.
     holder_names: list = field(default_factory=list)
 
+    # When True, every newly classified Kontoauszug is paused before the
+    # second-pass LLM extraction. The user can review the pseudonymised
+    # OCR text on /finance and either approve it (extract) or skip it
+    # (no extraction) — useful for spot-checking the masking on
+    # sensitive statements before any byte leaves the box. Default OFF
+    # so existing pipelines keep working unchanged.
+    review_before_send: bool = False
+
 
 @dataclass
 class AppSettings:
@@ -210,6 +218,7 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
             str(n).strip() for n in (fin_cfg.get("holder_names") or [])
             if str(n).strip()
         ],
+        review_before_send=bool(fin_cfg.get("review_before_send", False)),
     )
 
     return AppSettings(

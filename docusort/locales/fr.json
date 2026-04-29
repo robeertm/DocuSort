@@ -582,5 +582,7 @@
   "finance.balance.title": "Évolution du solde",
   "finance.largest.title": "Plus grosses opérations individuelles",
   "settings.finance.holder_names_label": "Noms toujours masqués",
-  "settings.finance.holder_names_hint": "Un nom par ligne. Remplacé par des jetons avant tout appel IA — pratique pour les proches qui n'apparaissent pas dans le bloc d'adresse."
+  "settings.finance.holder_names_hint": "Un nom par ligne. Remplacé par des jetons avant tout appel IA — pratique pour les proches qui n'apparaissent pas dans le bloc d'adresse.",
+  "settings.finance.review_label": "Vérifier les relevés avant l'appel IA",
+  "settings.finance.review_hint": "Chaque nouveau relevé se met en pause après l'OCR. Sur /finance tu peux examiner le texte pseudonymisé et l'approuver ou le retenir."
 }

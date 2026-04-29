@@ -2,6 +2,64 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.16.0] – 2026-04-29
+
+### Fixed — data-loss regression in 0.15.1
+
+The 0.15.1 startup cleanup unconditionally deleted every `statements`
+row whose document didn't have category `Kontoauszug`. That hit
+documents legitimately filed under the legacy `Bank` category — the
+extractor still handles those via the title-based fallback in
+`backfill_statements()`. The cleanup wiped real transactions out of
+the live database. The dangerous step is gone in this release; the
+inline cascade in `update_metadata()` (the safe case where the user
+actively re-classifies a document) is kept.
+
+**Recovery for affected installs:** restore the SQLite file from a
+Synology snapshot if you have one. Otherwise, once your AI quota
+resets, run `python -m docusort --backfill-statements` — the OCR text
+is still in `documents.extracted_text`, so the extractor can rebuild
+the missing rows. `tx_hash` deduplication keeps the result idempotent
+even if some statements survived the cleanup.
+
+### Added — review queue for bank statements
+
+A new toggle in `/settings` → privacy section pauses every newly
+classified Kontoauszug before the second-pass LLM call. Each paused
+document surfaces in a sky-blue banner on `/finance` and on the
+document detail page itself, where the user can:
+
+- Inspect the pseudonymised text exactly as it would leave the box
+  (using the existing `Was wird gesendet?` preview).
+- Approve and extract that one document.
+- Skip — file the document without ever calling the AI (no
+  transactions extracted).
+- Release every pending document at once from the banner.
+
+Default OFF, so existing pipelines keep working unchanged.
+
+### Added — selectable charts on /finance
+
+The heatmap and the categories-over-time chart used to be locked to
+"the last N weeks/months" sliding windows. Now both honour the full
+booking history:
+
+- The heatmap has year and month dropdowns. Year mode renders a
+  GitHub-style annual contribution grid for the chosen year; month
+  mode shows a calendar block for one month.
+- The category-trend stacked bar chart has start/end month selectors
+  that default to the full history and scroll horizontally on long
+  ranges.
+- New donut charts render the spend and income split per category
+  for the same selected window, with a legend that totals to 100%.
+
+### Changed — heatmap palette
+
+The intensity ramp now goes cool-green → lime → amber → orange → red
+instead of the previous greens-only scale, so heavy-spending days
+really stand out from quiet ones. The empty-day cell stays neutral
+grey so it never reads as "this day was warm".
+
 ## [0.15.1] – 2026-04-29
 
 ### Fixed — stuck "needs review" banner on `/finance`

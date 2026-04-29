@@ -139,6 +139,20 @@
       </label>
     </div>
 
+    <!-- Per-statement review queue toggle: when on, every newly
+         classified Kontoauszug pauses before the second-pass LLM call
+         and waits for the user to inspect the pseudonymised text on
+         /finance and click "send". -->
+    <div class="mb-4" x-show="!localOnly" x-cloak>
+      <label class="flex items-start gap-3 text-sm cursor-pointer p-3 rounded-xl border border-ink-700 hover:border-ink-600">
+        <input type="checkbox" x-model="reviewBeforeSend" class="mt-0.5 accent-emerald-500">
+        <div class="min-w-0">
+          <div class="font-medium">{{ t('settings.finance.review_label') }}</div>
+          <div class="text-xs text-ink-400 mt-0.5">{{ t('settings.finance.review_hint') }}</div>
+        </div>
+      </label>
+    </div>
+
     <!-- Household names — always masked, even if no structured cue
          in the document picks them up. One name per line. -->
     <div class="mb-4" x-show="!localOnly && pseudonymize" x-cloak>
@@ -621,6 +635,7 @@ function financeSettings() {
   return {
     localOnly:        {{ finance_local_only | tojson }},
     pseudonymize:     {{ finance_pseudonymize | tojson }},
+    reviewBeforeSend: {{ finance_review_before_send | tojson }},
     holderNamesText:  ({{ finance_holder_names | tojson }}).join('\n'),
     saving: false, message: '', ok: false,
     async save() {
@@ -632,6 +647,7 @@ function financeSettings() {
           body: JSON.stringify({
             local_only:   this.localOnly,
             pseudonymize: this.pseudonymize,
+            review_before_send: this.reviewBeforeSend,
             holder_names: this.holderNamesText
               .split(/[\n,;]+/)
               .map(s => s.trim())

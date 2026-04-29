@@ -35,6 +35,45 @@
     {% endif %}
   </div>
 
+  <!-- Pending review banner — Kontoauszug docs paused before the
+       second-pass LLM call when finance.review_before_send is on.
+       Each item links to the document detail page where the user can
+       inspect the pseudonymised text and click Send / Skip. -->
+  <div class="card p-4 mb-6 border-sky-500/30 bg-sky-500/5"
+       x-data='financePending({{ pending_review | tojson }})'
+       x-show="items.length > 0"
+       x-cloak>
+    <div class="flex items-start gap-3">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-sky-300 shrink-0 mt-0.5">
+        <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium"
+             x-text="(T['finance.pending.title'] || '{n} Kontoauszug awaiting your approval before AI extraction')
+                       .replace('{n}', items.length)"></div>
+        <p class="text-xs text-ink-400 mt-1">{{ t('finance.pending.hint') }}</p>
+        <ul class="mt-2 space-y-0.5 text-xs">
+          <template x-for="d in items" :key="d.doc_id">
+            <li class="flex items-baseline gap-2">
+              <span class="text-ink-500 tabular-nums" x-text="d.doc_date || '—'"></span>
+              <a :href="'/document/' + d.doc_id"
+                 class="text-ink-200 hover:text-sky-300 truncate"
+                 x-text="d.subject || ('doc ' + d.doc_id)"></a>
+              <span class="text-ink-500" x-show="d.sender" x-text="'· ' + d.sender"></span>
+            </li>
+          </template>
+        </ul>
+      </div>
+      <button type="button" @click="approveAll()" :disabled="busy"
+              class="btn-primary text-xs shrink-0"
+              :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+              x-text="busy ? T['finance.pending.running'] : T['finance.pending.approve_all']"></button>
+    </div>
+    <div x-show="result" x-cloak class="mt-3 text-xs rounded px-3 py-2"
+         :class="resultOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="result"></div>
+  </div>
+
   <!-- Coverage / diagnostics banner — empty statements get called out.
        Always present in the DOM so the Alpine component can show/hide
        it as the underlying state changes (re-extract, manual fix-up,
@@ -191,20 +230,46 @@
   </div>
   {% endif %}
 
-  <!-- Calendar heatmap: weeks × weekdays grid coloured by daily spend -->
-  {% if heatmap_grid.weeks %}
+  <!-- Calendar heatmap: weeks × weekdays grid coloured by daily spend.
+       Supports a full year (Jan 1 → Dec 31) or a single month, picked
+       via the dropdown selectors. Palette runs cool-green → yellow →
+       red so heavy-spending days really pop. -->
+  {% if heatmap_grid.weeks or heatmap_periods.years %}
   <div class="card p-5 mb-6">
-    <div class="flex items-baseline justify-between mb-4">
+    <div class="flex items-baseline justify-between mb-4 gap-3 flex-wrap">
       <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.heatmap.title') }}</h2>
-      <span class="text-[11px] text-ink-500">{{ t('finance.heatmap.subtitle') }}</span>
+      <form method="get" action="/finance" class="flex items-center gap-2 text-xs">
+        <label class="flex items-center gap-1.5">
+          <span class="text-ink-500">{{ t('finance.heatmap.year_label') }}</span>
+          <select name="heatmap_year"
+                  onchange="this.form.heatmap_month.value=''; this.form.submit()"
+                  class="bg-ink-900/60 border border-ink-700 rounded px-2 py-1 text-xs">
+            {% for y in heatmap_periods.years %}
+              <option value="{{ y }}" {% if y == heatmap_grid.year and not heatmap_grid.month %}selected{% endif %}>{{ y }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="flex items-center gap-1.5">
+          <span class="text-ink-500">{{ t('finance.heatmap.month_label') }}</span>
+          <select name="heatmap_month"
+                  onchange="this.form.submit()"
+                  class="bg-ink-900/60 border border-ink-700 rounded px-2 py-1 text-xs">
+            <option value="">{{ t('finance.heatmap.full_year') }}</option>
+            {% for m in heatmap_periods.months %}
+              <option value="{{ m }}" {% if m == heatmap_grid.month %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </form>
     </div>
+    {% if heatmap_grid.weeks %}
     <div class="overflow-x-auto -mx-2 px-2">
       <div class="inline-grid gap-[3px] text-[10px] text-ink-500"
            style="grid-template-columns: 22px repeat({{ heatmap_grid.weeks | length }}, 14px); grid-template-rows: 14px repeat(7, 14px);">
-        <!-- empty top-left cell + week labels (every 4th week) -->
+        <!-- empty top-left cell + week labels (sparse: every 4th week) -->
         <div></div>
         {% for w in heatmap_grid.weeks %}
-          <div class="text-center {% if loop.index0 % 4 != 0 %}invisible{% endif %}">{{ w.label }}</div>
+          <div class="text-center {% if loop.index0 % 4 != 0 %}invisible{% endif %}">{{ w.month_label or w.label }}</div>
         {% endfor %}
         {% for dow_label in ['Mo','Di','Mi','Do','Fr','Sa','So'] %}
           {% set d = loop.index0 %}
@@ -214,12 +279,16 @@
             {% if cell.spend is none %}
               <div class="rounded-[2px] bg-transparent"></div>
             {% elif cell.spend == 0 %}
-              <div class="rounded-[2px] bg-ink-800/60" title="{{ cell.date }} · 0 €"></div>
+              <div class="rounded-[2px] bg-ink-800/50" title="{{ cell.date }} · 0 €"></div>
             {% else %}
               {% set ratio = cell.spend / heatmap_grid.max_spend %}
-              {% set bin = 1 if ratio < 0.1 else (2 if ratio < 0.3 else (3 if ratio < 0.6 else 4)) %}
+              {% set bin = 1 if ratio < 0.15 else (2 if ratio < 0.35 else (3 if ratio < 0.6 else (4 if ratio < 0.85 else 5))) %}
               <div class="rounded-[2px]
-                {% if bin == 1 %}bg-emerald-900/70{% elif bin == 2 %}bg-emerald-700/80{% elif bin == 3 %}bg-emerald-500/90{% else %}bg-emerald-300{% endif %}"
+                {% if bin == 1 %}bg-emerald-700/60
+                {% elif bin == 2 %}bg-lime-500/70
+                {% elif bin == 3 %}bg-amber-400/80
+                {% elif bin == 4 %}bg-orange-500/90
+                {% else %}bg-rose-500{% endif %}"
                 title="{{ cell.date }} · {{ '%.0f'|format(cell.spend) }} €"></div>
             {% endif %}
           {% endfor %}
@@ -228,47 +297,80 @@
     </div>
     <div class="flex items-center gap-2 text-[11px] text-ink-500 mt-3 justify-end">
       <span>{{ t('finance.heatmap.less') }}</span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-ink-800/60"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-900/70"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-700/80"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-500/90"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-300"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-ink-800/50"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-700/60"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-lime-500/70"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-amber-400/80"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-orange-500/90"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-rose-500"></span>
       <span>{{ t('finance.heatmap.more') }}</span>
     </div>
+    {% else %}
+      <p class="text-xs text-ink-500">{{ t('finance.heatmap.empty') }}</p>
+    {% endif %}
   </div>
   {% endif %}
 
-  <!-- Category trends: stacked bar per month, top 6 categories + Other -->
-  {% if cat_monthly.matrix %}
+  <!-- Category trends: stacked bar per month, top 6 categories + Other.
+       Default covers the full booking history; the user can narrow
+       the range with the start/end month selectors. -->
+  {% if cat_monthly.matrix or heatmap_periods.months %}
   <div class="card p-5 mb-6">
-    <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.catrend.title') }}</h2>
+    <div class="flex items-baseline justify-between gap-3 mb-4 flex-wrap">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.catrend.title') }}</h2>
+      <form method="get" action="/finance" class="flex items-center gap-2 text-xs">
+        <input type="hidden" name="heatmap_year"  value="{{ heatmap_grid.year if not heatmap_grid.month else '' }}">
+        <input type="hidden" name="heatmap_month" value="{{ heatmap_grid.month or '' }}">
+        <span class="text-ink-500">{{ t('finance.catrend.range_label') }}</span>
+        <select name="cat_start" onchange="this.form.submit()"
+                class="bg-ink-900/60 border border-ink-700 rounded px-2 py-1 text-xs">
+          <option value="">{{ t('finance.catrend.range_all') }}</option>
+          {% for m in heatmap_periods.months %}
+            <option value="{{ m }}" {% if cat_range.start == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+        <span class="text-ink-500">…</span>
+        <select name="cat_end" onchange="this.form.submit()"
+                class="bg-ink-900/60 border border-ink-700 rounded px-2 py-1 text-xs">
+          <option value="">{{ t('finance.catrend.range_all') }}</option>
+          {% for m in heatmap_periods.months %}
+            <option value="{{ m }}" {% if cat_range.end == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+    {% if cat_monthly.matrix %}
     {% set all_cats = cat_monthly.categories %}
     {% set top_cats = all_cats[:6] %}
     {% set palette  = ['bg-emerald-500/70','bg-sky-500/70','bg-amber-500/70','bg-rose-500/70','bg-violet-500/70','bg-teal-500/70','bg-ink-600/70'] %}
     {% set max_total = cat_monthly.max_total %}
-    <div class="grid grid-cols-12 gap-1 items-end h-48">
-      {% for row in cat_monthly.matrix[-12:] %}
-        {% set month_total = row['values'] | sum %}
-        <div class="flex flex-col group" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
-          <div class="flex-1 flex flex-col-reverse w-full" style="min-height: 0;">
-            {% for c_idx in range(top_cats|length) %}
-              {% set v = row['values'][c_idx] %}
-              {% if v > 0 %}
-                <div class="{{ palette[c_idx] }} hover:brightness-125"
-                     style="height: {{ (v / max_total * 100) if max_total > 0 else 0 }}%; min-height: 1px;"
-                     title="{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} €"></div>
+    {% set bar_count = cat_monthly.matrix | length %}
+    <div class="overflow-x-auto">
+      <div class="flex gap-1 items-end h-56 min-w-full"
+           style="min-width: {{ bar_count * 28 }}px;">
+        {% for row in cat_monthly.matrix %}
+          {% set month_total = row['values'] | sum %}
+          <div class="flex flex-col group flex-1 min-w-[20px]" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
+            <div class="flex-1 flex flex-col-reverse w-full" style="min-height: 0;">
+              {% for c_idx in range(top_cats|length) %}
+                {% set v = row['values'][c_idx] %}
+                {% if v > 0 %}
+                  <div class="{{ palette[c_idx] }} hover:brightness-125"
+                       style="height: {{ (v / max_total * 100) if max_total > 0 else 0 }}%; min-height: 1px;"
+                       title="{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} €"></div>
+                {% endif %}
+              {% endfor %}
+              {% set other = (row['values'][6:] | sum) %}
+              {% if other > 0 %}
+                <div class="{{ palette[6] }}"
+                     style="height: {{ (other / max_total * 100) if max_total > 0 else 0 }}%; min-height: 1px;"
+                     title="Andere · {{ '%.0f'|format(other) }} €"></div>
               {% endif %}
-            {% endfor %}
-            {% set other = (row['values'][6:] | sum) %}
-            {% if other > 0 %}
-              <div class="{{ palette[6] }}"
-                   style="height: {{ (other / max_total * 100) if max_total > 0 else 0 }}%; min-height: 1px;"
-                   title="Andere · {{ '%.0f'|format(other) }} €"></div>
-            {% endif %}
+            </div>
+            <div class="text-[10px] text-ink-500 text-center mt-1 truncate">{{ row.month[5:] }}/{{ row.month[2:4] }}</div>
           </div>
-          <div class="text-[10px] text-ink-500 text-center mt-1 truncate">{{ row.month[5:] }}/{{ row.month[2:4] }}</div>
-        </div>
-      {% endfor %}
+        {% endfor %}
+      </div>
     </div>
     <!-- Legend -->
     <div class="flex flex-wrap gap-3 mt-4 text-[11px] text-ink-400">
@@ -285,6 +387,64 @@
         </span>
       {% endif %}
     </div>
+    {% else %}
+      <p class="text-xs text-ink-500">{{ t('finance.heatmap.empty') }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Donut charts: category split for spend + income over the same range -->
+  {% if cat_pie_spend or cat_pie_income %}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    {% set pie_palette = ['#10b981','#0ea5e9','#f59e0b','#f43f5e','#a855f7','#14b8a6','#fb923c','#ec4899','#8b5cf6','#22d3ee','#84cc16','#64748b'] %}
+    {% for pie in [{"title": t('finance.pie.spend_title'), "data": cat_pie_spend},
+                   {"title": t('finance.pie.income_title'), "data": cat_pie_income}] %}
+      {% if pie.data %}
+      <div class="card p-5">
+        <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ pie.title }}</h2>
+        {% set total = pie.data | map(attribute='total') | sum %}
+        <div class="flex items-center gap-5 flex-wrap">
+          {# SVG donut: each slice is a stroke-dasharray segment around a single circle. #}
+          <svg viewBox="0 0 42 42" class="w-40 h-40 -rotate-90">
+            <circle cx="21" cy="21" r="15.915" fill="none" stroke="#1f2937" stroke-width="6"></circle>
+            {% set ns = namespace(offset=0) %}
+            {% for r in pie.data %}
+              {% set pct = (r.total / total * 100) if total > 0 else 0 %}
+              {% if pct > 0 %}
+              <circle cx="21" cy="21" r="15.915" fill="none"
+                      stroke="{{ pie_palette[loop.index0 % (pie_palette|length)] }}"
+                      stroke-width="6"
+                      stroke-dasharray="{{ '%.3f'|format(pct) }} {{ '%.3f'|format(100 - pct) }}"
+                      stroke-dashoffset="{{ '%.3f'|format(-ns.offset) }}">
+                <title>{{ t('finance.cat.' + r.category) }} · {{ '%.0f'|format(r.total) }} € · {{ '%.1f'|format(pct) }}%</title>
+              </circle>
+              {% set ns.offset = ns.offset + pct %}
+              {% endif %}
+            {% endfor %}
+            <text x="21" y="20" text-anchor="middle" dominant-baseline="middle"
+                  class="rotate-90" style="transform-origin: 21px 21px"
+                  fill="currentColor" font-size="4" font-weight="600">{{ "%.0f"|format(total) }}</text>
+            <text x="21" y="25" text-anchor="middle" dominant-baseline="middle"
+                  class="rotate-90" style="transform-origin: 21px 21px"
+                  fill="#9ca3af" font-size="2.5">€</text>
+          </svg>
+          <ul class="flex-1 min-w-0 space-y-1 text-xs">
+            {% for r in pie.data %}
+              <li class="flex items-center gap-2">
+                <span class="inline-block h-3 w-3 rounded-sm shrink-0"
+                      style="background-color: {{ pie_palette[loop.index0 % (pie_palette|length)] }}"></span>
+                <span class="truncate">{{ t('finance.cat.' + r.category) }}</span>
+                <span class="ml-auto tabular-nums text-ink-500">{{ "%.0f"|format(r.total) }} €</span>
+                {% if total > 0 %}
+                  <span class="text-[10px] tabular-nums text-ink-600 w-10 text-right">{{ "%.1f"|format(r.total / total * 100) }}%</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+    {% endfor %}
   </div>
   {% endif %}
 
@@ -705,6 +865,45 @@
 
 <script>
 function financePage() { return {}; }
+
+function financePending(initialItems) {
+  return {
+    items: initialItems || [],
+    busy: false, result: '', resultOk: false,
+    pollHandle: null,
+    init() {
+      this.pollHandle = setInterval(() => this.refresh(), 30000);
+    },
+    async refresh() {
+      try {
+        const r = await fetch('/api/finance/pending-review');
+        if (!r.ok) return;
+        const d = await r.json();
+        this.items = d.items || [];
+      } catch (e) { /* swallow — next poll retries */ }
+    },
+    async approveAll() {
+      if (!this.items.length) return;
+      const msg = (T['finance.pending.confirm'] || 'Send {n} statements to the AI?')
+        .replace('{n}', this.items.length);
+      if (!confirm(msg)) return;
+      this.busy = true; this.result = '';
+      try {
+        const r = await fetch('/api/finance/approve-all-pending', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.resultOk = (d.failed || []).length === 0;
+        this.result = (T['finance.pending.done'] || 'Approved {ok} of {found}.')
+          .replace('{ok}', (d.approved || []).length)
+          .replace('{found}', d.found);
+        await this.refresh();
+      } catch (e) {
+        this.resultOk = false;
+        this.result = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+  };
+}
 
 function financeDiag(initialItems, initialTotal) {
   return {

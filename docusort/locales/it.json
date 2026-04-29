@@ -582,5 +582,7 @@
   "finance.balance.title": "Andamento saldo",
   "finance.largest.title": "Maggiori movimenti singoli",
   "settings.finance.holder_names_label": "Nomi sempre mascherati",
-  "settings.finance.holder_names_hint": "Un nome per riga. Sostituito con token prima di ogni chiamata IA — utile per familiari che non compaiono nel blocco indirizzo."
+  "settings.finance.holder_names_hint": "Un nome per riga. Sostituito con token prima di ogni chiamata IA — utile per familiari che non compaiono nel blocco indirizzo.",
+  "settings.finance.review_label": "Rivedere gli estratti prima della chiamata IA",
+  "settings.finance.review_hint": "Ogni nuovo estratto si ferma dopo l'OCR. Su /finance puoi vedere il testo pseudonimizzato e approvarlo o trattenerlo."
 }

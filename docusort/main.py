@@ -232,6 +232,21 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                     "but active provider %s is not local",
                     target.name, settings.ai.provider,
                 )
+            elif settings.finance.review_before_send and not is_local:
+                # User opted in to manually approve every Kontoauszug before
+                # the second-pass LLM call. Mark the doc as pending so it
+                # appears in the /finance review queue; extraction runs
+                # later when the user clicks "send" on the preview page.
+                with db._lock:
+                    db._conn.execute(
+                        "UPDATE documents SET status = 'pending_review' WHERE id = ?",
+                        (doc_id,),
+                    )
+                log.info(
+                    "Statement extraction paused for %s — waiting for user "
+                    "approval on /finance",
+                    target.name,
+                )
             else:
                 try:
                     from .finance import StatementExtractor

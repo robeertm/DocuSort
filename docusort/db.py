@@ -310,26 +310,15 @@ class Database:
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_deleted ON documents(deleted_at)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_subcat  ON documents(subcategory)")
 
-        # One-shot cleanup: drop statements / receipts rows whose document
-        # has been re-classified away from Kontoauszug / Kassenzettel.
-        # Earlier versions left these orphans behind, which kept showing
-        # the doc in the /finance "needs review" banner forever. After
-        # 0.15.1 the cleanup runs inline on every metadata edit, so this
-        # only ever does work on the first launch after upgrade.
-        orphan_stmts = self._conn.execute(
-            """DELETE FROM statements
-               WHERE doc_id IN (SELECT id FROM documents WHERE category != 'Kontoauszug')"""
-        ).rowcount
-        orphan_recs = self._conn.execute(
-            """DELETE FROM receipts
-               WHERE doc_id IN (SELECT id FROM documents WHERE category != 'Kassenzettel')"""
-        ).rowcount
-        if orphan_stmts or orphan_recs:
-            logger.info(
-                "DB migration: removed %d orphan statement(s) and %d orphan receipt(s) "
-                "left over from earlier versions (re-classified docs)",
-                orphan_stmts, orphan_recs,
-            )
+        # NOTE: 0.15.1 shipped a startup cleanup that deleted every
+        # `statements` row whose document didn't have category =
+        # 'Kontoauszug'. That was destructive — pre-0.13 installs
+        # legitimately stored statements under the legacy `Bank`
+        # category (`backfill_statements()` still handles that case),
+        # so the cleanup wiped real transactions. The cleanup has
+        # been removed; re-classification cascade still happens
+        # inline in `update_metadata()` for the original use case
+        # (user moves a non-statement away from Kontoauszug).
 
     def close(self) -> None:
         with self._lock:
@@ -1294,14 +1283,92 @@ class Database:
 
     # ---------- Finance: charts & analytics ----------
 
-    def finance_heatmap(self, weeks: int = 26) -> list[dict[str, Any]]:
-        """Daily expense totals for the last N weeks of activity —
-        feeds the calendar heatmap (week × weekday grid). Anchored to
-        the most recent booking date in the database, not to "now",
-        so the heatmap stays useful even when the user uploads
-        historical statements long after they were issued. Internal
-        transfers are excluded so the heatmap reflects real spending
-        intensity, not bookkeeping moves between own accounts."""
+    def finance_available_periods(self) -> dict[str, list[str]]:
+        """Distinct years and YYYY-MM months that have bookings — used
+        by the /finance period selectors so the dropdown only offers
+        valid choices instead of empty months padded around the
+        dataset."""
+        with self._lock:
+            yrs = self._conn.execute(
+                """SELECT DISTINCT substr(t.booking_date, 1, 4) AS y
+                   FROM transactions t
+                   JOIN statements s ON s.id = t.statement_id
+                   JOIN documents  d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                   ORDER BY y DESC"""
+            ).fetchall()
+            mns = self._conn.execute(
+                """SELECT DISTINCT substr(t.booking_date, 1, 7) AS m
+                   FROM transactions t
+                   JOIN statements s ON s.id = t.statement_id
+                   JOIN documents  d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                   ORDER BY m DESC"""
+            ).fetchall()
+        return {
+            "years":  [r["y"] for r in yrs if r["y"]],
+            "months": [r["m"] for r in mns if r["m"]],
+        }
+
+    def finance_heatmap(self, *, year: str | None = None,
+                        month: str | None = None) -> dict[str, Any]:
+        """Daily expense totals for the calendar heatmap.
+
+        - When `month` is given (YYYY-MM): returns daily totals for that
+          month, plus the day-of-week of the 1st so the template can
+          align the calendar grid.
+        - When only `year` is given: returns daily totals for the full
+          year (Jan 1 – Dec 31) for a GitHub-style annual heatmap.
+        - When neither is given: defaults to the most-recent year that
+          has any booking.
+
+        Internal transfers are excluded so the heatmap reflects real
+        spending intensity, not bookkeeping moves between own accounts.
+        """
+        if month and len(month) >= 7:
+            ym = month[:7]
+            start = ym + "-01"
+            # SQLite has no direct "last day of month" — date(start, '+1 month', '-1 day').
+            with self._lock:
+                rows = self._conn.execute(
+                    """SELECT t.booking_date AS date,
+                              COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
+                              COALESCE(SUM(CASE WHEN t.amount > 0 THEN  t.amount ELSE 0 END), 0) AS income,
+                              COUNT(*) AS n
+                       FROM transactions t
+                       JOIN statements s ON s.id = t.statement_id
+                       JOIN documents  d ON d.id = s.doc_id
+                       WHERE d.deleted_at IS NULL
+                         AND t.category != 'uebertrag'
+                         AND t.booking_date >= ?
+                         AND t.booking_date <  date(?, '+1 month')
+                       GROUP BY t.booking_date
+                       ORDER BY t.booking_date""",
+                    (start, start),
+                ).fetchall()
+            return {
+                "mode": "month", "year": ym[:4], "month": ym,
+                "days": [dict(r) for r in rows],
+            }
+
+        # Year mode (default to latest year with data when none given).
+        if not year:
+            with self._lock:
+                row = self._conn.execute(
+                    """SELECT substr(MAX(t.booking_date), 1, 4) AS y
+                       FROM transactions t
+                       JOIN statements s ON s.id = t.statement_id
+                       JOIN documents  d ON d.id = s.doc_id
+                       WHERE d.deleted_at IS NULL
+                         AND t.booking_date IS NOT NULL AND t.booking_date != ''"""
+                ).fetchone()
+            year = (row["y"] if row else None) or ""
+        if not year:
+            return {"mode": "year", "year": "", "month": "", "days": []}
+        start = f"{year}-01-01"
+        end   = f"{int(year) + 1}-01-01"
         with self._lock:
             rows = self._conn.execute(
                 """SELECT t.booking_date AS date,
@@ -1309,47 +1376,54 @@ class Database:
                           COALESCE(SUM(CASE WHEN t.amount > 0 THEN  t.amount ELSE 0 END), 0) AS income,
                           COUNT(*) AS n
                    FROM transactions t
-                   JOIN statements   s ON s.id = t.statement_id
-                   JOIN documents    d ON d.id = s.doc_id
+                   JOIN statements s ON s.id = t.statement_id
+                   JOIN documents  d ON d.id = s.doc_id
                    WHERE d.deleted_at IS NULL
                      AND t.category != 'uebertrag'
-                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
-                     AND t.booking_date >= (
-                       SELECT date(MAX(booking_date), ?) FROM transactions
-                       WHERE booking_date IS NOT NULL AND booking_date != ''
-                     )
+                     AND t.booking_date >= ? AND t.booking_date < ?
                    GROUP BY t.booking_date
                    ORDER BY t.booking_date""",
-                (f"-{weeks * 7} days",),
+                (start, end),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return {
+            "mode": "year", "year": year, "month": "",
+            "days": [dict(r) for r in rows],
+        }
 
-    def finance_category_monthly(self, months: int = 12) -> dict[str, Any]:
-        """Per-category spend per month — feeds the stacked-area /
-        stacked-bar chart that shows how each category evolves over
-        time. Window is anchored on the latest booking date so it
-        stays informative when the dataset isn't current."""
+    def finance_category_monthly(self, *, start: str | None = None,
+                                 end: str | None = None) -> dict[str, Any]:
+        """Per-category spend per month for the stacked chart.
+
+        `start` / `end` are inclusive YYYY-MM bounds. When neither is
+        given the query covers the whole booking history — the
+        previous behaviour clamped the window to "last 12 months" and
+        the user couldn't see further back than that.
+        """
+        clauses = ["d.deleted_at IS NULL", "t.category != 'uebertrag'",
+                   "t.amount < 0",
+                   "t.booking_date IS NOT NULL AND t.booking_date != ''"]
+        params: list[Any] = []
+        if start:
+            clauses.append("substr(t.booking_date, 1, 7) >= ?")
+            params.append(start[:7])
+        if end:
+            clauses.append("substr(t.booking_date, 1, 7) <= ?")
+            params.append(end[:7])
+        where = " AND ".join(clauses)
+        sql = (
+            "SELECT substr(t.booking_date, 1, 7) AS month, "
+            "       COALESCE(NULLIF(t.category, ''), 'sonstiges') AS category, "
+            "       COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend, "
+            "       COUNT(*) AS n "
+            "FROM transactions t "
+            "JOIN statements s ON s.id = t.statement_id "
+            "JOIN documents  d ON d.id = s.doc_id "
+            "WHERE " + where + " "
+            "GROUP BY month, t.category "
+            "ORDER BY month ASC"
+        )
         with self._lock:
-            rows = self._conn.execute(
-                """SELECT substr(t.booking_date, 1, 7) AS month,
-                          COALESCE(NULLIF(t.category, ''), 'sonstiges') AS category,
-                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
-                          COUNT(*) AS n
-                   FROM transactions t
-                   JOIN statements   s ON s.id = t.statement_id
-                   JOIN documents    d ON d.id = s.doc_id
-                   WHERE d.deleted_at IS NULL
-                     AND t.category != 'uebertrag'
-                     AND t.amount < 0
-                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
-                     AND t.booking_date >= (
-                       SELECT date(MAX(booking_date), ?) FROM transactions
-                       WHERE booking_date IS NOT NULL AND booking_date != ''
-                     )
-                   GROUP BY month, t.category
-                   ORDER BY month ASC""",
-                (f"-{months * 31} days",),
-            ).fetchall()
+            rows = self._conn.execute(sql, params).fetchall()
         # Restructure into months × categories matrix for easy template
         # rendering. Categories ranked by total spend so the legend
         # reads largest-first.
@@ -1523,6 +1597,42 @@ class Database:
                 "balance": round(running[acct], 2),
             })
         return out
+
+    def finance_category_totals(self, *, start: str | None = None,
+                                end: str | None = None,
+                                direction: str = "spend") -> list[dict[str, Any]]:
+        """Total spend (or income) per category over the selected
+        period — feeds the donut / pie chart on /finance.
+
+        `direction` is either 'spend' (negative amounts) or 'income'
+        (positive). Internal transfers always excluded.
+        """
+        sign = "-1" if direction == "spend" else "+1"
+        amount_clause = "t.amount < 0" if direction == "spend" else "t.amount > 0"
+        clauses = ["d.deleted_at IS NULL", "t.category != 'uebertrag'", amount_clause,
+                   "t.booking_date IS NOT NULL AND t.booking_date != ''"]
+        params: list[Any] = []
+        if start:
+            clauses.append("substr(t.booking_date, 1, 7) >= ?")
+            params.append(start[:7])
+        if end:
+            clauses.append("substr(t.booking_date, 1, 7) <= ?")
+            params.append(end[:7])
+        sql = (
+            "SELECT COALESCE(NULLIF(t.category, ''), 'sonstiges') AS cat, "
+            f"       COALESCE(SUM(t.amount * {sign}), 0) AS total, "
+            "       COUNT(*) AS n "
+            "FROM transactions t "
+            "JOIN statements s ON s.id = t.statement_id "
+            "JOIN documents  d ON d.id = s.doc_id "
+            "WHERE " + " AND ".join(clauses) + " "
+            "GROUP BY cat "
+            "HAVING total > 0 "
+            "ORDER BY total DESC"
+        )
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [{"category": r["cat"], "total": r["total"], "n": r["n"]} for r in rows]
 
     def finance_counterparty_treemap(self, limit: int = 25) -> list[dict[str, Any]]:
         """Top counterparties by absolute spend — feeds the treemap.
