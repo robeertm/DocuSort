@@ -2,6 +2,27 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.16.1] – 2026-04-29
+
+### Added — one-click statement backfill from the web UI
+
+A new `/api/finance/backfill-statements` endpoint runs the same
+recovery flow that `python -m docusort --backfill-statements` does
+from the CLI: walks every Kontoauszug / legacy Bank document that
+has stored OCR text but no statement row, and rebuilds the
+extraction. Idempotent — `tx_hash` deduplication makes it safe to
+call repeatedly. Lets users recover the data lost in 0.15.1 without
+shell access.
+
+### Fixed — chart cards were too narrow on wide screens
+
+`/finance` now uses a wider main wrapper (max-w-screen-2xl instead
+of max-w-6xl) so the eight chart cards actually use the horizontal
+real estate on a desktop monitor. The heatmap cells stretch with
+`minmax(16px, 1fr)` so they fill the wider card on a year view, and
+the donut charts grew from w-40 to w-48 / sm:w-56 so the legend
+breathes. Other pages keep the original max-w-6xl wrapper.
+
 ## [0.16.0] – 2026-04-29
 
 ### Fixed — data-loss regression in 0.15.1

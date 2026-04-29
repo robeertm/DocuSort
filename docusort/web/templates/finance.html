@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ t('finance.title') }} · DocuSort{% endblock %}
+{# Wider main wrapper for /finance — the dashboard packs eight charts and
+   benefits from the extra real estate on large screens. Other pages stay
+   on the original max-w-6xl. #}
+{% block main_class %}mx-auto max-w-screen-2xl px-4 py-6 sm:py-10{% endblock %}
 {% block content %}
 
 <div x-data="financePage()">
@@ -265,7 +269,7 @@
     {% if heatmap_grid.weeks %}
     <div class="overflow-x-auto -mx-2 px-2">
       <div class="inline-grid gap-[3px] text-[10px] text-ink-500"
-           style="grid-template-columns: 22px repeat({{ heatmap_grid.weeks | length }}, 14px); grid-template-rows: 14px repeat(7, 14px);">
+           style="grid-template-columns: 32px repeat({{ heatmap_grid.weeks | length }}, minmax(16px, 1fr)); grid-template-rows: 16px repeat(7, 18px); min-width: {{ 32 + heatmap_grid.weeks | length * 18 }}px;">
         <!-- empty top-left cell + week labels (sparse: every 4th week) -->
         <div></div>
         {% for w in heatmap_grid.weeks %}
@@ -405,7 +409,7 @@
         {% set total = pie.data | map(attribute='total') | sum %}
         <div class="flex items-center gap-5 flex-wrap">
           {# SVG donut: each slice is a stroke-dasharray segment around a single circle. #}
-          <svg viewBox="0 0 42 42" class="w-40 h-40 -rotate-90">
+          <svg viewBox="0 0 42 42" class="w-48 h-48 sm:w-56 sm:h-56 -rotate-90 shrink-0">
             <circle cx="21" cy="21" r="15.915" fill="none" stroke="#1f2937" stroke-width="6"></circle>
             {% set ns = namespace(offset=0) %}
             {% for r in pie.data %}

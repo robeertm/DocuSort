@@ -945,6 +945,34 @@ def create_app(
             "failed": failed,
         }
 
+    @app.post("/api/finance/backfill-statements")
+    def api_backfill_statements():
+        """Run the full statement backfill — picks up every Kontoauszug
+        / legacy Bank doc that has stored OCR text but NO statement row
+        yet, and runs the extractor on it. Recovery path for the data
+        loss caused by 0.15.1's startup cleanup. Idempotent thanks to
+        the tx_hash unique constraint, so it's safe to call repeatedly.
+        Same per-call rate-limit pacing as the CLI flag."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        is_local = settings.ai.provider == "openai_compat"
+        if settings.finance.local_only and not is_local:
+            raise HTTPException(
+                403,
+                "finance.local_only is enabled but the active provider is not local.",
+            )
+        from ..finance.extractor import backfill_statements
+        local_only = settings.finance.local_only and is_local
+        try:
+            result = backfill_statements(
+                settings, db, classifier,
+                dry_run=False, local_only=local_only,
+            )
+        except Exception as exc:
+            logger.exception("Statement backfill via API failed")
+            raise HTTPException(500, f"backfill failed: {exc}")
+        return result
+
     @app.delete("/api/finance/account/{account_id}")
     def api_delete_account(account_id: int):
         """Delete a bogus account (typically the "Unbekannt" entry that
