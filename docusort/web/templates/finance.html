@@ -177,7 +177,7 @@
       {% set max_in = (monthly | map(attribute='income') | max) or 0 %}
       {% set max_out = -((monthly | map(attribute='expense') | min) or 0) %}
       {% set scale = [max_in, max_out] | max %}
-      <div class="grid grid-cols-12 gap-1 items-stretch h-48">
+      <div class="grid grid-cols-12 gap-1 items-stretch h-64 sm:h-80">
         {% for m in monthly %}
           {% set in_h  = (m.income / scale * 50) if scale > 0 else 0 %}
           {% set out_h = (-m.expense / scale * 50) if scale > 0 else 0 %}
@@ -268,8 +268,8 @@
     </div>
     {% if heatmap_grid.weeks %}
     <div class="overflow-x-auto -mx-2 px-2">
-      <div class="inline-grid gap-[3px] text-[10px] text-ink-500"
-           style="grid-template-columns: 32px repeat({{ heatmap_grid.weeks | length }}, minmax(16px, 1fr)); grid-template-rows: 16px repeat(7, 18px); min-width: {{ 32 + heatmap_grid.weeks | length * 18 }}px;">
+      <div class="inline-grid gap-[4px] text-[10px] text-ink-500 w-full"
+           style="grid-template-columns: 32px repeat({{ heatmap_grid.weeks | length }}, minmax(18px, 1fr)); grid-template-rows: 16px repeat(7, 28px); min-width: {{ 32 + heatmap_grid.weeks | length * 22 }}px;">
         <!-- empty top-left cell + week labels (sparse: every 4th week) -->
         <div></div>
         {% for w in heatmap_grid.weeks %}
@@ -350,7 +350,7 @@
     {% set max_total = cat_monthly.max_total %}
     {% set bar_count = cat_monthly.matrix | length %}
     <div class="overflow-x-auto">
-      <div class="flex gap-1 items-end h-56 min-w-full"
+      <div class="flex gap-1 items-end h-72 sm:h-80 min-w-full"
            style="min-width: {{ bar_count * 28 }}px;">
         {% for row in cat_monthly.matrix %}
           {% set month_total = row['values'] | sum %}
@@ -409,7 +409,7 @@
         {% set total = pie.data | map(attribute='total') | sum %}
         <div class="flex items-center gap-5 flex-wrap">
           {# SVG donut: each slice is a stroke-dasharray segment around a single circle. #}
-          <svg viewBox="0 0 42 42" class="w-48 h-48 sm:w-56 sm:h-56 -rotate-90 shrink-0">
+          <svg viewBox="0 0 42 42" class="w-56 h-56 sm:w-64 sm:h-64 lg:w-72 lg:h-72 -rotate-90 shrink-0">
             <circle cx="21" cy="21" r="15.915" fill="none" stroke="#1f2937" stroke-width="6"></circle>
             {% set ns = namespace(offset=0) %}
             {% for r in pie.data %}
@@ -481,7 +481,7 @@
       <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.dom.title') }}</h2>
       <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.dom.hint') }}</p>
       {% set dom_max = (by_day_of_month | map(attribute='spend') | max) or 1 %}
-      <div class="grid grid-cols-31 gap-[2px] items-end h-32" style="grid-template-columns: repeat(31, minmax(0, 1fr));">
+      <div class="grid grid-cols-31 gap-[2px] items-end h-48 sm:h-56" style="grid-template-columns: repeat(31, minmax(0, 1fr));">
         {% for r in by_day_of_month %}
           <div class="flex flex-col items-center justify-end h-full group">
             <div class="w-full bg-amber-500/40 hover:bg-amber-500/80 rounded-t transition"
@@ -566,7 +566,7 @@
     {% set bh_range = (bh_max - bh_min) if bh_max != bh_min else 1 %}
     {% set acct_palette = ['#34d399','#60a5fa','#fbbf24','#f87171','#a78bfa'] %}
     {% set acct_ids = balance_history | map(attribute='account_id') | unique | list %}
-    <svg viewBox="0 0 1000 200" class="w-full h-48" preserveAspectRatio="none">
+    <svg viewBox="0 0 1000 200" class="w-full h-64 sm:h-80" preserveAspectRatio="none">
       <!-- zero line if range crosses zero -->
       {% if bh_min < 0 < bh_max %}
         {% set zero_y = 200 - ((0 - bh_min) / bh_range * 180) - 10 %}

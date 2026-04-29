@@ -2,6 +2,23 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.16.2] – 2026-04-29
+
+### Fixed — chart cards now have proportional height
+
+After 0.16.1 widened `/finance` to `max-w-screen-2xl` the chart
+cards looked stretched: lots of horizontal space, the same modest
+vertical extent as before. Heights now scale with the larger
+canvas:
+
+- Heatmap rows: 18 px → 28 px per cell. Year mode in particular
+  benefits from the taller squares.
+- Cashflow chart: h-48 → h-64 / sm:h-80.
+- Category-trend stacked bars: h-56 → h-72 / sm:h-80.
+- Day-of-month bars: h-32 → h-48 / sm:h-56.
+- Balance trajectory SVG: h-48 → h-64 / sm:h-80.
+- Donut charts: w-48 → w-56 / sm:w-64 / lg:w-72.
+
 ## [0.16.1] – 2026-04-29
 
 ### Added — one-click statement backfill from the web UI
