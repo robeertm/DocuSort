@@ -310,6 +310,27 @@ class Database:
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_deleted ON documents(deleted_at)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_subcat  ON documents(subcategory)")
 
+        # One-shot cleanup: drop statements / receipts rows whose document
+        # has been re-classified away from Kontoauszug / Kassenzettel.
+        # Earlier versions left these orphans behind, which kept showing
+        # the doc in the /finance "needs review" banner forever. After
+        # 0.15.1 the cleanup runs inline on every metadata edit, so this
+        # only ever does work on the first launch after upgrade.
+        orphan_stmts = self._conn.execute(
+            """DELETE FROM statements
+               WHERE doc_id IN (SELECT id FROM documents WHERE category != 'Kontoauszug')"""
+        ).rowcount
+        orphan_recs = self._conn.execute(
+            """DELETE FROM receipts
+               WHERE doc_id IN (SELECT id FROM documents WHERE category != 'Kassenzettel')"""
+        ).rowcount
+        if orphan_stmts or orphan_recs:
+            logger.info(
+                "DB migration: removed %d orphan statement(s) and %d orphan receipt(s) "
+                "left over from earlier versions (re-classified docs)",
+                orphan_stmts, orphan_recs,
+            )
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -419,6 +440,20 @@ class Database:
                  doc_date, sender, subject, filename,
                  library_path, status, doc_id),
             )
+            # If the user re-classified a doc away from Kontoauszug /
+            # Kassenzettel, drop the corresponding extractor row so the
+            # /finance "needs review" banner and the receipts dashboard
+            # don't keep flagging an orphan that no longer belongs to
+            # them. ON DELETE CASCADE on transactions / receipt_items
+            # cleans up the children.
+            if category != "Kontoauszug":
+                self._conn.execute(
+                    "DELETE FROM statements WHERE doc_id = ?", (doc_id,)
+                )
+            if category != "Kassenzettel":
+                self._conn.execute(
+                    "DELETE FROM receipts WHERE doc_id = ?", (doc_id,)
+                )
 
     def get(self, doc_id: int) -> dict[str, Any] | None:
         with self._lock:

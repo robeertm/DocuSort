@@ -2,6 +2,39 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.15.1] – 2026-04-29
+
+### Fixed — stuck "needs review" banner on `/finance`
+
+A document that was first classified as `Kontoauszug` and later
+re-classified by the user kept showing up in the diagnostics banner
+forever. The statement row was orphaned because the category change
+on the document detail page didn't cascade to the `statements` table,
+and the banner query didn't filter by category, so any leftover row
+kept being flagged.
+
+- `update_metadata` now drops the `statements` row when a document is
+  moved away from `Kontoauszug` (and the same for `receipts` when
+  moved away from `Kassenzettel`). The transaction / item children
+  cascade automatically.
+- Both diagnostic queries (the `/finance` banner and the
+  `/api/finance/diagnostics` endpoint) now filter by
+  `documents.category = 'Kontoauszug'` so a stale row alone can no
+  longer keep the banner alive.
+- A one-shot cleanup runs on startup that deletes any orphan
+  `statements` / `receipts` rows left behind by earlier versions, so
+  upgrading to this release clears the banner without manual work.
+
+### Changed — `/finance` diagnostics banner self-updates
+
+The banner used to require a full page reload after re-extracting or
+fixing a stuck document. It now lives in an Alpine component that
+re-fetches `/api/finance/diagnostics` after the user clicks
+"re-extract" and on a 30-second background poll. When the list of
+empty statements becomes empty, the banner hides itself; when a new
+empty appears (because the watcher just classified one in another
+tab), it surfaces without a reload.
+
 ## [0.15.0] – 2026-04-29
 
 ### Changed — pseudonymisation now covers every cloud AI call

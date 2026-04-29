@@ -35,34 +35,37 @@
     {% endif %}
   </div>
 
-  <!-- Coverage / diagnostics banner — empty statements get called out -->
-  {% if empty_statements %}
+  <!-- Coverage / diagnostics banner — empty statements get called out.
+       Always present in the DOM so the Alpine component can show/hide
+       it as the underlying state changes (re-extract, manual fix-up,
+       background polling). -->
   <div class="card p-4 mb-6 border-amber-500/30 bg-amber-500/5"
-       x-data="financeDiag()">
+       x-data='financeDiag({{ empty_statements | tojson }}, {{ kontoauszug_total | tojson }})'
+       x-show="items.length > 0"
+       x-cloak>
     <div class="flex items-start gap-3">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-amber-300 shrink-0 mt-0.5">
         <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
       </svg>
       <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium">
-          {{ t('finance.diag.title')
-              .replace('{empty}', empty_statements | length | string)
-              .replace('{total}', kontoauszug_total | string) }}
-        </div>
+        <div class="text-sm font-medium"
+             x-text="(T['finance.diag.title'] || 'Some statements need review')
+                       .replace('{empty}', items.length)
+                       .replace('{total}', total)"></div>
         <p class="text-xs text-ink-400 mt-1">{{ t('finance.diag.hint') }}</p>
         <details class="mt-2">
           <summary class="cursor-pointer text-xs text-ink-300 hover:text-ink-100 select-none">
             {{ t('finance.diag.show_list') }}
           </summary>
           <ul class="mt-2 space-y-0.5 text-xs">
-            {% for s in empty_statements %}
+            <template x-for="s in items" :key="s.doc_id">
               <li class="flex items-baseline gap-2">
-                <span class="text-ink-500 tabular-nums">{{ s.doc_date or '—' }}</span>
-                <a href="/document/{{ s.doc_id }}" class="text-ink-200 hover:text-emerald-300 truncate">
-                  {{ s.subject or 'doc ' ~ s.doc_id }}
-                </a>
+                <span class="text-ink-500 tabular-nums" x-text="s.doc_date || '—'"></span>
+                <a :href="'/document/' + s.doc_id"
+                   class="text-ink-200 hover:text-emerald-300 truncate"
+                   x-text="s.subject || ('doc ' + s.doc_id)"></a>
               </li>
-            {% endfor %}
+            </template>
           </ul>
         </details>
       </div>
@@ -75,7 +78,6 @@
          :class="resultOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
          x-text="result"></div>
   </div>
-  {% endif %}
 
   {% if summary.statement_count == 0 %}
     <div class="card p-10 text-center">
@@ -704,9 +706,27 @@
 <script>
 function financePage() { return {}; }
 
-function financeDiag() {
+function financeDiag(initialItems, initialTotal) {
   return {
+    items: initialItems || [],
+    total: initialTotal || 0,
     busy: false, result: '', resultOk: false,
+    pollHandle: null,
+    init() {
+      // Light background polling so the banner reflects state changes
+      // from other tabs / the watcher / a re-classification done on
+      // the document detail page — without forcing the user to reload.
+      this.pollHandle = setInterval(() => this.refresh(), 30000);
+    },
+    async refresh() {
+      try {
+        const r = await fetch('/api/finance/diagnostics');
+        if (!r.ok) return;
+        const d = await r.json();
+        this.items = d.without_transactions || [];
+        this.total = d.kontoauszug_docs || 0;
+      } catch (e) { /* ignore — next poll will retry */ }
+    },
     async reextract() {
       this.busy = true; this.result = '';
       try {
@@ -718,7 +738,7 @@ function financeDiag() {
           .replace('{recovered}', d.recovered.length)
           .replace('{found}', d.found)
           .replace('{still}', d.still_empty.length);
-        setTimeout(() => location.reload(), 1500);
+        await this.refresh();
       } catch (e) {
         this.resultOk = false;
         this.result = e.message || String(e);

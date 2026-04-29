@@ -690,6 +690,7 @@ def create_app(
                    JOIN documents d ON d.id = s.doc_id
                    LEFT JOIN accounts a ON a.id = s.account_id
                    WHERE d.deleted_at IS NULL
+                     AND d.category = 'Kontoauszug'
                      AND s.id NOT IN (SELECT statement_id FROM transactions)
                    ORDER BY d.doc_date DESC, d.id DESC
                    LIMIT 20"""
@@ -748,6 +749,7 @@ def create_app(
                    JOIN documents d ON d.id = s.doc_id
                    LEFT JOIN accounts a ON a.id = s.account_id
                    WHERE d.deleted_at IS NULL
+                     AND d.category = 'Kontoauszug'
                      AND s.id NOT IN (SELECT statement_id FROM transactions)
                    ORDER BY d.doc_date DESC, d.id DESC"""
             ).fetchall()
