@@ -2,6 +2,34 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.17.1] – 2026-04-29
+
+### Fixed — /finance layout regressions
+
+The 0.16.1 / 0.16.2 chart upgrades introduced four cosmetic bugs:
+
+- **Page width** — `/finance` was wider than `/` (Dashboard); both
+  now share `max-w-6xl`, so the dashboard / finance / library look
+  consistent again.
+- **Donut charts** — the SVG was rotated `-90°` to make slices
+  start at 12 o'clock, but that also tipped the centre total +
+  legend on their side. Replaced with an SVG `<g
+  transform="rotate(-90 21 21)">` group so only the slice circles
+  rotate; the centre text stays upright. Legend stacks under the
+  donut on narrow screens and sits beside it on `sm:` and up
+  without overlapping.
+- **Categories over time** — full-history default produced
+  hair-thin bars on accounts with several years of bookings. Now
+  defaults to the most-recent 12 months that contain data; the
+  range dropdowns still let users open it back to the full range.
+  Bars also get a 36 px minimum width and 8 px gap so they read.
+- **Heatmap defaults / layout** — picked the chronologically
+  latest year, which is often a single end-of-year statement and
+  looks empty. Defaults now to the year with the **most** bookings.
+  Cells are also no longer locked to a fixed pixel width, so the
+  grid actually fills the card instead of overflowing horizontally
+  when the card is narrower than the calendar.
+
 ## [0.17.0] – 2026-04-29
 
 ### Added — light / dark mode toggle

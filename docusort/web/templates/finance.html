@@ -1,9 +1,5 @@
 {% extends "base.html" %}
 {% block title %}{{ t('finance.title') }} · DocuSort{% endblock %}
-{# Wider main wrapper for /finance — the dashboard packs eight charts and
-   benefits from the extra real estate on large screens. Other pages stay
-   on the original max-w-6xl. #}
-{% block main_class %}mx-auto max-w-screen-2xl px-4 py-6 sm:py-10{% endblock %}
 {% block content %}
 
 <div x-data="financePage()">
@@ -268,8 +264,8 @@
     </div>
     {% if heatmap_grid.weeks %}
     <div class="overflow-x-auto -mx-2 px-2">
-      <div class="inline-grid gap-[4px] text-[10px] text-ink-500 w-full"
-           style="grid-template-columns: 32px repeat({{ heatmap_grid.weeks | length }}, minmax(18px, 1fr)); grid-template-rows: 16px repeat(7, 28px); min-width: {{ 32 + heatmap_grid.weeks | length * 22 }}px;">
+      <div class="grid gap-[4px] text-[10px] text-ink-500 w-full"
+           style="grid-template-columns: 32px repeat({{ heatmap_grid.weeks | length }}, minmax(0, 1fr)); grid-auto-rows: 22px; min-width: {{ 32 + heatmap_grid.weeks | length * 14 }}px;">
         <!-- empty top-left cell + week labels (sparse: every 4th week) -->
         <div></div>
         {% for w in heatmap_grid.weeks %}
@@ -349,12 +345,12 @@
     {% set palette  = ['bg-emerald-500/70','bg-sky-500/70','bg-amber-500/70','bg-rose-500/70','bg-violet-500/70','bg-teal-500/70','bg-ink-600/70'] %}
     {% set max_total = cat_monthly.max_total %}
     {% set bar_count = cat_monthly.matrix | length %}
-    <div class="overflow-x-auto">
-      <div class="flex gap-1 items-end h-72 sm:h-80 min-w-full"
-           style="min-width: {{ bar_count * 28 }}px;">
+    <div class="overflow-x-auto -mx-1 px-1">
+      <div class="flex gap-2 items-end h-72 sm:h-80"
+           style="min-width: max({{ bar_count * 44 }}px, 100%);">
         {% for row in cat_monthly.matrix %}
           {% set month_total = row['values'] | sum %}
-          <div class="flex flex-col group flex-1 min-w-[20px]" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
+          <div class="flex flex-col group flex-1 min-w-[36px]" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
             <div class="flex-1 flex flex-col-reverse w-full" style="min-height: 0;">
               {% for c_idx in range(top_cats|length) %}
                 {% set v = row['values'][c_idx] %}
@@ -407,40 +403,42 @@
       <div class="card p-5">
         <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ pie.title }}</h2>
         {% set total = pie.data | map(attribute='total') | sum %}
-        <div class="flex items-center gap-5 flex-wrap">
-          {# SVG donut: each slice is a stroke-dasharray segment around a single circle. #}
-          <svg viewBox="0 0 42 42" class="w-56 h-56 sm:w-64 sm:h-64 lg:w-72 lg:h-72 -rotate-90 shrink-0">
-            <circle cx="21" cy="21" r="15.915" fill="none" stroke="#1f2937" stroke-width="6"></circle>
-            {% set ns = namespace(offset=0) %}
-            {% for r in pie.data %}
-              {% set pct = (r.total / total * 100) if total > 0 else 0 %}
-              {% if pct > 0 %}
-              <circle cx="21" cy="21" r="15.915" fill="none"
-                      stroke="{{ pie_palette[loop.index0 % (pie_palette|length)] }}"
-                      stroke-width="6"
-                      stroke-dasharray="{{ '%.3f'|format(pct) }} {{ '%.3f'|format(100 - pct) }}"
-                      stroke-dashoffset="{{ '%.3f'|format(-ns.offset) }}">
-                <title>{{ t('finance.cat.' + r.category) }} · {{ '%.0f'|format(r.total) }} € · {{ '%.1f'|format(pct) }}%</title>
-              </circle>
-              {% set ns.offset = ns.offset + pct %}
-              {% endif %}
-            {% endfor %}
+        <div class="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+          {# SVG donut. The whole canvas stays upright; we rotate ONLY the
+             slice circles via an SVG <g transform="rotate(-90 21 21)"> so
+             segments start at 12 o'clock. The center text stays readable. #}
+          <svg viewBox="0 0 42 42" class="w-44 h-44 sm:w-52 sm:h-52 shrink-0">
+            <g transform="rotate(-90 21 21)">
+              <circle cx="21" cy="21" r="15.915" fill="none" stroke="#1f2937" stroke-width="6"></circle>
+              {% set ns = namespace(offset=0) %}
+              {% for r in pie.data %}
+                {% set pct = (r.total / total * 100) if total > 0 else 0 %}
+                {% if pct > 0 %}
+                <circle cx="21" cy="21" r="15.915" fill="none"
+                        stroke="{{ pie_palette[loop.index0 % (pie_palette|length)] }}"
+                        stroke-width="6"
+                        stroke-dasharray="{{ '%.3f'|format(pct) }} {{ '%.3f'|format(100 - pct) }}"
+                        stroke-dashoffset="{{ '%.3f'|format(-ns.offset) }}">
+                  <title>{{ t('finance.cat.' + r.category) }} · {{ '%.0f'|format(r.total) }} € · {{ '%.1f'|format(pct) }}%</title>
+                </circle>
+                {% set ns.offset = ns.offset + pct %}
+                {% endif %}
+              {% endfor %}
+            </g>
             <text x="21" y="20" text-anchor="middle" dominant-baseline="middle"
-                  class="rotate-90" style="transform-origin: 21px 21px"
-                  fill="currentColor" font-size="4" font-weight="600">{{ "%.0f"|format(total) }}</text>
-            <text x="21" y="25" text-anchor="middle" dominant-baseline="middle"
-                  class="rotate-90" style="transform-origin: 21px 21px"
+                  fill="currentColor" font-size="4.5" font-weight="600">{{ "%.0f"|format(total) }}</text>
+            <text x="21" y="26" text-anchor="middle" dominant-baseline="middle"
                   fill="#9ca3af" font-size="2.5">€</text>
           </svg>
-          <ul class="flex-1 min-w-0 space-y-1 text-xs">
+          <ul class="flex-1 min-w-0 w-full space-y-1.5 text-xs">
             {% for r in pie.data %}
               <li class="flex items-center gap-2">
                 <span class="inline-block h-3 w-3 rounded-sm shrink-0"
                       style="background-color: {{ pie_palette[loop.index0 % (pie_palette|length)] }}"></span>
-                <span class="truncate">{{ t('finance.cat.' + r.category) }}</span>
-                <span class="ml-auto tabular-nums text-ink-500">{{ "%.0f"|format(r.total) }} €</span>
+                <span class="truncate min-w-0 flex-1">{{ t('finance.cat.' + r.category) }}</span>
+                <span class="tabular-nums text-ink-300 shrink-0">{{ "%.0f"|format(r.total) }} €</span>
                 {% if total > 0 %}
-                  <span class="text-[10px] tabular-nums text-ink-600 w-10 text-right">{{ "%.1f"|format(r.total / total * 100) }}%</span>
+                  <span class="text-[10px] tabular-nums text-ink-500 w-10 text-right shrink-0">{{ "%.1f"|format(r.total / total * 100) }}%</span>
                 {% endif %}
               </li>
             {% endfor %}

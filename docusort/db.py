@@ -1353,16 +1353,22 @@ class Database:
                 "days": [dict(r) for r in rows],
             }
 
-        # Year mode (default to latest year with data when none given).
+        # Year mode (default to the year with the MOST bookings — the
+        # chronologically-latest year is often a single end-of-year
+        # statement and looks empty in the grid).
         if not year:
             with self._lock:
                 row = self._conn.execute(
-                    """SELECT substr(MAX(t.booking_date), 1, 4) AS y
+                    """SELECT substr(t.booking_date, 1, 4) AS y, COUNT(*) AS n
                        FROM transactions t
                        JOIN statements s ON s.id = t.statement_id
                        JOIN documents  d ON d.id = s.doc_id
                        WHERE d.deleted_at IS NULL
-                         AND t.booking_date IS NOT NULL AND t.booking_date != ''"""
+                         AND t.category != 'uebertrag'
+                         AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                       GROUP BY y
+                       ORDER BY n DESC
+                       LIMIT 1"""
                 ).fetchone()
             year = (row["y"] if row else None) or ""
         if not year:

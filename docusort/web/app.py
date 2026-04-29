@@ -610,6 +610,16 @@ def create_app(
             start=start, end=end, query=q, limit=200,
         )
         periods = db.finance_available_periods()
+        # If the user hasn't explicitly picked a range for the category-
+        # trend chart, default to the most recent 12 months that actually
+        # contain bookings — full-history bars get too narrow to read on
+        # accounts with several years of data, but the user can still
+        # open the range to "all" via the dropdown.
+        if not cat_start and not cat_end and periods.get("months"):
+            visible_months = periods["months"][:12]
+            if visible_months:
+                cat_start = visible_months[-1]
+                cat_end   = visible_months[0]
         # Charts data — only computed when there's actually something
         # to plot, otherwise the empty-state card on /finance covers it.
         heatmap_grid: dict[str, Any] = {
