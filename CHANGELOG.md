@@ -2,6 +2,28 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.18.1] – 2026-04-29
+
+### Fixed — bank statements classified as `Bank` were silently skipped
+
+The pipeline only triggered statement extraction when the classifier
+picked `category = Kontoauszug`. PDFs that the classifier filed under
+the legacy `Bank` category (subcategory Konto / Karte, or subject
+mentioning Kontoauszug / Girokonto / Tagesgeld / Kreditkarte) sat
+unprocessed — no extraction, no banner, nothing in `/finance`.
+A user could upload thirty statements and only the half that the
+classifier happened to label `Kontoauszug` would show up.
+
+The watcher now mirrors the heuristic that `backfill_statements`
+already uses: if the doc looks like a statement by subject /
+subcategory cue, extraction runs anyway. After successful extraction
+the doc gets promoted to `category = Kontoauszug` so /finance and the
+diagnostics banner pick it up alongside everything else.
+
+A one-shot recovery for installs that already have the orphaned
+`Bank`-category docs: hit `POST /api/finance/backfill-statements`
+(idempotent, deduplicated by `tx_hash`).
+
 ## [0.18.0] – 2026-04-29
 
 ### Added — live progress for the bulk approve-pending run

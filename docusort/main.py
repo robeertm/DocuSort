@@ -223,7 +223,27 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         # holder names before sending text to a cloud provider. Users
         # who flipped finance.local_only get statement extraction skipped
         # if the active provider isn't local.
-        if cls.category == "Kontoauszug" and ocr_res.text:
+        #
+        # Also catch the case where the classifier picked the legacy
+        # `Bank` category for what is clearly a statement (the subject
+        # mentions Kontoauszug / Girokonto / Tagesgeld / Kreditkarte,
+        # or the subcategory says Konto / Karte). Without this branch
+        # those docs sit unprocessed in /finance — same path as the
+        # heuristic in `backfill_statements`. After successful
+        # extraction we promote the doc to category=Kontoauszug so
+        # /finance picks it up everywhere else, mirroring the backfill.
+        is_bank_statement_lookalike = False
+        if cls.category == "Bank" and ocr_res.text:
+            subj_l = (cls.subject or "").lower()
+            sub_l  = (cls.subcategory or "").lower()
+            if (sub_l in ("konto", "karte")
+                    or "kontoauszug" in subj_l
+                    or "girokonto"   in subj_l
+                    or "tagesgeld"   in subj_l
+                    or "kreditkart"  in subj_l):
+                is_bank_statement_lookalike = True
+
+        if (cls.category == "Kontoauszug" or is_bank_statement_lookalike) and ocr_res.text:
             local_providers = ("openai_compat",)
             is_local = settings.ai.provider in local_providers
             if settings.finance.local_only and not is_local:
@@ -312,6 +332,18 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                         transactions=tx_payload,
                         extra_json=stmt.raw_response,
                     )
+                    # If the doc was filed under the legacy `Bank`
+                    # category but the extractor actually pulled
+                    # transactions, promote it to `Kontoauszug` so
+                    # /finance and the diagnostics banner pick it up
+                    # alongside everything else.
+                    if is_bank_statement_lookalike and stmt.transactions:
+                        with db._lock:
+                            db._conn.execute(
+                                "UPDATE documents SET category = 'Kontoauszug', "
+                                "subcategory = '' WHERE id = ?",
+                                (doc_id,),
+                            )
                     log.info(
                         "Statement extracted for %s: bank=%s period=%s..%s tx=%d privacy=%s",
                         target.name, stmt.bank_name, stmt.period_start,
