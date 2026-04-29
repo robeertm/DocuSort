@@ -2,6 +2,50 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.18.0] – 2026-04-29
+
+### Added — live progress for the bulk approve-pending run
+
+The "Alle freigeben" button used to block one HTTP request for the
+entire run. With twenty pending statements the user saw "Verarbeite…"
+for several minutes with no signal whether the AI was actually
+working. The bulk run now lives in a background thread:
+
+- `POST /api/finance/approve-all-pending` returns immediately with a
+  job descriptor.
+- `GET /api/finance/approve-progress` returns the live state
+  (`running`, `total`, `done`, `current`, `approved`, `failed`).
+- The pending banner on `/finance` polls the progress endpoint while
+  a run is active. It shows "Sende Auszug 5 von 12", the current
+  document subject, a progress bar, and a list of failed statements
+  with their errors once the run finishes. Hard errors (rate-limit,
+  spending-cap, 5xx) stop the loop early so we don't burn through
+  more LLM calls against the same wall.
+
+### Added — global AI-activity indicator in the header
+
+A small dot next to the language picker pulses green while any LLM
+call is in flight or a bulk job is running, and stays grey when the
+pipeline is idle. Click it for a popover with the in-flight call
+count, the pending-or-processing document count, the running bulk
+job's "X / Y" position, and how long ago the last LLM call returned.
+Polls `/api/activity` every 3 seconds.
+
+### Fixed — diagnostic banner counted orphan statements
+
+The `statements_extracted` figure on `/api/finance/diagnostics`
+included rows whose document had been re-classified away from
+`Kontoauszug`, so the count could exceed `kontoauszug_docs` by a few
+stragglers. The query now joins on the doc's current category, so
+the two figures line up again.
+
+### Changed — diagnostic banner wording
+
+"{empty} von {total} Kontoauszügen ohne Buchungen erkannt" parsed
+as "{total} have no bookings" at first glance. Reworded to "{empty}
+Kontoauszug ohne erkannte Buchungen (von {total} insgesamt)" so it
+reads as the success report it really is.
+
 ## [0.17.2] – 2026-04-29
 
 ### Added — updater survives GitHub rate-limits

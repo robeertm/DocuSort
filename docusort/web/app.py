@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -818,7 +819,8 @@ def create_app(
             statements_total = db._conn.execute(
                 """SELECT COUNT(*) FROM statements s
                    JOIN documents d ON d.id = s.doc_id
-                   WHERE d.deleted_at IS NULL"""
+                   WHERE d.deleted_at IS NULL
+                     AND d.category = 'Kontoauszug'"""
             ).fetchone()[0]
         return {
             "kontoauszug_docs":       int(kontoauszug_total),
@@ -1230,39 +1232,96 @@ def create_app(
 
     @app.post("/api/finance/approve-all-pending")
     def api_approve_all_pending():
-        """Bulk-release every Kontoauszug currently in the review
-        queue: runs the extractor for each. Stops on the first failure
-        so the user can investigate before more LLM calls are billed."""
+        """Bulk-release every Kontoauszug currently in the review queue.
+        Returns immediately with a job descriptor; the actual extraction
+        runs in a background thread. Poll /api/finance/approve-progress
+        to follow along."""
         if classifier is None:
             raise HTTPException(503, "classifier not available — finish /setup first")
+        from .. import activity
+        existing = activity.get_job("approve-pending")
+        if existing.running:
+            return {
+                "started": False, "reason": "already running",
+                **existing.as_dict(),
+            }
         with db._lock:
             rows = db._conn.execute(
-                """SELECT id FROM documents
+                """SELECT id, COALESCE(subject, filename) AS subject FROM documents
                    WHERE status = 'pending_review' AND deleted_at IS NULL
                      AND category = 'Kontoauszug'
                    ORDER BY created_at ASC"""
             ).fetchall()
-        approved: list[int] = []
-        failed: list[dict] = []
-        import time as _time
-        for idx, row in enumerate(rows):
-            doc_id = int(row["id"])
-            if idx > 0:
-                _time.sleep(1.5)   # rate-limit pacing
-            try:
-                api_extract_statement(doc_id)
-                approved.append(doc_id)
-            except HTTPException as exc:
-                failed.append({"doc_id": doc_id, "error": exc.detail})
-                break
-            except Exception as exc:
-                failed.append({"doc_id": doc_id, "error": str(exc)})
-                break
-        return {
-            "found":    len(rows),
-            "approved": approved,
-            "failed":   failed,
-        }
+        if not rows:
+            return {"started": False, "reason": "queue empty",
+                    "total": 0, "approved": [], "failed": []}
+
+        doc_ids = [(int(r["id"]), r["subject"] or f"doc {r['id']}") for r in rows]
+        activity.start_job("approve-pending", total=len(doc_ids))
+
+        def worker():
+            import time as _time
+            for idx, (doc_id, subject) in enumerate(doc_ids):
+                # Re-read the latest state in case the user navigated
+                # away and triggered a stop, or the doc got deleted.
+                if idx > 0:
+                    _time.sleep(1.5)   # rate-limit pacing
+                activity.update_job(
+                    "approve-pending",
+                    current=str(subject)[:120], current_doc_id=doc_id,
+                )
+                try:
+                    api_extract_statement(doc_id)
+                    job = activity.get_job("approve-pending")
+                    job.approved.append(doc_id)
+                    activity.update_job("approve-pending", done=idx + 1)
+                except HTTPException as exc:
+                    job = activity.get_job("approve-pending")
+                    job.failed.append({"doc_id": doc_id, "error": str(exc.detail)})
+                    activity.update_job(
+                        "approve-pending", done=idx + 1,
+                        last_error=str(exc.detail),
+                    )
+                    # Stop on hard errors (rate limit, spending cap) so
+                    # we don't burn through more docs against the same wall.
+                    if exc.status_code in (429, 503, 403):
+                        break
+                except Exception as exc:
+                    job = activity.get_job("approve-pending")
+                    job.failed.append({"doc_id": doc_id, "error": str(exc)})
+                    activity.update_job(
+                        "approve-pending", done=idx + 1, last_error=str(exc),
+                    )
+            activity.finish_job("approve-pending", current="")
+
+        threading.Thread(target=worker, name="approve-pending",
+                         daemon=True).start()
+        snapshot = activity.get_job("approve-pending").as_dict()
+        return {"started": True, **snapshot}
+
+    @app.get("/api/finance/approve-progress")
+    def api_approve_progress():
+        """Live progress of the currently-running (or last completed)
+        approve-pending job — drives the live progress bar in the UI."""
+        from .. import activity
+        return activity.get_job("approve-pending").as_dict()
+
+    @app.get("/api/activity")
+    def api_activity():
+        """Global AI-activity snapshot used by the header indicator.
+        Returns the in-flight provider-call counter, the timestamp of
+        the most-recent provider call, and the current state of every
+        named background job."""
+        from .. import activity
+        snap = activity.snapshot()
+        with db._lock:
+            queue = db._conn.execute(
+                """SELECT COUNT(*) FROM documents
+                   WHERE deleted_at IS NULL
+                     AND status IN ('pending_review','processing')"""
+            ).fetchone()[0]
+        snap["pending_or_processing"] = int(queue or 0)
+        return snap
 
     # ---------- Bulk operations ----------
     @app.post("/api/bulk/delete")

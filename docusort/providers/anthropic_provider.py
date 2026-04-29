@@ -35,6 +35,21 @@ class AnthropicProvider(Provider):
                  timeout: float | None = None) -> ProviderResponse:
         # Late import so the type can be referenced even when handling errors.
         from anthropic import RateLimitError, APIStatusError
+        from .. import activity
+        activity.begin_call()
+        try:
+            return self._classify_impl(
+                system_prompt=system_prompt, user_prompt=user_prompt,
+                model=model, max_output_tokens=max_output_tokens,
+                timeout=timeout, RateLimitError=RateLimitError,
+                APIStatusError=APIStatusError,
+            )
+        finally:
+            activity.end_call()
+
+    def _classify_impl(self, *, system_prompt, user_prompt, model,
+                       max_output_tokens, timeout,
+                       RateLimitError, APIStatusError) -> ProviderResponse:
 
         # Per-request timeout overrides the client default. Long
         # extractions (many transactions, big output budget) push past

@@ -160,6 +160,50 @@
       <span class="hidden md:inline">{{ t('nav.settings') }}</span>
     </a>
 
+    <!-- AI activity indicator — pulses while an LLM call is in flight or a
+         bulk job is running, idle dot when nothing is happening. Polls every
+         3 s while idle, every 1.5 s while active so users never wonder "is
+         the model still working?". -->
+    <div x-data="aiActivity()" x-init="start()" @click.outside="open = false"
+         class="relative">
+      <button type="button" @click="open = !open"
+              class="btn-ghost !px-2"
+              :title="active ? (T['nav.ai_active'] || 'AI is processing') : (T['nav.ai_idle'] || 'AI idle')">
+        <span class="relative inline-flex h-3 w-3 items-center justify-center">
+          <span x-show="active" x-cloak
+                class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping"></span>
+          <span class="relative inline-flex h-2 w-2 rounded-full"
+                :class="active ? 'bg-emerald-400' : 'bg-ink-600'"></span>
+        </span>
+        <span x-show="active" x-cloak class="text-[11px] tabular-nums text-emerald-200/80"
+              x-text="(T['nav.ai_label_short'] || '{n} active').replace('{n}', total)"></span>
+      </button>
+      <div x-show="open" x-cloak x-transition.opacity
+           class="absolute right-0 mt-2 w-72 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30 p-3 text-xs">
+        <div class="font-medium text-sm mb-1"
+             x-text="active ? (T['nav.ai_active'] || 'AI is processing') : (T['nav.ai_idle'] || 'AI idle')"></div>
+        <div class="text-ink-400 space-y-1">
+          <div>
+            <span class="text-ink-500">{{ t('nav.ai_in_flight') }}:</span>
+            <span x-text="snap.in_flight || 0" class="tabular-nums"></span>
+          </div>
+          <div>
+            <span class="text-ink-500">{{ t('nav.ai_pending') }}:</span>
+            <span x-text="snap.pending_or_processing || 0" class="tabular-nums"></span>
+          </div>
+          <div x-show="approveJob && approveJob.running" x-cloak>
+            <span class="text-ink-500">{{ t('nav.ai_bulk_job') }}:</span>
+            <span class="tabular-nums"
+                  x-text="(approveJob.done || 0) + ' / ' + (approveJob.total || 0)"></span>
+          </div>
+          <div x-show="snap.last_call_at" x-cloak>
+            <span class="text-ink-500">{{ t('nav.ai_last_call') }}:</span>
+            <span x-text="lastCallLabel"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- theme toggle -->
     <button type="button"
             x-data="{
@@ -319,6 +363,48 @@ async function switchLang(code) {
   await fetch('/api/language/' + encodeURIComponent(code), { method: 'POST' });
   location.reload();
 }
+
+function aiActivity() {
+  return {
+    open: false,
+    snap: { in_flight: 0, last_call_at: 0, pending_or_processing: 0, jobs: {} },
+    handle: null,
+    start() {
+      this.tick();
+      // Poll cadence: tighter while something is in flight, looser
+      // while idle so we don't hit the API every second for nothing.
+      this.handle = setInterval(() => this.tick(), 3000);
+    },
+    async tick() {
+      try {
+        const r = await fetch('/api/activity');
+        if (!r.ok) return;
+        this.snap = await r.json();
+      } catch (e) { /* swallow */ }
+    },
+    get active() {
+      return (this.snap.in_flight || 0) > 0
+          || (this.approveJob && this.approveJob.running);
+    },
+    get total() {
+      const inflight = this.snap.in_flight || 0;
+      const job = this.approveJob;
+      const remaining = (job && job.running) ? Math.max(0, job.total - job.done) : 0;
+      return inflight + remaining;
+    },
+    get approveJob() { return (this.snap.jobs || {})['approve-pending']; },
+    get lastCallLabel() {
+      const t = this.snap.last_call_at;
+      if (!t) return '—';
+      const now = Date.now() / 1000;
+      const ds = Math.max(0, Math.round(now - t));
+      if (ds < 60)   return ds + ' s';
+      if (ds < 3600) return Math.round(ds / 60) + ' min';
+      return Math.round(ds / 3600) + ' h';
+    },
+  };
+}
+
 function updateBanner() {
   return {
     state: 'idle', info: {}, result: {}, error: '',
