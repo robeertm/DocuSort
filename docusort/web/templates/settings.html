@@ -23,6 +23,7 @@
       <option value="openai">OpenAI GPT</option>
       <option value="gemini">Google Gemini</option>
       <option value="openai_compat">{{ t('setup.provider.compat_label') }}</option>
+      <option value="bridge">Local AI Bridge (your Mac)</option>
     </select>
 
     <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.model') }}</label>
@@ -37,13 +38,21 @@
       </div>
     </template>
 
-    <template x-if="ai.provider !== 'openai_compat'">
+    <template x-if="ai.provider !== 'openai_compat' && ai.provider !== 'bridge'">
       <div class="mb-4">
         <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.api_key') }}</label>
         <div class="text-xs text-ink-500 mb-1" x-text="storedHint"></div>
         <input x-model="ai.api_key" type="password" autocomplete="off"
                :placeholder="storedKey ? T['settings.ai.key_keep'] : T['settings.ai.key_paste']"
                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+    </template>
+
+    <template x-if="ai.provider === 'bridge'">
+      <div class="rounded-lg bg-cyan-500/5 border border-cyan-500/20 p-3 text-xs text-cyan-100/90 mb-4">
+        Inference runs on a Mac you control. Configure the bridge in
+        the next section — once a Mac is connected, every classification
+        and statement extraction goes through it instead of a cloud API.
       </div>
     </template>
 
@@ -61,6 +70,89 @@
           <span x-show="!ai.saving">{{ t('settings.save') }}</span>
           <span x-show="ai.saving" x-cloak>{{ t('setup.saving') }}</span>
         </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Local AI Bridge ===== -->
+  <section class="card p-6" id="bridge" x-data="bridgeSettings()" x-init="init()">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+      <h2 class="text-lg font-semibold">Local AI Bridge</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full"
+            :class="status.connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+            x-text="status.connected ? 'connected' : 'offline'"></span>
+    </div>
+    <p class="text-ink-400 text-sm mb-5">
+      Run the AI on your Mac instead of a cloud API. The Mac connects to
+      this server outbound — no port forwarding, no firewall changes.
+      Every document classification and bank-statement extraction is
+      then processed locally.
+    </p>
+
+    <!-- Live status block -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5 text-sm">
+      <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3">
+        <div class="text-ink-500 text-xs uppercase tracking-wide mb-1">Client</div>
+        <div x-show="status.connected" class="font-mono text-xs leading-5 break-all">
+          <div><span class="text-ink-500">host:</span>     <span x-text="status.client.host || '—'"></span></div>
+          <div><span class="text-ink-500">platform:</span> <span x-text="status.client.platform || '—'"></span></div>
+          <div><span class="text-ink-500">model:</span>    <span x-text="status.client.model || '—'"></span></div>
+          <div><span class="text-ink-500">ollama:</span>   <span x-text="status.client.ollama || '—'"></span></div>
+        </div>
+        <div x-show="!status.connected" class="text-ink-400 text-xs">
+          No client connected yet. Run the one-liner below on your Mac.
+        </div>
+      </div>
+      <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3 text-xs">
+        <div class="text-ink-500 uppercase tracking-wide mb-1">Activity</div>
+        <div class="grid grid-cols-2 gap-y-1 font-mono">
+          <div class="text-ink-500">requests</div>
+          <div x-text="status.calls_total ?? 0" class="text-right tabular-nums"></div>
+          <div class="text-ink-500">failed</div>
+          <div :class="status.calls_failed > 0 ? 'text-rose-300' : ''"
+               x-text="status.calls_failed ?? 0" class="text-right tabular-nums"></div>
+          <div class="text-ink-500">tokens in</div>
+          <div x-text="status.tokens_in ?? 0" class="text-right tabular-nums"></div>
+          <div class="text-ink-500">tokens out</div>
+          <div x-text="status.tokens_out ?? 0" class="text-right tabular-nums"></div>
+          <div class="text-ink-500">pending</div>
+          <div x-text="status.pending ?? 0" class="text-right tabular-nums"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Token + one-liner install -->
+    <div class="space-y-3">
+      <label class="block text-sm font-medium">Bridge token</label>
+      <div class="flex flex-wrap gap-2 items-stretch">
+        <input :value="status.token || ''" readonly
+               class="flex-1 min-w-0 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-xs font-mono"
+               :type="showToken ? 'text' : 'password'">
+        <button type="button" @click="showToken = !showToken" class="btn-secondary text-sm"
+                x-text="showToken ? 'Hide' : 'Show'"></button>
+        <button type="button" @click="copyToken()" class="btn-secondary text-sm"
+                x-text="copied ? 'Copied!' : 'Copy'"></button>
+        <button type="button" @click="regenerate()"
+                class="btn-secondary text-sm text-rose-300 hover:text-rose-200">Regenerate</button>
+      </div>
+      <p class="text-xs text-ink-500">
+        Paste this token into the bridge client on your Mac. Regenerating
+        immediately disconnects any client still using the old token.
+      </p>
+
+      <div class="mt-5">
+        <label class="block text-sm font-medium mb-2">Run on your Mac</label>
+        <div class="rounded-xl bg-ink-950/80 border border-ink-700 p-3 font-mono text-[11px] leading-5 overflow-x-auto whitespace-pre-wrap break-all"
+             x-text="installCmd()"></div>
+        <div class="flex justify-end mt-2">
+          <button type="button" @click="copyInstall()" class="btn-secondary text-xs"
+                  x-text="installCopied ? 'Copied!' : 'Copy command'"></button>
+        </div>
+        <p class="text-xs text-ink-500 mt-2">
+          One terminal command on your Mac. The script auto-installs Ollama
+          (Homebrew or the official installer), pulls the model the first
+          time, and stays connected until you hit Ctrl-C.
+        </p>
       </div>
     </div>
   </section>
@@ -592,6 +684,66 @@ function settingsPage() {
       } finally {
         this.ai.saving = false;
       }
+    },
+  };
+}
+
+function bridgeSettings() {
+  return {
+    status:        { connected: false, client: {}, token: '',
+                     calls_total: 0, calls_failed: 0,
+                     tokens_in: 0, tokens_out: 0, pending: 0 },
+    showToken:     false,
+    copied:        false,
+    installCopied: false,
+    _timer:        null,
+
+    init() {
+      this.refresh();
+      this._timer = setInterval(() => this.refresh(), 4000);
+    },
+    async refresh() {
+      try {
+        const r = await fetch('/api/bridge/status');
+        if (!r.ok) return;
+        this.status = await r.json();
+      } catch (e) { /* keep last known state */ }
+    },
+    serverOrigin() {
+      return window.location.origin;
+    },
+    installCmd() {
+      const tok = (this.status.token || '<token>').replace(/'/g, "'\\''");
+      const srv = this.serverOrigin();
+      const insecure = window.location.protocol === 'https:' ? '--insecure' : '';
+      // The script is fetched from the server itself so the user does
+      // not need to know about GitHub. The same file ships with the
+      // running version, served at /static/scripts/.
+      return [
+        `curl -fsSL ${srv}/static/scripts/docusort_mac_bridge.py -o /tmp/docusort_mac_bridge.py && \\`,
+        `python3 /tmp/docusort_mac_bridge.py \\`,
+        `  --server ${srv} \\`,
+        `  --token  '${tok}'${insecure ? ' \\\n  ' + insecure : ''}`,
+      ].join('\n');
+    },
+    async copyToken() {
+      try { await navigator.clipboard.writeText(this.status.token || ''); }
+      catch (e) {}
+      this.copied = true;
+      setTimeout(() => this.copied = false, 1500);
+    },
+    async copyInstall() {
+      try { await navigator.clipboard.writeText(this.installCmd()); }
+      catch (e) {}
+      this.installCopied = true;
+      setTimeout(() => this.installCopied = false, 1500);
+    },
+    async regenerate() {
+      if (!confirm('Generate a new token? The currently-running client will be disconnected and will need the new token to reconnect.')) return;
+      try {
+        const r = await fetch('/api/bridge/regenerate-token', { method: 'POST' });
+        if (r.ok) { await this.refresh(); }
+      } catch (e) {}
     },
   };
 }

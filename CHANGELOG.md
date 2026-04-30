@@ -2,6 +2,44 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.19.0] – 2026-04-30
+
+### Added — Local AI Bridge: run inference on your Mac
+
+Brand-new way to keep document analysis fully on-prem when the
+DocuSort host (e.g. a Synology) cannot run a large language model
+itself. A Python script runs on a Mac, opens an outbound WebSocket to
+the DocuSort server, and answers every classify/extract request from
+that connection. No port forwarding, no firewall rules, no Tailscale
+ACLs to chase — the only thing that has to reach anything is the Mac
+reaching the server, which the user already does in a browser.
+
+Pieces:
+
+- New provider `bridge` selectable under Settings → AI provider.
+- New `Local AI Bridge` settings card showing live connection status,
+  the active client's model and platform, request/token counters,
+  the shared-secret token (with regenerate), and a copy-paste
+  one-liner that downloads the bridge script from this server and
+  starts it on the Mac.
+- WebSocket endpoint `/api/llm-bridge/ws` with constant-time token
+  comparison; a single connected client at a time, replaced cleanly
+  on reconnect.
+- Mac client script `docusort_mac_bridge.py` (served at
+  `/static/scripts/docusort_mac_bridge.py`):
+    - Self-installs `websockets` on first run.
+    - Auto-installs Ollama (Homebrew if available, official installer
+      otherwise) and starts `ollama serve`.
+    - Auto-pulls the chosen model (default `qwen2.5:7b-instruct`).
+    - Reconnects with exponential backoff if the WebSocket drops.
+    - Reports back token counts so the dashboard still shows
+      something sensible (cost is reported as zero — local inference
+      has no per-token billing).
+
+The bridge is intentionally pluggable: any host that can run the
+script and reach an Ollama-compatible endpoint can serve as the
+inference node. The default Mac flow is the easy path.
+
 ## [0.18.7] – 2026-04-30
 
 ### Fixed — heatmap and category-trend rebuilt as SVG with inline hex fills

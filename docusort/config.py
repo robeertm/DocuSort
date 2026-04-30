@@ -326,4 +326,10 @@ def is_configured(settings: AppSettings | None = None) -> bool:
             return False
     if settings.ai.provider == "openai_compat":
         return bool(settings.ai.base_url)  # local needs a URL, not a key
+    if settings.ai.provider == "bridge":
+        # The bridge is always "configured" from the server's
+        # perspective: a token is auto-minted on first read. Whether a
+        # client is actually connected is a runtime question handled
+        # by the BridgeProvider itself.
+        return True
     return bool(get_api_key(settings))

@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -1655,12 +1655,14 @@ def create_app(
         if provider == "openai_compat" and not base_url:
             raise HTTPException(400, "openai_compat requires base_url")
         api_key = payload.get("api_key")  # may be empty if user doesn't change it
-        if provider != "openai_compat" and api_key is not None and not api_key.strip():
+        if provider not in ("openai_compat", "bridge") and api_key is not None and not api_key.strip():
             # Allow blank when there's already a key — either in secrets.yaml
             # or in the legacy environment variable (ANTHROPIC_API_KEY etc.).
             if not get_api_key(settings, provider):
                 raise HTTPException(400, "api_key required for this provider")
             api_key = None  # don't overwrite
+        if provider == "bridge":
+            api_key = None  # bridge does not use an API key at all
 
         settings_writer.update_ai(
             provider=provider, model=model, base_url=base_url,
@@ -1674,6 +1676,81 @@ def create_app(
         settings.ai.model    = model
         settings.ai.base_url = base_url
         return {"ok": True, "restart_required": True}
+
+    # ------------------------------------------------------------- Local AI Bridge
+    # The Mac client opens an outbound WebSocket to /api/llm-bridge/ws
+    # carrying a shared-secret token. Once attached, every classify
+    # call routed through the BridgeProvider goes through this socket
+    # and the answer comes back the same way. See docusort/bridge/.
+    @app.get("/api/bridge/status")
+    def api_bridge_status():
+        from ..bridge.server import get_bridge, get_or_create_token
+        bridge = get_bridge()
+        info   = bridge.info()
+        info["token"]      = get_or_create_token(settings.config_dir)
+        info["provider_active"] = settings.ai.provider == "bridge"
+        return info
+
+    @app.post("/api/bridge/regenerate-token")
+    def api_bridge_regenerate_token():
+        from ..bridge.server import get_bridge, regenerate_token
+        # Force-disconnect the active client too — its old token is no
+        # longer accepted, but it would happily keep its current socket
+        # open until the next reconnect attempt without this nudge.
+        bridge = get_bridge()
+        token  = regenerate_token(settings.config_dir)
+        try:
+            client = bridge._client  # noqa: SLF001  — singleton, we own it
+            loop   = bridge._loop    # noqa: SLF001
+        except Exception:
+            client = loop = None
+        if client is not None and loop is not None:
+            import asyncio
+            async def _kick():
+                try:
+                    await client.close(code=1000, reason="token regenerated")
+                except Exception:
+                    pass
+            try:
+                asyncio.run_coroutine_threadsafe(_kick(), loop)
+            except Exception:
+                pass
+        return {"ok": True, "token": token}
+
+    @app.websocket("/api/llm-bridge/ws")
+    async def llm_bridge_ws(ws: WebSocket):
+        from ..bridge.server import get_bridge, get_or_create_token
+        import secrets as _secrets
+        token_q  = ws.query_params.get("token", "") or ""
+        expected = get_or_create_token(settings.config_dir)
+        # Constant-time compare so a wrong token can't be brute-forced
+        # by timing the close.
+        if not _secrets.compare_digest(token_q, expected):
+            await ws.close(code=4401, reason="invalid token")
+            return
+        await ws.accept()
+        bridge = get_bridge()
+        try:
+            # First message must be the hello envelope.
+            hello_raw = await ws.receive_json()
+            if hello_raw.get("type") != "hello":
+                await ws.close(code=4400, reason="expected hello")
+                return
+            await bridge.attach_client(ws, hello_raw.get("client", {}) or {})
+            await ws.send_json({
+                "type":    "welcome",
+                "server":  "docusort",
+                "version": __version__,
+            })
+            while True:
+                msg = await ws.receive_json()
+                await bridge.handle_message(msg)
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:
+            logger.warning("Bridge WS error: %s", exc)
+        finally:
+            await bridge.detach_client(ws)
 
     @app.post("/api/settings/sync")
     def api_settings_sync(payload: dict):
