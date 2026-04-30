@@ -2,6 +2,20 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.18.5] – 2026-04-30
+
+### Fixed — category-trend stacked bars collapsed to a thin strip
+
+The 100 %-stacked column container used `items-end` on its outer
+flexbox. With that alignment children take their content height
+instead of stretching to the parent's `h-72`, so each segment's
+height percentage applied to a tiny auto-height column and the
+whole chart compressed into a sliver at the bottom of the card.
+
+Switched to `items-stretch` and pinned each column with `h-full +
+min-h-0`. Bars now actually fill the chart vertically and the
+100 %-stacked semantics are visible.
+
 ## [0.18.4] – 2026-04-30
 
 ### Changed — heatmap counts every booking, not just spend

@@ -423,15 +423,15 @@
     {% set bar_count = cat_monthly.matrix | length %}
     <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.catrend.normalised_hint') }}</p>
     <div class="overflow-x-auto -mx-1 px-1">
-      <div class="flex gap-2 items-end h-72 sm:h-80"
+      <div class="flex gap-2 items-stretch h-72 sm:h-80"
            style="min-width: max({{ bar_count * 44 }}px, 100%);">
         {% for row in cat_monthly.matrix %}
           {% set month_total = row['values'] | sum %}
-          <div class="flex flex-col group flex-1 min-w-[36px]" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
+          <div class="flex flex-col group flex-1 min-w-[36px] h-full" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
             {# Total above the bar so the absolute spend isn't hidden by the
                100%-stacked normalisation. #}
-            <div class="text-[9px] text-ink-500 text-center tabular-nums mb-1 truncate">{{ "%.0f"|format(month_total) }}</div>
-            <div class="flex-1 flex flex-col-reverse w-full rounded-t overflow-hidden bg-ink-900/30" style="min-height: 0;">
+            <div class="text-[9px] text-ink-500 text-center tabular-nums mb-1 truncate shrink-0">{{ "%.0f"|format(month_total) }}</div>
+            <div class="flex-1 flex flex-col-reverse w-full rounded-t overflow-hidden bg-ink-900/30 min-h-0">
               {% if month_total > 0 %}
                 {% for c_idx in range(top_cats|length) %}
                   {% set v = row['values'][c_idx] %}
@@ -449,7 +449,7 @@
                 {% endif %}
               {% endif %}
             </div>
-            <div class="text-[10px] text-ink-500 text-center mt-1 truncate">{{ row.month[5:] }}/{{ row.month[2:4] }}</div>
+            <div class="text-[10px] text-ink-500 text-center mt-1 truncate shrink-0">{{ row.month[5:] }}/{{ row.month[2:4] }}</div>
           </div>
         {% endfor %}
       </div>
