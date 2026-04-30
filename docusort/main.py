@@ -396,6 +396,13 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
         app, host=settings.web.host, port=settings.web.port,
         log_level=os.environ.get("DOCUSORT_LOG_LEVEL", "info").lower(),
         access_log=False,
+        # Local-AI-Bridge requests can stay in flight for many minutes
+        # (a 16k-token Kontoauszug extraction on a 7B/14B model). Default
+        # ws_ping_timeout=20s would kill the WebSocket mid-inference even
+        # though both sides are still alive. Push both interval and
+        # timeout up so a slow model never causes a phantom disconnect.
+        ws_ping_interval=30.0,
+        ws_ping_timeout=300.0,
         **ssl_kwargs,
     )
 

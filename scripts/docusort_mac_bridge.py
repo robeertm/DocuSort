@@ -432,8 +432,17 @@ async def run_loop(*, server_url: str, token: str, model: str,
             async with websockets.connect(
                 ws_url,
                 ssl=ssl_ctx,
-                ping_interval=20, ping_timeout=20,
-                max_size=8 * 1024 * 1024,  # 8 MB — long bank statements
+                # Long local inference (10–30 min for a big statement
+                # on a 14B/32B model) must not trigger a phantom
+                # disconnect. Both sides are bumped to a 5-minute
+                # ping_timeout so a model that takes its time keeps
+                # the WebSocket open. The interval stays short enough
+                # to detect a *real* dead connection within a few
+                # minutes.
+                ping_interval=30, ping_timeout=300,
+                # 16 MB — covers very long bank statements
+                # (300+ booking lines) plus some headroom.
+                max_size=16 * 1024 * 1024,
             ) as ws:
                 # Hello envelope — first message after accept must be this.
                 hello = {
