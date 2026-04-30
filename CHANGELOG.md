@@ -6,13 +6,13 @@ All notable changes to DocuSort will be documented in this file.
 
 ### Fixed — heatmap was washed-out grey on accounts with one outlier day
 
-Scaling cells by `max(spend)` means a single account-closure transfer
-(€100k+) squashes every other day to ratio < 0.15 → bottom-bin
-colour. With a dark theme the bottom bin (`emerald-700/60`) reads as
+Scaling cells by the absolute max spend means a single
+account-closure transfer can squash every other day to ratio < 0.15
+→ bottom-bin colour. With a dark theme the bottom bin reads as
 grey-blue and is hard to spot against the page background.
 
 - The reference value is now the 90th percentile of non-zero days so
-  90 % of days spread across all five bins; days above p90 get
+  most days spread across all five bins; days above p90 get
   clamped to the brightest colour.
 - Bottom-three palette stops are brightened (emerald-400, lime-400,
   amber-400) so even quiet days pop on the dark theme. Top stops
@@ -27,10 +27,9 @@ category-trend bars looked tiny on accounts with a few extreme
 months. The heatmap looked deserted because non-zero days sat in a
 sea of light-grey zero days. Three pragmatic redesigns:
 
-- **Cashflow** is now an SVG area+line plot with three series
-  (income, expense — net was dropped because the overlap got busy).
-  Lines stay readable across orders of magnitude even when one
-  month has €100k traffic and another has €11.
+- **Cashflow** is now an SVG area+line plot with two series (income
+  and expense). Lines stay readable across orders of magnitude even
+  when one month dwarfs the next.
 - **Categories over time** is now a 100 %-stacked bar chart. Each
   month's bar fills the chart height and the segments show what
   share each top-category took. The absolute month-total sits above
