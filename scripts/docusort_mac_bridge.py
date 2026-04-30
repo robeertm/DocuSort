@@ -207,6 +207,80 @@ def install_ollama(non_interactive: bool) -> None:
 install_ollama_macos = install_ollama
 
 
+def maybe_upgrade_ollama(*, non_interactive: bool, disabled: bool) -> None:
+    """Check for and apply Ollama updates at script startup, before
+    `ollama serve` comes up. Doing it pre-serve guarantees no in-flight
+    request can be interrupted by the upgrade restart.
+
+    We only auto-upgrade through package managers that are quiet,
+    non-interactive, and idempotent (Homebrew on macOS, winget on
+    Windows). Hosts without a package manager just skip the upgrade —
+    a manual `curl | sh` re-run would work but it's an intrusive
+    interactive script and we don't want to surprise anyone.
+
+    A failed upgrade check NEVER aborts the bridge — it logs a warning
+    and we continue with whatever Ollama version is already there.
+    """
+    if disabled or not _have("ollama"):
+        return
+    sysname = platform.system()
+    try:
+        if sysname == "Darwin" and _have("brew"):
+            # `brew outdated --json=v2` gives us a structured answer in
+            # ~1 s; we only run `brew upgrade ollama` when it's needed.
+            out = subprocess.run(
+                ["brew", "outdated", "--json=v2"],
+                capture_output=True, text=True, timeout=20, check=False,
+            )
+            data = {}
+            if out.returncode == 0 and out.stdout.strip():
+                try:
+                    data = json.loads(out.stdout)
+                except Exception:
+                    data = {}
+            outdated_names = {f.get("name") for f in (data.get("formulae") or [])}
+            outdated_names |= {f.get("name") for f in (data.get("casks") or [])}
+            if "ollama" in outdated_names:
+                step("Ollama update available — upgrading via Homebrew …")
+                subprocess.run(
+                    ["brew", "upgrade", "ollama"],
+                    timeout=600, check=False,
+                )
+                good("Ollama upgraded.")
+            else:
+                info("Ollama is up to date (Homebrew).")
+            return
+
+        if sysname == "Windows" and _have("winget"):
+            # winget exits 0 even when nothing was upgraded; --silent
+            # keeps the install UI from popping up. Long timeout in
+            # case there's a real download (~250 MB).
+            step("Checking for Ollama updates via winget …")
+            r = subprocess.run(
+                ["winget", "upgrade", "--silent",
+                 "--accept-source-agreements", "--accept-package-agreements",
+                 "--id", "Ollama.Ollama"],
+                capture_output=True, text=True, timeout=900, check=False,
+            )
+            txt = (r.stdout or "") + (r.stderr or "")
+            if "No applicable update" in txt or "No installed package" in txt:
+                info("Ollama is up to date (winget).")
+            else:
+                good("winget run finished — any pending Ollama update applied.")
+            return
+
+        # macOS-without-brew, Linux, BSD, etc: the official install.sh
+        # is the upgrade path but it's interactive and intrusive.
+        # Surface a hint instead of running it silently.
+        info("Auto-upgrade only runs through Homebrew (macOS) or winget "
+             "(Windows). Run `curl -fsSL https://ollama.com/install.sh | sh` "
+             "manually to upgrade on this host.")
+    except subprocess.TimeoutExpired:
+        warn("Ollama upgrade check timed out — keeping the current version.")
+    except Exception as exc:
+        warn(f"Ollama upgrade check failed: {exc}")
+
+
 def ensure_ollama_running() -> subprocess.Popen | None:
     """Return a Popen handle if we started ollama, else None."""
     if _ollama_health():
@@ -493,6 +567,8 @@ def main() -> None:
                     help="Accept self-signed TLS certs (e.g. local dev)")
     ap.add_argument("--no-auto-install", action="store_true",
                     help="Skip the Ollama auto-install step")
+    ap.add_argument("--no-auto-upgrade-ollama", action="store_true",
+                    help="Skip the per-startup check for Ollama updates")
     args = ap.parse_args()
 
     if not args.server or not args.token:
@@ -513,6 +589,13 @@ def main() -> None:
     elif not _have("ollama"):
         fail("Ollama not found and --no-auto-install was set.")
         sys.exit(1)
+
+    # Run the upgrade check BEFORE serving — guarantees no in-flight
+    # request gets interrupted by an Ollama restart mid-extraction.
+    maybe_upgrade_ollama(
+        non_interactive=args.non_interactive,
+        disabled=args.no_auto_upgrade_ollama,
+    )
 
     proc = ensure_ollama_running()
 
