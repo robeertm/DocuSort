@@ -168,6 +168,72 @@ def update_finance(
     return _write_raw(cfg, config_dir)
 
 
+def update_notifications(
+    *,
+    enabled: bool | None = None,
+    event_doc_review: bool | None = None,
+    event_doc_failed: bool | None = None,
+    event_doc_filed: bool | None = None,
+    event_bulk_done: bool | None = None,
+    telegram_enabled: bool | None = None,
+    telegram_chat_id: str | None = None,
+    telegram_bot_token: str | None = None,   # → secrets.yaml
+    email_enabled: bool | None = None,
+    smtp_host: str | None = None,
+    smtp_port: int | None = None,
+    smtp_user: str | None = None,
+    smtp_from: str | None = None,
+    smtp_to: str | None = None,
+    smtp_starttls: bool | None = None,
+    smtp_password: str | None = None,         # → secrets.yaml
+    config_dir: Path | None = None,
+) -> Path:
+    """Persist notification settings to config.yaml. Bot tokens and SMTP
+    passwords go to secrets.yaml so they don't end up in the git-friendly
+    config file."""
+    cfg = _read_raw(config_dir)
+    n = cfg.get("notifications") or {}
+    for key, val in [
+        ("enabled",          enabled),
+        ("event_doc_review", event_doc_review),
+        ("event_doc_failed", event_doc_failed),
+        ("event_doc_filed",  event_doc_filed),
+        ("event_bulk_done",  event_bulk_done),
+        ("telegram_enabled", telegram_enabled),
+        ("email_enabled",    email_enabled),
+        ("smtp_starttls",    smtp_starttls),
+    ]:
+        if val is not None:
+            n[key] = bool(val)
+    for key, val in [
+        ("telegram_chat_id", telegram_chat_id),
+        ("smtp_host",        smtp_host),
+        ("smtp_user",        smtp_user),
+        ("smtp_from",        smtp_from),
+        ("smtp_to",          smtp_to),
+    ]:
+        if val is not None:
+            n[key] = str(val).strip()
+    if smtp_port is not None:
+        n["smtp_port"] = int(smtp_port)
+    cfg["notifications"] = n
+
+    # Sensitive bits go to secrets.yaml. Empty string means "leave the
+    # existing one alone" — the UI uses "" to represent "no change".
+    secrets_changed = False
+    secrets = load_secrets(config_dir)
+    if telegram_bot_token is not None and telegram_bot_token.strip():
+        secrets["telegram_bot_token"] = telegram_bot_token.strip()
+        secrets_changed = True
+    if smtp_password is not None and smtp_password.strip():
+        secrets["smtp_password"] = smtp_password.strip()
+        secrets_changed = True
+    if secrets_changed:
+        save_secrets(secrets, config_dir)
+
+    return _write_raw(cfg, config_dir)
+
+
 def remove_secret(provider: str, config_dir: Path | None = None) -> None:
     secrets = load_secrets(config_dir)
     secrets.pop(f"{provider}_api_key", None)

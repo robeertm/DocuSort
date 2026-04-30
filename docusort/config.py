@@ -116,6 +116,37 @@ class FinanceSettings:
 
 
 @dataclass
+class NotificationSettings:
+    """Where + when to send out-of-band notifications.
+
+    Channel credentials (Telegram bot token, SMTP password) live in
+    secrets.yaml so they don't end up in the regular config file. The
+    rest is here.
+    """
+    enabled: bool = False
+
+    # Per-event toggles — let the user turn down the noise without
+    # disabling the whole subsystem.
+    event_doc_review: bool = True   # low-confidence / review queue
+    event_doc_failed: bool = True   # classifier raised
+    event_doc_filed:  bool = False  # off by default — too chatty
+    event_bulk_done:  bool = True   # background jobs (analyze-all, …)
+
+    # Telegram channel
+    telegram_enabled:  bool = False
+    telegram_chat_id:  str  = ""    # numeric id from @BotFather
+
+    # Email channel
+    email_enabled:  bool = False
+    smtp_host:      str  = ""
+    smtp_port:      int  = 587
+    smtp_user:      str  = ""
+    smtp_from:      str  = ""
+    smtp_to:        str  = ""       # comma-separated recipients
+    smtp_starttls:  bool = True
+
+
+@dataclass
 class AppSettings:
     paths: Paths
     categories: list[dict[str, Any]]
@@ -124,6 +155,7 @@ class AppSettings:
     web: WebSettings = field(default_factory=WebSettings)
     sync: SyncSettings = field(default_factory=SyncSettings)
     finance: FinanceSettings = field(default_factory=FinanceSettings)
+    notifications: NotificationSettings = field(default_factory=NotificationSettings)
     keep_original: bool = True
     filename_template: str = "{date}_{category}_{sender}_{subject}"
     max_filename_length: int = 120
@@ -221,6 +253,24 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         review_before_send=bool(fin_cfg.get("review_before_send", False)),
     )
 
+    n_cfg = cfg.get("notifications", {}) or {}
+    notifications = NotificationSettings(
+        enabled=bool(n_cfg.get("enabled", False)),
+        event_doc_review=bool(n_cfg.get("event_doc_review", True)),
+        event_doc_failed=bool(n_cfg.get("event_doc_failed", True)),
+        event_doc_filed=bool(n_cfg.get("event_doc_filed", False)),
+        event_bulk_done=bool(n_cfg.get("event_bulk_done", True)),
+        telegram_enabled=bool(n_cfg.get("telegram_enabled", False)),
+        telegram_chat_id=str(n_cfg.get("telegram_chat_id", "") or ""),
+        email_enabled=bool(n_cfg.get("email_enabled", False)),
+        smtp_host=str(n_cfg.get("smtp_host", "") or ""),
+        smtp_port=int(n_cfg.get("smtp_port", 587) or 587),
+        smtp_user=str(n_cfg.get("smtp_user", "") or ""),
+        smtp_from=str(n_cfg.get("smtp_from", "") or ""),
+        smtp_to=str(n_cfg.get("smtp_to", "") or ""),
+        smtp_starttls=bool(n_cfg.get("smtp_starttls", True)),
+    )
+
     return AppSettings(
         paths=paths,
         categories=cats.get("categories", []),
@@ -229,6 +279,7 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         web=web,
         sync=sync,
         finance=finance,
+        notifications=notifications,
         keep_original=cfg.get("keep_original", True),
         filename_template=cfg.get(
             "filename_template", "{date}_{category}_{sender}_{subject}"

@@ -314,6 +314,41 @@ Groq / Together / xAI / OpenRouter / Mistral, pick **OpenAI-compatible**
 in `/settings`, paste the base URL (`https://api.groq.com/openai/v1`,
 `http://192.168.1.50:8080/v1`, …) and an API key if needed.
 
+## Notifications
+
+DocuSort can ping you out of band when a document needs your
+attention. Configure under **Settings → Notifications**:
+
+- **Telegram** — create a bot via [@BotFather](https://t.me/BotFather),
+  send any message to your bot, then visit
+  `https://api.telegram.org/bot<TOKEN>/getUpdates` to find your
+  numeric `chat_id`. Paste both into the form.
+- **Email** — standard SMTP. Works with Gmail (use an
+  [app password](https://support.google.com/accounts/answer/185833)),
+  Fastmail, or your own server.
+
+Per-event toggles control the noise:
+
+- *Document landed in review* — the classifier was unsure or the
+  doc has incomplete metadata.
+- *Classification failed* — the LLM call raised an exception.
+- *Document filed* — every successful filing (off by default — too
+  chatty for normal use).
+- *Bulk job finished* — `analyze-all`, `retry-review`, and friends
+  emit a summary message with the success / failure tally.
+
+Each notification carries a clickable URL back to the document
+detail page. Channel credentials live in `secrets.yaml` (mode 0600)
+and are never logged.
+
+## Duplicates
+
+A new **Duplicates** page (`/duplicates`) groups every byte-identical
+pair in the library by SHA-256 hash and offers a one-click bulk
+trash action. Pick which copy to keep per group (default: oldest)
+or sweep them all at once. The dashboard shows an amber banner
+when groups exist, so you do not have to remember to look.
+
 ## Configuration
 
 All behaviour is controlled by three files in `config/`:
@@ -461,10 +496,10 @@ the value lives under `web.port` in `config.yaml`).
 - ~~Local-AI bridge so a small NAS can offload inference to a beefier
   desktop on the same network~~ — shipped in **v0.19.0** + robustness
   pass in **v0.21.0**
-- Etappe 3: Telegram / email notification on new file or `_Review` entry
-- Etappe 4: Duplicate detection across the whole library
+- ~~Etappe 3: Telegram / email notification on new file or `_Review` entry~~ — shipped in **v0.22.0**
+- ~~Etappe 4: Duplicate detection across the whole library~~ — shipped in **v0.22.0**
+- ~~Etappe 6: Prompt caching for bulk imports (reuse system prompt across calls)~~ — Anthropic ephemeral cache, already shipped earlier
 - Etappe 5: Automatic reminders for contract termination dates
-- Etappe 6: Prompt caching for bulk imports (reuse system prompt across calls)
 
 ## License
 

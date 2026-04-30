@@ -32,6 +32,18 @@ from .organizer import organize
 from .watcher import process_existing, run_forever, watch
 
 
+def _doc_url(settings: AppSettings, doc_id: int) -> str | None:
+    """Best-effort clickable URL for a document — used in notifications.
+    The watcher has no incoming HTTP request to derive the public host
+    from, so we rely on settings.web.host/port and assume HTTP unless
+    an SSL cert is configured. None if we can't make a sensible guess."""
+    host = (settings.web.host or "").strip()
+    if not host or host in ("0.0.0.0", "::"):
+        return None
+    scheme = "https" if (settings.web.ssl_cert and settings.web.ssl_key) else "http"
+    return f"{scheme}://{host}:{settings.web.port}/document/{doc_id}"
+
+
 def _sha256(path: Path, chunk_size: int = 1 << 16) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -185,6 +197,42 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         except Exception as exc:
             log.exception("DB insert failed for %s: %s", target.name, exc)
             return
+
+        # Fire a notification (if any channel is configured + the
+        # corresponding event is enabled). Failures here can never
+        # break the pipeline — the dispatcher catches and logs.
+        try:
+            from . import notifier as _n
+            ev_kind = (
+                "doc_failed" if status == "failed"
+                else "doc_review" if status == "review"
+                else "doc_filed"
+            )
+            subject_line = cls.subject or target.name
+            sender_line  = cls.sender or "?"
+            body = (
+                f"Category:    {cls.category}"
+                + (f" / {cls.subcategory}" if cls.subcategory else "")
+                + f"\nSender:      {sender_line}"
+                f"\nSubject:     {subject_line}"
+                f"\nDate:        {cls.date or '—'}"
+                f"\nConfidence:  {cls.confidence:.0%}"
+                f"\nFile:        {target.name}"
+            )
+            title_prefix = {
+                "doc_failed": "❌ Classification failed",
+                "doc_review": "⚠️  New review document",
+                "doc_filed":  "📄 Document filed",
+            }[ev_kind]
+            _n.fire(_n.NotificationEvent(
+                kind=ev_kind,
+                title=f"{title_prefix}: {subject_line[:80]}",
+                body=body,
+                doc_id=doc_id,
+                url=_doc_url(settings, doc_id),
+            ))
+        except Exception as exc:
+            log.warning("Notification fire failed: %s", exc)
 
         # Receipts get a second-pass LLM extraction for the line items so
         # the analytics dashboard can do per-item aggregation. We only run
@@ -465,6 +513,14 @@ def main(argv: list[str] | None = None) -> int:
     log = logging.getLogger("docusort.main")
     log.info("DocuSort %s starting (dry_run=%s, once=%s, web=%s)",
              __version__, settings.dry_run, args.once, not args.no_web)
+
+    # Spin up the notification dispatcher early so even watcher events
+    # before the web UI starts can be delivered.
+    try:
+        from . import notifier as _notifier
+        _notifier.configure(settings)
+    except Exception as exc:
+        log.warning("Notifier setup failed (continuing without): %s", exc)
 
     _ensure_dirs(settings)
 

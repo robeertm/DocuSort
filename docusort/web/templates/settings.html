@@ -425,6 +425,128 @@
     </div>
   </section>
 
+  <!-- ===== Notifications ===== -->
+  <section class="card p-6" id="notifications" x-data="notificationsSettings()" x-init="init()">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+      <h2 class="text-lg font-semibold">Notifications</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full"
+            :class="channels.length ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+            x-text="channels.length ? channels.join(' + ') : 'off'"></span>
+    </div>
+    <p class="text-ink-400 text-sm mb-5">
+      Get pinged on Telegram or by email when DocuSort finds something
+      that needs your attention — a low-confidence document, a failed
+      classification, or a bulk job that just finished. Each event is
+      individually toggleable.
+    </p>
+
+    <label class="inline-flex items-center gap-2 mb-4">
+      <input type="checkbox" x-model="form.enabled" class="accent-cyan-400">
+      <span class="text-sm">Enable notifications</span>
+    </label>
+
+    <div x-show="form.enabled" x-cloak class="space-y-5">
+      <!-- Event toggles -->
+      <div>
+        <div class="text-sm font-medium mb-2">Send a notification when …</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_doc_review" class="accent-cyan-400"> a document lands in review</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_doc_failed" class="accent-cyan-400"> classification fails</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_bulk_done"  class="accent-cyan-400"> a bulk job finishes</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_doc_filed"  class="accent-cyan-400"> any document is filed (chatty)</label>
+        </div>
+      </div>
+
+      <!-- Telegram -->
+      <div class="rounded-xl bg-ink-900/40 border border-ink-700 p-4">
+        <label class="inline-flex items-center gap-2 mb-3">
+          <input type="checkbox" x-model="form.telegram_enabled" class="accent-cyan-400">
+          <span class="font-medium">Telegram</span>
+        </label>
+        <div x-show="form.telegram_enabled" x-cloak class="space-y-2 text-sm">
+          <p class="text-xs text-ink-500">
+            Create a bot via <a href="https://t.me/BotFather" class="underline" target="_blank">@BotFather</a>,
+            then send your bot any message and visit
+            <span class="font-mono">api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</span>
+            to find your chat id.
+          </p>
+          <label class="block">
+            <span class="text-xs text-ink-400">Bot token</span>
+            <input x-model="form.telegram_bot_token" type="password" autocomplete="off"
+                   :placeholder="status.telegram_bot_token_set ? '(stored — leave blank to keep)' : 'paste token'"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">Chat id</span>
+            <input x-model="form.telegram_chat_id" type="text"
+                   placeholder="123456789"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+        </div>
+      </div>
+
+      <!-- Email -->
+      <div class="rounded-xl bg-ink-900/40 border border-ink-700 p-4">
+        <label class="inline-flex items-center gap-2 mb-3">
+          <input type="checkbox" x-model="form.email_enabled" class="accent-cyan-400">
+          <span class="font-medium">Email</span>
+        </label>
+        <div x-show="form.email_enabled" x-cloak class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+          <label class="block">
+            <span class="text-xs text-ink-400">SMTP host</span>
+            <input x-model="form.smtp_host" type="text" placeholder="smtp.gmail.com"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">SMTP port</span>
+            <input x-model.number="form.smtp_port" type="number" placeholder="587"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">Username</span>
+            <input x-model="form.smtp_user" type="text" autocomplete="off"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">Password</span>
+            <input x-model="form.smtp_password" type="password" autocomplete="off"
+                   :placeholder="status.smtp_password_set ? '(stored — leave blank to keep)' : 'app password'"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">From</span>
+            <input x-model="form.smtp_from" type="email" placeholder="docusort@home.lan"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">To (comma-separated)</span>
+            <input x-model="form.smtp_to" type="text" placeholder="me@example.com"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="inline-flex items-center gap-2 sm:col-span-2 text-sm">
+            <input type="checkbox" x-model="form.smtp_starttls" class="accent-cyan-400">
+            <span>Use STARTTLS (port 587 / 25) — turn off only for plain port-465-implicit-TLS providers</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div x-show="message" x-cloak class="mt-4 text-sm rounded-lg px-3 py-2"
+         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="message"></div>
+    <div class="mt-4 flex flex-wrap gap-2 justify-end">
+      <button type="button" @click="testNow()" :disabled="testing || !channels.length"
+              class="rounded-xl px-4 py-2 text-sm font-medium border border-ink-700 bg-ink-900/40 text-ink-300 hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed">
+        <span x-show="!testing">Send test message</span>
+        <span x-show="testing" x-cloak>Sending …</span>
+      </button>
+      <button type="button" @click="save()" :disabled="saving" class="btn-primary">
+        <span x-show="!saving">{{ t('settings.save') }}</span>
+        <span x-show="saving" x-cloak>{{ t('setup.saving') }}</span>
+      </button>
+    </div>
+  </section>
+
   <!-- ===== Backup ===== -->
   <section class="card p-6" x-data="syncSettings()">
     <h2 class="text-lg font-semibold mb-1">{{ t('settings.sync.heading') }}</h2>
@@ -911,6 +1033,91 @@ function settingsPage() {
         // unsetting now would briefly show "Restart service now" again
         // and look like the click did nothing.
       }
+    },
+  };
+}
+
+function notificationsSettings() {
+  return {
+    status:   {},
+    form:     {
+      enabled:           false,
+      event_doc_review:  true,
+      event_doc_failed:  true,
+      event_doc_filed:   false,
+      event_bulk_done:   true,
+      telegram_enabled:  false,
+      telegram_chat_id:  '',
+      telegram_bot_token:'',
+      email_enabled:     false,
+      smtp_host:         '',
+      smtp_port:         587,
+      smtp_user:         '',
+      smtp_from:         '',
+      smtp_to:           '',
+      smtp_starttls:     true,
+      smtp_password:     '',
+    },
+    channels: [],
+    saving:   false,
+    testing:  false,
+    message:  '',
+    ok:       false,
+    async init() {
+      try {
+        const r = await fetch('/api/settings/notifications');
+        if (r.ok) {
+          const d = await r.json();
+          this.status = d;
+          // Pull every field that exists in form, but never the
+          // password placeholders — those stay empty so an accidental
+          // save without typing doesn't blank them.
+          for (const k of Object.keys(this.form)) {
+            if (k === 'telegram_bot_token' || k === 'smtp_password') continue;
+            if (d[k] !== undefined) this.form[k] = d[k];
+          }
+          this.channels = d.channels_active || [];
+        }
+      } catch (e) { /* ignore */ }
+    },
+    async save() {
+      this.saving = true; this.message = '';
+      try {
+        const body = {...this.form};
+        // Send empty token/password as null so the server keeps the
+        // existing value.
+        if (!body.telegram_bot_token) body.telegram_bot_token = null;
+        if (!body.smtp_password)      body.smtp_password      = null;
+        const r = await fetch('/api/settings/notifications', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.ok = true;
+        this.channels = d.channels_active || [];
+        this.message = `Saved. Active channels: ${this.channels.join(', ') || 'none'}`;
+        // Clear sensitive fields so a follow-up save doesn't resend them.
+        this.form.telegram_bot_token = '';
+        this.form.smtp_password      = '';
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally { this.saving = false; }
+    },
+    async testNow() {
+      this.testing = true; this.message = '';
+      try {
+        const r = await fetch('/api/notifications/test', {method: 'POST'});
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.ok = true;
+        this.message = `Test fired to ${d.channels.join(', ')} — check your inbox / chat in a moment.`;
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally { this.testing = false; }
     },
   };
 }

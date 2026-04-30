@@ -2,6 +2,57 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.22.0] – 2026-05-01
+
+### Added — Telegram + email notifications
+
+DocuSort can now ping you out of band when something needs your
+attention. Two channels ship in the box, both stdlib-only so they
+work on a fresh install without extra dependencies.
+
+- **Telegram** — create a bot via @BotFather, paste the token + chat
+  id under Settings → Notifications, hit "Send test message" to
+  confirm.
+- **Email** — standard SMTP with optional STARTTLS. Username,
+  password (kept in `secrets.yaml`), from / to addresses.
+
+Per-event toggles let you turn down the noise:
+
+- `doc_review` — a document landed in review (low confidence).
+- `doc_failed` — classification raised an exception.
+- `doc_filed` — any document was filed (off by default — chatty).
+- `bulk_done` — a background job (analyze-all, retry-review, …)
+  finished, with the success / failure tally in the body.
+
+Each event carries a clickable URL back to the document detail
+page. Dispatch is fire-and-forget per channel in a daemon thread,
+so a slow SMTP server can never stall the watcher.
+
+### Added — library-wide duplicate detection
+
+A new `/duplicates` page groups every byte-identical pair (same
+SHA-256, both still in the library) and lets the user pick which
+copy to keep per group. Bulk action **Trash all duplicates (keep
+oldest)** sweeps everything in one click — falls through to the
+trash, so a misclick is reversible from `/library?trash=1`.
+
+The dashboard surfaces the same count: when there are duplicate
+groups, an amber banner appears above the bridge card linking to
+`/duplicates`. Hidden when there are none.
+
+### Verified — Anthropic prompt caching for bulk imports
+
+The Anthropic provider already sends every system prompt with
+`cache_control: ephemeral` and tracks `cache_creation_input_tokens`
++ `cache_read_input_tokens` separately. Bulk runs (analyze-all,
+retry-review, backfill_statements) hitting the same system prompt
+within the 5-minute TTL pay only the cache-read price for the
+prompt, not full input. The savings show up on the dashboard's
+cost strip.
+
+This was already shipped in earlier versions — recording it here so
+the roadmap line ticks off correctly.
+
 ## [0.21.0] – 2026-04-30
 
 ### Added — bridge survives WebSocket drops without losing in-flight work

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Duplicates · DocuSort{% endblock %}
+{% block content %}
+
+<div x-data="duplicatesPage({{ groups | tojson }})" x-init="init()">
+  <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Duplicate documents</h1>
+      <p class="text-ink-400 mt-1 text-sm">
+        Byte-identical files in your library — same SHA-256, same content.
+        Pick which copy to keep in each group and send the rest to trash
+        in one go.
+      </p>
+    </div>
+    {% if groups %}
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs text-ink-500">
+        <span class="text-ink-200 font-semibold">{{ group_count }}</span> group{% if group_count != 1 %}s{% endif %} ·
+        <span class="text-ink-200 font-semibold">{{ extra_count }}</span> extra cop{% if extra_count == 1 %}y{% else %}ies{% endif %}
+      </span>
+      <button type="button" @click="cleanAll()" :disabled="busy"
+              class="rounded-xl px-4 py-2 text-sm font-medium border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-50">
+        <span x-show="!busy">Trash all duplicates (keep oldest)</span>
+        <span x-show="busy" x-cloak>Trashing …</span>
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if not groups %}
+    <div class="card p-10 text-center">
+      <div class="inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300 mb-4">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-7 w-7">
+          <path d="M5 13l4 4L19 7"/>
+        </svg>
+      </div>
+      <h2 class="text-lg font-semibold mb-1">No duplicates</h2>
+      <p class="text-sm text-ink-400">Every file in your library is unique.</p>
+    </div>
+  {% endif %}
+
+  <div x-show="message" x-cloak class="mb-4 text-sm rounded-lg px-3 py-2"
+       :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+       x-text="message"></div>
+
+  <div class="space-y-4">
+    {% for g in groups %}
+    <div class="card p-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-200">
+            {{ g.docs | length }} copies
+          </span>
+          <span class="text-[11px] font-mono text-ink-500" title="content_hash">{{ g.content_hash[:16] }}…</span>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-ink-500">Keep:</span>
+          <select x-model="keepers['{{ g.content_hash }}']"
+                  class="rounded bg-ink-900/60 border border-ink-700 px-2 py-1 text-xs">
+            {% for d in g.docs %}
+              <option value="{{ d.id }}">
+                {{ d.subject or d.filename }} · {{ d.doc_date or d.created_at[:10] }}
+              </option>
+            {% endfor %}
+          </select>
+          <button type="button" @click="cleanGroup('{{ g.content_hash }}')"
+                  :disabled="busy"
+                  class="text-rose-300 hover:text-rose-200 underline disabled:opacity-50">
+            trash other {{ g.docs | length - 1 }}
+          </button>
+        </div>
+      </div>
+      <ul class="divide-y divide-ink-800/60">
+        {% for d in g.docs %}
+        <li class="py-2 flex items-baseline gap-3 text-sm">
+          <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-mono"
+                :class="keepers['{{ g.content_hash }}'] == {{ d.id }} ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-500'"
+                x-text="keepers['{{ g.content_hash }}'] == {{ d.id }} ? 'KEEP' : 'trash'"></span>
+          <span class="text-ink-500 tabular-nums text-xs shrink-0">
+            {{ d.doc_date or (d.created_at[:10] if d.created_at else '—') }}
+          </span>
+          <a href="/document/{{ d.id }}" class="text-ink-200 hover:text-emerald-300 truncate flex-1 min-w-0">
+            {{ d.subject or d.filename }}
+          </a>
+          <span class="text-xs text-ink-500 shrink-0">{{ d.category }}{% if d.subcategory %} / {{ d.subcategory }}{% endif %}</span>
+          {% if d.status == 'duplicate' %}
+            <span class="text-[10px] uppercase tracking-wide bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded shrink-0">filed-as-dup</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+function duplicatesPage(initialGroups) {
+  const keepers = {};
+  for (const g of (initialGroups || [])) {
+    keepers[g.content_hash] = g.docs[0].id;   // default: oldest
+  }
+  return {
+    keepers,
+    busy: false, message: '', ok: false,
+    init() {},
+    async _post(body) {
+      this.busy = true; this.message = '';
+      try {
+        const r = await fetch('/api/library/duplicates/clean', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.ok = true;
+        this.message = `Trashed ${d.trashed_n} duplicate(s). ${d.remaining_groups} group(s) still left.`;
+        setTimeout(() => window.location.reload(), 1500);
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+    cleanAll() {
+      if (!confirm('Send every non-keeper duplicate to trash? Restore from /library?trash=1 if you change your mind.')) return;
+      this._post({keepers: this.keepers});
+    },
+    cleanGroup(hash) {
+      if (!confirm('Send the other copies in this group to trash?')) return;
+      const sub = {};
+      sub[hash] = this.keepers[hash];
+      this._post({keepers: sub});
+    },
+  };
+}
+</script>
+{% endblock %}

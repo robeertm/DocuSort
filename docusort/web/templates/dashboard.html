@@ -126,6 +126,21 @@ function reviewQueue() {
 }
 </script>
 
+{% if duplicate_groups %}
+<a href="/duplicates" class="card p-4 mb-4 flex items-center justify-between gap-4 border border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 transition">
+  <div class="flex items-center gap-3 min-w-0">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6 text-amber-300 shrink-0">
+      <rect x="8" y="8" width="12" height="12" rx="2"/><rect x="4" y="4" width="12" height="12" rx="2"/>
+    </svg>
+    <div class="min-w-0">
+      <div class="font-semibold text-amber-100">{{ duplicate_groups }} duplicate group{% if duplicate_groups != 1 %}s{% endif %} in the library</div>
+      <div class="text-xs text-amber-200/80 truncate">Click to review them and trash the extras with one click.</div>
+    </div>
+  </div>
+  <span class="text-amber-200/80 text-sm shrink-0">→</span>
+</a>
+{% endif %}
+
 <!-- Local AI bridge card: only renders if the bridge has ever been
      touched (token configured or a client connected at least once).
      Polls /api/bridge/status every 5 s while the page is open. -->

@@ -196,10 +196,24 @@ def create_app(
         stats = db.stats()
         recent = db.list_documents(limit=8, order_by="created_at")
         review_count = db.count_documents(status="review")
+        # Cheap library-wide duplicate count (groups, not docs) for the
+        # dashboard hint. Same query the /duplicates page uses, just
+        # the COUNT.
+        with db._lock:
+            dup_row = db._conn.execute(
+                """SELECT COUNT(*) AS n FROM (
+                     SELECT 1 FROM documents
+                     WHERE deleted_at IS NULL
+                       AND content_hash IS NOT NULL AND content_hash != ''
+                     GROUP BY content_hash HAVING COUNT(*) > 1
+                   )"""
+            ).fetchone()
+            duplicate_groups = int(dup_row["n"]) if dup_row else 0
         return templates.TemplateResponse(
             request, "dashboard.html",
             {**base_ctx(request), "stats": stats, "recent": recent,
-             "review_count": review_count},
+             "review_count": review_count,
+             "duplicate_groups": duplicate_groups},
         )
 
     # ---------- Library ----------
@@ -1077,6 +1091,17 @@ def create_app(
                         last_error=str(exc),
                     )
             activity.finish_job("analyze-statements", current="")
+            try:
+                from .. import notifier as _n
+                job = activity.get_job("analyze-statements")
+                ok, fail_n = len(job.approved), len(job.failed)
+                _n.fire(_n.NotificationEvent(
+                    kind="bulk_done",
+                    title=f"Statement analysis done — {ok} ok, {fail_n} failed",
+                    body=f"Processed {ok + fail_n} of {len(targets)} unanalysed Kontoauszüge.",
+                ))
+            except Exception:
+                pass
 
         threading.Thread(target=worker, name="analyze-statements",
                          daemon=True).start()
@@ -1583,6 +1608,100 @@ def create_app(
         from .. import activity
         return activity.get_job("approve-pending").as_dict()
 
+    # ----------------------------------------------------------- Duplicates
+    @app.get("/duplicates", response_class=HTMLResponse)
+    def duplicates_page(request: Request):
+        groups = _duplicate_groups()
+        return templates.TemplateResponse(
+            request, "duplicates.html",
+            {**base_ctx(request),
+             "groups":     groups,
+             "group_count": len(groups),
+             "doc_count":   sum(len(g["docs"]) for g in groups),
+             "extra_count": sum(len(g["docs"]) - 1 for g in groups),
+             "wasted_bytes": sum(g["docs"][0]["file_size"] * (len(g["docs"]) - 1)
+                                 for g in groups if g["docs"][0].get("file_size")),
+            },
+        )
+
+    def _duplicate_groups() -> list[dict]:
+        """Return all hash collisions across non-deleted documents.
+        Each group is sorted oldest → newest so the UI can default to
+        'keep first, trash rest' without further work."""
+        with db._lock:
+            hash_rows = db._conn.execute(
+                """SELECT content_hash, COUNT(*) AS n FROM documents
+                   WHERE deleted_at IS NULL
+                     AND content_hash IS NOT NULL AND content_hash != ''
+                   GROUP BY content_hash HAVING n > 1
+                   ORDER BY n DESC, content_hash"""
+            ).fetchall()
+            groups: list[dict] = []
+            for hr in hash_rows:
+                rows = db._conn.execute(
+                    """SELECT id, filename, doc_date, created_at, category,
+                              subcategory, sender, subject, file_size,
+                              status, library_path
+                       FROM documents
+                       WHERE content_hash = ? AND deleted_at IS NULL
+                       ORDER BY datetime(created_at) ASC""",
+                    (hr["content_hash"],),
+                ).fetchall()
+                groups.append({
+                    "content_hash": hr["content_hash"],
+                    "n":            int(hr["n"]),
+                    "docs":         [dict(r) for r in rows],
+                })
+        return groups
+
+    @app.get("/api/library/duplicates")
+    def api_library_duplicates():
+        groups = _duplicate_groups()
+        return {
+            "groups":      groups,
+            "group_count": len(groups),
+            "doc_count":   sum(len(g["docs"]) for g in groups),
+            "extra_count": sum(len(g["docs"]) - 1 for g in groups),
+        }
+
+    @app.post("/api/library/duplicates/clean")
+    def api_library_duplicates_clean(payload: dict):
+        """Trash every duplicate except one keeper per group. The
+        keeper id can be picked client-side; if none is given we keep
+        the oldest (first inserted) doc.
+        Body shape: ``{"keepers": {"<hash>": <doc_id>, ...}}`` or
+        ``{}`` for the keep-oldest default applied to every group.
+        """
+        from ..trash import delete_document
+        keepers: dict[str, int] = {
+            str(k): int(v) for k, v in (payload.get("keepers") or {}).items()
+        }
+        groups = _duplicate_groups()
+        trashed: list[int] = []
+        failed: list[dict]  = []
+        for g in groups:
+            doc_ids = [d["id"] for d in g["docs"]]
+            keeper  = keepers.get(g["content_hash"], doc_ids[0])
+            if keeper not in doc_ids:
+                # Caller picked an id that isn't part of this group —
+                # safer to skip the whole group than to wipe a row by
+                # accident.
+                failed.append({"hash": g["content_hash"],
+                               "error": f"keeper {keeper} not in group"})
+                continue
+            for doc_id in doc_ids:
+                if doc_id == keeper:
+                    continue
+                try:
+                    delete_document(doc_id, settings, db)
+                    trashed.append(doc_id)
+                except Exception as exc:
+                    failed.append({"doc_id": doc_id, "error": str(exc)})
+        return {"trashed":  trashed,
+                "trashed_n": len(trashed),
+                "failed":    failed,
+                "remaining_groups": len(_duplicate_groups())}
+
     @app.post("/api/library/retry-all-review")
     def api_retry_all_review():
         """Re-classify every document currently in `status='review'` —
@@ -1640,6 +1759,17 @@ def create_app(
                         "retry-review", done=idx + 1, last_error=str(exc),
                     )
             activity.finish_job("retry-review", current="")
+            try:
+                from .. import notifier as _n
+                job = activity.get_job("retry-review")
+                ok, fail_n = len(job.approved), len(job.failed)
+                _n.fire(_n.NotificationEvent(
+                    kind="bulk_done",
+                    title=f"Review re-queue done — {ok} ok, {fail_n} failed",
+                    body=f"Re-classified {ok + fail_n} review documents.",
+                ))
+            except Exception:
+                pass
 
         threading.Thread(target=worker, name="retry-review",
                          daemon=True).start()
@@ -2288,6 +2418,86 @@ def create_app(
             logger.warning("Bridge WS error: %s", exc)
         finally:
             await bridge.detach_client(ws)
+
+    # ---------------------------------------------------------- Notifications
+    @app.get("/api/settings/notifications")
+    def api_settings_notifications_get():
+        n = settings.notifications
+        secrets = load_secrets(settings.config_dir)
+        return {
+            "enabled":           n.enabled,
+            "event_doc_review":  n.event_doc_review,
+            "event_doc_failed":  n.event_doc_failed,
+            "event_doc_filed":   n.event_doc_filed,
+            "event_bulk_done":   n.event_bulk_done,
+            "telegram_enabled":  n.telegram_enabled,
+            "telegram_chat_id":  n.telegram_chat_id,
+            # Tell the UI whether a token is already on disk without
+            # leaking it. The `••••` marker keeps the field dimmed
+            # without offering anything to copy.
+            "telegram_bot_token_set": bool((secrets.get("telegram_bot_token") or "").strip()),
+            "email_enabled":     n.email_enabled,
+            "smtp_host":         n.smtp_host,
+            "smtp_port":         n.smtp_port,
+            "smtp_user":         n.smtp_user,
+            "smtp_from":         n.smtp_from,
+            "smtp_to":           n.smtp_to,
+            "smtp_starttls":     n.smtp_starttls,
+            "smtp_password_set": bool((secrets.get("smtp_password") or "").strip()),
+            "channels_active":   list(__import__("docusort.notifier", fromlist=["get_dispatcher"]).get_dispatcher().channels_summary()),
+        }
+
+    @app.post("/api/settings/notifications")
+    def api_settings_notifications(payload: dict):
+        from .. import settings_writer, notifier as _notifier
+        # Empty-string token/password mean "leave the existing value
+        # alone". The UI sends None when the field hasn't been touched.
+        settings_writer.update_notifications(
+            enabled=payload.get("enabled"),
+            event_doc_review=payload.get("event_doc_review"),
+            event_doc_failed=payload.get("event_doc_failed"),
+            event_doc_filed=payload.get("event_doc_filed"),
+            event_bulk_done=payload.get("event_bulk_done"),
+            telegram_enabled=payload.get("telegram_enabled"),
+            telegram_chat_id=payload.get("telegram_chat_id"),
+            telegram_bot_token=(payload.get("telegram_bot_token") or None),
+            email_enabled=payload.get("email_enabled"),
+            smtp_host=payload.get("smtp_host"),
+            smtp_port=payload.get("smtp_port"),
+            smtp_user=payload.get("smtp_user"),
+            smtp_from=payload.get("smtp_from"),
+            smtp_to=payload.get("smtp_to"),
+            smtp_starttls=payload.get("smtp_starttls"),
+            smtp_password=(payload.get("smtp_password") or None),
+            config_dir=settings.config_dir,
+        )
+        # Mirror into the live AppSettings so the in-memory dispatcher
+        # picks up the change immediately, and rebuild the dispatcher.
+        n = settings.notifications
+        for key in ("enabled","event_doc_review","event_doc_failed",
+                    "event_doc_filed","event_bulk_done",
+                    "telegram_enabled","telegram_chat_id",
+                    "email_enabled","smtp_host","smtp_port","smtp_user",
+                    "smtp_from","smtp_to","smtp_starttls"):
+            if payload.get(key) is not None:
+                setattr(n, key, payload[key])
+        _notifier.configure(settings)
+        return {"ok": True,
+                "channels_active": _notifier.get_dispatcher().channels_summary()}
+
+    @app.post("/api/notifications/test")
+    def api_notifications_test():
+        from .. import notifier as _notifier
+        disp = _notifier.get_dispatcher()
+        if not disp.channels_summary():
+            raise HTTPException(409, "no channel configured / enabled")
+        _notifier.fire(_notifier.NotificationEvent(
+            kind="test",
+            title="DocuSort test notification",
+            body=("If you are reading this, the channel is wired up "
+                  "correctly. You can safely ignore this message."),
+        ))
+        return {"ok": True, "channels": disp.channels_summary()}
 
     @app.post("/api/settings/sync")
     def api_settings_sync(payload: dict):
