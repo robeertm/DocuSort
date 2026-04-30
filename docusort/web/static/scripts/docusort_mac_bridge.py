@@ -199,12 +199,35 @@ def ensure_model(model: str) -> None:
     good(f"Model '{model}' is ready.")
 
 
+def _estimate_ctx_size(system_prompt: str, user_prompt: str,
+                       max_output_tokens: int) -> int:
+    """Pick a num_ctx that is big enough for prompt + output without
+    blowing up unified memory. Ollama defaults to 4096 across versions,
+    which silently truncates anything longer — that quietly destroys
+    bank-statement extraction (10k+ chars of OCR text). We size up to
+    fit the whole exchange and cap at 32k."""
+    chars = len(system_prompt) + len(user_prompt)
+    # German legal/finance text averages ~3.3 chars/token for Qwen and
+    # similar tokenizers. Leave a chunky margin for tokenizer surprises
+    # and for the chat template overhead.
+    prompt_tokens = int(chars / 3.0) + 256
+    needed = prompt_tokens + int(max_output_tokens) + 512
+    # Round up to a power-of-two-ish step so the KV cache buffer is a
+    # familiar size and we don't wobble between near-identical values
+    # for similar inputs.
+    for cap in (8192, 12288, 16384, 24576, 32768):
+        if needed <= cap:
+            return cap
+    return 32768  # hard cap
+
+
 def call_ollama_blocking(*, model: str, system_prompt: str, user_prompt: str,
                          max_output_tokens: int, timeout: float,
                          force_json: bool) -> dict:
     """Synchronous Ollama chat call. Returns dict with raw_text + token
     counts. We deliberately stay on stdlib (urllib) so the bridge has
     no extra dependencies."""
+    num_ctx = _estimate_ctx_size(system_prompt, user_prompt, max_output_tokens)
     body: dict = {
         "model": model,
         "messages": [
@@ -214,6 +237,7 @@ def call_ollama_blocking(*, model: str, system_prompt: str, user_prompt: str,
         "stream": False,
         "options": {
             "num_predict": int(max_output_tokens),
+            "num_ctx":     num_ctx,
             "temperature": 0.0,
         },
     }
@@ -233,11 +257,21 @@ def call_ollama_blocking(*, model: str, system_prompt: str, user_prompt: str,
     with urllib.request.urlopen(req, timeout=timeout) as r:
         out = json.loads(r.read().decode("utf-8"))
     raw = (out.get("message") or {}).get("content", "") or ""
+    in_tok  = int(out.get("prompt_eval_count", 0) or 0)
+    out_tok = int(out.get("eval_count", 0) or 0)
+    # Ollama's `truncated` flag is unreliable across versions, so we
+    # compare the prompt token count against the requested ctx window.
+    # When they meet exactly, the prompt was clipped — surface that to
+    # the server so the user sees a real warning instead of silent
+    # quality loss.
+    truncated = (in_tok >= num_ctx - 8)
     return {
         "raw_text":      raw,
         "model":         model,
-        "input_tokens":  int(out.get("prompt_eval_count", 0) or 0),
-        "output_tokens": int(out.get("eval_count", 0) or 0),
+        "input_tokens":  in_tok,
+        "output_tokens": out_tok,
+        "num_ctx":       num_ctx,
+        "truncated":     truncated,
     }
 
 
@@ -335,9 +369,11 @@ async def run_loop(*, server_url: str, token: str, model: str,
                             "data": data,
                         }))
                         dt = time.time() - started
+                        flag = " (truncated!)" if data.get("truncated") else ""
                         good(f"{short}  ✓  {data['input_tokens']:>5} → "
-                             f"{data['output_tokens']:>4} tok in "
-                             f"{dt:5.1f}s")
+                             f"{data['output_tokens']:>4} tok "
+                             f"(ctx={data.get('num_ctx', '?')}) in "
+                             f"{dt:5.1f}s{flag}")
                     except Exception as exc:
                         await ws.send(json.dumps({
                             "type": "response",

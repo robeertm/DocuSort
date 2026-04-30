@@ -68,6 +68,101 @@
   </div>
 </div>
 
+<!-- Local AI bridge card: only renders if the bridge has ever been
+     touched (token configured or a client connected at least once).
+     Polls /api/bridge/status every 5 s while the page is open. -->
+<div x-data="bridgeDashboard()" x-init="init()" x-show="visible" x-cloak class="mb-8">
+  <div class="card p-5">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-4">
+      <div class="flex items-center gap-3 flex-wrap">
+        <h2 class="font-semibold">Local AI Bridge</h2>
+        <span class="text-xs px-2 py-0.5 rounded-full"
+              :class="status.connected ? 'bg-emerald-500/15 text-emerald-300'
+                                       : 'bg-ink-800 text-ink-400'"
+              x-text="status.connected ? 'connected' : 'offline'"></span>
+        <span class="text-xs px-2 py-0.5 rounded-full"
+              :class="status.provider_active ? 'bg-cyan-500/15 text-cyan-200'
+                                              : 'bg-ink-800 text-ink-500'"
+              x-text="status.provider_active ? 'active provider' : 'standby'"></span>
+      </div>
+      <a href="/settings#bridge" class="text-xs text-ink-400 hover:text-ink-200">manage →</a>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-sm">
+      <div>
+        <div class="text-[10px] uppercase tracking-wide text-ink-500">Mac</div>
+        <div class="font-mono text-xs truncate" x-text="status.client?.host || '—'"></div>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-wide text-ink-500">Model</div>
+        <div class="font-mono text-xs truncate" x-text="status.client?.model || '—'"></div>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-wide text-ink-500">Requests</div>
+        <div class="text-xl font-semibold tabular-nums" x-text="status.calls_total ?? 0"></div>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-wide text-ink-500">Failed</div>
+        <div class="text-xl font-semibold tabular-nums"
+             :class="(status.calls_failed ?? 0) > 0 ? 'text-rose-300' : ''"
+             x-text="status.calls_failed ?? 0"></div>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-wide text-ink-500">Tokens in/out</div>
+        <div class="text-xs font-mono tabular-nums">
+          <span x-text="formatN(status.tokens_in ?? 0)"></span>
+          <span class="text-ink-500"> / </span>
+          <span x-text="formatN(status.tokens_out ?? 0)"></span>
+        </div>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-wide text-ink-500">Avg latency</div>
+        <div class="text-xl font-semibold tabular-nums"
+             x-text="(status.avg_latency_s || 0).toFixed(1) + 's'"></div>
+      </div>
+    </div>
+    <div x-show="status.pending > 0" x-cloak
+         class="mt-3 text-xs text-cyan-200 bg-cyan-500/10 rounded-lg px-3 py-1.5 inline-flex items-center gap-2">
+      <span class="inline-block h-2 w-2 rounded-full bg-cyan-300 animate-pulse"></span>
+      <span x-text="status.pending + ' request' + (status.pending === 1 ? '' : 's') + ' in flight'"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+function bridgeDashboard() {
+  return {
+    status: { connected: false, client: {}, calls_total: 0, calls_failed: 0,
+              tokens_in: 0, tokens_out: 0, pending: 0, avg_latency_s: 0,
+              provider_active: false },
+    visible: false,
+    _t: null,
+    init() {
+      this.refresh();
+      this._t = setInterval(() => this.refresh(), 5000);
+    },
+    async refresh() {
+      try {
+        const r = await fetch('/api/bridge/status');
+        if (!r.ok) return;
+        this.status = await r.json();
+        // Only show the card once the user has actually touched the
+        // bridge: either a client connected, the provider is active,
+        // or there have been calls. Otherwise the card is dead weight.
+        this.visible = this.status.connected ||
+                       this.status.provider_active ||
+                       (this.status.calls_total ?? 0) > 0;
+      } catch (e) {}
+    },
+    formatN(n) {
+      n = Number(n) || 0;
+      if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+      if (n >= 1_000)     return (n / 1_000).toFixed(1) + 'k';
+      return String(n);
+    },
+  };
+}
+</script>
+
 <!-- Savings strip -->
 {% if (tot.cache_read_tokens or 0) or (tot.duplicates or 0) %}
 <div class="card p-4 mb-8 flex flex-wrap items-center gap-4 text-sm">

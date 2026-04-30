@@ -45,6 +45,17 @@ class BridgeProvider(Provider):
                 "Settings → Local AI Bridge for the one-line install)."
             )
 
+        # Local 7B inference on a Mac M-series runs at ~30–50 tok/s,
+        # so a 16k-token statement extraction can take 5–10 minutes —
+        # well past the per-call timeout the cloud-tuned callers set
+        # (300 s in finance/extractor.py). We compute a generous local
+        # budget from max_output_tokens at 15 tok/s (worst-case for a
+        # cold model + a busy machine) plus a 60 s startup pad, and
+        # take the max of that and whatever the caller asked for.
+        caller_timeout = float(timeout) if timeout else float(self.default_timeout)
+        local_budget   = (max_output_tokens / 15.0) + 60.0
+        effective      = max(caller_timeout, local_budget, 180.0)
+
         activity.begin_call()
         try:
             data = bridge.call(
@@ -52,7 +63,7 @@ class BridgeProvider(Provider):
                 user_prompt=user_prompt,
                 model=model,
                 max_output_tokens=max_output_tokens,
-                timeout=timeout if timeout is not None else self.default_timeout,
+                timeout=effective,
             )
         except TimeoutError as exc:
             raise ProviderError(str(exc)) from exc

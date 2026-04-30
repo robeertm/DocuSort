@@ -55,6 +55,8 @@ class BridgeServer:
         self._calls_failed: int = 0
         self._tokens_in: int = 0
         self._tokens_out: int = 0
+        self._latency_sum_s: float = 0.0  # for avg latency
+        self._latency_n: int = 0
         # Last token-rejected attempt — surfaced in the UI so the user
         # gets a clear "you're using the wrong token" instead of a
         # silent "offline".
@@ -66,6 +68,7 @@ class BridgeServer:
 
     def info(self) -> dict[str, Any]:
         with self._lock:
+            avg_latency = (self._latency_sum_s / self._latency_n) if self._latency_n else 0.0
             return {
                 "connected": self.is_connected(),
                 "client":    dict(self._client_info),
@@ -75,6 +78,7 @@ class BridgeServer:
                 "calls_failed":     self._calls_failed,
                 "tokens_in":        self._tokens_in,
                 "tokens_out":       self._tokens_out,
+                "avg_latency_s":    avg_latency,
                 "pending":          len(self._pending),
                 "last_reject":      dict(self._last_reject),
             }
@@ -140,9 +144,12 @@ class BridgeServer:
             p.error = str(msg["error"])
         else:
             p.response = msg.get("data") or {}
+            latency = max(time.time() - p.submitted_at, 0.0)
             with self._lock:
                 self._tokens_in  += int(p.response.get("input_tokens", 0) or 0)
                 self._tokens_out += int(p.response.get("output_tokens", 0) or 0)
+                self._latency_sum_s += latency
+                self._latency_n     += 1
         p.event.set()
 
     # --------------------------------------------------------------- submit
