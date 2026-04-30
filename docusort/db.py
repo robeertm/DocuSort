@@ -1334,14 +1334,13 @@ class Database:
             with self._lock:
                 rows = self._conn.execute(
                     """SELECT t.booking_date AS date,
-                              COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS spend,
+                              COALESCE(SUM(ABS(t.amount)), 0) AS spend,
                               COALESCE(SUM(CASE WHEN t.amount > 0 THEN  t.amount ELSE 0 END), 0) AS income,
                               COUNT(*) AS n
                        FROM transactions t
                        JOIN statements s ON s.id = t.statement_id
                        JOIN documents  d ON d.id = s.doc_id
                        WHERE d.deleted_at IS NULL
-                         AND t.category != 'uebertrag'
                          AND t.booking_date >= ?
                          AND t.booking_date <  date(?, '+1 month')
                        GROUP BY t.booking_date

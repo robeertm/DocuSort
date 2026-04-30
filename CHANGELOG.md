@@ -2,6 +2,25 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.18.4] – 2026-04-30
+
+### Changed — heatmap counts every booking, not just spend
+
+Filtering on outgoing-only amounts and excluding internal transfers
+left a lot of perfectly active days as grey cells — pure-income days
+(salary credits) and transfer days had nothing to colour. The
+heatmap now counts every booking on a day (income + spend + transfer
+as absolute amounts), so the calendar reflects activity regardless
+of direction.
+
+### Changed — heatmap palette swapped to bright distinct hues
+
+Bottom bins were tinted greens with opacity, which the dark theme
+muted to grey-blue. Replaced with five fully-saturated hues across a
+clear cool-to-warm sweep: cyan-400 → emerald-400 → yellow-400 →
+orange-500 → rose-500. Quiet days are now unambiguous, busy days
+still pop.
+
 ## [0.18.3] – 2026-04-30
 
 ### Fixed — heatmap was washed-out grey on accounts with one outlier day

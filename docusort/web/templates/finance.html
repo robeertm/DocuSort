@@ -359,11 +359,11 @@
                  out the scale. #}
               {% set ratio = (cell.spend / heatmap_grid.max_spend) if heatmap_grid.max_spend > 0 else 0 %}
               {% if ratio > 1 %}{% set ratio = 1 %}{% endif %}
-              {% set bin = 1 if ratio < 0.2 else (2 if ratio < 0.4 else (3 if ratio < 0.6 else (4 if ratio < 0.85 else 5))) %}
+              {% set bin = 1 if ratio < 0.15 else (2 if ratio < 0.4 else (3 if ratio < 0.65 else (4 if ratio < 0.9 else 5))) %}
               <div class="rounded-[2px]
-                {% if bin == 1 %}bg-emerald-400/80
-                {% elif bin == 2 %}bg-lime-400/90
-                {% elif bin == 3 %}bg-amber-400
+                {% if bin == 1 %}bg-cyan-400
+                {% elif bin == 2 %}bg-emerald-400
+                {% elif bin == 3 %}bg-yellow-400
                 {% elif bin == 4 %}bg-orange-500
                 {% else %}bg-rose-500{% endif %}"
                 title="{{ cell.date }} · {{ '%.0f'|format(cell.spend) }} €"></div>
@@ -375,9 +375,9 @@
     <div class="flex items-center gap-2 text-[11px] text-ink-500 mt-3 justify-end">
       <span>{{ t('finance.heatmap.less') }}</span>
       <span class="inline-block h-3 w-3 rounded-[2px] bg-ink-900/40"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-400/80"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-lime-400/90"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-amber-400"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-cyan-400"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-400"></span>
+      <span class="inline-block h-3 w-3 rounded-[2px] bg-yellow-400"></span>
       <span class="inline-block h-3 w-3 rounded-[2px] bg-orange-500"></span>
       <span class="inline-block h-3 w-3 rounded-[2px] bg-rose-500"></span>
       <span>{{ t('finance.heatmap.more') }}</span>
