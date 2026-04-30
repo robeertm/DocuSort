@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DocuSort Local AI Bridge — Mac client.
+DocuSort Local AI Bridge — client.
 
-Runs on the user's Mac, connects outbound to the DocuSort server, and
-turns every incoming LLM request into a local Ollama call. No firewall
-configuration, no port forwarding — the Mac is the one initiating the
-connection, so anything that can reach the DocuSort URL works (home
-network, Tailscale, public DNS, doesn't matter).
+Runs on a computer you control (Mac, Linux box, or Windows machine),
+connects outbound to the DocuSort server, and turns every incoming
+LLM request into a local Ollama call. No firewall configuration, no
+port forwarding — the client is the one initiating the connection,
+so anything that can reach the DocuSort URL works (home network,
+Tailscale, public DNS, doesn't matter).
 
 Designed to be runnable straight from the terminal with one command:
 
-    python3 docusort_mac_bridge.py \\
+    python3 docusort_bridge.py \\
         --server https://your-docusort.example \\
         --token  <token-from-settings>
 
 The script will:
-  1. Make sure Ollama is installed (uses Homebrew if available, otherwise
-     downloads the official installer).
+  1. Make sure Ollama is installed (Homebrew on macOS, the official
+     install script on Linux, winget on Windows; falls back to a
+     manual prompt when no automated path works).
   2. Make sure ``ollama serve`` is running locally.
   3. Make sure the requested model is pulled.
   4. Open a WebSocket to ``/api/llm-bridge/ws`` and process incoming
@@ -137,34 +139,72 @@ def _ollama_models(base: str = DEFAULT_OLLAMA_URL) -> list[str]:
         return []
 
 
-def install_ollama_macos(non_interactive: bool) -> None:
-    """Best-effort install path: Homebrew when present, official script
-    otherwise. We deliberately don't try to silently elevate privileges
-    or run an arbitrary remote shell script unless the user is OK with
-    it (`non_interactive=False` keeps the prompt)."""
+def _confirm(msg: str, non_interactive: bool, default_yes: bool = True) -> bool:
+    if non_interactive:
+        return True
+    suffix = " [Y/n] " if default_yes else " [y/N] "
+    ans = input(msg + suffix).strip().lower()
+    if not ans:
+        return default_yes
+    return ans in ("y", "yes", "j", "ja")
+
+
+def install_ollama(non_interactive: bool) -> None:
+    """Cross-platform install path. macOS prefers Homebrew, Linux uses
+    the official install script, Windows uses winget when available
+    and otherwise points the user at the installer download. We never
+    silently elevate privileges or run remote shell scripts without
+    explicit confirmation."""
     if _have("ollama"):
         return
-    if _have("brew"):
-        step("Installing Ollama via Homebrew …")
-        subprocess.check_call(["brew", "install", "ollama"])
-        return
-    msg = ("Ollama is not installed and Homebrew was not found. "
-           "I can run the official installer (curl https://ollama.com/install.sh | sh).")
-    if non_interactive:
-        warn(msg)
-        warn("--non-interactive set — running the official installer …")
-        proceed = True
-    else:
-        print(msg)
-        ans = input("Run the installer now? [Y/n] ").strip().lower()
-        proceed = ans in ("", "y", "yes")
-    if not proceed:
-        fail("Cannot continue without Ollama. Install it manually from "
-             "https://ollama.com and re-run this script.")
+    sysname = platform.system()
+
+    if sysname == "Darwin":
+        if _have("brew"):
+            step("Installing Ollama via Homebrew …")
+            subprocess.check_call(["brew", "install", "ollama"])
+            return
+        if _confirm("Ollama not found, Homebrew missing. Run the official "
+                    "macOS installer (curl https://ollama.com/install.sh | sh)?",
+                    non_interactive):
+            step("Running the Ollama installer …")
+            subprocess.check_call(["bash", "-c",
+                                   "curl -fsSL https://ollama.com/install.sh | sh"])
+            return
+    elif sysname == "Linux":
+        if _confirm("Ollama not found. Run the official Linux installer "
+                    "(curl https://ollama.com/install.sh | sh)?",
+                    non_interactive):
+            step("Running the Ollama installer …")
+            subprocess.check_call(["bash", "-c",
+                                   "curl -fsSL https://ollama.com/install.sh | sh"])
+            return
+    elif sysname == "Windows":
+        if _have("winget") and _confirm(
+                "Ollama not found. Install via winget (Ollama.Ollama)?",
+                non_interactive):
+            step("Installing Ollama via winget …")
+            subprocess.check_call(
+                ["winget", "install", "--silent", "--accept-source-agreements",
+                 "--accept-package-agreements", "Ollama.Ollama"])
+            return
+        fail("Ollama not found. Download and run the Windows installer "
+             "from https://ollama.com/download/windows, then re-run this "
+             "script.")
         sys.exit(1)
-    step("Running the Ollama installer …")
-    subprocess.check_call(["bash", "-c",
-                           "curl -fsSL https://ollama.com/install.sh | sh"])
+    else:
+        fail(f"Unsupported platform: {sysname}. Install Ollama manually "
+             "from https://ollama.com and re-run this script.")
+        sys.exit(1)
+
+    fail("Cannot continue without Ollama. Install it manually from "
+         "https://ollama.com and re-run this script.")
+    sys.exit(1)
+
+
+# Backwards-compat alias — older copies of the install command in
+# people's terminal history still call install_ollama_macos.
+install_ollama_macos = install_ollama
 
 
 def ensure_ollama_running() -> subprocess.Popen | None:
@@ -173,12 +213,21 @@ def ensure_ollama_running() -> subprocess.Popen | None:
         good("Ollama is already running.")
         return None
     step("Starting `ollama serve` in the background …")
-    proc = subprocess.Popen(
-        ["ollama", "serve"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    popen_kwargs: dict[str, Any] = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    # On POSIX detach via start_new_session; on Windows the equivalent
+    # is CREATE_NEW_PROCESS_GROUP so closing this script doesn't take
+    # the daemon down with it.
+    if platform.system() == "Windows":
+        popen_kwargs["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP
+            | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+    proc = subprocess.Popen(["ollama", "serve"], **popen_kwargs)
     # Wait up to 15 s for the daemon to come up.
     for _ in range(30):
         if _ollama_health():
@@ -425,9 +474,9 @@ def _ollama_version_or_blank() -> str:
 # ------------------------------------------------------------------- entry
 def main() -> None:
     ap = argparse.ArgumentParser(
-        prog="docusort_mac_bridge",
+        prog="docusort_bridge",
         description="Local AI bridge for DocuSort — runs LLM inference "
-                    "on your Mac and forwards answers back to the server.",
+                    "on your computer and forwards answers back to the server.",
     )
     ap.add_argument("--server", default=os.environ.get("DOCUSORT_SERVER", ""),
                     help="DocuSort URL, e.g. https://docusort.lan:9876")
@@ -451,19 +500,16 @@ def main() -> None:
              "Settings → Local AI Bridge.")
         sys.exit(1)
 
-    print(f"{_C['bold']}DocuSort Mac Bridge{_C['reset']} → {args.server}")
+    print(f"{_C['bold']}DocuSort Local Bridge{_C['reset']} → {args.server}")
+    print(f"  os:      {platform.system()} {platform.release()}")
     print(f"  model:   {args.model}")
     print(f"  python:  {sys.executable}")
     print()
 
-    if platform.system() != "Darwin":
-        warn(f"You're running on {platform.system()} — the bridge works "
-             "anywhere, but the auto-install path is tuned for macOS.")
-
     _ensure_websockets()
 
     if not args.no_auto_install:
-        install_ollama_macos(args.non_interactive)
+        install_ollama(args.non_interactive)
     elif not _have("ollama"):
         fail("Ollama not found and --no-auto-install was set.")
         sys.exit(1)

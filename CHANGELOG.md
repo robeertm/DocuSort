@@ -18,6 +18,40 @@ model name, token counts, and latency right there in the card. Lets
 the user verify "yes the Mac is actually answering" without uploading
 a real document.
 
+## [0.20.0] – 2026-04-30
+
+### Added — re-queue auto-extracts Kontoauszüge end-to-end
+
+A document that gets re-classified as Kontoauszug (or as a
+Bank-statement lookalike) by the Re-queue flow now runs the
+second-pass statement extraction in the same call. Without this
+step the bulk re-queue left every doc sitting in /finance with a
+"noch nicht ausgewertet" placeholder, making the user click
+"Auswerten" once per document.
+
+The same gates as the primary watcher pipeline apply (local-only,
+review-before-send), so the privacy posture does not silently
+change between fresh uploads and re-queued ones.
+
+### Changed — bridge client is cross-platform
+
+The Mac-only install path was a leftover from the prototype. The
+client script now detects the OS at runtime:
+
+- macOS: Homebrew first, official installer otherwise.
+- Linux: official installer (curl | sh), confirmed before running.
+- Windows: winget when present, otherwise points the user at the
+  Ollama installer download. Background `ollama serve` uses a
+  detached process group so closing the script does not take the
+  daemon down with it.
+
+Settings UI swapped every "your Mac" / "Mac client" string for
+"your computer" / "bridge client", added a Windows tab to the
+install command (`Invoke-WebRequest` + `python` instead of
+`curl` + `python3`), and the dashboard card label changed from
+"Mac" to "Host". The connected client's platform (macOS / Linux /
+Windows) is now displayed inline.
+
 ## [0.19.0] – 2026-04-30
 
 ### Added — Local AI Bridge: run inference on your Mac

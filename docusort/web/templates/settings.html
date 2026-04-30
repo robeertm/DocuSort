@@ -23,25 +23,28 @@
       <option value="openai">OpenAI GPT</option>
       <option value="gemini">Google Gemini</option>
       <option value="openai_compat">{{ t('setup.provider.compat_label') }}</option>
-      <option value="bridge">Local AI Bridge (your Mac)</option>
+      <option value="bridge">Local AI Bridge (your computer)</option>
     </select>
 
     <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.model') }}</label>
     <input x-model="ai.model" type="text"
            class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-1 font-mono"
-           :placeholder="ai.provider === 'bridge' ? 'qwen2.5:7b-instruct  · or whatever your Mac has pulled' : ''">
+           :placeholder="ai.provider === 'bridge' ? 'qwen2.5:7b-instruct  · or whatever your bridge host has pulled' : ''">
     <div x-show="ai.provider === 'bridge'" x-cloak class="text-xs text-ink-500 mb-4 flex items-center gap-2 flex-wrap">
-      <template x-if="bridgeMacModel()">
+      <template x-if="bridgeClientModel()">
         <span>
-          Mac is currently running
-          <span class="font-mono text-cyan-300" x-text="bridgeMacModel()"></span>.
-          <button type="button" @click="ai.model = bridgeMacModel()"
-                  x-show="ai.model !== bridgeMacModel()"
+          Bridge is currently running
+          <span class="font-mono text-cyan-300" x-text="bridgeClientModel()"></span>
+          <span x-show="bridgeClientPlatform()" class="text-ink-500">
+            on <span x-text="bridgeClientPlatform()"></span>
+          </span>.
+          <button type="button" @click="ai.model = bridgeClientModel()"
+                  x-show="ai.model !== bridgeClientModel()"
                   class="underline hover:text-cyan-200 ml-1">use this</button>
         </span>
       </template>
-      <template x-if="!bridgeMacModel()">
-        <span class="text-ink-500">Connect a Mac client first to see what model it has loaded.</span>
+      <template x-if="!bridgeClientModel()">
+        <span class="text-ink-500">Connect a bridge client first to see what model it has loaded.</span>
       </template>
     </div>
 
@@ -65,9 +68,10 @@
 
     <template x-if="ai.provider === 'bridge'">
       <div class="rounded-lg bg-cyan-500/5 border border-cyan-500/20 p-3 text-xs text-cyan-100/90 mb-4">
-        Inference runs on a Mac you control. Configure the bridge in
-        the next section — once a Mac is connected, every classification
-        and statement extraction goes through it instead of a cloud API.
+        Inference runs on a computer you control (Mac, Linux, or Windows).
+        Configure the bridge in the next section — once a client is
+        connected, every classification and statement extraction goes
+        through it instead of a cloud API.
       </div>
     </template>
 
@@ -110,10 +114,11 @@
             x-text="status.connected ? 'connected' : 'offline'"></span>
     </div>
     <p class="text-ink-400 text-sm mb-5">
-      Run the AI on your Mac instead of a cloud API. The Mac connects to
-      this server outbound — no port forwarding, no firewall changes.
-      Every document classification and bank-statement extraction is
-      then processed locally.
+      Run the AI on a computer you control (Mac, Linux, or Windows)
+      instead of a cloud API. The client connects to this server
+      outbound — no port forwarding, no firewall changes. Every
+      document classification and bank-statement extraction is then
+      processed locally.
     </p>
 
     <!-- Live status block -->
@@ -138,7 +143,7 @@
               </div>
             </template>
             <div class="text-ink-400">
-              No client connected yet. Run the one-liner below on your Mac.
+              No client connected yet. Run the one-liner below on the host you want to use as the bridge.
             </div>
           </div>
         </template>
@@ -188,12 +193,23 @@
                 class="btn-secondary text-sm text-rose-300 hover:text-rose-200">Regenerate</button>
       </div>
       <p class="text-xs text-ink-500">
-        Paste this token into the bridge client on your Mac. Regenerating
-        immediately disconnects any client still using the old token.
+        Paste this token into the bridge client on whichever host you
+        want to run the model on. Regenerating immediately disconnects
+        any client still using the old token.
       </p>
 
       <div class="mt-5">
-        <label class="block text-sm font-medium mb-2">Run on your Mac</label>
+        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <label class="block text-sm font-medium">Run on your computer</label>
+          <div class="inline-flex rounded-md overflow-hidden border border-ink-700 text-[11px]">
+            <button type="button" @click="osChoice='unix'"
+                    :class="osChoice==='unix' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
+                    class="px-2 py-1">macOS / Linux</button>
+            <button type="button" @click="osChoice='windows'"
+                    :class="osChoice==='windows' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
+                    class="px-2 py-1 border-l border-ink-700">Windows</button>
+          </div>
+        </div>
         <div class="rounded-xl bg-ink-950/80 border border-ink-700 p-3 font-mono text-[11px] leading-5 overflow-x-auto whitespace-pre-wrap break-all"
              x-text="installCmd()"></div>
         <div class="flex justify-end mt-2">
@@ -201,9 +217,11 @@
                   x-text="installCopied ? 'Copied!' : 'Copy command'"></button>
         </div>
         <p class="text-xs text-ink-500 mt-2">
-          One terminal command on your Mac. The script auto-installs Ollama
-          (Homebrew or the official installer), pulls the model the first
-          time, and stays connected until you hit Ctrl-C.
+          Open a terminal (macOS Terminal · Linux shell · Windows
+          PowerShell) and paste the command. The script auto-installs
+          Ollama (Homebrew on macOS, the official script on Linux,
+          winget on Windows), pulls the model the first time, and stays
+          connected until you hit Ctrl-C.
         </p>
       </div>
     </div>
@@ -699,8 +717,8 @@ function settingsPage() {
     bridgeStatus: { connected: false, client: {} },
     init() {
       this.updateStoredHint();
-      // Poll bridge status so the "model on your Mac" hint stays fresh
-      // and so the model field can auto-fill when a client connects.
+      // Poll bridge status so the "model on your bridge host" hint stays
+      // fresh and so the model field can auto-fill when a client connects.
       this.refreshBridgeStatus();
       setInterval(() => this.refreshBridgeStatus(), 4000);
     },
@@ -710,10 +728,22 @@ function settingsPage() {
         if (r.ok) this.bridgeStatus = await r.json();
       } catch (e) {}
     },
-    bridgeMacModel() {
+    bridgeClientModel() {
       return (this.bridgeStatus && this.bridgeStatus.client &&
               this.bridgeStatus.client.model) || '';
     },
+    bridgeClientPlatform() {
+      const p = (this.bridgeStatus && this.bridgeStatus.client &&
+                 this.bridgeStatus.client.platform) || '';
+      // Squash the long python-platform string into something readable.
+      if (/macOS|Darwin/i.test(p)) return 'macOS';
+      if (/Linux/i.test(p))        return 'Linux';
+      if (/Windows/i.test(p))      return 'Windows';
+      return p;
+    },
+    // Backwards-compat alias for any cached page that references the
+    // old name. Safe to remove once everyone has hard-refreshed.
+    bridgeMacModel() { return this.bridgeClientModel(); },
     updateStoredHint() {
       this.storedHint = this.storedKey
         ? T['settings.ai.key_stored'].replace('{key}', this.storedKey)
@@ -725,15 +755,16 @@ function settingsPage() {
       this.storedKey = stored[this.ai.provider + '_api_key'] || '';
       this.updateStoredHint();
       // When switching to bridge: auto-fill the model field with what
-      // the connected Mac is actually running, so the user does not
-      // accidentally save a cloud-style model id like "claude-..."
-      // and then wonder why nothing works. Cloud-style ids are also
-      // ignored on the Mac side now, but a clean default is friendlier.
+      // the connected client is actually running, so the user does not
+      // accidentally save a cloud-style model id like "claude-…" and
+      // then wonder why nothing works. Cloud-style ids are also
+      // ignored on the bridge side now, but a clean default is
+      // friendlier.
       if (this.ai.provider === 'bridge') {
-        const macModel = this.bridgeMacModel();
+        const localModel  = this.bridgeClientModel();
         const looksCloudy = /^(claude-|gpt-|gpt4|gemini-|o1-|o3-|command-)/i.test(this.ai.model || '');
-        if (macModel && (!this.ai.model || looksCloudy)) {
-          this.ai.model = macModel;
+        if (localModel && (!this.ai.model || looksCloudy)) {
+          this.ai.model = localModel;
         } else if (!this.ai.model) {
           this.ai.model = 'qwen2.5:7b-instruct';
         }
@@ -807,6 +838,7 @@ function bridgeSettings() {
     testing:       false,
     testMessage:   '',
     testOk:        false,
+    osChoice:      (navigator.userAgent.toLowerCase().includes('windows') ? 'windows' : 'unix'),
     _timer:        null,
 
     init() {
@@ -824,15 +856,36 @@ function bridgeSettings() {
       return window.location.origin;
     },
     installCmd() {
-      const tok = (this.status.token || '<token>').replace(/'/g, "'\\''");
-      const srv = this.serverOrigin();
+      const tokRaw = this.status.token || '<token>';
+      const srv    = this.serverOrigin();
+      // Tailscale + locally-trusted CAs work without --insecure; for
+      // a fresh install pointing at a self-signed local DocuSort, the
+      // bridge needs --insecure to skip TLS verification.
       const insecure = window.location.protocol === 'https:' ? '--insecure' : '';
       // The script is fetched from the server itself so the user does
       // not need to know about GitHub. The same file ships with the
       // running version, served at /static/scripts/.
+      const url = `${srv}/static/scripts/docusort_mac_bridge.py`;
+      if (this.osChoice === 'windows') {
+        // PowerShell: download via Invoke-WebRequest to a temp path,
+        // run with `python` (Windows uses `python`, not `python3`).
+        // Backtick-escape the apostrophes inside the token; on
+        // PowerShell single-quoted strings don't expand variables but
+        // also don't allow embedded single quotes — escape via doubling.
+        const tok = tokRaw.replace(/'/g, "''");
+        return [
+          `$dst = "$env:TEMP\\docusort_bridge.py"`,
+          `Invoke-WebRequest "${url}" -OutFile $dst`,
+          `python $dst \``,
+          `  --server "${srv}" \``,
+          `  --token  '${tok}'${insecure ? ' `\n  ' + insecure : ''}`,
+        ].join('\n');
+      }
+      // macOS / Linux: bash/zsh single-line script, escape apostrophes.
+      const tok = tokRaw.replace(/'/g, "'\\''");
       return [
-        `curl -fsSL ${srv}/static/scripts/docusort_mac_bridge.py -o /tmp/docusort_mac_bridge.py && \\`,
-        `python3 /tmp/docusort_mac_bridge.py \\`,
+        `curl -fsSL ${url} -o /tmp/docusort_bridge.py && \\`,
+        `python3 /tmp/docusort_bridge.py \\`,
         `  --server ${srv} \\`,
         `  --token  '${tok}'${insecure ? ' \\\n  ' + insecure : ''}`,
       ].join('\n');
