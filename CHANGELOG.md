@@ -2,6 +2,33 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.18.6] – 2026-04-30
+
+### Fixed — category-trend bars still collapsed despite items-stretch
+
+The 0.18.5 fix made the column wrapper take full height, but the bar
+box itself used `flex-1` directly as the parent for percent-height
+segments. Browsers do not always treat a flex-derived height as
+"definite", so the segments fell back to their `min-height: 1px` and
+the chart still rendered as a sliver.
+
+Wrapped the bar in a `relative` flex-1 box and moved the actual
+segment column to `absolute inset-0`. The absolute child has a
+definite size to resolve percent heights against, so the stacked
+bars finally render at full chart height.
+
+### Fixed — yearly heatmap empty when most activity was income or transfers
+
+Year mode summed only outgoing amounts and excluded internal
+transfers, so a year with mainly salary credits or account moves
+showed up as an empty grid even though the same data lit up the
+monthly view (which already counted absolute totals). Year mode now
+mirrors month mode: every booking contributes its absolute amount.
+
+The default-year picker was also tightened to ignore that filter so
+"the year with the most bookings" reflects real activity, not just
+spend rows.
+
 ## [0.18.5] – 2026-04-30
 
 ### Fixed — category-trend stacked bars collapsed to a thin strip

@@ -431,23 +431,28 @@
             {# Total above the bar so the absolute spend isn't hidden by the
                100%-stacked normalisation. #}
             <div class="text-[9px] text-ink-500 text-center tabular-nums mb-1 truncate shrink-0">{{ "%.0f"|format(month_total) }}</div>
-            <div class="flex-1 flex flex-col-reverse w-full rounded-t overflow-hidden bg-ink-900/30 min-h-0">
-              {% if month_total > 0 %}
-                {% for c_idx in range(top_cats|length) %}
-                  {% set v = row['values'][c_idx] %}
-                  {% if v > 0 %}
-                    <div class="{{ palette[c_idx] }} hover:brightness-125"
-                         style="height: {{ v / month_total * 100 }}%; min-height: 1px;"
-                         title="{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} € · {{ '%.0f'|format(v / month_total * 100) }}%"></div>
+            {# Wrap the bar in a relative box with flex-1 so % heights inside
+               resolve against the absolute child's definite size. Percent
+               heights on flex-item children are unreliable; absolute is. #}
+            <div class="flex-1 relative min-h-0 w-full">
+              <div class="absolute inset-0 flex flex-col-reverse rounded-t overflow-hidden bg-ink-900/30">
+                {% if month_total > 0 %}
+                  {% for c_idx in range(top_cats|length) %}
+                    {% set v = row['values'][c_idx] %}
+                    {% if v > 0 %}
+                      <div class="{{ palette[c_idx] }} hover:brightness-125"
+                           style="height: {{ v / month_total * 100 }}%; min-height: 1px;"
+                           title="{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} € · {{ '%.0f'|format(v / month_total * 100) }}%"></div>
+                    {% endif %}
+                  {% endfor %}
+                  {% set other = (row['values'][6:] | sum) %}
+                  {% if other > 0 %}
+                    <div class="{{ palette[6] }}"
+                         style="height: {{ other / month_total * 100 }}%; min-height: 1px;"
+                         title="Andere · {{ '%.0f'|format(other) }} €"></div>
                   {% endif %}
-                {% endfor %}
-                {% set other = (row['values'][6:] | sum) %}
-                {% if other > 0 %}
-                  <div class="{{ palette[6] }}"
-                       style="height: {{ other / month_total * 100 }}%; min-height: 1px;"
-                       title="Andere · {{ '%.0f'|format(other) }} €"></div>
                 {% endif %}
-              {% endif %}
+              </div>
             </div>
             <div class="text-[10px] text-ink-500 text-center mt-1 truncate shrink-0">{{ row.month[5:] }}/{{ row.month[2:4] }}</div>
           </div>
