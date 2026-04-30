@@ -2,6 +2,22 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.18.3] – 2026-04-30
+
+### Fixed — heatmap was washed-out grey on accounts with one outlier day
+
+Scaling cells by `max(spend)` means a single account-closure transfer
+(€100k+) squashes every other day to ratio < 0.15 → bottom-bin
+colour. With a dark theme the bottom bin (`emerald-700/60`) reads as
+grey-blue and is hard to spot against the page background.
+
+- The reference value is now the 90th percentile of non-zero days so
+  90 % of days spread across all five bins; days above p90 get
+  clamped to the brightest colour.
+- Bottom-three palette stops are brightened (emerald-400, lime-400,
+  amber-400) so even quiet days pop on the dark theme. Top stops
+  (orange-500, rose-500) stay as before for the heaviest days.
+
 ## [0.18.2] – 2026-04-29
 
 ### Changed — readable cashflow / category / heatmap charts

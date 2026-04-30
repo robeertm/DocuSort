@@ -673,7 +673,19 @@ def create_app(
                 if start_dt and end_dt:
                     first_monday = start_dt - _td(days=start_dt.weekday())
                     last_sunday  = end_dt + _td(days=6 - end_dt.weekday())
-                    max_spend = max(spend_by_date.values()) if spend_by_date else 0.0
+                    # Skip the absolute max — a single end-of-quarter
+                    # transfer or account closure can be 100x normal
+                    # daily spend, which then squashes every other day
+                    # into the lowest colour bin. Use the 90th
+                    # percentile so 90 % of days spread across all five
+                    # bins; days above p90 get clamped to the brightest
+                    # colour.
+                    vals = sorted(v for v in spend_by_date.values() if v > 0)
+                    if vals:
+                        p90_idx = max(0, int(len(vals) * 0.9) - 1)
+                        max_spend = max(vals[p90_idx], 1.0)
+                    else:
+                        max_spend = 0.0
                     weeks = []
                     cur = first_monday
                     while cur <= last_sunday:
