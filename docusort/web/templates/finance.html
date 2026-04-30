@@ -185,13 +185,19 @@
           <summary class="cursor-pointer text-xs text-ink-300 hover:text-ink-100 select-none">
             {{ t('finance.diag.show_list') }}
           </summary>
-          <ul class="mt-2 space-y-0.5 text-xs">
+          <ul class="mt-2 space-y-1 text-xs">
             <template x-for="s in items" :key="s.doc_id">
               <li class="flex items-baseline gap-2">
                 <span class="text-ink-500 tabular-nums" x-text="s.doc_date || '—'"></span>
                 <a :href="'/document/' + s.doc_id"
-                   class="text-ink-200 hover:text-emerald-300 truncate"
+                   class="text-ink-200 hover:text-emerald-300 truncate flex-1 min-w-0"
                    x-text="s.subject || ('doc ' + s.doc_id)"></a>
+                <button type="button"
+                        @click="dismiss(s.doc_id)"
+                        class="text-[10px] text-ink-500 hover:text-rose-300 underline shrink-0"
+                        title="Mark as 'no transactions to extract' so the banner stops nagging">
+                  ignorieren
+                </button>
               </li>
             </template>
           </ul>
@@ -1207,6 +1213,15 @@ function financeDiag(initialItems, initialTotal) {
         this.resultOk = false;
         this.result = e.message || String(e);
       } finally { this.busy = false; }
+    },
+    async dismiss(docId) {
+      // Optimistic: drop from list immediately so the banner shrinks.
+      // If the call fails, refresh() restores it on the next poll.
+      this.items = this.items.filter(s => s.doc_id !== docId);
+      try {
+        await fetch(`/api/document/${docId}/statement/dismiss-empty`,
+                    { method: 'POST' });
+      } catch (e) { this.refresh(); }
     },
   };
 }

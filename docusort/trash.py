@@ -51,13 +51,28 @@ def delete_document(doc_id: int, settings: AppSettings, db: Database) -> dict:
     if doc.get("deleted_at"):
         raise ValueError("document already in trash")
 
-    source = Path(doc["library_path"])
-    if not source.exists():
-        raise ValueError(f"library file missing: {source}")
+    source_str = doc.get("library_path") or ""
+    source = Path(source_str) if source_str else None
+
+    # If the underlying file is gone (e.g. an aborted classifier never
+    # actually moved the upload, or the user deleted it on disk), still
+    # let the user clean up the DB row. Without this branch the doc
+    # would stay in the review queue forever — exactly the "wie bekomme
+    # ich das weg?" case.
+    if source is None or not source.exists():
+        db.mark_deleted(doc_id, source_str)
+        logger.info("Trashed doc %d (file already missing): %s", doc_id, source_str)
+        return {"doc_id": doc_id, "trash_path": source_str,
+                "file_missing": True}
 
     # Preserve the original sub-path (YYYY/Category/filename) under _Trash/
     library_root = settings.paths.library
-    rel = source.relative_to(library_root)
+    try:
+        rel = source.relative_to(library_root)
+    except ValueError:
+        # File lives outside the library root (e.g. /review/...); flatten
+        # under _Trash/ instead of crashing on the relative_to call.
+        rel = Path(source.name)
     target = _uniquify(_trash_root(settings) / rel)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(source), str(target))

@@ -310,6 +310,17 @@ class Database:
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_deleted ON documents(deleted_at)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_subcat  ON documents(subcategory)")
 
+        # statements: opt-in column to mark a row as "no transactions
+        # ever, stop nagging about it". Used by the diag banner so the
+        # user can hide individual statements that genuinely have
+        # nothing to extract (e.g. a Tagesgeldkonto cover page).
+        stmt_cols = {row["name"] for row in self._conn.execute("PRAGMA table_info(statements)")}
+        if "acknowledged_empty" not in stmt_cols:
+            self._conn.execute(
+                "ALTER TABLE statements ADD COLUMN acknowledged_empty INTEGER DEFAULT 0"
+            )
+            logger.info("DB migration: added statements.acknowledged_empty")
+
         # NOTE: 0.15.1 shipped a startup cleanup that deleted every
         # `statements` row whose document didn't have category =
         # 'Kontoauszug'. That was destructive — pre-0.13 installs

@@ -199,30 +199,75 @@
       </p>
 
       <div class="mt-5">
-        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <label class="block text-sm font-medium">Run on your computer</label>
-          <div class="inline-flex rounded-md overflow-hidden border border-ink-700 text-[11px]">
-            <button type="button" @click="osChoice='unix'"
-                    :class="osChoice==='unix' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
-                    class="px-2 py-1">macOS / Linux</button>
-            <button type="button" @click="osChoice='windows'"
-                    :class="osChoice==='windows' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
-                    class="px-2 py-1 border-l border-ink-700">Windows</button>
+        <label class="block text-sm font-medium mb-2">Start on your computer</label>
+
+        <!-- One-click download path — most users land here. The file
+             carries the token + server URL embedded; double-clicking
+             starts the bridge in a terminal window. -->
+        <div class="rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">
+          <p class="text-sm text-ink-200 mb-3">
+            One-click setup — download the launcher for your OS,
+            double-click it, and the bridge starts.
+          </p>
+          <div class="flex flex-wrap gap-2 mb-2">
+            <a :href="'/api/bridge/installer?os=mac'" download
+               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-4 w-4">
+                <path d="M16 4c-1 1.5-2 2.5-3.5 2.5C13 5 14 4 16 4Zm0 4c-2 0-3 1.5-4 1.5s-2-1.5-3.5-1.5C6 8 4 10 4 13c0 4 3 7 4.5 7s2-1 3.5-1 2.5 1 3.5 1c2 0 4-3 4-7 0-2-1-3-2.5-3"/>
+              </svg>
+              macOS
+            </a>
+            <a :href="'/api/bridge/installer?os=windows'" download
+               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" class="h-4 w-4">
+                <path d="M3 5.5 11 4v8H3zM12 4l9-1.5V12h-9zM3 13h8v8L3 19.5zM12 13h9v8.5L12 21z"/>
+              </svg>
+              Windows
+            </a>
+            <a :href="'/api/bridge/installer?os=linux'" download
+               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-4 w-4">
+                <path d="M12 3a4 4 0 0 0-4 4c0 2 1 3 1 5s-3 4-3 6 1 3 6 3 6-1 6-3-3-4-3-6 1-3 1-5a4 4 0 0 0-4-4Z"/>
+                <circle cx="10.5" cy="7.5" r=".7" fill="currentColor"/>
+                <circle cx="13.5" cy="7.5" r=".7" fill="currentColor"/>
+              </svg>
+              Linux
+            </a>
           </div>
+          <details class="text-xs text-ink-500 mt-2">
+            <summary class="cursor-pointer hover:text-ink-300">First-run hints (Gatekeeper, dependencies)</summary>
+            <ul class="mt-2 space-y-1 list-disc pl-5">
+              <li><b>macOS:</b> first launch may show "cannot be opened because it is from an unidentified developer". Right-click the file → Open → Open. The script needs Python 3 (preinstalled on modern macOS) and will auto-install Ollama via Homebrew or the official installer.</li>
+              <li><b>Windows:</b> double-clicking opens a console window. SmartScreen may show a "Windows protected your PC" warning — click "More info" → "Run anyway". Needs Python 3 from python.org or the Microsoft Store. Ollama is auto-installed via winget.</li>
+              <li><b>Linux:</b> chmod +x once, then double-click or run from a terminal. Ollama is installed via the official `curl | sh` after a Y/N prompt.</li>
+            </ul>
+          </details>
         </div>
-        <div class="rounded-xl bg-ink-950/80 border border-ink-700 p-3 font-mono text-[11px] leading-5 overflow-x-auto whitespace-pre-wrap break-all"
-             x-text="installCmd()"></div>
-        <div class="flex justify-end mt-2">
-          <button type="button" @click="copyInstall()" class="btn-secondary text-xs"
-                  x-text="installCopied ? 'Copied!' : 'Copy command'"></button>
-        </div>
-        <p class="text-xs text-ink-500 mt-2">
-          Open a terminal (macOS Terminal · Linux shell · Windows
-          PowerShell) and paste the command. The script auto-installs
-          Ollama (Homebrew on macOS, the official script on Linux,
-          winget on Windows), pulls the model the first time, and stays
-          connected until you hit Ctrl-C.
-        </p>
+
+        <!-- Power-user fallback: paste the same command into a terminal. -->
+        <details class="mt-4">
+          <summary class="cursor-pointer text-xs text-ink-400 hover:text-ink-200 select-none">
+            Or run in a terminal yourself
+          </summary>
+          <div class="mt-2">
+            <div class="flex justify-end mb-2">
+              <div class="inline-flex rounded-md overflow-hidden border border-ink-700 text-[11px]">
+                <button type="button" @click="osChoice='unix'"
+                        :class="osChoice==='unix' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
+                        class="px-2 py-1">macOS / Linux</button>
+                <button type="button" @click="osChoice='windows'"
+                        :class="osChoice==='windows' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
+                        class="px-2 py-1 border-l border-ink-700">Windows</button>
+              </div>
+            </div>
+            <div class="rounded-xl bg-ink-950/80 border border-ink-700 p-3 font-mono text-[11px] leading-5 overflow-x-auto whitespace-pre-wrap break-all"
+                 x-text="installCmd()"></div>
+            <div class="flex justify-end mt-2">
+              <button type="button" @click="copyInstall()" class="btn-secondary text-xs"
+                      x-text="installCopied ? 'Copied!' : 'Copy command'"></button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   </section>

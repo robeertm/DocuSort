@@ -744,6 +744,7 @@ def create_app(
                    LEFT JOIN accounts a ON a.id = s.account_id
                    WHERE d.deleted_at IS NULL
                      AND d.category = 'Kontoauszug'
+                     AND COALESCE(s.acknowledged_empty, 0) = 0
                      AND s.id NOT IN (SELECT statement_id FROM transactions)
                    ORDER BY d.doc_date DESC, d.id DESC
                    LIMIT 20"""
@@ -917,25 +918,45 @@ def create_app(
         # readable. Both return doc rows with stored OCR text — we
         # never re-OCR, since /api/finance/reocr-all is the entry
         # point for that.
+        #
+        # The "missing" leg also catches legacy Bank-tagged docs that
+        # are clearly statements (subject mentions Kontoauszug /
+        # Girokonto / Tagesgeld / Kreditkarte / paypal-auszug, or the
+        # subcategory says Konto). After successful extraction the
+        # worker promotes them to category=Kontoauszug so /finance and
+        # all category filters pick them up — same logic backfill
+        # already uses.
         with db._lock:
             missing = db._conn.execute(
-                """SELECT d.id AS doc_id,
+                """SELECT d.id AS doc_id, d.category AS category,
                           COALESCE(d.subject, d.filename) AS subject,
                           d.extracted_text AS text
                    FROM documents d
                    LEFT JOIN statements s ON s.doc_id = d.id
                    WHERE d.deleted_at IS NULL
-                     AND d.category = 'Kontoauszug'
                      AND s.id IS NULL
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''
+                     AND (
+                       d.category = 'Kontoauszug'
+                       OR (d.category = 'Bank' AND (
+                         d.subcategory = 'Konto'
+                         OR d.subcategory = 'Karte'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kontoauszug%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%girokonto%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%tagesgeld%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kreditkart%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%paypal%auszug%'
+                       ))
+                     )"""
             ).fetchall()
             empty = db._conn.execute(
-                """SELECT d.id AS doc_id,
+                """SELECT d.id AS doc_id, d.category AS category,
                           COALESCE(d.subject, d.filename) AS subject,
                           d.extracted_text AS text
                    FROM documents d
                    JOIN statements s ON s.doc_id = d.id
                    WHERE d.deleted_at IS NULL
+                     AND COALESCE(s.acknowledged_empty, 0) = 0
                      AND s.id NOT IN (SELECT statement_id FROM transactions)
                      AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
             ).fetchall()
@@ -944,13 +965,14 @@ def create_app(
         # though our schema keeps them disjoint). Order: missing first,
         # then empty — feels more natural progress-wise.
         seen: set[int] = set()
-        targets: list[tuple[int, str, str]] = []
+        targets: list[tuple[int, str, str, str]] = []  # (doc_id, subject, text, category)
         for r in list(missing) + list(empty):
             doc_id = int(r["doc_id"])
             if doc_id in seen:
                 continue
             seen.add(doc_id)
-            targets.append((doc_id, r["subject"] or f"doc {doc_id}", r["text"]))
+            cat = (r["category"] if "category" in r.keys() else None) or ""
+            targets.append((doc_id, r["subject"] or f"doc {doc_id}", r["text"], cat))
 
         if not targets:
             return {"started": False, "reason": "nothing to analyse",
@@ -968,7 +990,7 @@ def create_app(
                 max_text_chars=max(settings.ai.max_text_chars, 32000),
                 holder_names=settings.finance.holder_names,
             )
-            for idx, (doc_id, subject, text) in enumerate(targets):
+            for idx, (doc_id, subject, text, category) in enumerate(targets):
                 if idx > 0:
                     _time.sleep(0.6)
                 activity.update_job(
@@ -1032,6 +1054,18 @@ def create_app(
                         transactions=tx_payload,
                         extra_json=stmt.raw_response,
                     )
+                    # Promote a legacy Bank-tagged doc to category=
+                    # Kontoauszug now that we've confirmed it's a real
+                    # statement (transactions came back). Same logic
+                    # as backfill_statements.
+                    if category == "Bank":
+                        with db._lock:
+                            db._conn.execute(
+                                "UPDATE documents SET category = 'Kontoauszug', "
+                                "subcategory = '' WHERE id = ?",
+                                (doc_id,),
+                            )
+                            db._conn.commit()
                     job = activity.get_job("analyze-statements")
                     job.approved.append(doc_id)
                     activity.update_job("analyze-statements", done=idx + 1)
@@ -1056,27 +1090,62 @@ def create_app(
 
     @app.get("/api/finance/unanalyzed-count")
     def api_unanalyzed_count():
-        """Cheap count for the UI banner — how many Kontoauszug docs
-        still need a populated statement row?"""
+        """Cheap count for the UI banner — how many statement-shaped
+        docs still need a populated statement row? Includes legacy
+        Bank-tagged docs that look like statements (subject mentions
+        Kontoauszug / Girokonto / Tagesgeld / Kreditkarte / paypal-auszug)
+        — those get promoted to category=Kontoauszug after extraction."""
         with db._lock:
             missing = db._conn.execute(
                 """SELECT COUNT(*) AS n FROM documents d
                    LEFT JOIN statements s ON s.doc_id = d.id
                    WHERE d.deleted_at IS NULL
-                     AND d.category = 'Kontoauszug'
                      AND s.id IS NULL
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''
+                     AND (
+                       d.category = 'Kontoauszug'
+                       OR (d.category = 'Bank' AND (
+                         d.subcategory = 'Konto'
+                         OR d.subcategory = 'Karte'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kontoauszug%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%girokonto%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%tagesgeld%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kreditkart%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%paypal%auszug%'
+                       ))
+                     )"""
             ).fetchone()
             empty = db._conn.execute(
                 """SELECT COUNT(*) AS n FROM documents d
                    JOIN statements s ON s.doc_id = d.id
                    WHERE d.deleted_at IS NULL
                      AND d.category = 'Kontoauszug'
+                     AND COALESCE(s.acknowledged_empty, 0) = 0
                      AND s.id NOT IN (SELECT statement_id FROM transactions)
                      AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
             ).fetchone()
         return {"missing": int(missing["n"] if missing else 0),
                 "empty":   int(empty["n"]   if empty   else 0)}
+
+    @app.post("/api/document/{doc_id}/statement/dismiss-empty")
+    def api_dismiss_empty_statement(doc_id: int):
+        """Mark this statement as 'genuinely empty, stop nagging about
+        it'. The diag banner and the bulk-analyse counter will skip
+        it from now on. Reversible by clicking 'Erneut auswerten' on
+        the document page — that flips the flag back to 0 and runs
+        extraction afresh."""
+        with db._lock:
+            row = db._conn.execute(
+                "SELECT id FROM statements WHERE doc_id = ?", (doc_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(404, "no statement row for this doc")
+            db._conn.execute(
+                "UPDATE statements SET acknowledged_empty = 1 WHERE doc_id = ?",
+                (doc_id,),
+            )
+            db._conn.commit()
+        return {"ok": True, "doc_id": doc_id}
 
     @app.post("/api/finance/reextract-empty")
     def api_reextract_empty():
@@ -1110,6 +1179,7 @@ def create_app(
                    FROM statements s
                    JOIN documents d ON d.id = s.doc_id
                    WHERE d.deleted_at IS NULL
+                     AND COALESCE(s.acknowledged_empty, 0) = 0
                      AND s.id NOT IN (SELECT statement_id FROM transactions)
                      AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
             ).fetchall()
@@ -1952,6 +2022,102 @@ def create_app(
         info["token"]      = get_or_create_token(settings.config_dir)
         info["provider_active"] = settings.ai.provider == "bridge"
         return info
+
+    @app.get("/api/bridge/installer")
+    def api_bridge_installer(request: Request, os: str = "mac"):
+        """Return a ready-to-run launcher with the server URL and token
+        already baked in — saves the user from copy-pasting a long
+        command into a terminal. Just download and double-click.
+
+        - os=mac    → `.command` (macOS Terminal opens on double-click)
+        - os=linux  → `.sh`      (chmod +x and run)
+        - os=windows→ `.bat`     (double-click to launch)
+
+        The token is sensitive (it grants the bridge access to drive
+        AI calls on the server), so the file is generated on demand
+        and the response is marked no-store. Filename includes the
+        host so multiple servers can co-exist in the Downloads folder.
+        """
+        from ..bridge.server import get_or_create_token
+        token = get_or_create_token(settings.config_dir)
+        # Reconstruct the public origin from the incoming request so
+        # the launcher will work on whichever interface the user is
+        # currently using (LAN ip vs Tailscale vs reverse proxy).
+        scheme = request.url.scheme
+        host   = request.headers.get("host") or request.url.netloc
+        origin = f"{scheme}://{host}".rstrip("/")
+        script_url = f"{origin}/static/scripts/docusort_mac_bridge.py"
+
+        # `.command` files trip macOS Gatekeeper on first run; the
+        # script tells the user to right-click → Open if that happens.
+        # The token MUST be single-quoted in the bash launcher and
+        # we escape any single quote inside it the standard way.
+        sh_token  = token.replace("'", "'\\''")
+        # In the .bat we use double-quote for the token; the token is
+        # url-safe base64 so it never contains a quote, but be defensive.
+        bat_token = token.replace('"', '""')
+
+        os_norm = (os or "").lower()
+        if os_norm in ("mac", "darwin", "macos"):
+            body = (
+                "#!/bin/bash\n"
+                "# DocuSort Local AI Bridge — generated launcher.\n"
+                "# Double-click this file to start the bridge in Terminal.\n"
+                "# If macOS blocks it the first time:  right-click → Open.\n"
+                "set -e\n"
+                'echo "DocuSort Local AI Bridge"\n'
+                f'SERVER="{origin}"\n'
+                f'TOKEN=\'{sh_token}\'\n'
+                'TMP="$(mktemp -t docusort_bridge.XXXXXX).py"\n'
+                f'curl -fsSL "{script_url}" -o "$TMP"\n'
+                'exec /usr/bin/env python3 "$TMP" --server "$SERVER" --token "$TOKEN"\n'
+            )
+            filename = f"docusort-bridge-{host.split(':')[0]}.command"
+            media    = "application/x-shellscript"
+        elif os_norm == "linux":
+            body = (
+                "#!/bin/bash\n"
+                "# DocuSort Local AI Bridge — generated launcher.\n"
+                "# Run from a terminal:  chmod +x docusort-bridge.sh && ./docusort-bridge.sh\n"
+                "set -e\n"
+                f'SERVER="{origin}"\n'
+                f'TOKEN=\'{sh_token}\'\n'
+                'TMP="$(mktemp -t docusort_bridge.XXXXXX.py)"\n'
+                f'curl -fsSL "{script_url}" -o "$TMP"\n'
+                'exec python3 "$TMP" --server "$SERVER" --token "$TOKEN"\n'
+            )
+            filename = f"docusort-bridge-{host.split(':')[0]}.sh"
+            media    = "application/x-shellscript"
+        elif os_norm in ("win", "windows"):
+            body = (
+                "@echo off\r\n"
+                "REM DocuSort Local AI Bridge -- generated launcher.\r\n"
+                "REM Double-click to launch.\r\n"
+                f'set SERVER={origin}\r\n'
+                f'set TOKEN={bat_token}\r\n'
+                f'set SCRIPT_URL={script_url}\r\n'
+                'set TMP_PY=%TEMP%\\docusort_bridge.py\r\n'
+                'powershell -NoProfile -Command "Invoke-WebRequest \'%SCRIPT_URL%\' -OutFile \'%TMP_PY%\'"\r\n'
+                'if errorlevel 1 (echo Download failed.& pause & exit /b 1)\r\n'
+                'python "%TMP_PY%" --server "%SERVER%" --token "%TOKEN%"\r\n'
+                'pause\r\n'
+            )
+            filename = f"docusort-bridge-{host.split(':')[0]}.bat"
+            media    = "application/x-bat"
+        else:
+            raise HTTPException(400, f"unknown os: {os!r}")
+
+        from fastapi.responses import Response
+        return Response(
+            content=body, media_type=media,
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="{filename}"',
+                # The token is in the body — make absolutely sure
+                # nothing along the way caches this response.
+                "Cache-Control": "no-store, max-age=0",
+            },
+        )
 
     @app.post("/api/bridge/test")
     def api_bridge_test():
