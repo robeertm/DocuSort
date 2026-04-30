@@ -2,6 +2,25 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.18.7] – 2026-04-30
+
+### Fixed — heatmap and category-trend rebuilt as SVG with inline hex fills
+
+The pre-built Tailwind CSS bundle does not contain the chart palette
+classes (`bg-cyan-400`, `bg-yellow-400`, `bg-orange-500`,
+`bg-emerald-400`, `bg-rose-500`, `bg-sky-500/80`, `bg-amber-500/80`,
+`bg-rose-500/80`, `bg-violet-500/80`, `bg-teal-500/80`,
+`bg-ink-600/80`). Every coloured cell and every stacked-bar segment
+referenced one of those classes, so all of them rendered transparent
+against a dark background — the charts looked empty even though the
+data was there.
+
+Both charts are now plain SVG with inline `fill="#…"` hex colours, so
+they cannot depend on which utility classes happen to be in the
+compiled CSS. Layout sizing is also explicit (viewBox + fixed
+heights), which removes the long-running flexbox percent-height
+issue from the stacked bars.
+
 ## [0.18.6] – 2026-04-30
 
 ### Fixed — category-trend bars still collapsed despite items-stretch

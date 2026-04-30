@@ -336,50 +336,72 @@
     </div>
     {% if heatmap_grid.weeks %}
     <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.heatmap.hint') }}</p>
+    {# Pure SVG heatmap. Tailwind colour classes are pre-compiled and the
+       site CSS does not include the bin palette, so we inline hex fills
+       directly into <rect> elements — guaranteed to render. #}
+    {% set hm_cell  = 14 %}{# px per cell incl. gap #}
+    {% set hm_rect  = 12 %}
+    {% set hm_lpad  = 32 %}{# left padding for weekday labels #}
+    {% set hm_tpad  = 16 %}{# top padding for month labels #}
+    {% set hm_w     = hm_lpad + heatmap_grid.weeks|length * hm_cell %}
+    {% set hm_h     = hm_tpad + 7 * hm_cell %}
     <div class="overflow-x-auto -mx-2 px-2">
-      <div class="grid gap-[4px] text-[10px] text-ink-500 w-full"
-           style="grid-template-columns: 32px repeat({{ heatmap_grid.weeks | length }}, minmax(0, 1fr)); grid-auto-rows: 24px; min-width: {{ 32 + heatmap_grid.weeks | length * 14 }}px;">
-        <!-- empty top-left cell + week labels (sparse: every 4th week) -->
-        <div></div>
+      <svg viewBox="0 0 {{ hm_w }} {{ hm_h }}"
+           width="100%" preserveAspectRatio="xMinYMin meet"
+           style="min-width: {{ hm_w }}px; height: {{ hm_h }}px;"
+           class="block">
+        <!-- month labels along the top -->
         {% for w in heatmap_grid.weeks %}
-          <div class="text-center {% if loop.index0 % 4 != 0 %}invisible{% endif %}">{{ w.month_label or w.label }}</div>
+          {% if loop.index0 % 4 == 0 and w.month_label %}
+            <text x="{{ hm_lpad + loop.index0 * hm_cell + hm_rect / 2 }}" y="11"
+                  fill="#9ca3af" font-size="10" text-anchor="middle">{{ w.month_label }}</text>
+          {% endif %}
         {% endfor %}
+        <!-- weekday labels on the left (Mo, Mi, Fr, So) -->
         {% for dow_label in ['Mo','Di','Mi','Do','Fr','Sa','So'] %}
           {% set d = loop.index0 %}
-          <div class="flex items-center justify-end pr-1 {% if d % 2 == 1 %}invisible{% endif %}">{{ dow_label }}</div>
-          {% for w in heatmap_grid.weeks %}
+          {% if d % 2 == 0 %}
+            <text x="{{ hm_lpad - 4 }}" y="{{ hm_tpad + d * hm_cell + hm_rect - 2 }}"
+                  fill="#9ca3af" font-size="10" text-anchor="end">{{ dow_label }}</text>
+          {% endif %}
+        {% endfor %}
+        <!-- one rect per (week, day) cell -->
+        {% for w in heatmap_grid.weeks %}
+          {% set wi = loop.index0 %}
+          {% for d in range(7) %}
             {% set cell = w.cells[d] %}
-            {% if cell.spend is none %}
-              <div class="rounded-[2px] bg-transparent"></div>
-            {% elif cell.spend == 0 %}
-              <div class="rounded-[2px] bg-ink-900/40" title="{{ cell.date }} · 0 €"></div>
-            {% else %}
-              {# ratio is clamped at 1.0 — days above the p90 reference
-                 all paint as the top-bin colour rather than blowing
-                 out the scale. #}
-              {% set ratio = (cell.spend / heatmap_grid.max_spend) if heatmap_grid.max_spend > 0 else 0 %}
-              {% if ratio > 1 %}{% set ratio = 1 %}{% endif %}
-              {% set bin = 1 if ratio < 0.15 else (2 if ratio < 0.4 else (3 if ratio < 0.65 else (4 if ratio < 0.9 else 5))) %}
-              <div class="rounded-[2px]
-                {% if bin == 1 %}bg-cyan-400
-                {% elif bin == 2 %}bg-emerald-400
-                {% elif bin == 3 %}bg-yellow-400
-                {% elif bin == 4 %}bg-orange-500
-                {% else %}bg-rose-500{% endif %}"
-                title="{{ cell.date }} · {{ '%.0f'|format(cell.spend) }} €"></div>
+            {% if cell and cell.spend is not none %}
+              {% if cell.spend == 0 %}
+                {% set fill = '#1f2937' %}
+              {% else %}
+                {% set ratio = (cell.spend / heatmap_grid.max_spend) if heatmap_grid.max_spend > 0 else 0 %}
+                {% if ratio > 1 %}{% set ratio = 1 %}{% endif %}
+                {% if   ratio < 0.15 %}{% set fill = '#22d3ee' %}
+                {% elif ratio < 0.40 %}{% set fill = '#34d399' %}
+                {% elif ratio < 0.65 %}{% set fill = '#facc15' %}
+                {% elif ratio < 0.90 %}{% set fill = '#f97316' %}
+                {% else                %}{% set fill = '#f43f5e' %}
+                {% endif %}
+              {% endif %}
+              <rect x="{{ hm_lpad + wi * hm_cell }}"
+                    y="{{ hm_tpad + d * hm_cell }}"
+                    width="{{ hm_rect }}" height="{{ hm_rect }}" rx="2" ry="2"
+                    fill="{{ fill }}">
+                <title>{{ cell.date }} · {{ '%.0f'|format(cell.spend) }} €</title>
+              </rect>
             {% endif %}
           {% endfor %}
         {% endfor %}
-      </div>
+      </svg>
     </div>
     <div class="flex items-center gap-2 text-[11px] text-ink-500 mt-3 justify-end">
       <span>{{ t('finance.heatmap.less') }}</span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-ink-900/40"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-cyan-400"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-emerald-400"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-yellow-400"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-orange-500"></span>
-      <span class="inline-block h-3 w-3 rounded-[2px] bg-rose-500"></span>
+      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#1f2937"/></svg>
+      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#22d3ee"/></svg>
+      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#34d399"/></svg>
+      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#facc15"/></svg>
+      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#f97316"/></svg>
+      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#f43f5e"/></svg>
       <span>{{ t('finance.heatmap.more') }}</span>
     </div>
     {% else %}
@@ -419,57 +441,80 @@
     {% if cat_monthly.matrix %}
     {% set all_cats = cat_monthly.categories %}
     {% set top_cats = all_cats[:6] %}
-    {% set palette  = ['bg-emerald-500/80','bg-sky-500/80','bg-amber-500/80','bg-rose-500/80','bg-violet-500/80','bg-teal-500/80','bg-ink-600/80'] %}
+    {# Hex palette mirrors the legend below so the chart can't go out of
+       sync with the CSS (Tailwind classes are pre-compiled and many of
+       these utility colours are not in the bundle). #}
+    {% set hex_palette = ['#10b981','#0ea5e9','#f59e0b','#f43f5e','#a855f7','#14b8a6','#6b7280'] %}
     {% set bar_count = cat_monthly.matrix | length %}
     <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.catrend.normalised_hint') }}</p>
+    {# Pure SVG stacked-bar. Total + month label rendered as <text> so we
+       don't depend on flex height resolution at all. #}
+    {% set ct_w_per_col = 56 %}
+    {% set ct_chart_w   = bar_count * ct_w_per_col %}
+    {% set ct_chart_h   = 320 %}
+    {% set ct_top_pad   = 18 %}{# total label #}
+    {% set ct_bot_pad   = 22 %}{# month label #}
+    {% set ct_bar_h     = ct_chart_h - ct_top_pad - ct_bot_pad %}
+    {% set ct_bar_w     = 38 %}
     <div class="overflow-x-auto -mx-1 px-1">
-      <div class="flex gap-2 items-stretch h-72 sm:h-80"
-           style="min-width: max({{ bar_count * 44 }}px, 100%);">
+      <svg viewBox="0 0 {{ ct_chart_w }} {{ ct_chart_h }}"
+           width="100%" preserveAspectRatio="xMinYMin meet"
+           style="min-width: {{ ct_chart_w }}px; height: {{ ct_chart_h }}px;"
+           class="block">
         {% for row in cat_monthly.matrix %}
           {% set month_total = row['values'] | sum %}
-          <div class="flex flex-col group flex-1 min-w-[36px] h-full" title="{{ row.month }} · {{ '%.0f'|format(month_total) }} €">
-            {# Total above the bar so the absolute spend isn't hidden by the
-               100%-stacked normalisation. #}
-            <div class="text-[9px] text-ink-500 text-center tabular-nums mb-1 truncate shrink-0">{{ "%.0f"|format(month_total) }}</div>
-            {# Wrap the bar in a relative box with flex-1 so % heights inside
-               resolve against the absolute child's definite size. Percent
-               heights on flex-item children are unreliable; absolute is. #}
-            <div class="flex-1 relative min-h-0 w-full">
-              <div class="absolute inset-0 flex flex-col-reverse rounded-t overflow-hidden bg-ink-900/30">
-                {% if month_total > 0 %}
-                  {% for c_idx in range(top_cats|length) %}
-                    {% set v = row['values'][c_idx] %}
-                    {% if v > 0 %}
-                      <div class="{{ palette[c_idx] }} hover:brightness-125"
-                           style="height: {{ v / month_total * 100 }}%; min-height: 1px;"
-                           title="{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} € · {{ '%.0f'|format(v / month_total * 100) }}%"></div>
-                    {% endif %}
-                  {% endfor %}
-                  {% set other = (row['values'][6:] | sum) %}
-                  {% if other > 0 %}
-                    <div class="{{ palette[6] }}"
-                         style="height: {{ other / month_total * 100 }}%; min-height: 1px;"
-                         title="Andere · {{ '%.0f'|format(other) }} €"></div>
-                  {% endif %}
-                {% endif %}
-              </div>
-            </div>
-            <div class="text-[10px] text-ink-500 text-center mt-1 truncate shrink-0">{{ row.month[5:] }}/{{ row.month[2:4] }}</div>
-          </div>
+          {% set col_x = loop.index0 * ct_w_per_col %}
+          {% set bar_x = col_x + (ct_w_per_col - ct_bar_w) / 2 %}
+          <!-- empty bar background so a 0-€ month is still visible -->
+          <rect x="{{ bar_x }}" y="{{ ct_top_pad }}"
+                width="{{ ct_bar_w }}" height="{{ ct_bar_h }}"
+                rx="3" ry="3" fill="#1f2937" fill-opacity="0.4"></rect>
+          <!-- total above bar -->
+          <text x="{{ col_x + ct_w_per_col / 2 }}" y="{{ ct_top_pad - 6 }}"
+                fill="#9ca3af" font-size="10" text-anchor="middle">{{ "%.0f"|format(month_total) }}</text>
+          {% if month_total > 0 %}
+            {# stack from bottom up; track running y offset #}
+            {% set ns = namespace(y=ct_top_pad + ct_bar_h) %}
+            {% for c_idx in range(top_cats|length) %}
+              {% set v = row['values'][c_idx] %}
+              {% if v > 0 %}
+                {% set seg_h = v / month_total * ct_bar_h %}
+                {% set ns.y = ns.y - seg_h %}
+                <rect x="{{ bar_x }}" y="{{ ns.y }}"
+                      width="{{ ct_bar_w }}" height="{{ seg_h }}"
+                      fill="{{ hex_palette[c_idx] }}" fill-opacity="0.85">
+                  <title>{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} € · {{ '%.0f'|format(v / month_total * 100) }}%</title>
+                </rect>
+              {% endif %}
+            {% endfor %}
+            {% set other = (row['values'][6:] | sum) %}
+            {% if other > 0 %}
+              {% set seg_h = other / month_total * ct_bar_h %}
+              {% set ns.y = ns.y - seg_h %}
+              <rect x="{{ bar_x }}" y="{{ ns.y }}"
+                    width="{{ ct_bar_w }}" height="{{ seg_h }}"
+                    fill="{{ hex_palette[6] }}" fill-opacity="0.85">
+                <title>Andere · {{ '%.0f'|format(other) }} €</title>
+              </rect>
+            {% endif %}
+          {% endif %}
+          <!-- month label below bar -->
+          <text x="{{ col_x + ct_w_per_col / 2 }}" y="{{ ct_chart_h - 6 }}"
+                fill="#9ca3af" font-size="10" text-anchor="middle">{{ row.month[5:] }}/{{ row.month[2:4] }}</text>
         {% endfor %}
-      </div>
+      </svg>
     </div>
-    <!-- Legend -->
+    <!-- Legend (hex swatches inline so the legend can't go missing either) -->
     <div class="flex flex-wrap gap-3 mt-4 text-[11px] text-ink-400">
       {% for c in top_cats %}
         <span class="inline-flex items-center gap-1.5">
-          <span class="inline-block h-3 w-3 rounded-sm {{ palette[loop.index0] }}"></span>
+          <svg width="12" height="12"><rect width="12" height="12" rx="2" fill="{{ hex_palette[loop.index0] }}" fill-opacity="0.85"/></svg>
           {{ t('finance.cat.' + c) }}
         </span>
       {% endfor %}
       {% if all_cats|length > 6 %}
         <span class="inline-flex items-center gap-1.5 italic">
-          <span class="inline-block h-3 w-3 rounded-sm {{ palette[6] }}"></span>
+          <svg width="12" height="12"><rect width="12" height="12" rx="2" fill="{{ hex_palette[6] }}" fill-opacity="0.85"/></svg>
           {{ t('finance.catrend.other') }} ({{ all_cats|length - 6 }})
         </span>
       {% endif %}
