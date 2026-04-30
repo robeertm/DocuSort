@@ -37,9 +37,10 @@ leave your network.
   per-document detail + PDF preview, mobile upload with camera capture
 - **First-run setup wizard** at `/setup` — pick language, AI provider, paste
   token, optionally configure backup. Always-reachable settings page at `/settings`
-- **Multi-provider AI**: Anthropic Claude · OpenAI GPT · Google Gemini · or any
-  OpenAI-compatible endpoint (Ollama, Groq, xAI, Mistral, OpenRouter …) for
-  fully local classification
+- **Multi-provider AI**: Anthropic Claude · OpenAI GPT · Google Gemini · any
+  OpenAI-compatible endpoint (Ollama, Groq, xAI, Mistral, OpenRouter …) ·
+  or the **Local AI Bridge** (run inference on a Mac / Linux / Windows
+  box of your choice — see below)
 - **Subcategories + free-form tags** — files land at
   `Library/YYYY/Category/Subcategory/` and carry up to 8 lowercase labels
 - **Receipt scanner + analytics** — Kassenzettel are recognised
@@ -231,6 +232,88 @@ sudoers rule once:
 
 The rule grants `NOPASSWD` only for `systemctl restart docusort`.
 
+## Local AI: keep documents on your network
+
+DocuSort can do every classification and bank-statement extraction
+locally — no token, no cloud round-trip, no per-document cost. Three
+ways to set it up depending on where you want the model to actually
+run.
+
+### A. DocuSort and Ollama on the same machine
+
+The simplest path. If you start DocuSort directly with
+`./start.command` / `start.sh` / `start.bat`, install Ollama on the
+same machine and DocuSort can talk to it directly:
+
+```bash
+# macOS
+brew install ollama && brew services start ollama
+ollama pull qwen2.5:7b-instruct
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen2.5:7b-instruct
+
+# Windows
+winget install Ollama.Ollama
+ollama pull qwen2.5:7b-instruct
+```
+
+Then open `/settings` in DocuSort. The page detects the local
+Ollama and shows a **Local Ollama on this machine** card with a
+model dropdown — pick a model, click **Use this on this machine**,
+restart, done. Provider is set to `openai_compat`, base URL is
+`http://127.0.0.1:11434/v1`.
+
+### B. DocuSort on a NAS / VM, model on a different machine
+
+Use the **Local AI Bridge** when DocuSort itself runs somewhere
+that cannot host a 7B+ model (Synology DS218 with 2 GB RAM, a tiny
+VM, a Raspberry Pi). The bridge is a Python script that runs on
+the machine you *do* want to do inference on (Mac / Linux box /
+Windows desktop) and connects outbound to DocuSort over a
+WebSocket. No port forwarding, no firewall changes — anything that
+can open the DocuSort URL in a browser can run the bridge.
+
+1. In DocuSort, switch the AI provider to **Local AI Bridge** in
+   `/settings`.
+2. Scroll to the **Local AI Bridge** card and download the
+   launcher for your OS — there are three buttons: **macOS**
+   (`.command`), **Windows** (`.bat`), **Linux** (`.sh`). The
+   launcher already contains the server URL and a shared-secret
+   token.
+3. Double-click the file you just downloaded. macOS: first launch
+   may show "from an unidentified developer" — right-click → Open.
+   Windows: SmartScreen may say "Windows protected your PC" —
+   click *More info* → *Run anyway*.
+4. The launcher auto-installs Ollama (Homebrew on macOS, the
+   official installer on Linux, winget on Windows), starts
+   `ollama serve`, pulls the requested model the first time, and
+   stays connected until you press Ctrl-C.
+5. The Settings card flips to a green **connected** badge with the
+   bridge host's name, OS, and model. Hit **Test** to round-trip a
+   prompt through the bridge and confirm it answers.
+
+The bridge tolerates network blips: a 120-second reconnect grace
+window holds in-flight requests open across a brief WebSocket drop,
+and the bridge client buffers any computed response that could not
+be delivered before the disconnect. Long bank-statement extractions
+that take 10+ minutes on a small model survive Tailscale or Wi-Fi
+hiccups without losing work.
+
+The **Test** button also exposes a per-statement progress bar in
+`/finance`: the **Alle auswerten** banner runs through every
+unprocessed Kontoauszug in the background, one by one, and reports
+done / failed counts as it goes. Lets you start a bulk extraction
+on a quiet evening and check the result the next morning.
+
+### C. External OpenAI-compatible endpoint
+
+For users who run their own inference cluster, or who want to use
+Groq / Together / xAI / OpenRouter / Mistral, pick **OpenAI-compatible**
+in `/settings`, paste the base URL (`https://api.groq.com/openai/v1`,
+`http://192.168.1.50:8080/v1`, …) and an API key if needed.
+
 ## Configuration
 
 All behaviour is controlled by three files in `config/`:
@@ -375,6 +458,9 @@ the value lives under `web.port` in `config.yaml`).
 ## Roadmap
 
 - ~~Etappe 2: Web UI, cost tracking, SQLite + FTS5 search~~ — shipped in **v0.2.0**
+- ~~Local-AI bridge so a small NAS can offload inference to a beefier
+  desktop on the same network~~ — shipped in **v0.19.0** + robustness
+  pass in **v0.21.0**
 - Etappe 3: Telegram / email notification on new file or `_Review` entry
 - Etappe 4: Duplicate detection across the whole library
 - Etappe 5: Automatic reminders for contract termination dates

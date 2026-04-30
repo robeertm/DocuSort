@@ -2,25 +2,144 @@
 
 All notable changes to DocuSort will be documented in this file.
 
-## [0.19.3] – 2026-04-30
+## [0.21.0] – 2026-04-30
 
-### Added — restart button + bridge test button
+### Added — bridge survives WebSocket drops without losing in-flight work
 
-The "restart required" banner under AI provider now ships with a
-big red **Restart service now** button. Clicking it triggers the
-same systemd restart path the auto-updater already uses and reloads
-the page after a short delay — no more shell-out to systemctl by
-hand.
+The Local AI Bridge now treats a dropped WebSocket as recoverable
+state, not a hard failure.
 
-The Local AI Bridge card grew a small **Test** button that runs a
-JSON-echo round-trip through the connected client and prints the
-model name, token counts, and latency right there in the card. Lets
-the user verify "yes the Mac is actually answering" without uploading
-a real document.
+- **Server-side reconnect grace.** Pending requests stay alive for
+  120 s after the client disconnects. If the bridge client comes
+  back with the same token in that window, the server takes over
+  the queue and re-delivers any still-pending requests, tagged
+  `redelivery=true`. The worker threads waiting on those requests
+  never see the blip.
+- **Client-side response queue.** When the WebSocket dies between
+  finishing an Ollama call and sending the answer, the client
+  buffers the response and ships it inside the next hello envelope.
+  An extraction whose answer was lost in transit ends up where it
+  belongs.
+- **Redelivery dedup.** The client keeps a 5000-entry ring of
+  recently-seen request ids and silently drops duplicates, so a
+  10-minute extraction never gets re-run because the server polled
+  it again.
+- **Grace timer.** If no reconnect arrives within the window, a
+  daemon timer fails orphaned requests cleanly so workers see a
+  real error rather than hanging forever.
+
+### Added — same-host Ollama: one-click setup, no bridge needed
+
+Settings now shows a **Local Ollama on this machine** card when
+DocuSort can talk to `http://127.0.0.1:11434` directly. Pick a
+model from the dropdown, click "Use this", and the AI provider
+flips to `openai_compat` with the right base URL — no bridge round
+trip, no token, no WebSocket. Saves direct-install users
+(`start.command` / `start.bat` / `start.sh`) from running the
+bridge back to themselves. Cloud-provider installs see the card
+even when Ollama is not detected, so they can install it and
+switch over.
+
+## [0.20.4] – 2026-04-30
+
+### Changed — much higher timeout ceilings for the bridge
+
+Local inference is slow enough that cloud-tuned per-call timeouts
+(`300 s` in finance/extractor.py) caused two distinct failure modes
+on long bank-statement extractions.
+
+- WebSocket `ping_timeout` raised from 20 s to **300 s** on both
+  server and client; `ping_interval` from 20 s to 30 s. Short
+  network hiccups during a 10-minute extraction no longer kill the
+  connection, while a real dead WebSocket is still detected within
+  about six minutes.
+- BridgeProvider per-call budget reformulated to
+  `max_output_tokens / 8 + 120` floored at 30 minutes — even a
+  16k-output extraction on a slow 32B model has comfortable
+  headroom now.
+- Client `max_size` for incoming requests bumped from 8 MB to
+  16 MB to handle very long statements (300+ booking lines).
+
+## [0.20.3] – 2026-04-30
+
+### Added — bridge client auto-upgrades Ollama at startup
+
+Bridge clients on Homebrew (macOS) or winget (Windows) now check
+once at startup whether a newer Ollama is available and apply the
+upgrade silently before `ollama serve` is started. Doing it before
+serve guarantees no in-flight request can be interrupted by the
+upgrade restart. Hosts without a quiet package manager print a
+hint instead of running an interactive installer. New
+`--no-auto-upgrade-ollama` flag for users managing Ollama
+themselves.
+
+## [0.20.2] – 2026-04-30
+
+### Added — one-click downloadable bridge launchers
+
+Browsers can not run programs on the client computer for good
+security reasons, but they can hand you a file you double-click.
+`/api/bridge/installer?os={mac,windows,linux}` returns a
+shell/PowerShell launcher with the server URL and bridge token
+already baked in (filename includes the host so multiple servers
+do not collide in `Downloads/`). The Settings card now shows three
+big "macOS / Windows / Linux" download buttons up front; the
+copy-paste command moves into a "Or run in a terminal yourself"
+disclosure for users who want it.
+
+### Added — "Ignorieren" button on the diag banner
+
+Each empty-statement row gets a per-doc dismiss link that flips a
+new `statements.acknowledged_empty` flag. Stops the banner nagging
+about docs that genuinely have no transactions to extract — for
+example a Tagesgeldkonto cover page. The reextract / analyze-all /
+diag query all respect the flag.
+
+### Changed — bulk Bank → Kontoauszug
+
+`analyze-all` now also picks up legacy Bank-tagged docs whose
+subject mentions Kontoauszug / Girokonto / Tagesgeld / Kreditkarte /
+PayPal-Auszug, runs extraction, and promotes them to
+`category=Kontoauszug` after a successful run (matches the
+`backfill_statements` heuristic). The same SQL filter feeds the
+unanalyzed-count banner.
+
+### Fixed — trash works when the file is gone
+
+`delete_document` used to fail with "File missing on disk" for
+orphaned doc rows, leaving the user no way to clean them up from
+the UI. A missing source now falls through to the DB-only
+mark-deleted path, with the response flagged `file_missing=true`
+so the caller can show a soft notice. The same path also handles
+docs whose `library_path` lives outside `settings.paths.library`
+(`relative_to` was raising).
+
+## [0.20.1] – 2026-04-30
+
+### Added — bulk-analyse all unprocessed Kontoauszüge from /finance
+
+There was no single button that re-ran extraction on every
+Kontoauszug doc that was missing a statement row entirely (the
+common case after switching from a cloud provider to the bridge —
+old uploads never had extraction succeed). The existing
+`reextract-empty` endpoint only covered the narrower "row exists
+but empty" case.
+
+`/api/finance/analyze-all` (background job, identical pattern to
+`approve-all-pending`) handles both cases in one pass:
+
+- Kontoauszug docs with no statement row, and
+- statements with zero transactions.
+
+Plus `/api/finance/unanalyzed-count` for the banner and
+`/api/finance/analyze-progress` for the polling client. The
+/finance page now shows a prominent cyan banner with a single
+**Alle auswerten** button when either count is non-zero, with a
+live progress bar and current-doc readout while the job runs.
 
 ## [0.20.0] – 2026-04-30
 
-### Added — re-queue auto-extracts Kontoauszüge end-to-end
+### Added — Re-queue auto-extracts Kontoauszüge end-to-end
 
 A document that gets re-classified as Kontoauszug (or as a
 Bank-statement lookalike) by the Re-queue flow now runs the
@@ -51,6 +170,98 @@ install command (`Invoke-WebRequest` + `python` instead of
 `curl` + `python3`), and the dashboard card label changed from
 "Mac" to "Host". The connected client's platform (macOS / Linux /
 Windows) is now displayed inline.
+
+## [0.19.6] – 2026-04-30
+
+### Added — bridge counts as local + bulk re-queue review docs
+
+`finance.local_only` and the pseudonymisation gate now treat the
+bridge as a local provider on par with `openai_compat`. Statement
+extraction no longer refuses to run with `provider=bridge`, and
+the classifier / receipts skip the cloud-only pseudonymisation
+step (the data never leaves the user's network anyway).
+
+New `POST /api/library/retry-all-review` and matching progress
+endpoint. The dashboard's review card grew an inline "Re-queue
+all" button with live progress bar; the library header gets the
+same button when filtering by `status=review`. Useful after
+switching the AI provider — every doc that landed in review with
+the previous setup gets a fresh look without per-doc clicks.
+
+## [0.19.5] – 2026-04-30
+
+### Fixed — bridge `num_ctx` truncation, longer local timeout, dashboard card
+
+Three distinct problems on long bridge calls.
+
+- Ollama defaults `num_ctx` to 4096. Anything larger than that gets
+  truncated from the front of the prompt before evaluation, so a
+  bank statement with 8–12k tokens of OCR text was reaching the
+  model with only its tail visible. The bridge client now sizes
+  `num_ctx` dynamically (8k → 32k step) from prompt + max_output +
+  a margin, so the whole exchange fits. Truncation is reported
+  back when it still happens.
+- BridgeProvider rescales every per-call timeout to
+  `max(caller, max_output_tokens / 15 + 60 s, 180 s)` so a 16k
+  extraction has plenty of headroom on a Mac.
+- Dashboard now shows a Local AI Bridge card when a client has
+  ever connected or the provider is active. Live status, request
+  count, failure count, in/out tokens, average latency, and a
+  "N requests in flight" pulse when something is being processed
+  right now.
+
+## [0.19.4] – 2026-04-30
+
+### Added — restart button always visible + bridge model auto-fill
+
+- The Restart Service button is no longer gated on `restartHint`
+  — it shows up next to Save at all times, with a subtle border
+  when no restart is required and a rose-tinted border when one is.
+- The AI section polls `/api/bridge/status` so the model field can
+  show a "Mac is currently running <model>" hint and offer to fill
+  it. Switching the provider to `bridge` auto-fills the model
+  field with the connected client's model when the previous value
+  looked cloudy (`claude-…`, `gpt-…`, `gemini-…`).
+- The bridge client honours `msg["model"]` when it looks like an
+  Ollama tag (falls back to its own `--model` arg when the server
+  passes a cloud-style id).
+
+## [0.19.3] – 2026-04-30
+
+### Added — restart button + bridge test button
+
+The "restart required" banner under AI provider now ships with a
+big red **Restart service now** button. Clicking it triggers the
+same systemd restart path the auto-updater already uses and
+reloads the page after a short delay — no more shell-out to
+`systemctl` by hand.
+
+The Local AI Bridge card grew a small **Test** button that runs a
+JSON-echo round-trip through the connected client and prints the
+model name, token counts, and latency right there in the card.
+Lets the user verify "yes the bridge is actually answering"
+without uploading a real document.
+
+## [0.19.2] – 2026-04-30
+
+### Added — surface bridge token rejections in the UI
+
+When a client tries to connect with a stale token (e.g. after the
+admin regenerated it), the only feedback was a silent "offline"
+status — leaving the user guessing whether the script even ran.
+The server now records each rejection (source IP + token prefix +
+timestamp) and exposes it via `/api/bridge/status`. The Settings
+card shows a clear "Last connect rejected — wrong token" banner
+so the user knows to re-copy the install command.
+
+## [0.19.1] – 2026-04-30
+
+### Added — `/api/bridge/test` for connection round-trip
+
+Tiny utility endpoint so the user (and the tests) can prove the
+bridge pipe is alive without running a real document through the
+pipeline. Sends a one-line prompt, expects a JSON echo back,
+returns the raw answer + token counts.
 
 ## [0.19.0] – 2026-04-30
 
