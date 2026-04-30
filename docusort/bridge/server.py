@@ -31,13 +31,19 @@ from typing import Any, Optional
 logger = logging.getLogger("docusort.bridge")
 
 
+_RECONNECT_GRACE_S = 120.0
+
+
 @dataclass
 class _PendingRequest:
-    """One in-flight request, waiting for the Mac client to answer."""
+    """One in-flight request, waiting for the bridge client to answer."""
     event: threading.Event = field(default_factory=threading.Event)
     response: Optional[dict[str, Any]] = None
     error: Optional[str] = None
     submitted_at: float = field(default_factory=time.time)
+    # The full request envelope, kept for re-delivery after a reconnect.
+    # Carries system_prompt / user_prompt / model / max_output_tokens.
+    envelope: dict[str, Any] = field(default_factory=dict)
 
 
 class BridgeServer:
@@ -57,6 +63,13 @@ class BridgeServer:
         self._tokens_out: int = 0
         self._latency_sum_s: float = 0.0  # for avg latency
         self._latency_n: int = 0
+        # Reconnect grace: when the client disconnects, we hold pending
+        # requests open until either a new client takes over (within
+        # the grace window) or the timer fires. This lets a brief WS
+        # blip during a 10-minute extraction recover without losing the
+        # in-flight work.
+        self._grace_until: float = 0.0
+        self._reconnect_count: int = 0
         # Last token-rejected attempt — surfaced in the UI so the user
         # gets a clear "you're using the wrong token" instead of a
         # silent "offline".
@@ -69,6 +82,8 @@ class BridgeServer:
     def info(self) -> dict[str, Any]:
         with self._lock:
             avg_latency = (self._latency_sum_s / self._latency_n) if self._latency_n else 0.0
+            now = time.time()
+            grace_remaining = max(0.0, self._grace_until - now) if self._grace_until else 0.0
             return {
                 "connected": self.is_connected(),
                 "client":    dict(self._client_info),
@@ -80,16 +95,23 @@ class BridgeServer:
                 "tokens_out":       self._tokens_out,
                 "avg_latency_s":    avg_latency,
                 "pending":          len(self._pending),
+                "reconnect_count":  self._reconnect_count,
+                "grace_remaining_s": grace_remaining,
                 "last_reject":      dict(self._last_reject),
             }
 
     # -------------------------------------------------------------- ws hooks
     async def attach_client(self, ws, hello: dict[str, Any]) -> None:
         """Called from the WebSocket handler once the client has said hello.
-        Replaces any previous client (single-client model)."""
+        Replaces any previous client (single-client model). If we were in
+        the reconnect-grace window, pending requests stay alive and get
+        re-delivered to the new client."""
         prev = None
+        rescued = False
         with self._lock:
             prev = self._client
+            now  = time.time()
+            rescued = bool(self._grace_until and now < self._grace_until and self._pending)
             self._client = ws
             self._client_info = {
                 "host":     str(hello.get("host", "")),
@@ -101,29 +123,117 @@ class BridgeServer:
             }
             self._loop = asyncio.get_running_loop()
             self._connected_at = time.time()
+            # Cancel any pending grace timer — we got rescued.
+            self._grace_until = 0.0
+            if prev is None:
+                self._reconnect_count += 1
         if prev is not None and prev is not ws:
             try:
                 await prev.close(code=1000, reason="replaced by new client")
             except Exception:
                 pass
             logger.info("Bridge: previous client dropped (replaced).")
+        if rescued:
+            logger.info("Bridge: client reconnected within grace window — "
+                        "%d pending request(s) preserved.",
+                        len(self._pending))
         logger.info("Bridge: client attached: %s", self._client_info)
 
+    async def redeliver_pending(self) -> int:
+        """After a reconnect, push any still-pending requests to the new
+        client so it can resume processing them. Marked with
+        ``redelivery=True`` so the client can dedupe against work it's
+        already running. Returns the number of envelopes re-sent."""
+        with self._lock:
+            ws  = self._client
+            envelopes = [
+                {**p.envelope, "redelivery": True}
+                for p in self._pending.values()
+                if p.envelope and not p.event.is_set()
+            ]
+        if ws is None or not envelopes:
+            return 0
+        sent = 0
+        for env in envelopes:
+            try:
+                await ws.send_json(env)
+                sent += 1
+            except Exception as exc:
+                logger.warning("Bridge: redelivery failed mid-flush: %s", exc)
+                break
+        if sent:
+            logger.info("Bridge: re-delivered %d pending request(s) "
+                        "to reconnected client.", sent)
+        return sent
+
+    async def ingest_queued_responses(self, queued: list[dict[str, Any]]) -> int:
+        """Process a batch of responses the client buffered while it was
+        disconnected. Same shape as a normal `response` message; we
+        feed each through handle_message so the routing dedup applies
+        the same way."""
+        n = 0
+        for msg in (queued or []):
+            try:
+                # Force the type field so a malformed envelope from the
+                # client can't sneak through as a control message.
+                if isinstance(msg, dict) and msg.get("request_id"):
+                    fixed = {**msg, "type": "response"}
+                    await self.handle_message(fixed)
+                    n += 1
+            except Exception as exc:
+                logger.warning("Bridge: ignoring malformed queued response: %s", exc)
+        if n:
+            logger.info("Bridge: ingested %d queued response(s) on reconnect.", n)
+        return n
+
     async def detach_client(self, ws) -> None:
-        """Drop the client and fail every still-pending request immediately."""
+        """Mark the client gone. Pending requests stay alive for the
+        grace window so a brief WS blip can be recovered without
+        losing in-flight work. A daemon timer fails them if no new
+        client arrives in time."""
         with self._lock:
             if self._client is not ws:
                 return
             self._client = None
             self._client_info = {}
             self._loop = None
+            self._grace_until = time.time() + _RECONNECT_GRACE_S
+            pending_n = len(self._pending)
+        logger.info("Bridge: client detached. %d request(s) pending — "
+                    "grace window of %.0fs before they fail.",
+                    pending_n, _RECONNECT_GRACE_S)
+        # Schedule the eventual fail-out via a daemon timer so it
+        # survives the asyncio loop ending. The timer is harmless if
+        # a reconnect cancels grace before it fires.
+        threading.Timer(
+            _RECONNECT_GRACE_S + 1.0,
+            self._fail_pending_if_orphaned,
+        ).start()
+
+    def _fail_pending_if_orphaned(self) -> None:
+        """Called by the grace-period timer. If the client never came
+        back, fail every pending request so the worker threads waiting
+        on them unblock with a clear error."""
+        with self._lock:
+            now = time.time()
+            still_orphaned = (
+                self._client is None
+                and self._grace_until > 0.0
+                and now >= self._grace_until
+            )
+            if not still_orphaned:
+                return  # client came back, or grace was already canceled
             pending = list(self._pending.items())
             self._pending.clear()
+            self._grace_until = 0.0
         for _, p in pending:
-            p.error = "bridge client disconnected"
+            p.error = "bridge client disconnected (no reconnect within grace period)"
             p.event.set()
-        logger.info("Bridge: client detached. Failed %d pending request(s).",
-                    len(pending))
+        if pending:
+            logger.warning(
+                "Bridge: grace expired — failed %d pending request(s).",
+                len(pending),
+            )
 
     async def handle_message(self, msg: dict[str, Any]) -> None:
         """Route an incoming message from the Mac client. Today only
@@ -174,7 +284,7 @@ class BridgeServer:
             "max_output_tokens": int(max_output_tokens),
             "timeout":       float(timeout),
         }
-        p = _PendingRequest()
+        p = _PendingRequest(envelope=request)
 
         with self._lock:
             self._pending[req_id] = p
@@ -183,26 +293,44 @@ class BridgeServer:
             ws   = self._client
             loop = self._loop
 
+        # If the client is in the grace window (briefly disconnected),
+        # keep the pending entry but don't try to send yet — the
+        # reconnect handler will redeliver. The worker thread blocks on
+        # the event the same way; if no reconnect arrives, the grace
+        # timer fires and the threading.Event is set with an error.
         if ws is None or loop is None:
             with self._lock:
-                self._pending.pop(req_id, None)
-                self._calls_failed += 1
-            raise RuntimeError("Bridge client gone before send")
+                in_grace = (self._grace_until > 0.0 and time.time() < self._grace_until)
+            if in_grace:
+                logger.info("Bridge: queued %s during grace window (no live ws).",
+                            req_id[:8])
+                # Fall through to the wait below — the redelivery on
+                # reconnect will pick this entry up via redeliver_pending.
+                pass
+            else:
+                with self._lock:
+                    self._pending.pop(req_id, None)
+                    self._calls_failed += 1
+                raise RuntimeError("Bridge client gone before send")
 
         # Marshal the WebSocket .send_json() call onto the asyncio loop
         # that owns the connection — calling it from this worker thread
-        # directly would race with the loop's own state machine.
-        async def _send() -> None:
-            await ws.send_json(request)
-
-        try:
-            future = asyncio.run_coroutine_threadsafe(_send(), loop)
-            future.result(timeout=10.0)
-        except Exception as exc:
-            with self._lock:
-                self._pending.pop(req_id, None)
-                self._calls_failed += 1
-            raise RuntimeError(f"Bridge send failed: {exc}") from exc
+        # directly would race with the loop's own state machine. If the
+        # send fails (WS just dropped) we leave the pending entry in
+        # place; the reconnect-grace path will redeliver via
+        # redeliver_pending() when the client returns.
+        if ws is not None and loop is not None:
+            async def _send() -> None:
+                await ws.send_json(request)
+            try:
+                future = asyncio.run_coroutine_threadsafe(_send(), loop)
+                future.result(timeout=10.0)
+            except Exception as exc:
+                logger.warning(
+                    "Bridge: send failed for %s (%s) — keeping pending "
+                    "entry for redelivery on reconnect.",
+                    req_id[:8], exc,
+                )
 
         # Now block this worker thread until the Mac answers (or doesn't).
         # The caller already picked a generous timeout for long extractions;

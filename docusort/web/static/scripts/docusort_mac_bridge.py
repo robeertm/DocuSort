@@ -425,6 +425,18 @@ async def run_loop(*, server_url: str, token: str, model: str,
         else:
             ssl_ctx = ssl.create_default_context()
 
+    # Survives across reconnect attempts: responses we computed but
+    # couldn't send (or weren't able to send fully) before the WS died.
+    # On the next connection we hand them to the server inside the
+    # hello envelope, so an extraction whose answer was lost in transit
+    # still ends up where it belongs.
+    queued_responses: list[dict] = []
+    # IDs we've already processed (or are processing). On reconnect the
+    # server may resend its still-pending requests; any redelivery we
+    # already have in flight or queued is silently dropped to avoid
+    # double-running expensive 10-min inference jobs.
+    seen_request_ids: set[str] = set()
+
     backoff = 1.0
     while True:
         try:
@@ -445,6 +457,8 @@ async def run_loop(*, server_url: str, token: str, model: str,
                 max_size=16 * 1024 * 1024,
             ) as ws:
                 # Hello envelope — first message after accept must be this.
+                # Carries any responses we computed but couldn't deliver
+                # before the previous WS died.
                 hello = {
                     "type": "hello",
                     "client": {
@@ -455,9 +469,15 @@ async def run_loop(*, server_url: str, token: str, model: str,
                         "model":    model,
                         "ollama":   _ollama_version_or_blank(),
                     },
+                    "queued_responses": list(queued_responses),
                 }
                 await ws.send(json.dumps(hello))
                 welcome = json.loads(await ws.recv())
+                # Responses are now delivered to the server (or will be
+                # by the time the welcome reply lands) — clear the queue.
+                if queued_responses:
+                    info(f"Replayed {len(queued_responses)} queued response(s).")
+                queued_responses = []
                 good(f"Connected to DocuSort {welcome.get('version', '?')} — "
                      f"model={model}. Waiting for requests …")
                 backoff = 1.0  # reset
@@ -472,6 +492,24 @@ async def run_loop(*, server_url: str, token: str, model: str,
                         continue
                     req_id = str(msg.get("request_id", ""))
                     short  = req_id[:8] or "??"
+                    redelivery = bool(msg.get("redelivery"))
+                    # Dedupe redeliveries: the server resends still-
+                    # pending requests after a reconnect. If we've seen
+                    # the id (already done, currently running, or in
+                    # the queued_responses backlog) drop it silently.
+                    already_queued = any(
+                        r.get("request_id") == req_id for r in queued_responses
+                    )
+                    if req_id in seen_request_ids or already_queued:
+                        if redelivery:
+                            info(f"{short}  · skip redelivery (already handled)")
+                        continue
+                    seen_request_ids.add(req_id)
+                    # Bound the dedup set so a long-running bridge doesn't
+                    # leak memory (request ids are 32-byte hex; the bound
+                    # is generous).
+                    if len(seen_request_ids) > 5000:
+                        seen_request_ids = set(list(seen_request_ids)[-2500:])
                     # Server may request a specific model. We honour the
                     # request when it looks like an Ollama tag; if the
                     # server is still on a cloud-style identifier
@@ -481,6 +519,7 @@ async def run_loop(*, server_url: str, token: str, model: str,
                     requested = str(msg.get("model") or "").strip()
                     active_model = requested if (requested and not _looks_cloudy(requested)) else model
                     started = time.time()
+                    response: dict
                     try:
                         loop = asyncio.get_running_loop()
                         m = active_model  # bind for the closure
@@ -495,25 +534,32 @@ async def run_loop(*, server_url: str, token: str, model: str,
                                 force_json=force_json,
                             ),
                         )
-                        await ws.send(json.dumps({
-                            "type": "response",
-                            "request_id": req_id,
-                            "data": data,
-                        }))
+                        response = {"type": "response", "request_id": req_id, "data": data}
                         dt = time.time() - started
                         flag = " (truncated!)" if data.get("truncated") else ""
-                        good(f"{short}  ✓  {data['input_tokens']:>5} → "
-                             f"{data['output_tokens']:>4} tok "
-                             f"(ctx={data.get('num_ctx', '?')}) in "
-                             f"{dt:5.1f}s{flag}")
+                        ok_log = (f"{short}  ✓  {data['input_tokens']:>5} → "
+                                  f"{data['output_tokens']:>4} tok "
+                                  f"(ctx={data.get('num_ctx', '?')}) in "
+                                  f"{dt:5.1f}s{flag}")
                     except Exception as exc:
-                        await ws.send(json.dumps({
-                            "type": "response",
-                            "request_id": req_id,
-                            "error": str(exc),
-                        }))
+                        response = {"type": "response", "request_id": req_id,
+                                    "error": str(exc)}
                         dt = time.time() - started
+                        ok_log = None
                         fail(f"{short}  ✗  {exc} ({dt:5.1f}s)")
+
+                    # Best-effort send. If the WS just died we keep the
+                    # response in queued_responses so the next connect's
+                    # hello envelope delivers it — never lose computed
+                    # work to a network blip.
+                    try:
+                        await ws.send(json.dumps(response))
+                        if ok_log: good(ok_log)
+                    except Exception as exc:
+                        queued_responses.append(response)
+                        warn(f"{short}  ✎ queued for redelivery (send failed: {exc})")
+                        # Bubble up so the outer reconnect logic kicks in.
+                        raise
         except (websockets.exceptions.InvalidStatus,
                 websockets.exceptions.InvalidStatusCode) as exc:
             # 4401 = invalid token → no point retrying

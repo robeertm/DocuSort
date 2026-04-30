@@ -105,6 +105,49 @@
     </div>
   </section>
 
+  <!-- ===== Local Ollama on this machine =====
+       Shortcut for direct installs: no bridge needed when DocuSort
+       runs on the same host as Ollama. Probes localhost on load and
+       offers a one-click "use this" button when it finds something. -->
+  <section class="card p-6" x-data="localOllama()" x-init="init()" x-show="visible" x-cloak>
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+      <h2 class="text-lg font-semibold">Local Ollama on this machine</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full"
+            :class="probe.reachable ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+            x-text="probe.reachable ? 'detected' : 'not running'"></span>
+    </div>
+    <p class="text-ink-400 text-sm mb-4">
+      DocuSort and Ollama appear to be on the same host — the simplest
+      setup. One click switches the AI provider to OpenAI-compatible
+      pointing at <span class="font-mono text-ink-300">localhost:11434</span>.
+      No bridge overhead, no token, no WebSocket.
+    </p>
+    <div class="flex items-center gap-3 flex-wrap mb-4">
+      <label class="text-sm text-ink-300">Model</label>
+      <select x-model="chosenModel"
+              :disabled="!probe.reachable || !probe.models?.length"
+              class="rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-1.5 text-sm font-mono">
+        <template x-for="m in (probe.models || [])" :key="m">
+          <option :value="m" x-text="m"></option>
+        </template>
+        <template x-if="!probe.models?.length">
+          <option value="" disabled>(no models pulled — run `ollama pull qwen2.5:7b-instruct`)</option>
+        </template>
+      </select>
+      <button type="button" @click="apply()"
+              :disabled="!chosenModel || applying"
+              class="rounded-xl px-4 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
+        <span x-show="!applying">Use this on this machine</span>
+        <span x-show="applying" x-cloak>Saving …</span>
+      </button>
+      <button type="button" @click="probeNow()" class="text-xs text-ink-400 hover:text-ink-200 underline">refresh</button>
+    </div>
+    <div x-show="message" x-cloak
+         class="text-xs rounded-lg px-3 py-2"
+         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="message"></div>
+  </section>
+
   <!-- ===== Local AI Bridge ===== -->
   <section class="card p-6" id="bridge" x-data="bridgeSettings()" x-init="init()">
     <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
@@ -867,6 +910,64 @@ function settingsPage() {
         // Keep "Restarting…" visible until the reload swaps the page —
         // unsetting now would briefly show "Restart service now" again
         // and look like the click did nothing.
+      }
+    },
+  };
+}
+
+function localOllama() {
+  return {
+    probe: { reachable: false, url: '', models: [] },
+    chosenModel: '',
+    applying:    false,
+    visible:     false,   // hide the card if no Ollama detected and current
+                          //   provider is already a local one — no point
+                          //   nagging an existing happy install.
+    message:     '',
+    ok:          false,
+    async init() {
+      await this.probeNow();
+      // Show the card if Ollama is reachable OR the user is currently
+      // on a cloud provider (so we can offer a switch). If they are
+      // already on openai_compat / bridge and Ollama isn't reachable
+      // here, hide it — they likely have something else set up.
+      const onCloud = ['anthropic','openai','gemini'].includes('{{ current_provider }}');
+      this.visible = this.probe.reachable || onCloud;
+    },
+    async probeNow() {
+      try {
+        const r = await fetch('/api/local-ai/probe');
+        if (r.ok) {
+          this.probe = await r.json();
+          if (!this.chosenModel && this.probe.models?.length) {
+            // Prefer a small instruction-tuned model when present.
+            const preferred = ['qwen2.5:7b-instruct', 'qwen2.5:14b-instruct',
+                               'llama3.2:3b-instruct', 'llama3.1:8b-instruct'];
+            this.chosenModel = preferred.find(m => this.probe.models.includes(m))
+                              || this.probe.models[0];
+          }
+        }
+      } catch (e) { /* ignore */ }
+    },
+    async apply() {
+      if (!this.chosenModel) return;
+      this.applying = true;
+      this.message = '';
+      try {
+        const r = await fetch('/api/local-ai/apply', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({url: this.probe.url, model: this.chosenModel}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.ok = true;
+        this.message = `Saved — provider switched to openai_compat (${d.base_url}, model=${d.model}). Restart required, see top of page.`;
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally {
+        this.applying = false;
       }
     },
   };

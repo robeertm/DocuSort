@@ -1974,6 +1974,57 @@ def create_app(
              "has_local_provider":   settings.ai.provider == "openai_compat"},
         )
 
+    # ----------------------------------------------------------- Local Ollama
+    # Same-host shortcut: if DocuSort is running directly on a Mac /
+    # Linux box / Windows machine that ALSO has Ollama installed,
+    # there's no point in routing through the bridge — the simplest
+    # path is the openai_compat provider pointing at localhost:11434.
+    # These two endpoints (probe + apply) make that a one-click setup.
+    @app.get("/api/local-ai/probe")
+    def api_local_ai_probe(url: str = "http://127.0.0.1:11434"):
+        """Check whether an Ollama (or other openai_compat) server is
+        reachable on the same machine and report its model list. The
+        UI uses this to decide whether the "Use local Ollama on this
+        machine" button should be enabled or grayed out."""
+        import urllib.request as _ur
+        import urllib.error  as _ue
+        base = url.rstrip("/")
+        try:
+            with _ur.urlopen(base + "/api/tags", timeout=2) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            models = [m.get("name", "") for m in (data.get("models") or [])]
+            return {"reachable": True, "url": base,
+                    "models": [m for m in models if m]}
+        except _ue.URLError as exc:
+            return {"reachable": False, "url": base, "error": str(exc.reason)}
+        except Exception as exc:
+            return {"reachable": False, "url": base, "error": str(exc)}
+
+    @app.post("/api/local-ai/apply")
+    def api_local_ai_apply(payload: dict):
+        """Switch the AI provider to openai_compat targeting a same-host
+        Ollama. Saves config + flips settings.ai in place so the next
+        request sees the change. The classifier still references the
+        old provider until the user restarts the service — same as
+        the regular /api/settings/ai handler."""
+        from .. import settings_writer
+        url   = (payload.get("url") or "http://127.0.0.1:11434").rstrip("/")
+        model = (payload.get("model") or "").strip()
+        if not model:
+            raise HTTPException(400, "model required")
+        # The openai_compat provider expects an OpenAI-style /v1 base
+        # URL; Ollama exposes that at /v1.
+        base_url = url + "/v1" if not url.endswith("/v1") else url
+        settings_writer.update_ai(
+            provider="openai_compat", model=model, base_url=base_url,
+            api_key=None, config_dir=settings.config_dir,
+        )
+        settings.ai.provider = "openai_compat"
+        settings.ai.model    = model
+        settings.ai.base_url = base_url
+        return {"ok": True, "restart_required": True,
+                "provider": "openai_compat", "base_url": base_url, "model": model}
+
     @app.post("/api/settings/ai")
     def api_settings_ai(payload: dict):
         from .. import settings_writer
@@ -2206,12 +2257,23 @@ def create_app(
         await ws.accept()
         bridge = get_bridge()
         try:
-            # First message must be the hello envelope.
+            # First message must be the hello envelope. Optional
+            # `queued_responses` is a list of response messages the
+            # client computed before its previous WS dropped — we
+            # ingest those before redelivering pending requests so
+            # the client never re-runs work it already completed.
             hello_raw = await ws.receive_json()
             if hello_raw.get("type") != "hello":
                 await ws.close(code=4400, reason="expected hello")
                 return
             await bridge.attach_client(ws, hello_raw.get("client", {}) or {})
+            queued = hello_raw.get("queued_responses") or []
+            if queued:
+                await bridge.ingest_queued_responses(queued)
+            # Re-send any requests that are still pending after the
+            # ingest step — these are the ones the client never got
+            # to (or got, processed, but failed to send the response).
+            await bridge.redeliver_pending()
             await ws.send_json({
                 "type":    "welcome",
                 "server":  "docusort",
