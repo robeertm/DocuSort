@@ -1691,6 +1691,36 @@ def create_app(
         info["provider_active"] = settings.ai.provider == "bridge"
         return info
 
+    @app.post("/api/bridge/test")
+    def api_bridge_test():
+        """Round-trip a trivial prompt through whatever client is currently
+        connected. Lets the user verify the connection from the UI without
+        running a real document through the pipeline."""
+        from ..bridge.server import get_bridge
+        bridge = get_bridge()
+        if not bridge.is_connected():
+            raise HTTPException(409, "no bridge client is connected")
+        try:
+            data = bridge.call(
+                system_prompt="You are a JSON echo. Reply with exactly: "
+                              "{\"ok\": true, \"echo\": \"<msg>\"}",
+                user_prompt="msg=docusort-bridge-test",
+                model=settings.ai.model or "qwen2.5:7b-instruct",
+                max_output_tokens=80,
+                timeout=60.0,
+            )
+        except TimeoutError as exc:
+            raise HTTPException(504, str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc))
+        return {
+            "ok": True,
+            "raw_text": data.get("raw_text", ""),
+            "model": data.get("model", ""),
+            "input_tokens":  data.get("input_tokens", 0),
+            "output_tokens": data.get("output_tokens", 0),
+        }
+
     @app.post("/api/bridge/regenerate-token")
     def api_bridge_regenerate_token():
         from ..bridge.server import get_bridge, regenerate_token
