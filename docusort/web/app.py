@@ -883,6 +883,201 @@ def create_app(
             })
         return {"found": len(rows), "refreshed": refreshed, "failed": failed}
 
+    @app.post("/api/finance/analyze-all")
+    def api_analyze_all_statements():
+        """One-click bulk analysis for every Kontoauszug that does not
+        yet have a populated statement row. Covers two distinct cases
+        the user can hit:
+
+        - Document classified as Kontoauszug but **no statement row**
+          (extraction was skipped at upload time, e.g. the bridge
+          was offline, or local_only blocked a cloud call).
+        - Statement row exists but has **zero transactions** (extraction
+          ran but the model returned an empty/garbled JSON).
+
+        Runs in a background thread so the HTTP request returns
+        instantly. Local 7B inference can spend 30–90 s per statement,
+        and a backlog of dozens would otherwise run past every
+        reasonable HTTP timeout. Poll /api/finance/analyze-progress."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
+        if settings.finance.local_only and not is_local:
+            raise HTTPException(
+                403,
+                "finance.local_only is enabled but the active provider is not local.",
+            )
+        from .. import activity
+        existing = activity.get_job("analyze-statements")
+        if existing.running:
+            return {"started": False, "reason": "already running",
+                    **existing.as_dict()}
+
+        # Two SELECTs unioned manually so we can keep the queries
+        # readable. Both return doc rows with stored OCR text — we
+        # never re-OCR, since /api/finance/reocr-all is the entry
+        # point for that.
+        with db._lock:
+            missing = db._conn.execute(
+                """SELECT d.id AS doc_id,
+                          COALESCE(d.subject, d.filename) AS subject,
+                          d.extracted_text AS text
+                   FROM documents d
+                   LEFT JOIN statements s ON s.doc_id = d.id
+                   WHERE d.deleted_at IS NULL
+                     AND d.category = 'Kontoauszug'
+                     AND s.id IS NULL
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+            ).fetchall()
+            empty = db._conn.execute(
+                """SELECT d.id AS doc_id,
+                          COALESCE(d.subject, d.filename) AS subject,
+                          d.extracted_text AS text
+                   FROM documents d
+                   JOIN statements s ON s.doc_id = d.id
+                   WHERE d.deleted_at IS NULL
+                     AND s.id NOT IN (SELECT statement_id FROM transactions)
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+            ).fetchall()
+
+        # Dedup on doc_id (a doc could in theory match both queries,
+        # though our schema keeps them disjoint). Order: missing first,
+        # then empty — feels more natural progress-wise.
+        seen: set[int] = set()
+        targets: list[tuple[int, str, str]] = []
+        for r in list(missing) + list(empty):
+            doc_id = int(r["doc_id"])
+            if doc_id in seen:
+                continue
+            seen.add(doc_id)
+            targets.append((doc_id, r["subject"] or f"doc {doc_id}", r["text"]))
+
+        if not targets:
+            return {"started": False, "reason": "nothing to analyse",
+                    "total": 0, "approved": [], "failed": []}
+
+        do_pseudo = settings.finance.pseudonymize and not is_local
+        activity.start_job("analyze-statements", total=len(targets))
+
+        def worker():
+            from ..finance import StatementExtractor
+            from hashlib import sha256
+            import time as _time
+            extractor = StatementExtractor(
+                classifier.provider, settings.ai.model,
+                max_text_chars=max(settings.ai.max_text_chars, 32000),
+                holder_names=settings.finance.holder_names,
+            )
+            for idx, (doc_id, subject, text) in enumerate(targets):
+                if idx > 0:
+                    _time.sleep(0.6)
+                activity.update_job(
+                    "analyze-statements",
+                    current=str(subject)[:120], current_doc_id=doc_id,
+                )
+                try:
+                    stmt = extractor.extract(text, pseudonymize=do_pseudo)
+                    if not stmt.transactions:
+                        # Persist the empty result with whatever
+                        # metadata we got — diag banner will still
+                        # call it out and the user can retry per-doc.
+                        db.upsert_statement(
+                            doc_id, account_id=None,
+                            period_start=stmt.period_start,
+                            period_end=stmt.period_end,
+                            statement_no=stmt.statement_no,
+                            opening_balance=stmt.opening_balance,
+                            closing_balance=stmt.closing_balance,
+                            currency=stmt.currency, file_hash="",
+                            privacy_mode=stmt.privacy_mode,
+                            transactions=[],
+                            extra_json=stmt.raw_response,
+                        )
+                        job = activity.get_job("analyze-statements")
+                        job.failed.append({"doc_id": doc_id,
+                                           "error": "no transactions extracted"})
+                        activity.update_job(
+                            "analyze-statements", done=idx + 1,
+                            last_error="empty result",
+                        )
+                        continue
+                    account_id = None
+                    if stmt.iban_hash:
+                        account_id = db.upsert_account(
+                            bank_name=stmt.bank_name or "Unbekannt",
+                            iban=stmt.iban, iban_last4=stmt.iban_last4,
+                            iban_hash=stmt.iban_hash,
+                            account_holder=stmt.account_holder,
+                            currency=stmt.currency,
+                        )
+                    tx_payload = []
+                    for tx in stmt.transactions:
+                        key = (
+                            (stmt.iban_hash or "no-iban") + "|" +
+                            tx.booking_date + "|" + f"{tx.amount:.2f}" +
+                            "|" + tx.purpose
+                        )
+                        d = tx.as_dict()
+                        d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
+                        tx_payload.append(d)
+                    db.upsert_statement(
+                        doc_id, account_id=account_id,
+                        period_start=stmt.period_start,
+                        period_end=stmt.period_end,
+                        statement_no=stmt.statement_no,
+                        opening_balance=stmt.opening_balance,
+                        closing_balance=stmt.closing_balance,
+                        currency=stmt.currency, file_hash="",
+                        privacy_mode=stmt.privacy_mode,
+                        transactions=tx_payload,
+                        extra_json=stmt.raw_response,
+                    )
+                    job = activity.get_job("analyze-statements")
+                    job.approved.append(doc_id)
+                    activity.update_job("analyze-statements", done=idx + 1)
+                except Exception as exc:
+                    job = activity.get_job("analyze-statements")
+                    job.failed.append({"doc_id": doc_id, "error": str(exc)})
+                    activity.update_job(
+                        "analyze-statements", done=idx + 1,
+                        last_error=str(exc),
+                    )
+            activity.finish_job("analyze-statements", current="")
+
+        threading.Thread(target=worker, name="analyze-statements",
+                         daemon=True).start()
+        return {"started": True,
+                **activity.get_job("analyze-statements").as_dict()}
+
+    @app.get("/api/finance/analyze-progress")
+    def api_analyze_progress():
+        from .. import activity
+        return activity.get_job("analyze-statements").as_dict()
+
+    @app.get("/api/finance/unanalyzed-count")
+    def api_unanalyzed_count():
+        """Cheap count for the UI banner — how many Kontoauszug docs
+        still need a populated statement row?"""
+        with db._lock:
+            missing = db._conn.execute(
+                """SELECT COUNT(*) AS n FROM documents d
+                   LEFT JOIN statements s ON s.doc_id = d.id
+                   WHERE d.deleted_at IS NULL
+                     AND d.category = 'Kontoauszug'
+                     AND s.id IS NULL
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+            ).fetchone()
+            empty = db._conn.execute(
+                """SELECT COUNT(*) AS n FROM documents d
+                   JOIN statements s ON s.doc_id = d.id
+                   WHERE d.deleted_at IS NULL
+                     AND d.category = 'Kontoauszug'
+                     AND s.id NOT IN (SELECT statement_id FROM transactions)
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+            ).fetchone()
+        return {"missing": int(missing["n"] if missing else 0),
+                "empty":   int(empty["n"]   if empty   else 0)}
+
     @app.post("/api/finance/reextract-empty")
     def api_reextract_empty():
         """One-click bulk re-extraction for every statement that came
