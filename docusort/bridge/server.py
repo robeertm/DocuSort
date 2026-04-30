@@ -55,6 +55,10 @@ class BridgeServer:
         self._calls_failed: int = 0
         self._tokens_in: int = 0
         self._tokens_out: int = 0
+        # Last token-rejected attempt — surfaced in the UI so the user
+        # gets a clear "you're using the wrong token" instead of a
+        # silent "offline".
+        self._last_reject: dict[str, Any] = {}
 
     # ------------------------------------------------------------------ status
     def is_connected(self) -> bool:
@@ -72,6 +76,7 @@ class BridgeServer:
                 "tokens_in":        self._tokens_in,
                 "tokens_out":       self._tokens_out,
                 "pending":          len(self._pending),
+                "last_reject":      dict(self._last_reject),
             }
 
     # -------------------------------------------------------------- ws hooks

@@ -1756,6 +1756,23 @@ def create_app(
         # Constant-time compare so a wrong token can't be brute-forced
         # by timing the close.
         if not _secrets.compare_digest(token_q, expected):
+            client_host = ws.client.host if ws.client else "?"
+            tok_preview = (token_q[:8] + "…") if token_q else "(empty)"
+            logger.warning(
+                "Bridge: rejected connect from %s with token=%s (does not match server token)",
+                client_host, tok_preview,
+            )
+            # Record the rejection in the bridge state too so the UI can
+            # surface it instead of just showing "offline".
+            try:
+                bridge_obj = get_bridge()
+                bridge_obj._last_reject = {  # noqa: SLF001
+                    "host":  client_host,
+                    "token_preview": tok_preview,
+                    "at":    __import__("time").time(),
+                }
+            except Exception:
+                pass
             await ws.close(code=4401, reason="invalid token")
             return
         await ws.accept()
