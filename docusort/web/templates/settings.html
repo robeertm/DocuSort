@@ -28,7 +28,22 @@
 
     <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.model') }}</label>
     <input x-model="ai.model" type="text"
-           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-4 font-mono">
+           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-1 font-mono"
+           :placeholder="ai.provider === 'bridge' ? 'qwen2.5:7b-instruct  · or whatever your Mac has pulled' : ''">
+    <div x-show="ai.provider === 'bridge'" x-cloak class="text-xs text-ink-500 mb-4 flex items-center gap-2 flex-wrap">
+      <template x-if="bridgeMacModel()">
+        <span>
+          Mac is currently running
+          <span class="font-mono text-cyan-300" x-text="bridgeMacModel()"></span>.
+          <button type="button" @click="ai.model = bridgeMacModel()"
+                  x-show="ai.model !== bridgeMacModel()"
+                  class="underline hover:text-cyan-200 ml-1">use this</button>
+        </span>
+      </template>
+      <template x-if="!bridgeMacModel()">
+        <span class="text-ink-500">Connect a Mac client first to see what model it has loaded.</span>
+      </template>
+    </div>
 
     <template x-if="ai.provider === 'openai_compat'">
       <div class="mb-4">
@@ -70,10 +85,11 @@
            x-text="ai.restartMessage"></div>
       <div class="ml-auto flex gap-2">
         <button type="button" @click="restartService()"
-                x-show="ai.restartHint" x-cloak
                 :disabled="ai.restarting"
-                class="rounded-xl px-4 py-2 text-sm font-medium border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-50">
-          <span x-show="!ai.restarting">Restart service now</span>
+                :class="ai.restartHint
+                    ? 'rounded-xl px-4 py-2 text-sm font-medium border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-50'
+                    : 'rounded-xl px-4 py-2 text-sm font-medium border border-ink-700 bg-ink-900/40 text-ink-300 hover:bg-ink-800 disabled:opacity-50'">
+          <span x-show="!ai.restarting">Restart service</span>
           <span x-show="ai.restarting" x-cloak>Restarting…</span>
         </button>
         <button type="button" @click="saveAi()" :disabled="ai.saving" class="btn-primary"
@@ -680,8 +696,23 @@ function settingsPage() {
       restartMessage: '',
       restartOk:      false,
     },
+    bridgeStatus: { connected: false, client: {} },
     init() {
       this.updateStoredHint();
+      // Poll bridge status so the "model on your Mac" hint stays fresh
+      // and so the model field can auto-fill when a client connects.
+      this.refreshBridgeStatus();
+      setInterval(() => this.refreshBridgeStatus(), 4000);
+    },
+    async refreshBridgeStatus() {
+      try {
+        const r = await fetch('/api/bridge/status');
+        if (r.ok) this.bridgeStatus = await r.json();
+      } catch (e) {}
+    },
+    bridgeMacModel() {
+      return (this.bridgeStatus && this.bridgeStatus.client &&
+              this.bridgeStatus.client.model) || '';
     },
     updateStoredHint() {
       this.storedHint = this.storedKey
@@ -693,6 +724,20 @@ function settingsPage() {
       const stored = {{ stored_secrets | tojson }};
       this.storedKey = stored[this.ai.provider + '_api_key'] || '';
       this.updateStoredHint();
+      // When switching to bridge: auto-fill the model field with what
+      // the connected Mac is actually running, so the user does not
+      // accidentally save a cloud-style model id like "claude-..."
+      // and then wonder why nothing works. Cloud-style ids are also
+      // ignored on the Mac side now, but a clean default is friendlier.
+      if (this.ai.provider === 'bridge') {
+        const macModel = this.bridgeMacModel();
+        const looksCloudy = /^(claude-|gpt-|gpt4|gemini-|o1-|o3-|command-)/i.test(this.ai.model || '');
+        if (macModel && (!this.ai.model || looksCloudy)) {
+          this.ai.model = macModel;
+        } else if (!this.ai.model) {
+          this.ai.model = 'qwen2.5:7b-instruct';
+        }
+      }
     },
     async saveAi() {
       this.ai.message = '';

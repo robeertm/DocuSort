@@ -306,13 +306,22 @@ async def run_loop(*, server_url: str, token: str, model: str,
                         continue
                     req_id = str(msg.get("request_id", ""))
                     short  = req_id[:8] or "??"
+                    # Server may request a specific model. We honour the
+                    # request when it looks like an Ollama tag; if the
+                    # server is still on a cloud-style identifier
+                    # (claude-…, gpt-4o, gemini-…) we silently fall back
+                    # to the script's --model arg, so a misconfigured
+                    # server can't break the bridge.
+                    requested = str(msg.get("model") or "").strip()
+                    active_model = requested if (requested and not _looks_cloudy(requested)) else model
                     started = time.time()
                     try:
                         loop = asyncio.get_running_loop()
+                        m = active_model  # bind for the closure
                         data = await loop.run_in_executor(
                             None,
                             lambda: call_ollama_blocking(
-                                model=model,
+                                model=m,
                                 system_prompt=msg.get("system_prompt", ""),
                                 user_prompt=msg.get("user_prompt", ""),
                                 max_output_tokens=int(msg.get("max_output_tokens", 600)),
@@ -353,6 +362,18 @@ async def run_loop(*, server_url: str, token: str, model: str,
         except KeyboardInterrupt:
             info("Shutting down (Ctrl-C).")
             return
+
+
+_CLOUD_MODEL_PREFIXES = ("claude-", "gpt-", "gpt4", "o1-", "o3-",
+                         "gemini-", "models/gemini", "command-",
+                         "anthropic.", "openai.", "google.")
+
+def _looks_cloudy(name: str) -> bool:
+    """Heuristic: does this look like a cloud-API model id rather than
+    an Ollama tag? Used to ignore stale provider settings on the
+    server when we know we are running locally."""
+    n = name.strip().lower()
+    return any(n.startswith(p) for p in _CLOUD_MODEL_PREFIXES)
 
 
 def _ollama_version_or_blank() -> str:
