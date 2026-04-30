@@ -14,6 +14,33 @@
     </p>
   </div>
   <div class="flex items-center gap-2">
+    {% if not trash and filter.status == 'review' %}
+      <button type="button" x-data="{ running: false, done: 0, total: 0 }"
+              x-init="
+                const tick = async () => {
+                  try {
+                    const r = await fetch('/api/library/retry-progress');
+                    if (r.ok) { const d = await r.json(); running = d.running; done = d.done; total = d.total; }
+                  } catch(e) {}
+                };
+                tick(); setInterval(tick, 2000);
+              "
+              @click="
+                if (running) return;
+                if (!confirm('Re-classify every document currently in review?')) return;
+                fetch('/api/library/retry-all-review', { method: 'POST' })
+                  .then(r => r.json())
+                  .then(d => { if (d.started === false && d.reason !== 'queue empty') alert('Already running.'); });
+              "
+              :disabled="running"
+              class="btn-ghost text-amber-300 hover:bg-amber-500/10 disabled:opacity-60 disabled:cursor-not-allowed">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M3 12a9 9 0 1 0 3-6.708"/><path d="M3 4v5h5"/>
+        </svg>
+        <span x-show="!running">Re-queue all review</span>
+        <span x-show="running" x-cloak x-text="`Re-classifying… ${done}/${total}`"></span>
+      </button>
+    {% endif %}
     {% if trash %}
       <button type="button" x-data
               @click="if (confirm('{{ t('trash.confirm_empty') }}')) {

@@ -244,7 +244,7 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                 is_bank_statement_lookalike = True
 
         if (cls.category == "Kontoauszug" or is_bank_statement_lookalike) and ocr_res.text:
-            local_providers = ("openai_compat",)
+            local_providers = ("openai_compat", "bridge")
             is_local = settings.ai.provider in local_providers
             if settings.finance.local_only and not is_local:
                 log.warning(
@@ -548,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.backfill_statements:
         from .finance.extractor import backfill_statements
-        local_only = settings.finance.local_only and settings.ai.provider == "openai_compat"
+        local_only = settings.finance.local_only and settings.ai.provider in ("openai_compat", "bridge")
         result = backfill_statements(
             settings, db, classifier, dry_run=False, local_only=local_only,
         )

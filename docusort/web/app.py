@@ -891,7 +891,7 @@ def create_app(
         stored OCR text so no re-OCR cost either."""
         if classifier is None:
             raise HTTPException(503, "classifier not available — finish /setup first")
-        is_local = settings.ai.provider == "openai_compat"
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
         if settings.finance.local_only and not is_local:
             raise HTTPException(
                 403,
@@ -979,7 +979,7 @@ def create_app(
         Same per-call rate-limit pacing as the CLI flag."""
         if classifier is None:
             raise HTTPException(503, "classifier not available — finish /setup first")
-        is_local = settings.ai.provider == "openai_compat"
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
         if settings.finance.local_only and not is_local:
             raise HTTPException(
                 403,
@@ -1094,7 +1094,7 @@ def create_app(
         if not text:
             raise HTTPException(400, "no OCR text stored — re-classify first")
 
-        is_local = settings.ai.provider == "openai_compat"
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
         will_pseudonymize = settings.finance.pseudonymize and not is_local
         will_skip = settings.finance.local_only and not is_local
 
@@ -1149,7 +1149,7 @@ def create_app(
             raise HTTPException(400, "no OCR text stored — re-classify the document first")
         from ..finance import StatementExtractor
         from hashlib import sha256
-        is_local = settings.ai.provider == "openai_compat"
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
         if settings.finance.local_only and not is_local:
             raise HTTPException(
                 403,
@@ -1317,6 +1317,73 @@ def create_app(
         approve-pending job — drives the live progress bar in the UI."""
         from .. import activity
         return activity.get_job("approve-pending").as_dict()
+
+    @app.post("/api/library/retry-all-review")
+    def api_retry_all_review():
+        """Re-classify every document currently in `status='review'` —
+        useful after the AI provider was switched (e.g. cloud → local
+        bridge) so the existing review pile gets a fresh look without
+        the user having to click each one. Returns immediately; work
+        runs in a background thread. Poll /api/library/retry-progress."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        from .. import activity
+        existing = activity.get_job("retry-review")
+        if existing.running:
+            return {"started": False, "reason": "already running",
+                    **existing.as_dict()}
+        with db._lock:
+            rows = db._conn.execute(
+                """SELECT id, COALESCE(subject, filename) AS subject FROM documents
+                   WHERE status = 'review' AND deleted_at IS NULL
+                   ORDER BY created_at ASC"""
+            ).fetchall()
+        if not rows:
+            return {"started": False, "reason": "queue empty",
+                    "total": 0, "approved": [], "failed": []}
+
+        doc_ids = [(int(r["id"]), r["subject"] or f"doc {r['id']}") for r in rows]
+        activity.start_job("retry-review", total=len(doc_ids))
+
+        from ..retry import retry_document
+
+        def worker():
+            import time as _time
+            for idx, (doc_id, subject) in enumerate(doc_ids):
+                if idx > 0:
+                    _time.sleep(0.8)  # gentle pacing — local is slower per call
+                activity.update_job(
+                    "retry-review",
+                    current=str(subject)[:120], current_doc_id=doc_id,
+                )
+                try:
+                    retry_document(doc_id, settings, classifier, db)
+                    job = activity.get_job("retry-review")
+                    job.approved.append(doc_id)
+                    activity.update_job("retry-review", done=idx + 1)
+                except ValueError as exc:
+                    # Bad input (no text, file missing) — skip, keep going.
+                    job = activity.get_job("retry-review")
+                    job.failed.append({"doc_id": doc_id, "error": str(exc)})
+                    activity.update_job(
+                        "retry-review", done=idx + 1, last_error=str(exc),
+                    )
+                except Exception as exc:
+                    job = activity.get_job("retry-review")
+                    job.failed.append({"doc_id": doc_id, "error": str(exc)})
+                    activity.update_job(
+                        "retry-review", done=idx + 1, last_error=str(exc),
+                    )
+            activity.finish_job("retry-review", current="")
+
+        threading.Thread(target=worker, name="retry-review",
+                         daemon=True).start()
+        return {"started": True, **activity.get_job("retry-review").as_dict()}
+
+    @app.get("/api/library/retry-progress")
+    def api_retry_progress():
+        from .. import activity
+        return activity.get_job("retry-review").as_dict()
 
     @app.get("/api/activity")
     def api_activity():

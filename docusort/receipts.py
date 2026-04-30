@@ -306,7 +306,7 @@ def backfill_receipts(settings, db, classifier, *, dry_run: bool = False) -> dic
     }
 
 
-_LOCAL_PROVIDERS = ("openai_compat",)
+_LOCAL_PROVIDERS = ("openai_compat", "bridge")
 
 
 class ReceiptExtractor:

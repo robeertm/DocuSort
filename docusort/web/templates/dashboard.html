@@ -56,7 +56,7 @@
       {{ '{:,}'.format(tot.output_tokens or 0) }}
     </div>
   </div>
-  <div class="card p-4">
+  <div class="card p-4" x-data="reviewQueue()" x-init="init()">
     <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.review_open') }}</div>
     <div class="mt-2 text-2xl sm:text-3xl font-semibold">
       {% if review_count %}
@@ -65,8 +65,66 @@
         <span class="text-ink-500">0</span>
       {% endif %}
     </div>
+    {% if review_count %}
+    <div class="mt-2">
+      <button type="button" @click="retryAll()" :disabled="job.running"
+              x-show="!job.running"
+              class="text-[11px] rounded-md px-2 py-1 border border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 disabled:opacity-40">
+        Re-queue all
+      </button>
+      <div x-show="job.running" x-cloak class="text-[11px] text-amber-200">
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <span>Re-classifying… <span x-text="job.done + '/' + job.total"></span></span>
+          <span class="text-ink-500" x-text="job.current ? job.current.slice(0, 24) : ''"></span>
+        </div>
+        <div class="h-1.5 rounded bg-ink-800 overflow-hidden">
+          <div class="h-full bg-amber-400/80 transition-all"
+               :style="`width: ${job.total ? (100 * job.done / job.total) : 0}%`"></div>
+        </div>
+        <div x-show="job.last_error" x-cloak class="mt-1 text-rose-300/90 truncate"
+             x-text="'last error: ' + (job.last_error || '')"></div>
+      </div>
+      <div x-show="!job.running && job.done > 0" x-cloak class="text-[11px] text-ink-400 mt-1">
+        Done · <span x-text="(job.approved && job.approved.length) || 0"></span> ok,
+        <span x-text="(job.failed && job.failed.length) || 0"></span> failed.
+        <a href="/library?status=review" class="underline hover:text-ink-200">refresh →</a>
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
+
+<script>
+function reviewQueue() {
+  return {
+    job: { running: false, done: 0, total: 0, current: '', approved: [], failed: [], last_error: '' },
+    _t: null,
+    init() {
+      this.refresh();
+      this._t = setInterval(() => this.refresh(), 2000);
+    },
+    async refresh() {
+      try {
+        const r = await fetch('/api/library/retry-progress');
+        if (r.ok) this.job = await r.json();
+      } catch (e) {}
+    },
+    async retryAll() {
+      if (!confirm('Re-classify every document currently in review? Useful after switching the AI provider — runs through them one by one in the background.')) return;
+      try {
+        const r = await fetch('/api/library/retry-all-review', { method: 'POST' });
+        const d = await r.json();
+        if (d.started === false && d.reason !== 'queue empty') {
+          alert('Already running.');
+        }
+        this.refresh();
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    },
+  };
+}
+</script>
 
 <!-- Local AI bridge card: only renders if the bridge has ever been
      touched (token configured or a client connected at least once).

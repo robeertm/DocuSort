@@ -391,7 +391,7 @@ def _parse_response(raw: str) -> dict[str, Any]:
     raise ValueError(f"No valid JSON object in model reply: {raw[:200]!r}")
 
 
-_LOCAL_PROVIDERS = ("openai_compat",)
+_LOCAL_PROVIDERS = ("openai_compat", "bridge")
 
 
 class Classifier:
