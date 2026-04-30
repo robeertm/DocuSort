@@ -2,6 +2,22 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.19.3] – 2026-04-30
+
+### Added — restart button + bridge test button
+
+The "restart required" banner under AI provider now ships with a
+big red **Restart service now** button. Clicking it triggers the
+same systemd restart path the auto-updater already uses and reloads
+the page after a short delay — no more shell-out to systemctl by
+hand.
+
+The Local AI Bridge card grew a small **Test** button that runs a
+JSON-echo round-trip through the connected client and prints the
+model name, token counts, and latency right there in the card. Lets
+the user verify "yes the Mac is actually answering" without uploading
+a real document.
+
 ## [0.19.0] – 2026-04-30
 
 ### Added — Local AI Bridge: run inference on your Mac

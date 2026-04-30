@@ -60,11 +60,22 @@
          :class="ai.ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
          x-text="ai.message"></div>
 
-    <div class="flex items-center justify-between">
-      <p class="text-xs text-ink-500" x-show="ai.restartHint" x-cloak>
+    <div class="flex flex-wrap items-center gap-3">
+      <p class="text-xs text-ink-500 flex-1 min-w-0" x-show="ai.restartHint" x-cloak>
         {{ t('settings.ai.restart_hint') }}
       </p>
+      <div x-show="ai.restartMessage" x-cloak
+           class="text-xs rounded-lg px-3 py-2"
+           :class="ai.restartOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+           x-text="ai.restartMessage"></div>
       <div class="ml-auto flex gap-2">
+        <button type="button" @click="restartService()"
+                x-show="ai.restartHint" x-cloak
+                :disabled="ai.restarting"
+                class="rounded-xl px-4 py-2 text-sm font-medium border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-50">
+          <span x-show="!ai.restarting">Restart service now</span>
+          <span x-show="ai.restarting" x-cloak>Restarting…</span>
+        </button>
         <button type="button" @click="saveAi()" :disabled="ai.saving" class="btn-primary"
                 :class="ai.saving ? 'opacity-50 cursor-not-allowed' : ''">
           <span x-show="!ai.saving">{{ t('settings.save') }}</span>
@@ -117,7 +128,15 @@
         </template>
       </div>
       <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3 text-xs">
-        <div class="text-ink-500 uppercase tracking-wide mb-1">Activity</div>
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-ink-500 uppercase tracking-wide">Activity</div>
+          <button type="button" @click="testConnection()"
+                  :disabled="!status.connected || testing"
+                  class="text-[11px] rounded-md px-2 py-0.5 border border-ink-700 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-not-allowed">
+            <span x-show="!testing">Test</span>
+            <span x-show="testing" x-cloak>…</span>
+          </button>
+        </div>
         <div class="grid grid-cols-2 gap-y-1 font-mono">
           <div class="text-ink-500">requests</div>
           <div x-text="status.calls_total ?? 0" class="text-right tabular-nums"></div>
@@ -131,6 +150,10 @@
           <div class="text-ink-500">pending</div>
           <div x-text="status.pending ?? 0" class="text-right tabular-nums"></div>
         </div>
+        <div x-show="testMessage" x-cloak
+             class="mt-2 rounded px-2 py-1.5 text-[11px] leading-4"
+             :class="testOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+             x-text="testMessage"></div>
       </div>
     </div>
 
@@ -652,7 +675,10 @@ function settingsPage() {
       saving:    false,
       message:   '',
       ok:        false,
-      restartHint: false,
+      restartHint:    false,
+      restarting:     false,
+      restartMessage: '',
+      restartOk:      false,
     },
     init() {
       this.updateStoredHint();
@@ -698,6 +724,30 @@ function settingsPage() {
         this.ai.saving = false;
       }
     },
+    async restartService() {
+      if (!confirm('Restart the DocuSort service now? Active uploads or in-flight extractions will be cut off.')) return;
+      this.ai.restartMessage = '';
+      this.ai.restarting = true;
+      try {
+        const r = await fetch('/api/setup/restart', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.restarted) {
+          this.ai.restartOk = true;
+          this.ai.restartMessage = 'Restart scheduled — page will reload in a few seconds.';
+          setTimeout(() => window.location.reload(), 6000);
+        } else {
+          this.ai.restartOk = false;
+          this.ai.restartMessage = (d.reason || d.detail || 'Restart failed.');
+        }
+      } catch (e) {
+        this.ai.restartOk = false;
+        this.ai.restartMessage = e.message || String(e);
+      } finally {
+        // Keep "Restarting…" visible until the reload swaps the page —
+        // unsetting now would briefly show "Restart service now" again
+        // and look like the click did nothing.
+      }
+    },
   };
 }
 
@@ -709,6 +759,9 @@ function bridgeSettings() {
     showToken:     false,
     copied:        false,
     installCopied: false,
+    testing:       false,
+    testMessage:   '',
+    testOk:        false,
     _timer:        null,
 
     init() {
@@ -757,6 +810,31 @@ function bridgeSettings() {
         const r = await fetch('/api/bridge/regenerate-token', { method: 'POST' });
         if (r.ok) { await this.refresh(); }
       } catch (e) {}
+    },
+    async testConnection() {
+      this.testMessage = '';
+      this.testing = true;
+      const t0 = performance.now();
+      try {
+        const r = await fetch('/api/bridge/test', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        const dt = ((performance.now() - t0) / 1000).toFixed(1);
+        if (r.ok && d.ok) {
+          this.testOk = true;
+          const tin  = d.input_tokens  ?? 0;
+          const tout = d.output_tokens ?? 0;
+          this.testMessage = `OK · ${d.model || 'model'} · ${tin}→${tout} tok · ${dt}s`;
+        } else {
+          this.testOk = false;
+          this.testMessage = (d.detail || `HTTP ${r.status}`) + ` (${dt}s)`;
+        }
+        await this.refresh();
+      } catch (e) {
+        this.testOk = false;
+        this.testMessage = e.message || String(e);
+      } finally {
+        this.testing = false;
+      }
     },
   };
 }
