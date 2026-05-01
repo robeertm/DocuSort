@@ -2,6 +2,38 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.22.3] – 2026-05-01
+
+### Fixed
+
+- **"Auswerten" no longer dead-ends on missing OCR text.** Old imports
+  sometimes left `extracted_text` empty in the database, which made the
+  statement-extract button refuse with *"no OCR text stored — re-classify
+  the document first"*. The endpoint now falls back to re-OCR'ing the
+  on-disk file, persists the recovered text, and continues with
+  extraction. One click instead of a forced re-classify.
+
+## [0.22.2] – 2026-05-01
+
+### Fixed
+
+- **Bridge launcher executable bit survives the download.** Browsers
+  strip Unix mode when serving raw text, so the downloaded
+  `docusort-bridge-mac.command` would refuse to run with a permissions
+  error. Settings now ships each launcher as a small ZIP with explicit
+  `0o755` mode bits — unzip and double-click works on macOS, Linux and
+  Windows alike.
+
+## [0.22.1] – 2026-04-30
+
+### Fixed
+
+- **Duplicates page rendered blank.** Alpine's `x-data` attribute used
+  double-quotes around an inlined JSON payload, so the inner quotes
+  closed the HTML attribute early and broke the component. Switched the
+  pattern to single-quoted `x-data='…tojson…'` to match the working
+  finance-diag card.
+
 ## [0.22.0] – 2026-05-01
 
 ### Added — Telegram + email notifications

@@ -1436,7 +1436,36 @@ def create_app(
             raise HTTPException(404, "document not found")
         text = doc.get("extracted_text") or ""
         if not text:
-            raise HTTPException(400, "no OCR text stored — re-classify the document first")
+            # Old imports never persisted the OCR text. Recover it from
+            # the on-disk file so the user doesn't have to first run a
+            # full re-classification just to populate the column.
+            src = Path(doc.get("library_path") or doc.get("processed_path") or "")
+            if not src.exists():
+                raise HTTPException(
+                    400,
+                    "no OCR text stored and the source file is missing — "
+                    "cannot recover automatically",
+                )
+            from ..ocr import extract_text as _ocr
+            try:
+                ocr_res = _ocr(src, settings.ocr)
+            except Exception as exc:
+                logger.exception("Fallback OCR failed for %d", doc_id)
+                raise HTTPException(500, f"OCR failed: {exc}")
+            text = (ocr_res.text or "").strip()
+            if not text:
+                raise HTTPException(
+                    400,
+                    "OCR returned no text — the file may be empty or unreadable",
+                )
+            with db._lock:
+                db._conn.execute(
+                    "UPDATE documents SET extracted_text = ? WHERE id = ?",
+                    (text[: max(settings.ai.max_text_chars, 200_000)], doc_id),
+                )
+                db._conn.commit()
+            logger.info("doc %d: filled missing extracted_text via fallback OCR (%d chars)",
+                        doc_id, len(text))
         from ..finance import StatementExtractor
         from hashlib import sha256
         is_local = settings.ai.provider in ("openai_compat", "bridge")
