@@ -696,6 +696,46 @@ def create_app(
         cat_start:     str | None = Query(None),
         cat_end:       str | None = Query(None),
     ):
+        try:
+            return _finance_page_impl(
+                request, account_id=account_id, category=category,
+                direction=direction, start=start, end=end, q=q,
+                heatmap_year=heatmap_year, heatmap_month=heatmap_month,
+                cat_start=cat_start, cat_end=cat_end,
+            )
+        except Exception as exc:
+            # Bei einem fehlgeschlagenen Render legen wir den vollen
+            # Trace im Server-Log ab und zeigen dem User eine
+            # Diagnose-Seite mit dem Fehlertext, statt eines blanken
+            # 500ers — das spart das Logs-Holen für die nächste
+            # Iteration.
+            import traceback as _tb
+            tb = _tb.format_exc()
+            logger.exception("Finance page render failed: %s", exc)
+            return HTMLResponse(
+                status_code=500,
+                content=f"""<!doctype html><html><head><meta charset="utf-8">
+<title>Finance — Fehler</title>
+<style>body{{font-family:system-ui;background:#0f172a;color:#e2e8f0;padding:2rem;}}
+pre{{background:#1e293b;padding:1rem;border-radius:0.5rem;overflow-x:auto;font-size:13px;}}
+a{{color:#34d399;}}
+.box{{max-width:900px;margin:0 auto;}}
+h1{{font-size:1.4rem;}}
+</style></head><body><div class="box">
+<h1>Finance-Seite konnte nicht gerendert werden</h1>
+<p>Der Fehler steckt im Stack-Trace unten. Bitte den Text dem Support
+durchgeben — die anderen Seiten (<a href="/library">Library</a>,
+<a href="/transactions">Buchungen</a>, <a href="/">Dashboard</a>) sind
+nicht betroffen.</p>
+<p><strong>Fehler:</strong> {type(exc).__name__}: {str(exc)[:500]}</p>
+<pre>{tb}</pre>
+</div></body></html>""",
+            )
+
+    def _finance_page_impl(
+        request: Request, *, account_id, category, direction, start, end, q,
+        heatmap_year, heatmap_month, cat_start, cat_end,
+    ):
         account_id = _coerce_int(account_id)
         from ..finance.categories import TX_CATEGORIES, TX_TYPES
         summary       = db.finance_summary()
