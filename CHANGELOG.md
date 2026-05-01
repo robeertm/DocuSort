@@ -2,6 +2,17 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.25.2] – 2026-05-01
+
+### Reverted
+
+- **Rolled back v0.25.0 + v0.25.1.** Page-by-page extraction and the
+  `/finance` diagnostic-page wrapper broke things on the live VM
+  (whole app refused to render). Functionally identical to v0.24.1,
+  shipped as a forward version so auto-update on upgraded clients
+  picks it up. Per-page extraction and pause/resume will come back
+  in a fresh, more carefully tested branch.
+
 ## [0.24.1] – 2026-05-01
 
 ### Fixed — Statements with mismatched balances and zero transactions
