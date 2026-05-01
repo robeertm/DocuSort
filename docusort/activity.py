@@ -38,12 +38,6 @@ class JobState:
     approved: list[int] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)
     last_error: str = ""
-    # Cooperative pause flag. The worker checks this before every
-    # iteration; on True it persists the still-pending doc_ids and
-    # exits cleanly. A later resume call rebuilds the targets from
-    # the persisted list and starts a fresh worker thread.
-    pause_requested: bool = False
-    paused: bool = False     # set by the worker once it has stopped
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -58,8 +52,6 @@ class JobState:
             "approved":  list(self.approved),
             "failed":    list(self.failed),
             "last_error": self.last_error,
-            "pause_requested": self.pause_requested,
-            "paused":    self.paused,
         }
 
 
@@ -103,48 +95,6 @@ def finish_job(name: str, **fields: Any) -> None:
             setattr(job, k, v)
         job.running = False
         job.finished_at = time.time()
-
-
-def request_pause(name: str) -> bool:
-    """Tell the named job to stop after the current iteration. Returns
-    True if the job exists and was running. Cooperative — the worker
-    has to actually check the flag."""
-    with _lock:
-        job = _jobs.get(name)
-        if job is None or not job.running:
-            return False
-        job.pause_requested = True
-        return True
-
-
-def is_pause_requested(name: str) -> bool:
-    with _lock:
-        job = _jobs.get(name)
-        return bool(job and job.pause_requested)
-
-
-def mark_paused(name: str) -> None:
-    """Worker-side acknowledgement: the loop has stopped after a pause
-    request. running flips to False so the UI can offer a Resume button."""
-    with _lock:
-        job = _jobs.get(name)
-        if job is None:
-            return
-        job.running = False
-        job.pause_requested = False
-        job.paused = True
-        job.finished_at = time.time()
-
-
-def clear_paused(name: str) -> None:
-    """Reset the paused flag — called when the resume worker actually
-    starts so the UI's Pause / Resume buttons swap correctly."""
-    with _lock:
-        job = _jobs.get(name)
-        if job is None:
-            return
-        job.paused = False
-        job.pause_requested = False
 
 
 def begin_call() -> None:

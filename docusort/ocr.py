@@ -35,22 +35,18 @@ class OcrResult:
     page_count: int | None = None
 
 
-def _extract_pdf_pages(pdf_path: Path) -> list[str]:
-    """Per-page text extraction. Returns one string per page, in order;
-    empty list when pypdf can't open the file."""
+def _extract_pdf(pdf_path: Path) -> tuple[str, int | None]:
     try:
         reader = PdfReader(str(pdf_path))
-        return [(page.extract_text() or "").strip() for page in reader.pages]
+        pages = len(reader.pages)
+        chunks = []
+        for page in reader.pages:
+            text = page.extract_text() or ""
+            chunks.append(text)
+        return "\n".join(chunks).strip(), pages
     except Exception as exc:
         logger.warning("pypdf could not read %s: %s", pdf_path.name, exc)
-        return []
-
-
-def _extract_pdf(pdf_path: Path) -> tuple[str, int | None]:
-    pages = _extract_pdf_pages(pdf_path)
-    if not pages:
         return "", None
-    return "\n".join(pages).strip(), len(pages)
 
 
 def _needs_ocr(text: str) -> bool:
@@ -126,39 +122,3 @@ def extract_text(file_path: Path, settings: OCRSettings) -> OcrResult:
 
 def is_supported(file_path: Path) -> bool:
     return file_path.suffix.lower() in (PDF_SUFFIXES | IMAGE_SUFFIXES)
-
-
-def extract_pages(file_path: Path, settings: OCRSettings) -> list[str]:
-    """Per-page text extraction for PDFs — runs OCR if the document is a
-    scanned PDF, otherwise returns the existing text layer page by page.
-    For non-PDFs we return a single-element list so callers can treat
-    "image" as a one-page document.
-
-    Used by the page-by-page statement extractor as a fallback when
-    single-pass extraction loses bookings on long documents."""
-    suffix = file_path.suffix.lower()
-
-    if suffix in PDF_SUFFIXES:
-        pages = _extract_pdf_pages(file_path)
-        joined = "\n".join(pages).strip()
-        if not settings.enabled or not _needs_ocr(joined):
-            return pages
-        if not shutil.which("ocrmypdf"):
-            return pages
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-        try:
-            _run_ocrmypdf(file_path, tmp_path, settings)
-            return _extract_pdf_pages(tmp_path)
-        except subprocess.CalledProcessError as exc:
-            logger.error("OCR failed for %s: %s",
-                         file_path.name, exc.stderr or exc.stdout)
-            tmp_path.unlink(missing_ok=True)
-            return pages
-
-    if suffix in IMAGE_SUFFIXES:
-        # Images don't have pages — treat the whole image as page 1.
-        result = extract_text(file_path, settings)
-        return [result.text] if result.text else []
-
-    return []
