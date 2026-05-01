@@ -2,6 +2,28 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.23.2] – 2026-05-01
+
+### Changed
+
+- **Search box no longer requires picking a suggestion.** The
+  autocomplete popover made it look like the user had to select a
+  specific payee from a list to filter; in practice the underlying
+  query was already a wildcard substring match against counterparty
+  and purpose, so typing "rossmann" had been filtering the table all
+  along — the popover was just hiding that fact behind a UI that
+  felt like a required choice. Removed the popover entirely. Typing
+  the search term now visibly drives the table directly. The
+  click-to-add workflow is still available via the Top Ausgaben /
+  Top Eingänge / Nach Kategorie lists, which already lived next to
+  the table.
+
+### Removed
+
+- `GET /api/transactions/payee-suggest` and the matching
+  `Database.transactions_payee_suggest` — both had no caller after
+  the popover went away.
+
 ## [0.23.1] – 2026-05-01
 
 ### Fixed

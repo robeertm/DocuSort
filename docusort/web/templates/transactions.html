@@ -20,26 +20,20 @@
   <!-- ============================ FILTER ============================ -->
   <div class="card p-4">
     <div class="grid gap-3 md:grid-cols-12">
-      <div class="md:col-span-5 relative">
-        <label class="text-[11px] uppercase tracking-wider text-ink-500">Suche (Komma trennt)</label>
-        <!-- x-model writes immediately so filter.q is always current,
-             but the debounced @input keeps us from firing a request on
-             every keystroke. -->
+      <div class="md:col-span-5">
+        <label class="text-[11px] uppercase tracking-wider text-ink-500">
+          Suche
+          <span class="text-ink-500/60 font-normal normal-case ml-1">
+            — Teilstring, Komma trennt mehrere
+          </span>
+        </label>
+        <!-- Wildcard substring match against counterparty + purpose.
+             "rossmann" hits every "Dirk Rossmann GmbH", "ROSSMANN xyz"
+             etc. without needing to select anything. -->
         <input type="search" x-model="filter.q"
-               @input.debounce.300ms="onQueryInput()"
+               @input.debounce.300ms="reload()"
                placeholder="rossmann, dm, amazon …"
                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mt-1">
-        <!-- Payee suggestions popover -->
-        <div x-show="suggestions.length > 0" x-cloak
-             class="absolute z-30 mt-1 w-full rounded-xl border border-ink-700 bg-ink-900 shadow-xl overflow-hidden">
-          <template x-for="s in suggestions" :key="s.counterparty">
-            <button type="button" @click="appendToken(s.counterparty)"
-                    class="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-ink-800/60">
-              <span class="truncate" x-text="s.counterparty"></span>
-              <span class="text-xs text-ink-500 tabular-nums" x-text="s.times + 'x'"></span>
-            </button>
-          </template>
-        </div>
       </div>
       <div class="md:col-span-2">
         <label class="text-[11px] uppercase tracking-wider text-ink-500">Konto</label>
@@ -352,7 +346,6 @@ function txExplorer() {
     agg: { count: 0, sum_in: 0, sum_out: 0, sum_net: 0,
            top_expense: [], top_income: [], monthly: [], by_category: [],
            first_date: '', last_date: '' },
-    suggestions: [],
     selected: new Set(),
     bulkCategory: '',
     loading: false,
@@ -476,27 +469,12 @@ function txExplorer() {
       }
     },
 
-    onQueryInput() {
-      this.reload();
-      this.fetchSuggestions();
-    },
-    async fetchSuggestions() {
-      const last = this.parsedTokens[this.parsedTokens.length - 1] || '';
-      if (last.length < 2) { this.suggestions = []; return; }
-      try {
-        const r = await fetch('/api/transactions/payee-suggest?q=' + encodeURIComponent(last));
-        const d = await r.json();
-        if (r.ok) this.suggestions = (d.suggestions || []).slice(0, 8);
-      } catch {}
-    },
-
     appendToken(name) {
       if (!name) return;
       const tokens = new Set(this.parsedTokens.map(t => t.toLowerCase()));
       if (!tokens.has(name.toLowerCase())) {
         this.filter.q = this.parsedTokens.concat([name]).join(', ');
       }
-      this.suggestions = [];
       this.reload();
     },
     removeToken(name) {

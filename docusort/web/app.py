@@ -1498,12 +1498,6 @@ def create_app(
             result["aggregate"] = db.transactions_aggregate(**f)
         return result
 
-    @app.get("/api/transactions/payee-suggest")
-    def api_transactions_payee_suggest(
-        q: str = Query(""), limit: int = Query(12),
-    ):
-        return {"suggestions": db.transactions_payee_suggest(q, limit=limit)}
-
     @app.post("/api/transactions/categorize")
     def api_transactions_categorize(payload: dict):
         """Bulk-recategorise. Body: {"ids": [int, ...], "category": str}.

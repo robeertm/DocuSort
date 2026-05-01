@@ -1459,33 +1459,6 @@ class Database:
             self._conn.commit()
             return cur.rowcount or 0
 
-    def transactions_payee_suggest(
-        self, query: str, *, limit: int = 12,
-    ) -> list[dict[str, Any]]:
-        """Distinct payees ranked by frequency for the search-box
-        autocomplete. Cheap because the index on lowered counterparty is
-        already populated by the per-statement ingest path."""
-        if not query or not query.strip():
-            return []
-        like = f"%{query.strip().lower()}%"
-        with self._lock:
-            rows = self._conn.execute(
-                """SELECT MAX(t.counterparty) AS counterparty,
-                          COUNT(*) AS times,
-                          COALESCE(SUM(t.amount), 0) AS total
-                   FROM transactions t
-                   JOIN statements s ON s.id = t.statement_id
-                   JOIN documents  d ON d.id = s.doc_id
-                   WHERE d.deleted_at IS NULL
-                     AND t.counterparty IS NOT NULL AND t.counterparty != ''
-                     AND LOWER(t.counterparty) LIKE ?
-                   GROUP BY LOWER(t.counterparty)
-                   ORDER BY times DESC
-                   LIMIT ?""",
-                (like, int(limit)),
-            ).fetchall()
-        return [dict(r) for r in rows]
-
     # ---------- Finance: charts & analytics ----------
 
     def finance_available_periods(self) -> dict[str, list[str]]:
