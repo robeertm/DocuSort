@@ -2,7 +2,7 @@
 {% block title %}Duplicates · DocuSort{% endblock %}
 {% block content %}
 
-<div x-data="duplicatesPage({{ groups | tojson }})" x-init="init()">
+<div x-data='duplicatesPage({{ groups | tojson }})' x-init="init()">
   <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
     <div>
       <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Duplicate documents</h1>
