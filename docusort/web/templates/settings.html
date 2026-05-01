@@ -278,11 +278,11 @@
             </a>
           </div>
           <details class="text-xs text-ink-500 mt-2">
-            <summary class="cursor-pointer hover:text-ink-300">First-run hints (Gatekeeper, dependencies)</summary>
+            <summary class="cursor-pointer hover:text-ink-300">First-run hints (zip, Gatekeeper, dependencies)</summary>
             <ul class="mt-2 space-y-1 list-disc pl-5">
-              <li><b>macOS:</b> first launch may show "cannot be opened because it is from an unidentified developer". Right-click the file → Open → Open. The script needs Python 3 (preinstalled on modern macOS) and will auto-install Ollama via Homebrew or the official installer.</li>
-              <li><b>Windows:</b> double-clicking opens a console window. SmartScreen may show a "Windows protected your PC" warning — click "More info" → "Run anyway". Needs Python 3 from python.org or the Microsoft Store. Ollama is auto-installed via winget.</li>
-              <li><b>Linux:</b> chmod +x once, then double-click or run from a terminal. Ollama is installed via the official `curl | sh` after a Y/N prompt.</li>
+              <li><b>macOS:</b> the download is a <code>.zip</code> — double-click it once to extract the <code>.command</code> file (preserves the executable bit; without zip wrapping, browsers strip it and macOS refuses with "you don't have permission"). Then double-click the extracted <code>.command</code>. First launch may show "cannot be opened because it is from an unidentified developer" → right-click → Open → Open. Python 3 is preinstalled on modern macOS; Ollama is auto-installed via Homebrew.</li>
+              <li><b>Windows:</b> double-click the <code>.bat</code> directly — no extraction needed. SmartScreen may show "Windows protected your PC" → click "More info" → "Run anyway". Needs Python 3 from python.org or the Microsoft Store. Ollama is auto-installed via winget.</li>
+              <li><b>Linux:</b> the download is a <code>.zip</code> — extract it, then double-click the extracted <code>.sh</code> (or run from a terminal). Ollama is installed via the official <code>curl | sh</code> after a Y/N prompt.</li>
             </ul>
           </details>
         </div>

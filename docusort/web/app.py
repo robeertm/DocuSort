@@ -2239,8 +2239,26 @@ def create_app(
         bat_token = token.replace('"', '""')
 
         os_norm = (os or "").lower()
+        host_short = host.split(":")[0]
+
+        # Helper: pack a shell script into a zip with the executable
+        # bit set on the inner file. Browsers strip the +x bit when
+        # they save a downloaded file directly, so a bare .command
+        # would fail with "you don't have permission to execute" on
+        # double-click. Inside a zip the Unix mode survives, and
+        # macOS's Archive Utility / Linux's unzip both restore it.
+        def _zipped(inner_filename: str, body_text: str) -> bytes:
+            import io as _io, zipfile as _zip
+            buf = _io.BytesIO()
+            with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+                zi = _zip.ZipInfo(inner_filename)
+                zi.create_system = 3                # Unix
+                zi.external_attr = (0o755 << 16)    # rwxr-xr-x
+                zf.writestr(zi, body_text)
+            return buf.getvalue()
+
         if os_norm in ("mac", "darwin", "macos"):
-            body = (
+            body_text = (
                 "#!/bin/bash\n"
                 "# DocuSort Local AI Bridge — generated launcher.\n"
                 "# Double-click this file to start the bridge in Terminal.\n"
@@ -2253,13 +2271,14 @@ def create_app(
                 f'curl -fsSL "{script_url}" -o "$TMP"\n'
                 'exec /usr/bin/env python3 "$TMP" --server "$SERVER" --token "$TOKEN"\n'
             )
-            filename = f"docusort-bridge-{host.split(':')[0]}.command"
-            media    = "application/x-shellscript"
+            inner = f"docusort-bridge-{host_short}.command"
+            content  = _zipped(inner, body_text)
+            filename = f"docusort-bridge-{host_short}-mac.zip"
+            media    = "application/zip"
         elif os_norm == "linux":
-            body = (
+            body_text = (
                 "#!/bin/bash\n"
                 "# DocuSort Local AI Bridge — generated launcher.\n"
-                "# Run from a terminal:  chmod +x docusort-bridge.sh && ./docusort-bridge.sh\n"
                 "set -e\n"
                 f'SERVER="{origin}"\n'
                 f'TOKEN=\'{sh_token}\'\n'
@@ -2267,10 +2286,14 @@ def create_app(
                 f'curl -fsSL "{script_url}" -o "$TMP"\n'
                 'exec python3 "$TMP" --server "$SERVER" --token "$TOKEN"\n'
             )
-            filename = f"docusort-bridge-{host.split(':')[0]}.sh"
-            media    = "application/x-shellscript"
+            inner = f"docusort-bridge-{host_short}.sh"
+            content  = _zipped(inner, body_text)
+            filename = f"docusort-bridge-{host_short}-linux.zip"
+            media    = "application/zip"
         elif os_norm in ("win", "windows"):
-            body = (
+            # Windows .bat doesn't need an executable bit — drop the
+            # zip wrapping for the cleanest one-click UX.
+            content = (
                 "@echo off\r\n"
                 "REM DocuSort Local AI Bridge -- generated launcher.\r\n"
                 "REM Double-click to launch.\r\n"
@@ -2282,15 +2305,15 @@ def create_app(
                 'if errorlevel 1 (echo Download failed.& pause & exit /b 1)\r\n'
                 'python "%TMP_PY%" --server "%SERVER%" --token "%TOKEN%"\r\n'
                 'pause\r\n'
-            )
-            filename = f"docusort-bridge-{host.split(':')[0]}.bat"
+            ).encode("utf-8")
+            filename = f"docusort-bridge-{host_short}.bat"
             media    = "application/x-bat"
         else:
             raise HTTPException(400, f"unknown os: {os!r}")
 
         from fastapi.responses import Response
         return Response(
-            content=body, media_type=media,
+            content=content, media_type=media,
             headers={
                 "Content-Disposition":
                     f'attachment; filename="{filename}"',
