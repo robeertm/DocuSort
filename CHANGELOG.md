@@ -2,17 +2,6 @@
 
 All notable changes to DocuSort will be documented in this file.
 
-## [0.25.1] – 2026-05-01
-
-### Fixed
-
-- **`/finance` shows a diagnostic page on render failure.** Wraps the
-  finance-page handler so any uncaught exception ends up in the
-  server log AND a styled diagnostic HTML — including the type, the
-  message and the full traceback — instead of a blank
-  *"Internal Server Error"*. The other pages stay reachable, so the
-  user can keep working while we figure out what broke.
-
 ## [0.25.0] – 2026-05-01
 
 ### Added — Page-by-page statement extraction
