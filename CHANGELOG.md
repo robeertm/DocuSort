@@ -2,6 +2,57 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.23.0] – 2026-05-01
+
+### Added — Transactions explorer
+
+A dedicated `/transactions` page that turns the booking ledger into a
+proper analytics surface. Driven entirely by a single live filter, so
+every change instantly refreshes the table, KPI cards, monthly trend,
+top-payee lists and category breakdown without a full page round-trip.
+
+- **Multi-token search.** Type `rossmann, dm, müller` and the page
+  shows every booking that mentions *any* of those names — across
+  counterparty *and* purpose. Each token shows up as a removable
+  chip, and a payee-autocomplete popover suggests existing names
+  while you type. Click any payee in the result list to add them to
+  the filter.
+
+- **Filter dimensions.** Account, category, direction (in/out), date
+  range, absolute-amount min/max, plus quick presets (this year,
+  last 12 months, this/last month, all time). All values are mirrored
+  into the URL so you can bookmark a saved view or share a link.
+
+- **Live aggregates** for the current filter:
+  - Counters: hits, total in, total out, net, first/last booking date
+  - Per-month income vs. expense bars (click a bar to zoom into that
+    month)
+  - Top expenses + top incomes by total spend / earned, deduplicated
+    on lower-cased counterparty
+  - Category breakdown, click a row to drill into that category
+
+- **Inline + bulk re-categorisation.** Each row has a category
+  dropdown that saves on change; checkbox selection plus a "set
+  category for X bookings" action bar handles bulk relabelling.
+  Categories are validated against the canonical `TX_CATEGORIES`
+  list, so the existing dashboards keep working with the relabelled
+  data.
+
+A new "Buchungen" entry sits in the top nav (desktop), and the
+existing transactions card on `/finance` now links here for the
+power-user workflow.
+
+### Added — API surface
+
+- `GET /api/transactions/search` — list + aggregate in one call.
+  Accepts the full filter (`q`, `account_id`, `category`, `direction`,
+  `start`, `end`, `amount_min`, `amount_max`, `limit`, `offset`,
+  `with_aggregates`).
+- `GET /api/transactions/payee-suggest?q=ros` — autocomplete for
+  the search box, returns distinct payees ranked by frequency.
+- `POST /api/transactions/categorize` — bulk re-categorise. Body:
+  `{ "ids": [...], "category": "<TX_CATEGORIES>" }`.
+
 ## [0.22.4] – 2026-05-01
 
 ### Fixed

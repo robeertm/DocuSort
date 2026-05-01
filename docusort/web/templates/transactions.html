@@ -1,0 +1,592 @@
+{% extends "base.html" %}
+{% block title %}Buchungen · DocuSort{% endblock %}
+{% block content %}
+
+<div x-data="txExplorer()" x-init="init()" class="space-y-5">
+
+  <div class="flex items-start justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Buchungen durchsuchen</h1>
+      <p class="text-ink-400 mt-1 text-sm">
+        Mehrere Empfänger gleichzeitig (Komma trennt: <code class="text-ink-200">rossmann, dm, müller</code>),
+        Zeitraum, Beträge — alles live. Klick auf einen Empfänger, um ihn dem Filter hinzuzufügen.
+      </p>
+    </div>
+    <div class="flex items-center gap-2 text-xs text-ink-500">
+      <a href="/finance" class="hover:text-emerald-300 underline">Finance Dashboard →</a>
+    </div>
+  </div>
+
+  <!-- ============================ FILTER ============================ -->
+  <div class="card p-4">
+    <div class="grid gap-3 md:grid-cols-12">
+      <div class="md:col-span-5 relative">
+        <label class="text-[11px] uppercase tracking-wider text-ink-500">Suche (Komma trennt)</label>
+        <input type="search" x-model.debounce.300ms="filter.q"
+               @input="onQueryInput()"
+               placeholder="rossmann, dm, amazon …"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mt-1">
+        <!-- Payee suggestions popover -->
+        <div x-show="suggestions.length > 0" x-cloak
+             class="absolute z-30 mt-1 w-full rounded-xl border border-ink-700 bg-ink-900 shadow-xl overflow-hidden">
+          <template x-for="s in suggestions" :key="s.counterparty">
+            <button type="button" @click="appendToken(s.counterparty)"
+                    class="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-ink-800/60">
+              <span class="truncate" x-text="s.counterparty"></span>
+              <span class="text-xs text-ink-500 tabular-nums" x-text="s.times + 'x'"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+      <div class="md:col-span-2">
+        <label class="text-[11px] uppercase tracking-wider text-ink-500">Konto</label>
+        <select x-model="filter.account_id" @change="reload()"
+                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mt-1">
+          <option value="">Alle Konten</option>
+          {% for a in accounts %}
+            <option value="{{ a.id }}">
+              {{ a.bank_name }}{% if a.iban_last4 %} · …{{ a.iban_last4 }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="md:col-span-2">
+        <label class="text-[11px] uppercase tracking-wider text-ink-500">Kategorie</label>
+        <select x-model="filter.category" @change="reload()"
+                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mt-1">
+          <option value="">Alle</option>
+          {% for c in tx_categories %}
+            <option value="{{ c }}">{{ t('finance.cat.' + c) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="md:col-span-1">
+        <label class="text-[11px] uppercase tracking-wider text-ink-500">Richtung</label>
+        <select x-model="filter.direction" @change="reload()"
+                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mt-1">
+          <option value="">+/−</option>
+          <option value="expense">Aus</option>
+          <option value="income">Ein</option>
+        </select>
+      </div>
+      <div class="md:col-span-2">
+        <label class="text-[11px] uppercase tracking-wider text-ink-500">Zeitraum</label>
+        <div class="grid grid-cols-2 gap-1 mt-1">
+          <input type="date" x-model="filter.start" @change="reload()"
+                 class="rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2.5 text-sm">
+          <input type="date" x-model="filter.end" @change="reload()"
+                 class="rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2.5 text-sm">
+        </div>
+      </div>
+
+      <div class="md:col-span-3">
+        <label class="text-[11px] uppercase tracking-wider text-ink-500">Betrag (€, |abs|)</label>
+        <div class="grid grid-cols-2 gap-1 mt-1">
+          <input type="number" step="0.01" x-model="filter.amount_min"
+                 @change="reload()" placeholder="min"
+                 class="rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2.5 text-sm tabular-nums">
+          <input type="number" step="0.01" x-model="filter.amount_max"
+                 @change="reload()" placeholder="max"
+                 class="rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2.5 text-sm tabular-nums">
+        </div>
+      </div>
+
+      <div class="md:col-span-9 flex flex-wrap items-end gap-2 justify-end">
+        <template x-for="preset in periodPresets" :key="preset.label">
+          <button type="button" @click="applyPreset(preset)"
+                  class="text-xs rounded-lg px-2.5 py-1.5 border border-ink-700 hover:border-emerald-500/50 text-ink-300 hover:text-emerald-300"
+                  x-text="preset.label"></button>
+        </template>
+        <button type="button" @click="reset()"
+                class="text-xs rounded-lg px-2.5 py-1.5 border border-ink-700 hover:border-rose-500/50 text-ink-300 hover:text-rose-300">
+          Filter zurücksetzen
+        </button>
+      </div>
+    </div>
+
+    <!-- Active token chips so the user sees the parsed query -->
+    <div x-show="parsedTokens.length > 1" x-cloak class="mt-3 flex flex-wrap items-center gap-1.5">
+      <span class="text-[11px] uppercase tracking-wider text-ink-500">Aktive Tokens:</span>
+      <template x-for="tok in parsedTokens" :key="tok">
+        <button type="button" @click="removeToken(tok)"
+                class="text-xs rounded-full bg-emerald-500/15 text-emerald-200 px-2.5 py-1 hover:bg-emerald-500/25">
+          <span x-text="tok"></span>
+          <span class="text-emerald-400/70 ml-1">×</span>
+        </button>
+      </template>
+    </div>
+  </div>
+
+  <!-- ============================ KPIS ============================ -->
+  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Treffer</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="agg.count.toLocaleString('de-DE')"></div>
+      <div class="text-[11px] text-ink-500 mt-0.5" x-text="agg.first_date ? (agg.first_date + ' … ' + agg.last_date) : '—'"></div>
+    </div>
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Eingang</div>
+      <div class="mt-1 text-2xl font-semibold text-emerald-300 tabular-nums" x-text="fmtEur(agg.sum_in)"></div>
+    </div>
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Ausgang</div>
+      <div class="mt-1 text-2xl font-semibold text-rose-300 tabular-nums" x-text="fmtEur(agg.sum_out)"></div>
+    </div>
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Netto</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums"
+           :class="agg.sum_net >= 0 ? 'text-emerald-300' : 'text-rose-300'"
+           x-text="fmtEur(agg.sum_net)"></div>
+    </div>
+  </div>
+
+  <!-- ============================ MONTHLY TREND ============================ -->
+  <div class="card p-4" x-show="agg.monthly && agg.monthly.length > 0" x-cloak>
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400">
+        Pro Monat (für aktuellen Filter)
+      </h2>
+      <p class="text-[11px] text-ink-500">
+        Klick auf einen Balken, um auf diesen Monat zu zoomen.
+      </p>
+    </div>
+    <div class="overflow-x-auto -mx-1">
+      <svg :width="Math.max(monthlyChart.width, 320)" :height="monthlyChart.height" class="block">
+        <template x-for="(m, i) in agg.monthly" :key="m.month">
+          <g @click="zoomMonth(m.month)" class="cursor-pointer">
+            <!-- Income bar (positive, above zero line) -->
+            <rect :x="i * monthlyChart.colWidth + 4"
+                  :y="monthlyChart.zeroY - (m.sum_in / monthlyChart.maxAbs) * monthlyChart.halfH"
+                  :width="monthlyChart.colWidth - 8"
+                  :height="(m.sum_in / monthlyChart.maxAbs) * monthlyChart.halfH"
+                  fill="#34d399" opacity="0.85"></rect>
+            <!-- Expense bar (negative, below zero line; sum_out is negative) -->
+            <rect :x="i * monthlyChart.colWidth + 4"
+                  :y="monthlyChart.zeroY"
+                  :width="monthlyChart.colWidth - 8"
+                  :height="(Math.abs(m.sum_out) / monthlyChart.maxAbs) * monthlyChart.halfH"
+                  fill="#fb7185" opacity="0.85"></rect>
+            <!-- Month label -->
+            <text :x="i * monthlyChart.colWidth + monthlyChart.colWidth / 2"
+                  :y="monthlyChart.height - 4" text-anchor="middle"
+                  fill="#94a3b8" font-size="10"
+                  x-text="m.month.slice(2)"></text>
+          </g>
+        </template>
+        <!-- Zero line -->
+        <line x1="0" :x2="agg.monthly.length * monthlyChart.colWidth"
+              :y1="monthlyChart.zeroY" :y2="monthlyChart.zeroY"
+              stroke="#475569" stroke-width="1"></line>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ============================ TOPS + CATEGORY BREAKDOWN ============================ -->
+  <div class="grid gap-3 lg:grid-cols-3" x-show="agg.count > 0" x-cloak>
+    <div class="card p-4">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">Top Ausgaben</h2>
+      <ul class="space-y-1.5">
+        <template x-for="r in agg.top_expense" :key="r.counterparty">
+          <li class="flex items-center justify-between gap-2 text-sm hover:bg-ink-800/40 -mx-1 px-1 rounded">
+            <button type="button" @click="appendToken(r.counterparty)"
+                    class="truncate text-left flex-1 text-ink-200 hover:text-emerald-300"
+                    x-text="r.counterparty || '—'"></button>
+            <span class="text-xs text-ink-500 tabular-nums shrink-0" x-text="r.times + 'x'"></span>
+            <span class="tabular-nums text-rose-300 shrink-0 w-24 text-right" x-text="fmtEur(r.total)"></span>
+          </li>
+        </template>
+        <li x-show="!agg.top_expense || agg.top_expense.length === 0" x-cloak class="text-xs text-ink-500">
+          Keine Ausgaben für diesen Filter.
+        </li>
+      </ul>
+    </div>
+    <div class="card p-4">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">Top Eingänge</h2>
+      <ul class="space-y-1.5">
+        <template x-for="r in agg.top_income" :key="r.counterparty">
+          <li class="flex items-center justify-between gap-2 text-sm hover:bg-ink-800/40 -mx-1 px-1 rounded">
+            <button type="button" @click="appendToken(r.counterparty)"
+                    class="truncate text-left flex-1 text-ink-200 hover:text-emerald-300"
+                    x-text="r.counterparty || '—'"></button>
+            <span class="text-xs text-ink-500 tabular-nums shrink-0" x-text="r.times + 'x'"></span>
+            <span class="tabular-nums text-emerald-300 shrink-0 w-24 text-right" x-text="fmtEur(r.total)"></span>
+          </li>
+        </template>
+        <li x-show="!agg.top_income || agg.top_income.length === 0" x-cloak class="text-xs text-ink-500">
+          Keine Eingänge für diesen Filter.
+        </li>
+      </ul>
+    </div>
+    <div class="card p-4">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">Nach Kategorie</h2>
+      <ul class="space-y-1.5">
+        <template x-for="r in agg.by_category" :key="r.cat">
+          <li class="flex items-center justify-between gap-2 text-sm">
+            <button type="button" @click="filter.category = r.cat; reload()"
+                    class="truncate text-left flex-1 text-ink-200 hover:text-emerald-300"
+                    x-text="catLabel(r.cat)"></button>
+            <span class="text-xs text-ink-500 tabular-nums shrink-0" x-text="r.n + 'x'"></span>
+            <span class="tabular-nums shrink-0 w-24 text-right"
+                  :class="r.total < 0 ? 'text-rose-300' : 'text-emerald-300'"
+                  x-text="fmtEur(r.total)"></span>
+          </li>
+        </template>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============================ TX TABLE + SELECTION ============================ -->
+  <div class="card p-0 overflow-hidden">
+    <div class="px-4 py-3 border-b border-ink-800/60 flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-3 text-sm">
+        <span class="text-ink-300 font-medium">
+          <span x-text="rows.length.toLocaleString('de-DE')"></span> /
+          <span class="text-ink-500" x-text="agg.count.toLocaleString('de-DE')"></span> angezeigt
+        </span>
+        <span x-show="loading" x-cloak class="text-xs text-ink-500">lade …</span>
+        <span x-show="rows.length < agg.count && !loading" x-cloak>
+          <button type="button" @click="loadMore()"
+                  class="text-xs underline text-emerald-300 hover:text-emerald-200">
+            Mehr laden (+500)
+          </button>
+        </span>
+      </div>
+      <div x-show="selected.size > 0" x-cloak
+           class="flex items-center gap-2 text-sm rounded-lg bg-emerald-500/10 px-3 py-1.5">
+        <span class="text-emerald-200" x-text="selected.size + ' ausgewählt'"></span>
+        <select x-model="bulkCategory"
+                class="rounded bg-ink-900/60 border border-ink-700 px-2 py-1 text-xs">
+          <option value="">Kategorie wählen …</option>
+          {% for c in tx_categories %}
+            <option value="{{ c }}">{{ t('finance.cat.' + c) }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" @click="bulkApply()" :disabled="!bulkCategory || busy"
+                class="text-xs rounded px-2 py-1 bg-emerald-500/30 text-emerald-100 hover:bg-emerald-500/50 disabled:opacity-50">
+          Anwenden
+        </button>
+        <button type="button" @click="selected = new Set(); $event.stopPropagation()"
+                class="text-xs text-ink-400 hover:text-ink-200">
+          ✕ Auswahl löschen
+        </button>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wider text-ink-500 bg-ink-900/40">
+          <tr>
+            <th class="px-3 py-2 w-8">
+              <input type="checkbox" @change="toggleAll($event)"
+                     :checked="rows.length > 0 && selected.size === rows.length"
+                     class="rounded border-ink-700 bg-ink-900">
+            </th>
+            <th class="text-left px-3 py-2 font-medium">Datum</th>
+            <th class="text-left px-3 py-2 font-medium">Empfänger</th>
+            <th class="text-left px-3 py-2 font-medium">Verwendungszweck</th>
+            <th class="text-left px-3 py-2 font-medium">Konto</th>
+            <th class="text-left px-3 py-2 font-medium">Kategorie</th>
+            <th class="text-right px-3 py-2 font-medium">Betrag</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="tx in rows" :key="tx.id">
+            <tr class="border-t border-ink-800/50 hover:bg-ink-800/30"
+                :class="selected.has(tx.id) ? 'bg-emerald-500/5' : ''">
+              <td class="px-3 py-2 align-middle">
+                <input type="checkbox" :checked="selected.has(tx.id)"
+                       @change="toggleRow(tx.id)"
+                       class="rounded border-ink-700 bg-ink-900">
+              </td>
+              <td class="px-3 py-2 tabular-nums text-ink-300 whitespace-nowrap" x-text="tx.booking_date || '—'"></td>
+              <td class="px-3 py-2 font-medium">
+                <a :href="'/document/' + tx.doc_id" class="hover:text-emerald-300" x-text="tx.counterparty || '—'"></a>
+              </td>
+              <td class="px-3 py-2 text-ink-400 max-w-[320px] truncate" :title="tx.purpose" x-text="tx.purpose || ''"></td>
+              <td class="px-3 py-2 text-ink-500 text-xs whitespace-nowrap">
+                <span x-text="tx.bank_name || '—'"></span>
+                <template x-if="tx.iban_last4"><span> · …<span x-text="tx.iban_last4"></span></span></template>
+              </td>
+              <td class="px-3 py-2">
+                <select :value="tx.category || ''" @change="setRowCategory(tx, $event.target.value)"
+                        class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs">
+                  <option value="">—</option>
+                  {% for c in tx_categories %}
+                    <option value="{{ c }}">{{ t('finance.cat.' + c) }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td class="px-3 py-2 text-right tabular-nums whitespace-nowrap"
+                  :class="tx.amount < 0 ? 'text-rose-300' : 'text-emerald-300'">
+                <span x-text="(tx.amount > 0 ? '+' : '') + fmtEur(tx.amount)"></span>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!loading && rows.length === 0" x-cloak>
+            <td colspan="7" class="px-3 py-10 text-center text-ink-500 text-sm">
+              Keine Buchungen für diesen Filter.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div x-show="message" x-cloak
+       class="rounded-lg px-3 py-2 text-sm"
+       :class="messageOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+       x-text="message"></div>
+</div>
+
+<script>
+function txExplorer() {
+  return {
+    filter: {
+      q: '', account_id: '', category: '', direction: '',
+      start: '', end: '', amount_min: '', amount_max: '',
+    },
+    rows: [],
+    agg: { count: 0, sum_in: 0, sum_out: 0, sum_net: 0,
+           top_expense: [], top_income: [], monthly: [], by_category: [],
+           first_date: '', last_date: '' },
+    suggestions: [],
+    selected: new Set(),
+    bulkCategory: '',
+    loading: false,
+    busy: false,
+    message: '',
+    messageOk: false,
+    pageSize: 500,
+    offset: 0,
+
+    periodPresets: [
+      { label: 'Dieses Jahr',     fn: 'thisYear'  },
+      { label: 'Letzte 12 Monate', fn: 'last12m'  },
+      { label: 'Letzter Monat',    fn: 'lastMonth' },
+      { label: 'Aktueller Monat',  fn: 'thisMonth' },
+      { label: 'Alle',             fn: 'all'       },
+    ],
+
+    get parsedTokens() {
+      return (this.filter.q || '')
+        .split(',').map(t => t.trim()).filter(Boolean);
+    },
+
+    get monthlyChart() {
+      const m = this.agg.monthly || [];
+      const colWidth = 36;
+      const height = 120;
+      const halfH = (height - 18) / 2;
+      const zeroY = halfH + 4;
+      const maxAbs = Math.max(
+        1,
+        ...m.map(x => Math.max(Math.abs(x.sum_in || 0), Math.abs(x.sum_out || 0)))
+      );
+      return { colWidth, height, halfH, zeroY, maxAbs, width: m.length * colWidth };
+    },
+
+    fmtEur(v) {
+      const n = Number(v) || 0;
+      return n.toLocaleString('de-DE',
+        { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 });
+    },
+    catLabel(key) {
+      const k = 'finance.cat.' + key;
+      return (T[k]) || key;
+    },
+
+    init() {
+      // Parse the URL once on entry so links from /finance ("show all
+      // for this category") drop the user into a pre-filtered view.
+      const u = new URL(location.href);
+      for (const k of Object.keys(this.filter)) {
+        const v = u.searchParams.get(k);
+        if (v !== null) this.filter[k] = v;
+      }
+      this.reload();
+    },
+
+    pushUrl() {
+      const u = new URL(location.href);
+      for (const [k, v] of Object.entries(this.filter)) {
+        if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);
+      }
+      history.replaceState(null, '', u);
+    },
+
+    queryParams(extra) {
+      const p = new URLSearchParams();
+      for (const [k, v] of Object.entries(this.filter)) {
+        if (v) p.set(k, v);
+      }
+      if (extra) for (const [k, v] of Object.entries(extra)) p.set(k, v);
+      return p;
+    },
+
+    async reload() {
+      this.offset = 0;
+      this.selected = new Set();
+      this.pushUrl();
+      this.loading = true;
+      try {
+        const p = this.queryParams({ limit: this.pageSize, offset: 0, with_aggregates: 1 });
+        const r = await fetch('/api/transactions/search?' + p.toString());
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.rows = d.transactions || [];
+        if (d.aggregate) this.agg = d.aggregate;
+      } catch (e) {
+        this.flash(false, e.message || String(e));
+      } finally { this.loading = false; }
+    },
+
+    async loadMore() {
+      if (this.rows.length >= this.agg.count) return;
+      this.loading = true;
+      try {
+        this.offset = this.rows.length;
+        const p = this.queryParams({ limit: this.pageSize, offset: this.offset, with_aggregates: 0 });
+        const r = await fetch('/api/transactions/search?' + p.toString());
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.rows = this.rows.concat(d.transactions || []);
+      } catch (e) {
+        this.flash(false, e.message || String(e));
+      } finally { this.loading = false; }
+    },
+
+    onQueryInput() {
+      this.reload();
+      this.fetchSuggestions();
+    },
+    async fetchSuggestions() {
+      const last = this.parsedTokens[this.parsedTokens.length - 1] || '';
+      if (last.length < 2) { this.suggestions = []; return; }
+      try {
+        const r = await fetch('/api/transactions/payee-suggest?q=' + encodeURIComponent(last));
+        const d = await r.json();
+        if (r.ok) this.suggestions = (d.suggestions || []).slice(0, 8);
+      } catch {}
+    },
+
+    appendToken(name) {
+      if (!name) return;
+      const tokens = new Set(this.parsedTokens.map(t => t.toLowerCase()));
+      if (!tokens.has(name.toLowerCase())) {
+        this.filter.q = this.parsedTokens.concat([name]).join(', ');
+      }
+      this.suggestions = [];
+      this.reload();
+    },
+    removeToken(name) {
+      this.filter.q = this.parsedTokens
+        .filter(t => t.toLowerCase() !== name.toLowerCase())
+        .join(', ');
+      this.reload();
+    },
+
+    applyPreset(p) {
+      const today = new Date();
+      const fmt = (d) => d.toISOString().slice(0, 10);
+      if (p.fn === 'all')        { this.filter.start = ''; this.filter.end = ''; }
+      if (p.fn === 'thisYear')   { this.filter.start = today.getFullYear() + '-01-01'; this.filter.end = ''; }
+      if (p.fn === 'last12m')    {
+        const d = new Date(today); d.setMonth(d.getMonth() - 12);
+        this.filter.start = fmt(d); this.filter.end = '';
+      }
+      if (p.fn === 'thisMonth')  {
+        this.filter.start = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-01';
+        this.filter.end = '';
+      }
+      if (p.fn === 'lastMonth')  {
+        const last = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const end  = new Date(today.getFullYear(), today.getMonth(), 0);
+        this.filter.start = fmt(last); this.filter.end = fmt(end);
+      }
+      this.reload();
+    },
+    zoomMonth(month) {
+      // month is YYYY-MM — set start/end to that calendar month.
+      const [y, mo] = month.split('-').map(Number);
+      const last = new Date(y, mo, 0).getDate();
+      this.filter.start = month + '-01';
+      this.filter.end   = month + '-' + String(last).padStart(2, '0');
+      this.reload();
+    },
+
+    reset() {
+      this.filter = { q: '', account_id: '', category: '', direction: '',
+                      start: '', end: '', amount_min: '', amount_max: '' };
+      this.reload();
+    },
+
+    toggleRow(id) {
+      const s = new Set(this.selected);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      this.selected = s;
+    },
+    toggleAll(ev) {
+      this.selected = ev.target.checked
+        ? new Set(this.rows.map(r => r.id))
+        : new Set();
+    },
+
+    async setRowCategory(tx, cat) {
+      if (!cat) return;
+      try {
+        const r = await fetch('/api/transactions/categorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [tx.id], category: cat }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        tx.category = cat;
+        this.flash(true, `1 Buchung umkategorisiert.`);
+        this.reloadAggOnly();
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+
+    async bulkApply() {
+      if (!this.bulkCategory || this.selected.size === 0) return;
+      const ids = Array.from(this.selected);
+      const cat = this.bulkCategory;
+      this.busy = true;
+      try {
+        const r = await fetch('/api/transactions/categorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids, category: cat }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        for (const row of this.rows) {
+          if (this.selected.has(row.id)) row.category = cat;
+        }
+        this.selected = new Set();
+        this.bulkCategory = '';
+        this.flash(true, `${d.updated} Buchung(en) auf "${this.catLabel(cat)}" gesetzt.`);
+        this.reloadAggOnly();
+      } catch (e) {
+        this.flash(false, e.message || String(e));
+      } finally { this.busy = false; }
+    },
+
+    async reloadAggOnly() {
+      try {
+        const p = this.queryParams({ limit: 0, offset: 0, with_aggregates: 1 });
+        const r = await fetch('/api/transactions/search?' + p.toString());
+        const d = await r.json();
+        if (r.ok && d.aggregate) this.agg = d.aggregate;
+      } catch {}
+    },
+
+    flash(ok, msg) {
+      this.message = msg; this.messageOk = ok;
+      setTimeout(() => { this.message = ''; }, 3500);
+    },
+  };
+}
+</script>
+
+{% endblock %}

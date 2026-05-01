@@ -1448,6 +1448,94 @@ def create_app(
             direction=direction, start=start, end=end, query=q, limit=limit,
         )}
 
+    # ---------- Transactions explorer ----------
+    # The /transactions page renders a static shell; everything dynamic
+    # (filter, list, aggregates) is fetched live from the endpoints
+    # below so the user can iterate on the filter without a full page
+    # round-trip.
+
+    def _tx_explorer_filters(
+        account_id: str | None, category: str | None, direction: str | None,
+        start: str | None, end: str | None, q: str | None,
+        amount_min: str | None, amount_max: str | None,
+    ) -> dict:
+        return {
+            "account_id": _coerce_int(account_id),
+            "category":   (category or "") or None,
+            "direction":  (direction or "") or None,
+            "start":      start or None,
+            "end":        end or None,
+            "query":      q or None,
+            "amount_min": _coerce_float(amount_min),
+            "amount_max": _coerce_float(amount_max),
+        }
+
+    @app.get("/api/transactions/search")
+    def api_transactions_search(
+        account_id: str | None = Query(None),
+        category: str | None = Query(None),
+        direction: str | None = Query(None),
+        start: str | None = Query(None),
+        end: str | None = Query(None),
+        q: str | None = Query(None),
+        amount_min: str | None = Query(None),
+        amount_max: str | None = Query(None),
+        limit: int = Query(500),
+        offset: int = Query(0),
+        with_aggregates: int = Query(1),
+    ):
+        f = _tx_explorer_filters(account_id, category, direction, start, end,
+                                 q, amount_min, amount_max)
+        rows = db.transactions_list(limit=limit, offset=offset, **f)
+        result: dict = {
+            "transactions": rows,
+            "filter": {
+                **{k: v for k, v in f.items()},
+                "limit": limit, "offset": offset,
+            },
+        }
+        if with_aggregates:
+            result["aggregate"] = db.transactions_aggregate(**f)
+        return result
+
+    @app.get("/api/transactions/payee-suggest")
+    def api_transactions_payee_suggest(
+        q: str = Query(""), limit: int = Query(12),
+    ):
+        return {"suggestions": db.transactions_payee_suggest(q, limit=limit)}
+
+    @app.post("/api/transactions/categorize")
+    def api_transactions_categorize(payload: dict):
+        """Bulk-recategorise. Body: {"ids": [int, ...], "category": str}.
+        The category must be one of the canonical TX_CATEGORIES so the
+        existing per-category dashboards keep working."""
+        from ..finance.categories import TX_CATEGORIES
+        ids = payload.get("ids") or []
+        cat = (payload.get("category") or "").strip()
+        if not isinstance(ids, list) or not ids:
+            raise HTTPException(400, "ids must be a non-empty list")
+        if cat not in TX_CATEGORIES:
+            raise HTTPException(
+                400, f"unknown category {cat!r} — must be one of {list(TX_CATEGORIES)}",
+            )
+        try:
+            int_ids = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            raise HTTPException(400, "ids must be integers")
+        n = db.transactions_set_category(int_ids, cat)
+        return {"ok": True, "updated": n, "category": cat}
+
+    @app.get("/transactions", response_class=HTMLResponse)
+    def transactions_page(request: Request):
+        from ..finance.categories import TX_CATEGORIES
+        accounts = db.list_accounts()
+        return templates.TemplateResponse(
+            request, "transactions.html",
+            {**base_ctx(request),
+             "accounts": accounts,
+             "tx_categories": list(TX_CATEGORIES)},
+        )
+
     @app.post("/api/settings/finance")
     def api_save_finance(payload: dict):
         """Persist the privacy toggles. Local-only forces statement

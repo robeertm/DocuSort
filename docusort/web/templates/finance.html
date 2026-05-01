@@ -978,7 +978,16 @@
 
   <!-- Transactions: filter + paged list -->
   <div class="card p-5">
-    <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.transactions_heading') }}</h2>
+    <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.transactions_heading') }}</h2>
+      <a href="/transactions"
+         class="inline-flex items-center gap-1.5 text-xs rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 px-2.5 py-1.5 hover:bg-emerald-500/20">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+          <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+        </svg>
+        Alle Buchungen durchsuchen, vergleichen &amp; umkategorisieren
+      </a>
+    </div>
     <form
       class="grid gap-3 md:grid-cols-[1fr_auto_auto_auto_auto] mb-4"
       hx-get="/finance"

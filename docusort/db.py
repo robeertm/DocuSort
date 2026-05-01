@@ -1245,7 +1245,7 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def transactions_list(
+    def _build_tx_filter(
         self,
         *,
         account_id: int | None = None,
@@ -1254,8 +1254,23 @@ class Database:
         start: str | None = None,
         end: str | None = None,
         query: str | None = None,
-        limit: int = 200,
-    ) -> list[dict[str, Any]]:
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+        exclude_uebertrag: bool = False,
+    ) -> tuple[list[str], list[Any]]:
+        """Shared WHERE-builder for the transactions explorer.
+
+        `query` is split on commas — each non-empty token becomes a
+        substring match against `counterparty OR purpose`, and the tokens
+        themselves are OR'd together. So "rossmann, dm" returns rows that
+        mention *either* Rossmann or DM, which is what the user types
+        when comparing several merchants in one go.
+
+        `amount_min` / `amount_max` are matched against the absolute
+        amount, so the user doesn't have to flip signs depending on
+        income vs expense — "show me everything between 50 € and 500 €"
+        works regardless of direction.
+        """
         where = ["d.deleted_at IS NULL"]
         params: list[Any] = []
         if account_id is not None:
@@ -1274,10 +1289,44 @@ class Database:
         if end:
             where.append("t.booking_date <= ?")
             params.append(end)
+        if amount_min is not None:
+            where.append("ABS(t.amount) >= ?")
+            params.append(float(amount_min))
+        if amount_max is not None:
+            where.append("ABS(t.amount) <= ?")
+            params.append(float(amount_max))
+        if exclude_uebertrag:
+            where.append("(t.category IS NULL OR t.category != 'uebertrag')")
         if query:
-            where.append("(t.counterparty LIKE ? OR t.purpose LIKE ?)")
-            q = f"%{query}%"
-            params += [q, q]
+            tokens = [t.strip() for t in str(query).split(",") if t.strip()]
+            if tokens:
+                or_clauses = []
+                for tok in tokens:
+                    or_clauses.append("(t.counterparty LIKE ? OR t.purpose LIKE ?)")
+                    like = f"%{tok}%"
+                    params += [like, like]
+                where.append("(" + " OR ".join(or_clauses) + ")")
+        return where, params
+
+    def transactions_list(
+        self,
+        *,
+        account_id: int | None = None,
+        category: str | None = None,
+        direction: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        query: str | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        where, params = self._build_tx_filter(
+            account_id=account_id, category=category, direction=direction,
+            start=start, end=end, query=query,
+            amount_min=amount_min, amount_max=amount_max,
+        )
         sql = (
             "SELECT t.*, s.doc_id, a.bank_name, a.iban_last4 "
             "FROM transactions t "
@@ -1285,11 +1334,156 @@ class Database:
             "JOIN documents    d ON d.id = s.doc_id "
             "LEFT JOIN accounts a ON a.id = t.account_id "
             "WHERE " + " AND ".join(where) +
-            " ORDER BY t.booking_date DESC, t.id DESC LIMIT ?"
+            " ORDER BY t.booking_date DESC, t.id DESC LIMIT ? OFFSET ?"
         )
-        params.append(limit)
+        params += [int(limit), int(offset)]
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def transactions_aggregate(
+        self,
+        *,
+        account_id: int | None = None,
+        category: str | None = None,
+        direction: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        query: str | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+        top_n: int = 10,
+        monthly_limit: int = 36,
+    ) -> dict[str, Any]:
+        """Aggregations over the same filter that drives transactions_list.
+
+        Returns counters + sums + top counterparties + a per-month
+        breakdown so the explorer page can render KPI cards and a small
+        trend chart from a single round trip. Internal transfers are
+        excluded from the totals because they'd otherwise double-count
+        spend that just moved between the user's own accounts.
+        """
+        where, params = self._build_tx_filter(
+            account_id=account_id, category=category, direction=direction,
+            start=start, end=end, query=query,
+            amount_min=amount_min, amount_max=amount_max,
+            exclude_uebertrag=True,
+        )
+        join = (
+            "FROM transactions t "
+            "JOIN statements   s ON s.id = t.statement_id "
+            "JOIN documents    d ON d.id = s.doc_id "
+            "LEFT JOIN accounts a ON a.id = t.account_id "
+        )
+        where_sql = "WHERE " + " AND ".join(where)
+        with self._lock:
+            totals = self._conn.execute(
+                "SELECT "
+                "  COUNT(*)                                            AS n, "
+                "  COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount END), 0) AS sum_in, "
+                "  COALESCE(SUM(CASE WHEN t.amount < 0 THEN t.amount END), 0) AS sum_out, "
+                "  COALESCE(SUM(t.amount), 0)                          AS sum_net, "
+                "  COALESCE(MIN(t.booking_date), '')                   AS first_date, "
+                "  COALESCE(MAX(t.booking_date), '')                   AS last_date "
+                + join + where_sql,
+                params,
+            ).fetchone()
+            # Top counterparties (by absolute spend, expense side first
+            # since users care most about where the money went; income
+            # gets its own list below for symmetry).
+            top_expense = self._conn.execute(
+                "SELECT COALESCE(NULLIF(t.counterparty, ''), '—') AS counterparty, "
+                "       COUNT(*) AS times, "
+                "       COALESCE(SUM(t.amount), 0) AS total "
+                + join + where_sql + " AND t.amount < 0 "
+                "GROUP BY LOWER(COALESCE(NULLIF(t.counterparty, ''), '—')) "
+                "ORDER BY total ASC LIMIT ?",
+                params + [int(top_n)],
+            ).fetchall()
+            top_income = self._conn.execute(
+                "SELECT COALESCE(NULLIF(t.counterparty, ''), '—') AS counterparty, "
+                "       COUNT(*) AS times, "
+                "       COALESCE(SUM(t.amount), 0) AS total "
+                + join + where_sql + " AND t.amount > 0 "
+                "GROUP BY LOWER(COALESCE(NULLIF(t.counterparty, ''), '—')) "
+                "ORDER BY total DESC LIMIT ?",
+                params + [int(top_n)],
+            ).fetchall()
+            monthly = self._conn.execute(
+                "SELECT substr(t.booking_date, 1, 7) AS month, "
+                "       COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount END), 0) AS sum_in, "
+                "       COALESCE(SUM(CASE WHEN t.amount < 0 THEN t.amount END), 0) AS sum_out, "
+                "       COUNT(*) AS n "
+                + join + where_sql +
+                " AND t.booking_date IS NOT NULL AND t.booking_date != '' "
+                "GROUP BY month ORDER BY month DESC LIMIT ?",
+                params + [int(monthly_limit)],
+            ).fetchall()
+            by_category = self._conn.execute(
+                "SELECT COALESCE(NULLIF(t.category, ''), 'sonstiges') AS cat, "
+                "       COUNT(*) AS n, "
+                "       COALESCE(SUM(t.amount), 0) AS total "
+                + join + where_sql +
+                " GROUP BY cat ORDER BY total ASC",
+                params,
+            ).fetchall()
+        return {
+            "count":      int(totals["n"] or 0),
+            "sum_in":     float(totals["sum_in"] or 0.0),
+            "sum_out":    float(totals["sum_out"] or 0.0),
+            "sum_net":    float(totals["sum_net"] or 0.0),
+            "first_date": totals["first_date"] or "",
+            "last_date":  totals["last_date"] or "",
+            "top_expense": [dict(r) for r in top_expense],
+            "top_income":  [dict(r) for r in top_income],
+            "monthly":     [dict(r) for r in reversed(monthly)],  # ascending
+            "by_category": [dict(r) for r in by_category],
+        }
+
+    def transactions_set_category(
+        self, tx_ids: list[int], category: str,
+    ) -> int:
+        """Bulk-recategorise a set of transactions. Returns the row count
+        that was actually updated (skips ids that don't exist or already
+        carried the same category)."""
+        if not tx_ids:
+            return 0
+        placeholders = ",".join("?" * len(tx_ids))
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE transactions SET category = ? "
+                f"WHERE id IN ({placeholders}) "
+                f"  AND COALESCE(category, '') != ?",
+                [category, *[int(i) for i in tx_ids], category],
+            )
+            self._conn.commit()
+            return cur.rowcount or 0
+
+    def transactions_payee_suggest(
+        self, query: str, *, limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        """Distinct payees ranked by frequency for the search-box
+        autocomplete. Cheap because the index on lowered counterparty is
+        already populated by the per-statement ingest path."""
+        if not query or not query.strip():
+            return []
+        like = f"%{query.strip().lower()}%"
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT MAX(t.counterparty) AS counterparty,
+                          COUNT(*) AS times,
+                          COALESCE(SUM(t.amount), 0) AS total
+                   FROM transactions t
+                   JOIN statements s ON s.id = t.statement_id
+                   JOIN documents  d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.counterparty IS NOT NULL AND t.counterparty != ''
+                     AND LOWER(t.counterparty) LIKE ?
+                   GROUP BY LOWER(t.counterparty)
+                   ORDER BY times DESC
+                   LIMIT ?""",
+                (like, int(limit)),
+            ).fetchall()
         return [dict(r) for r in rows]
 
     # ---------- Finance: charts & analytics ----------
