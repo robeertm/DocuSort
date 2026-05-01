@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import shutil
 import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -98,6 +99,75 @@ def _usd(usd: float) -> str:
     if usd < 0.01:
         return f"${usd:.4f}"
     return f"${usd:.2f}"
+
+
+def _coerce_int(v: str | int | None) -> int | None:
+    """Treat empty form values as missing. FastAPI's `int | None` rejects
+    "" with a 422, but the filter forms emit "" for "all"-style choices —
+    coerce here instead of raising."""
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(v: str | float | None) -> float | None:
+    """Same idea as _coerce_int, used for amount-min / amount-max filters."""
+    if v is None or v == "":
+        return None
+    try:
+        return float(str(v).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
+
+# Per-document long-running jobs (statement / receipt extraction). Process-
+# local, in-memory: a request that hits api_extract_statement registers
+# itself here so concurrent doc-page reloads can see "Auswertung läuft"
+# instead of falling back to the stale "klick Auswerten" prompt. The
+# registry is wiped on restart, which is fine — the worst case is a stuck
+# entry whose request thread already died, and the cleanup_after grace
+# below times those out automatically.
+_doc_jobs: dict[int, dict] = {}
+_doc_jobs_lock = threading.Lock()
+_DOC_JOB_MAX_AGE_S = 30 * 60  # entries older than this are considered orphaned
+
+
+def _doc_job_start(doc_id: int, kind: str) -> bool:
+    """Register a running job for `doc_id`. Returns False if a job is
+    already registered for this document — used to short-circuit concurrent
+    clicks from refresh-happy users without piling extractions onto the
+    same expensive PDF."""
+    now = time.time()
+    with _doc_jobs_lock:
+        existing = _doc_jobs.get(doc_id)
+        if existing and (now - existing["started_at"]) < _DOC_JOB_MAX_AGE_S:
+            return False
+        _doc_jobs[doc_id] = {"kind": kind, "started_at": now}
+        return True
+
+
+def _doc_job_end(doc_id: int) -> None:
+    with _doc_jobs_lock:
+        _doc_jobs.pop(doc_id, None)
+
+
+def _doc_job_status(doc_id: int) -> dict | None:
+    now = time.time()
+    with _doc_jobs_lock:
+        j = _doc_jobs.get(doc_id)
+        if not j:
+            return None
+        elapsed = now - j["started_at"]
+        if elapsed > _DOC_JOB_MAX_AGE_S:
+            # Probably orphaned by a process restart or hard crash. Drop
+            # it so the UI doesn't lie about an extraction that no longer
+            # has a thread behind it.
+            _doc_jobs.pop(doc_id, None)
+            return None
+        return {"kind": j["kind"], "started_at": j["started_at"], "elapsed_s": elapsed}
 
 
 def create_app(
@@ -513,29 +583,38 @@ def create_app(
         text = doc.get("extracted_text") or ""
         if not text:
             raise HTTPException(400, "no OCR text stored — re-classify the document first")
-        from ..receipts import ReceiptExtractor
-        extractor = ReceiptExtractor(
-            classifier.provider, settings.ai.model,
-            max_text_chars=settings.ai.max_text_chars,
-            holder_names=settings.finance.holder_names,
-            pseudonymize=settings.finance.pseudonymize,
-        )
+        if not _doc_job_start(doc_id, "receipt"):
+            raise HTTPException(
+                409,
+                "extraction already running for this document — wait for the "
+                "current run to finish before retrying",
+            )
         try:
-            r = extractor.extract(text)
-        except Exception as exc:
-            logger.exception("Receipt extract failed for %d", doc_id)
-            raise HTTPException(500, f"extract failed: {exc}")
-        db.upsert_receipt(
-            doc_id,
-            shop_name=r.shop_name, shop_type=r.shop_type,
-            payment_method=r.payment_method, total_amount=r.total_amount,
-            currency=r.currency,
-            receipt_date=r.receipt_date or doc.get("doc_date") or "",
-            items=[i.as_dict() for i in r.items],
-            extra_json=r.raw_response,
-        )
-        return {"ok": True, "items": len(r.items),
-                "total": r.total_amount, "shop": r.shop_name}
+            from ..receipts import ReceiptExtractor
+            extractor = ReceiptExtractor(
+                classifier.provider, settings.ai.model,
+                max_text_chars=settings.ai.max_text_chars,
+                holder_names=settings.finance.holder_names,
+                pseudonymize=settings.finance.pseudonymize,
+            )
+            try:
+                r = extractor.extract(text)
+            except Exception as exc:
+                logger.exception("Receipt extract failed for %d", doc_id)
+                raise HTTPException(500, f"extract failed: {exc}")
+            db.upsert_receipt(
+                doc_id,
+                shop_name=r.shop_name, shop_type=r.shop_type,
+                payment_method=r.payment_method, total_amount=r.total_amount,
+                currency=r.currency,
+                receipt_date=r.receipt_date or doc.get("doc_date") or "",
+                items=[i.as_dict() for i in r.items],
+                extra_json=r.raw_response,
+            )
+            return {"ok": True, "items": len(r.items),
+                    "total": r.total_amount, "shop": r.shop_name}
+        finally:
+            _doc_job_end(doc_id)
 
     @app.patch("/api/document/{doc_id}/receipt")
     def api_patch_receipt(doc_id: int, payload: dict):
@@ -602,7 +681,11 @@ def create_app(
     @app.get("/finance", response_class=HTMLResponse)
     def finance_page(
         request: Request,
-        account_id: int | None = Query(None),
+        # account_id is declared as a string and parsed manually because the
+        # filter form sends an empty value when "All accounts" is selected,
+        # and FastAPI's strict int coercion 422s on "" instead of treating
+        # it as None.
+        account_id: str | None = Query(None),
         category: str | None = Query(None),
         direction: str | None = Query(None),
         start: str | None = Query(None),
@@ -613,6 +696,7 @@ def create_app(
         cat_start:     str | None = Query(None),
         cat_end:       str | None = Query(None),
     ):
+        account_id = _coerce_int(account_id)
         from ..finance.categories import TX_CATEGORIES, TX_TYPES
         summary       = db.finance_summary()
         monthly       = db.finance_monthly(months=12)
@@ -1152,6 +1236,48 @@ def create_app(
         return {"missing": int(missing["n"] if missing else 0),
                 "empty":   int(empty["n"]   if empty   else 0)}
 
+    @app.get("/api/document/{doc_id}/status")
+    def api_doc_status(doc_id: int):
+        """Snapshot of everything the document page needs to render the
+        right state without having to refresh by hand. Returned on first
+        load and polled while a job is running so the user can see live
+        progress instead of a stale "klick Auswerten" prompt after
+        navigating away mid-extraction."""
+        doc = db.get(doc_id)
+        if not doc:
+            raise HTTPException(404, "document not found")
+        running = _doc_job_status(doc_id)
+        category = doc.get("category") or ""
+        statement = None
+        receipt = None
+        if category in ("Kontoauszug", "Bank"):
+            stmt = db.get_statement(doc_id)
+            if stmt:
+                statement = {
+                    "transactions":   len(stmt.get("transactions") or []),
+                    "period_start":   stmt.get("period_start"),
+                    "period_end":     stmt.get("period_end"),
+                    "iban_last4":     stmt.get("iban_last4"),
+                    "bank_name":      stmt.get("bank_name"),
+                    "acknowledged_empty": bool(stmt.get("acknowledged_empty") or 0),
+                }
+        if category in ("Rechnung", "Quittung", "Kassenzettel"):
+            r = db.get_receipt(doc_id)
+            if r:
+                receipt = {
+                    "items": len(r.get("items") or []),
+                    "total": r.get("total_amount"),
+                    "shop":  r.get("shop_name"),
+                }
+        return {
+            "doc_id":   doc_id,
+            "status":   doc.get("status"),
+            "category": category,
+            "running":  running,
+            "statement": statement,
+            "receipt":   receipt,
+        }
+
     @app.post("/api/document/{doc_id}/statement/dismiss-empty")
     def api_dismiss_empty_statement(doc_id: int):
         """Mark this statement as 'genuinely empty, stop nagging about
@@ -1309,7 +1435,7 @@ def create_app(
 
     @app.get("/api/finance/transactions")
     def api_finance_transactions(
-        account_id: int | None = Query(None),
+        account_id: str | None = Query(None),
         category: str | None = Query(None),
         direction: str | None = Query(None),
         start: str | None = Query(None),
@@ -1318,8 +1444,8 @@ def create_app(
         limit: int = Query(200),
     ):
         return {"transactions": db.transactions_list(
-            account_id=account_id, category=category, direction=direction,
-            start=start, end=end, query=q, limit=limit,
+            account_id=_coerce_int(account_id), category=category,
+            direction=direction, start=start, end=end, query=q, limit=limit,
         )}
 
     @app.post("/api/settings/finance")
@@ -1434,6 +1560,20 @@ def create_app(
         doc = db.get(doc_id)
         if not doc:
             raise HTTPException(404, "document not found")
+        # Block duplicate clicks: if an extraction is already running for
+        # this doc, surface a 409 instead of letting two LLM calls race.
+        if not _doc_job_start(doc_id, "statement"):
+            raise HTTPException(
+                409,
+                "extraction already running for this document — wait for the "
+                "current run to finish before retrying",
+            )
+        try:
+            return _run_statement_extract(doc_id, doc)
+        finally:
+            _doc_job_end(doc_id)
+
+    def _run_statement_extract(doc_id: int, doc: dict) -> dict:
         text = doc.get("extracted_text") or ""
         if not text:
             # Old imports never persisted the OCR text. Recover it from

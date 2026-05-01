@@ -464,24 +464,39 @@
         </div>
       </details>
 
+      <div x-show="running" x-cloak
+           class="mt-3 flex items-center gap-3 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-sm">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             class="h-4 w-4 shrink-0 animate-spin text-sky-300">
+          <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
+        </svg>
+        <div class="flex-1 min-w-0">
+          <div class="text-sky-200">
+            <span x-text="running && running.kind === 'receipt' ? 'Beleg-Auswertung läuft' : 'Auswertung läuft'"></span>
+            …
+          </div>
+          <div class="text-xs text-sky-300/70 tabular-nums" x-text="'seit ' + runningLabel()"></div>
+        </div>
+      </div>
+
       <div class="mt-4 flex flex-wrap items-center gap-2">
         {% if doc.status == 'pending_review' %}
           <span class="chip bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/20 mr-1">
             {{ t('doc.statement.pending_badge') }}
           </span>
-          <button type="button" @click="extract()" :disabled="extracting || skipping"
+          <button type="button" @click="extract()" :disabled="extracting || skipping || running"
                   class="btn-primary text-sm"
-                  :class="(extracting || skipping) ? 'opacity-50 cursor-not-allowed' : ''"
-                  x-text="extracting ? T['doc.statement.sending'] : T['doc.statement.send']"></button>
-          <button type="button" @click="skip()" :disabled="extracting || skipping"
+                  :class="(extracting || skipping || running) ? 'opacity-50 cursor-not-allowed' : ''"
+                  x-text="(extracting || running) ? T['doc.statement.sending'] : T['doc.statement.send']"></button>
+          <button type="button" @click="skip()" :disabled="extracting || skipping || running"
                   class="btn-secondary text-sm"
-                  :class="(extracting || skipping) ? 'opacity-50 cursor-not-allowed' : ''"
+                  :class="(extracting || skipping || running) ? 'opacity-50 cursor-not-allowed' : ''"
                   x-text="skipping ? T['doc.statement.skipping'] : T['doc.statement.skip']"></button>
         {% else %}
-          <button type="button" @click="extract()" :disabled="extracting"
+          <button type="button" @click="extract()" :disabled="extracting || running"
                   class="btn-primary text-sm"
-                  :class="extracting ? 'opacity-50 cursor-not-allowed' : ''"
-                  x-text="extracting ? T['statement.extracting'] : (hasStatement ? T['statement.reextract'] : T['statement.extract_now'])"></button>
+                  :class="(extracting || running) ? 'opacity-50 cursor-not-allowed' : ''"
+                  x-text="(extracting || running) ? T['statement.extracting'] : (hasStatement ? T['statement.reextract'] : T['statement.extract_now'])"></button>
         {% endif %}
         <span x-show="extractMessage" x-cloak class="text-xs"
               :class="extractOk ? 'text-emerald-300' : 'text-rose-300'"
@@ -714,6 +729,51 @@ function statementCard(docId, hasStatement) {
     preview: null, previewing: false, error: '',
     extracting: false, extractMessage: '', extractOk: false,
     skipping: false,
+    // Server-reported job state. Survives page reloads, so a long
+    // extraction kicked off in another tab still shows "Auswertung
+    // läuft" instead of a stale "klick Auswerten" prompt.
+    running: null,         // { kind, started_at, elapsed_s } or null
+    runningElapsed: 0,     // seconds since the job started, kept fresh
+    _statusTimer: null,
+    _tickTimer: null,
+    init() {
+      this.fetchStatus(true);
+    },
+    async fetchStatus(initial) {
+      try {
+        const r = await fetch('/api/document/' + this.docId + '/status');
+        if (!r.ok) return;
+        const d = await r.json();
+        const wasRunning = !!this.running;
+        this.running = d.running || null;
+        if (this.running) {
+          this.runningElapsed = Math.floor(this.running.elapsed_s || 0);
+          this._scheduleTick();
+          // Poll again soon — long extractions on the bridge can take
+          // 5–10 minutes, so 4s is a comfortable cadence.
+          clearTimeout(this._statusTimer);
+          this._statusTimer = setTimeout(() => this.fetchStatus(false), 4000);
+        } else {
+          if (this._tickTimer) { clearInterval(this._tickTimer); this._tickTimer = null; }
+          if (wasRunning && !initial) {
+            // Job just finished — pull fresh data from the server.
+            location.reload();
+          }
+        }
+      } catch (e) { /* network blip — try again on next interaction */ }
+    },
+    _scheduleTick() {
+      if (this._tickTimer) return;
+      this._tickTimer = setInterval(() => {
+        if (this.running) this.runningElapsed += 1;
+      }, 1000);
+    },
+    runningLabel() {
+      const m = Math.floor(this.runningElapsed / 60);
+      const s = this.runningElapsed % 60;
+      if (m > 0) return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+      return s + 's';
+    },
     async loadPreview() {
       this.error = ''; this.previewing = true;
       try {
@@ -730,6 +790,15 @@ function statementCard(docId, hasStatement) {
       // already saw what's going out.
       if (this.preview === null && !confirm(T['statement.extract_confirm'])) return;
       this.extractMessage = ''; this.extracting = true;
+      // Reflect "running" immediately so the banner appears without
+      // waiting for the first /status poll cycle.
+      this.running = { kind: 'statement', started_at: Date.now() / 1000, elapsed_s: 0 };
+      this.runningElapsed = 0;
+      this._scheduleTick();
+      // Start polling so a navigate-away-and-back still shows the
+      // banner — the server is now the source of truth.
+      clearTimeout(this._statusTimer);
+      this._statusTimer = setTimeout(() => this.fetchStatus(false), 4000);
       try {
         const r = await fetch('/api/document/' + this.docId + '/statement/extract', { method: 'POST' });
         const d = await r.json();
@@ -742,6 +811,10 @@ function statementCard(docId, hasStatement) {
       } catch (e) {
         this.extractOk = false;
         this.extractMessage = e.message || String(e);
+        // Failed/aborted — clear our optimistic running flag so the
+        // user can retry. The next /status poll will confirm.
+        this.running = null;
+        if (this._tickTimer) { clearInterval(this._tickTimer); this._tickTimer = null; }
       } finally { this.extracting = false; }
     },
     async skip() {

@@ -2,6 +2,27 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.22.4] – 2026-05-01
+
+### Fixed
+
+- **Document page now reports extractions in progress.** Statement
+  extraction can run for several minutes on the local-AI bridge, but
+  if the user navigated away and came back the card showed "Noch
+  nicht ausgewertet — klick Auswerten" again, even though the original
+  call was still on the wire. The card now polls a new
+  `/api/document/{id}/status` endpoint, displays a "Auswertung läuft
+  seit Xm Ys" banner, and disables the action buttons until the run
+  finishes — then auto-reloads to show the result. Concurrent clicks
+  on the same document now return 409 instead of double-spending the
+  LLM call.
+
+- **Filter form no longer 422s on "All accounts".** `/finance` and
+  `/api/finance/transactions` were declared with `account_id: int |
+  None`, which made FastAPI reject the empty string the select sends
+  for the all-accounts choice. Both endpoints now coerce empty form
+  values to `None` instead.
+
 ## [0.22.3] – 2026-05-01
 
 ### Fixed
