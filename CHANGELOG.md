@@ -2,6 +2,22 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.25.3] – 2026-05-01
+
+### Added — Read-only diagnostic endpoint for `/finance`
+
+`GET /api/finance/diag-render` runs every DB method the finance page
+relies on, in the same order as the page handler, and returns
+`{ok_count, fail_count, results}` — a flat map of method-name to
+either `"ok"` or the exception text. Use this when `/finance` is
+returning 500 in production but not reproducible locally: hit this
+URL, find the failing method, fix it.
+
+The endpoint is **isolated** from the finance page — read-only,
+plain function, no closure on nested helpers, can't break the page
+it diagnoses. Locally verified against a seeded DB and an empty DB:
+all 23 probes return `ok` and every other route still serves 200.
+
 ## [0.25.2] – 2026-05-01
 
 ### Reverted

@@ -899,6 +899,90 @@ def create_app(
             "recurring": db.finance_recurring(),
         }
 
+    @app.get("/api/finance/diag-render")
+    def api_finance_diag_render():
+        """Read-only Diagnose: ruft jede DB-Methode auf, die /finance
+        nutzt, und liefert pro Methode `ok` oder den Fehlertext. Nutzt
+        ausschließlich die selben Methoden wie der Page-Endpoint, in
+        der gleichen Reihenfolge — wenn hier alles `ok` ist und
+        /finance trotzdem 500 wirft, liegt es an der Template-Render-
+        Phase, nicht am DB-Layer.
+
+        Diese Route ist isoliert von /finance: Read-only, kein
+        Render, keine Closure auf nested helpers — sie kann nicht
+        kaputtgehen wenn /finance kaputtgeht."""
+        import traceback as _tb
+        results: dict[str, str] = {}
+
+        def probe(name: str, fn) -> None:
+            try:
+                fn()
+                results[name] = "ok"
+            except Exception as exc:
+                results[name] = f"{type(exc).__name__}: {exc}"
+
+        probe("finance_summary",          lambda: db.finance_summary())
+        probe("finance_monthly",          lambda: db.finance_monthly(months=12))
+        probe("list_accounts",            lambda: db.list_accounts())
+        probe("finance_top_counterparties_expense",
+              lambda: db.finance_top_counterparties(direction="expense", limit=10))
+        probe("finance_top_counterparties_income",
+              lambda: db.finance_top_counterparties(direction="income", limit=10))
+        probe("finance_recurring",        lambda: db.finance_recurring(min_months=3, limit=20))
+        probe("transactions_list",        lambda: db.transactions_list(limit=200))
+        probe("finance_available_periods", lambda: db.finance_available_periods())
+        probe("finance_heatmap",          lambda: db.finance_heatmap())
+        probe("finance_category_monthly", lambda: db.finance_category_monthly(start=None, end=None))
+        probe("finance_category_totals_spend",
+              lambda: db.finance_category_totals(start=None, end=None, direction="spend"))
+        probe("finance_category_totals_income",
+              lambda: db.finance_category_totals(start=None, end=None, direction="income"))
+        probe("finance_by_weekday",       lambda: db.finance_by_weekday())
+        probe("finance_by_day_of_month",  lambda: db.finance_by_day_of_month())
+        probe("finance_by_tx_type",       lambda: db.finance_by_tx_type())
+        probe("finance_largest_tx",       lambda: db.finance_largest_tx(limit=15))
+        probe("finance_balance_history",  lambda: db.finance_balance_history(account_id=None))
+        probe("finance_counterparty_treemap",
+              lambda: db.finance_counterparty_treemap(limit=24))
+        probe("finance_kpis",             lambda: db.finance_kpis())
+
+        def _direct(label: str, sql: str) -> None:
+            try:
+                with db._lock:
+                    db._conn.execute(sql).fetchall()
+                results[label] = "ok"
+            except Exception as exc:
+                results[label] = f"{type(exc).__name__}: {exc}"
+
+        _direct("direct: last_privacy_mode",
+                "SELECT privacy_mode FROM statements ORDER BY id DESC LIMIT 1")
+        _direct("direct: empty_stmts",
+                """SELECT s.doc_id, COALESCE(d.subject, d.filename) AS subject,
+                          d.doc_date, a.bank_name
+                   FROM statements s
+                   JOIN documents d ON d.id = s.doc_id
+                   LEFT JOIN accounts a ON a.id = s.account_id
+                   WHERE d.deleted_at IS NULL
+                     AND d.category = 'Kontoauszug'
+                     AND COALESCE(s.acknowledged_empty, 0) = 0
+                     AND s.id NOT IN (SELECT statement_id FROM transactions)
+                   ORDER BY d.doc_date DESC, d.id DESC LIMIT 20""")
+        _direct("direct: kontoauszug_total",
+                """SELECT COUNT(*) FROM documents
+                   WHERE category = 'Kontoauszug' AND deleted_at IS NULL""")
+        _direct("direct: pending_review",
+                """SELECT id AS doc_id, COALESCE(subject, filename) AS subject,
+                          doc_date, sender
+                   FROM documents
+                   WHERE status = 'pending_review' AND category = 'Kontoauszug'
+                     AND deleted_at IS NULL""")
+
+        return {
+            "ok_count": sum(1 for v in results.values() if v == "ok"),
+            "fail_count": sum(1 for v in results.values() if v != "ok"),
+            "results": results,
+        }
+
     @app.get("/api/finance/diagnostics")
     def api_finance_diagnostics():
         """Surface statements that came back without any transactions —
