@@ -2,6 +2,29 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.25.4] – 2026-05-01
+
+### Fixed — `/finance` 500 on non-ISO booking dates
+
+`finance_by_weekday` and `finance_by_day_of_month` crashed with
+`TypeError: int() argument must be ... not 'NoneType'` whenever a
+single booking row had a `booking_date` value SQLite's `strftime()`
+couldn't parse — a German-format date (`"31.07.2024"`), a stray
+whitespace value, a year-only string, anything non-ISO. SQLite then
+returned NULL for the day-of-week / day-of-month projection, and the
+Python loop did `int(None)` and 500'd the whole `/finance` page.
+
+Both methods now skip rows with NULL projections instead of crashing.
+The WHERE-clause filter (`booking_date IS NOT NULL AND != ''`) was
+already there but only catches empty strings — non-ISO formats slip
+through.
+
+Found via the v0.25.3 `/api/finance/diag-render` endpoint, which
+isolated the failing methods to those two. Reproduced locally by
+seeding a DB with mixed-format booking_dates; all three test
+scenarios (empty / clean ISO / messy non-ISO) now serve 200 across
+every page and all 23 diagnostic probes.
+
 ## [0.25.3] – 2026-05-01
 
 ### Added — Read-only diagnostic endpoint for `/finance`

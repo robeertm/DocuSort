@@ -1758,7 +1758,12 @@ class Database:
     def finance_by_weekday(self) -> list[dict[str, Any]]:
         """Spend totals per day of week (0=Mon … 6=Sun for display).
         SQLite's strftime('%w', …) returns 0=Sun … 6=Sat, we shift it
-        in the SELECT so Monday is the leftmost column in charts."""
+        in the SELECT so Monday is the leftmost column in charts.
+
+        Filters NULL `dow` rows in Python instead of via HAVING — that
+        catches transactions whose booking_date was stored in a non-ISO
+        format (e.g. "31.07.2024") and would otherwise crash int(None)
+        downstream."""
         with self._lock:
             rows = self._conn.execute(
                 """SELECT ((CAST(strftime('%w', t.booking_date) AS INTEGER) + 6) % 7) AS dow,
@@ -1774,8 +1779,11 @@ class Database:
                    GROUP BY dow
                    ORDER BY dow"""
             ).fetchall()
-        # Always return a row for every weekday so the chart has a fixed shape.
-        present = {int(r["dow"]): dict(r) for r in rows}
+        present: dict[int, dict] = {}
+        for r in rows:
+            if r["dow"] is None:
+                continue
+            present[int(r["dow"])] = dict(r)
         return [
             present.get(d, {"dow": d, "spend": 0.0, "avg_spend": 0.0, "n": 0})
             for d in range(7)
@@ -1784,7 +1792,11 @@ class Database:
     def finance_by_day_of_month(self) -> list[dict[str, Any]]:
         """Spend totals per day-of-month — surfaces "everything hits
         on the 1st" patterns (rent, insurance, subscriptions). Always
-        returns rows 1–31 so the chart has a stable axis."""
+        returns rows 1–31 so the chart has a stable axis.
+
+        Same NULL-tolerance as finance_by_weekday: a non-ISO
+        booking_date makes strftime return NULL, which we drop here
+        instead of crashing int(None)."""
         with self._lock:
             rows = self._conn.execute(
                 """SELECT CAST(strftime('%d', t.booking_date) AS INTEGER) AS dom,
@@ -1799,7 +1811,11 @@ class Database:
                    GROUP BY dom
                    ORDER BY dom"""
             ).fetchall()
-        present = {int(r["dom"]): dict(r) for r in rows}
+        present: dict[int, dict] = {}
+        for r in rows:
+            if r["dom"] is None:
+                continue
+            present[int(r["dom"])] = dict(r)
         return [
             present.get(d, {"dom": d, "spend": 0.0, "n": 0})
             for d in range(1, 32)
