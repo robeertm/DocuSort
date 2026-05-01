@@ -22,8 +22,11 @@
     <div class="grid gap-3 md:grid-cols-12">
       <div class="md:col-span-5 relative">
         <label class="text-[11px] uppercase tracking-wider text-ink-500">Suche (Komma trennt)</label>
-        <input type="search" x-model.debounce.300ms="filter.q"
-               @input="onQueryInput()"
+        <!-- x-model writes immediately so filter.q is always current,
+             but the debounced @input keeps us from firing a request on
+             every keystroke. -->
+        <input type="search" x-model="filter.q"
+               @input.debounce.300ms="onQueryInput()"
                placeholder="rossmann, dm, amazon …"
                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mt-1">
         <!-- Payee suggestions popover -->
@@ -358,6 +361,12 @@ function txExplorer() {
     messageOk: false,
     pageSize: 500,
     offset: 0,
+    // Bumped on every reload so a slow earlier request can't overwrite
+    // the result of a faster later one. Without this, typing a query and
+    // then quickly applying a date preset gives an aggregate from the
+    // no-date query but a row list from the dated one — visibly
+    // inconsistent (count: 183 / rows: 1).
+    _reqToken: 0,
 
     periodPresets: [
       { label: 'Dieses Jahr',     fn: 'thisYear'  },
@@ -428,31 +437,43 @@ function txExplorer() {
       this.selected = new Set();
       this.pushUrl();
       this.loading = true;
+      const token = ++this._reqToken;
       try {
         const p = this.queryParams({ limit: this.pageSize, offset: 0, with_aggregates: 1 });
         const r = await fetch('/api/transactions/search?' + p.toString());
         const d = await r.json();
+        // A newer reload started while we were waiting — drop this
+        // result on the floor so we don't overwrite the fresh state.
+        if (token !== this._reqToken) return;
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
         this.rows = d.transactions || [];
         if (d.aggregate) this.agg = d.aggregate;
       } catch (e) {
-        this.flash(false, e.message || String(e));
-      } finally { this.loading = false; }
+        if (token === this._reqToken) this.flash(false, e.message || String(e));
+      } finally {
+        if (token === this._reqToken) this.loading = false;
+      }
     },
 
     async loadMore() {
       if (this.rows.length >= this.agg.count) return;
       this.loading = true;
+      const token = this._reqToken;  // tied to the current page state
       try {
         this.offset = this.rows.length;
         const p = this.queryParams({ limit: this.pageSize, offset: this.offset, with_aggregates: 0 });
         const r = await fetch('/api/transactions/search?' + p.toString());
         const d = await r.json();
+        // Filter changed underneath us — abandon this page since it
+        // belongs to a different filter.
+        if (token !== this._reqToken) return;
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
         this.rows = this.rows.concat(d.transactions || []);
       } catch (e) {
-        this.flash(false, e.message || String(e));
-      } finally { this.loading = false; }
+        if (token === this._reqToken) this.flash(false, e.message || String(e));
+      } finally {
+        if (token === this._reqToken) this.loading = false;
+      }
     },
 
     onQueryInput() {
@@ -573,10 +594,12 @@ function txExplorer() {
     },
 
     async reloadAggOnly() {
+      const token = this._reqToken;
       try {
         const p = this.queryParams({ limit: 0, offset: 0, with_aggregates: 1 });
         const r = await fetch('/api/transactions/search?' + p.toString());
         const d = await r.json();
+        if (token !== this._reqToken) return;  // user moved on
         if (r.ok && d.aggregate) this.agg = d.aggregate;
       } catch {}
     },

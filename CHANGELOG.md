@@ -2,6 +2,27 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.23.1] – 2026-05-01
+
+### Fixed
+
+- **Transactions explorer no longer mixes results from racing
+  requests.** Typing a query and then quickly applying a date preset
+  fired two `/api/transactions/search` calls in flight: the
+  no-date one (slow, large payload) and the date-filtered one (fast,
+  tiny payload). The fast one resolved first and the slow one then
+  overwrote the aggregate, leaving the page reporting "183 hits"
+  while the table only listed the single date-filtered row. Each
+  reload now stamps a request token; responses that come back after
+  a newer reload has started are dropped on the floor.
+
+- **Search input no longer fires a request on every keystroke.**
+  The search box used `x-model.debounce` for the write but a plain
+  `@input` for the handler, which fired before the debounced write
+  landed. Switched to immediate `x-model` plus a debounced
+  `@input.debounce.300ms`, so the handler always sees the current
+  value and only one request goes out per typing pause.
+
 ## [0.23.0] – 2026-05-01
 
 ### Added — Transactions explorer
