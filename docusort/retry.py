@@ -202,6 +202,7 @@ def _extract_statement_inline(*, doc_id: int, text: str,
         privacy_mode=stmt.privacy_mode,
         transactions=tx_payload,
         extra_json=stmt.raw_response,
+        extraction_warning=stmt.extraction_warning,
     )
 
     # Promote a Bank lookalike to Kontoauszug so /finance picks it up

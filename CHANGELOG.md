@@ -2,6 +2,36 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.24.1] – 2026-05-01
+
+### Fixed — Statements with mismatched balances and zero transactions
+
+A multi-page Privatgirokonto where the LLM correctly extracted bank,
+period, opening- and closing-balance but returned `transactions=[]`
+used to be silently filed as *"no bookings"*. That is almost always
+a model failure: balances change ONLY through bookings, so a
+non-trivial balance delta with an empty transaction list means the
+output got truncated mid-table or the model skipped the table
+entirely.
+
+- The extractor now sniffs this signature and **automatically retries
+  once with a doubled output-token budget** (32k instead of 16k).
+  Most 12-page Privatgirokonto statements that "lost" their bookings
+  on the first try come back complete on the second.
+
+- If the retry also returns empty + balance mismatch, the statement
+  is persisted with a new `extraction_warning` flag and surfaced as
+  *"verdächtig"* in the UI:
+  - The bulk-analyse banner counts it among the pending statements
+    again — *"… mit leerem oder verdächtigem Ergebnis"*.
+  - The next *"Alle auswerten"* sweep automatically re-tries it.
+  - On the document page, a yellow warning banner above the
+    statement card explains what happened and how it gets resolved.
+
+- New column `statements.extraction_warning` (idempotent migration,
+  defaults to `''`). On a successful re-extraction the flag clears
+  itself.
+
 ## [0.24.0] – 2026-05-01
 
 ### Added — Force re-analysis of every Kontoauszug, automatic on upgrade

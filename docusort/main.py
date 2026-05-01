@@ -379,6 +379,7 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                         privacy_mode=stmt.privacy_mode,
                         transactions=tx_payload,
                         extra_json=stmt.raw_response,
+                        extraction_warning=stmt.extraction_warning,
                     )
                     # If the doc was filed under the legacy `Bank`
                     # category but the extractor actually pulled

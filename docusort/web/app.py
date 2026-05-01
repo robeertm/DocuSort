@@ -1055,8 +1055,11 @@ def create_app(
                    JOIN statements s ON s.doc_id = d.id
                    WHERE d.deleted_at IS NULL
                      AND COALESCE(s.acknowledged_empty, 0) = 0
-                     AND s.id NOT IN (SELECT statement_id FROM transactions)
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''
+                     AND (
+                       s.id NOT IN (SELECT statement_id FROM transactions)
+                       OR COALESCE(s.extraction_warning, '') != ''
+                     )"""
             ).fetchall()
 
         # Dedup on doc_id (a doc could in theory match both queries,
@@ -1112,13 +1115,15 @@ def create_app(
                             privacy_mode=stmt.privacy_mode,
                             transactions=[],
                             extra_json=stmt.raw_response,
+                            extraction_warning=stmt.extraction_warning,
                         )
                         job = activity.get_job("analyze-statements")
-                        job.failed.append({"doc_id": doc_id,
-                                           "error": "no transactions extracted"})
+                        err = stmt.extraction_warning or "no transactions extracted"
+                        job.failed.append({"doc_id": doc_id, "error": err})
                         activity.update_job(
                             "analyze-statements", done=idx + 1,
-                            last_error="empty result",
+                            last_error=("suspicious empty result"
+                                        if stmt.extraction_warning else "empty result"),
                         )
                         continue
                     account_id = None
@@ -1151,6 +1156,7 @@ def create_app(
                         privacy_mode=stmt.privacy_mode,
                         transactions=tx_payload,
                         extra_json=stmt.raw_response,
+                        extraction_warning=stmt.extraction_warning,
                     )
                     # Promote a legacy Bank-tagged doc to category=
                     # Kontoauszug now that we've confirmed it's a real
@@ -1254,8 +1260,11 @@ def create_app(
                    WHERE d.deleted_at IS NULL
                      AND d.category = 'Kontoauszug'
                      AND COALESCE(s.acknowledged_empty, 0) = 0
-                     AND s.id NOT IN (SELECT statement_id FROM transactions)
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
+                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''
+                     AND (
+                       s.id NOT IN (SELECT statement_id FROM transactions)
+                       OR COALESCE(s.extraction_warning, '') != ''
+                     )"""
             ).fetchone()
             total = db._conn.execute(
                 """SELECT COUNT(*) AS n FROM documents d
@@ -1417,6 +1426,7 @@ def create_app(
                 currency=stmt.currency, file_hash="",
                 privacy_mode=stmt.privacy_mode,
                 transactions=tx_payload, extra_json=stmt.raw_response,
+                extraction_warning=stmt.extraction_warning,
             )
             recovered.append(doc_id)
         return {
@@ -1775,6 +1785,7 @@ def create_app(
             currency=stmt.currency, file_hash="",
             privacy_mode=stmt.privacy_mode,
             transactions=tx_payload, extra_json=stmt.raw_response,
+            extraction_warning=stmt.extraction_warning,
         )
         # If this doc was waiting in the review queue, promote it to
         # 'filed' now that the user has approved + extraction succeeded.

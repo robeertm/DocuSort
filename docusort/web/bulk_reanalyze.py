@@ -132,6 +132,7 @@ def start_reanalyze_all_statements(
                     privacy_mode=stmt.privacy_mode,
                     transactions=tx_payload,
                     extra_json=stmt.raw_response,
+                    extraction_warning=stmt.extraction_warning,
                 )
                 if category == "Bank" and stmt.transactions:
                     with db._lock:
@@ -142,7 +143,14 @@ def start_reanalyze_all_statements(
                         )
                         db._conn.commit()
                 job = activity.get_job("analyze-statements")
-                if not stmt.transactions:
+                if stmt.extraction_warning:
+                    job.failed.append({"doc_id": doc_id,
+                                       "error": stmt.extraction_warning})
+                    activity.update_job(
+                        "analyze-statements", done=idx + 1,
+                        last_error="suspicious empty result",
+                    )
+                elif not stmt.transactions:
                     job.failed.append({"doc_id": doc_id,
                                        "error": "no transactions extracted"})
                     activity.update_job(

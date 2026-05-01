@@ -320,6 +320,11 @@ class Database:
                 "ALTER TABLE statements ADD COLUMN acknowledged_empty INTEGER DEFAULT 0"
             )
             logger.info("DB migration: added statements.acknowledged_empty")
+        if "extraction_warning" not in stmt_cols:
+            self._conn.execute(
+                "ALTER TABLE statements ADD COLUMN extraction_warning TEXT DEFAULT ''"
+            )
+            logger.info("DB migration: added statements.extraction_warning")
 
         # Per-tx category overrides — set when the user manually
         # recategorises a booking via /transactions. Survives the
@@ -1093,12 +1098,18 @@ class Database:
         privacy_mode: str = "",
         transactions: list[dict] | None = None,
         extra_json: str = "",
+        extraction_warning: str = "",
     ) -> int:
         """Replace the statement + transactions for a document.
 
         Transactions get inserted with INSERT OR IGNORE on tx_hash so that
         a second statement covering an overlapping period does not create
-        duplicate rows for the same booking. Returns the statement row id."""
+        duplicate rows for the same booking. Returns the statement row id.
+
+        `extraction_warning` flags a result the extractor doesn't trust
+        (e.g. balances differ but no transactions were returned). The
+        analyse-all selector picks these up on the next sweep so the
+        user doesn't have to chase them manually."""
         transactions = transactions or []
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock:
@@ -1110,11 +1121,12 @@ class Database:
                 self._conn.execute(
                     """UPDATE statements SET account_id=?, period_start=?, period_end=?,
                          statement_no=?, opening_balance=?, closing_balance=?,
-                         currency=?, file_hash=?, privacy_mode=?, extra_json=?
+                         currency=?, file_hash=?, privacy_mode=?, extra_json=?,
+                         extraction_warning=?
                        WHERE id=?""",
                     (account_id, period_start, period_end, statement_no,
                      opening_balance, closing_balance, currency, file_hash,
-                     privacy_mode, extra_json, stmt_id),
+                     privacy_mode, extra_json, extraction_warning, stmt_id),
                 )
                 self._conn.execute(
                     "DELETE FROM transactions WHERE statement_id = ?", (stmt_id,)
@@ -1124,11 +1136,13 @@ class Database:
                     """INSERT INTO statements
                          (doc_id, account_id, period_start, period_end,
                           statement_no, opening_balance, closing_balance,
-                          currency, file_hash, privacy_mode, extra_json, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                          currency, file_hash, privacy_mode, extra_json,
+                          extraction_warning, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (doc_id, account_id, period_start, period_end,
                      statement_no, opening_balance, closing_balance,
-                     currency, file_hash, privacy_mode, extra_json, now),
+                     currency, file_hash, privacy_mode, extra_json,
+                     extraction_warning, now),
                 )
                 stmt_id = cur.lastrowid or 0
             for i, tx in enumerate(transactions):

@@ -92,6 +92,12 @@ class Statement:
     transactions: list[Transaction] = field(default_factory=list)
     raw_response: str = ""
     privacy_mode: str = ""    # 'pseudonymize' | 'local' | 'plain'
+    # Diagnostic flag set by the extractor when the result smells wrong
+    # but isn't a hard error — e.g. opening / closing balances differ
+    # but the model returned zero transactions. Callers use this to
+    # tag the statement as "needs retry" instead of accepting it as
+    # legitimately empty.
+    extraction_warning: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -301,6 +307,28 @@ def _coerce_float(value: Any) -> float | None:
         return None
 
 
+def _looks_like_lost_bookings(data: dict[str, Any]) -> bool:
+    """Heuristic for "the model returned a parseable statement but the
+    booking table is suspiciously empty". A real statement with no
+    activity has opening_balance == closing_balance (the bank prints
+    both numbers identical when nothing happened during the period).
+    A non-trivial balance change with zero transactions is the textbook
+    signature of an output-truncation or a model that skipped the
+    table entirely."""
+    if not isinstance(data, dict):
+        return False
+    txs = data.get("transactions")
+    if isinstance(txs, list) and len(txs) > 0:
+        return False
+    opening = _coerce_float(data.get("opening_balance"))
+    closing = _coerce_float(data.get("closing_balance"))
+    if opening is None or closing is None:
+        # Without both balances we can't tell — accept the empty result
+        # rather than retrying every legit-blank statement.
+        return False
+    return abs(opening - closing) > 0.01
+
+
 def _normalise_tx(d: dict[str, Any]) -> Transaction | None:
     amount = _coerce_float(d.get("amount"))
     if amount is None:
@@ -343,6 +371,24 @@ class StatementExtractor:
         # rationale.
         self.holder_names = list(holder_names or [])
 
+    def _call_and_parse(self, body: str, *, max_output_tokens: int):
+        """One LLM round-trip. Generating the full transaction list
+        of a multi-page Privatgirokonto can take a couple of minutes,
+        so the timeout floor is generous."""
+        try:
+            resp = self.provider.classify(
+                system_prompt=SYSTEM_PROMPT,
+                user_prompt=_USER_TEMPLATE.format(text=body),
+                model=self.model,
+                max_output_tokens=max_output_tokens,
+                timeout=300.0,
+            )
+        except ProviderError as exc:
+            logger.error("Statement extractor: provider call failed: %s", exc)
+            raise
+        data = _parse_response(resp.raw_text)
+        return resp, data
+
     def extract(self, ocr_text: str, *, pseudonymize: bool = True) -> Statement:
         if not ocr_text:
             raise ValueError("no OCR text provided")
@@ -355,33 +401,36 @@ class StatementExtractor:
                 pseudo.seed_household_names(self.holder_names)
             body = pseudo.pseudonymize(body)
 
-        try:
-            resp = self.provider.classify(
-                system_prompt=SYSTEM_PROMPT,
-                user_prompt=_USER_TEMPLATE.format(text=body),
-                model=self.model,
-                # Multi-page Privatgirokonto statements can carry many
-                # bookings; the JSON response with all of them easily
-                # outgrows a small output cap. When the response gets
-                # truncated mid-string, the JSON parser can't find a
-                # closing brace for the outer object and falls back to
-                # whichever inner transaction dict happens to be
-                # fully-formed at that point — which leaves bank /
-                # period / transactions all empty. Generous ceiling so
-                # the model has room to emit every booking on a
-                # twelve-page statement.
-                max_output_tokens=16000,
-                # Generating that much output takes well past the
-                # default 60 s. Five minutes covers the worst-case
-                # Privatgirokonto with hundreds of bookings on Anthropic
-                # Haiku-class models.
-                timeout=300.0,
-            )
-        except ProviderError as exc:
-            logger.error("Statement extractor: provider call failed: %s", exc)
-            raise
+        # First attempt with a generous-but-not-extreme output budget.
+        # Most statements (1-3 pages, < 30 bookings) fit comfortably.
+        resp, data = self._call_and_parse(body, max_output_tokens=16000)
+        warning = ""
 
-        data = _parse_response(resp.raw_text)
+        # Sanity check: if opening and closing balances both came back
+        # AND they differ by more than a rounding cent AND the model
+        # returned zero transactions, something went wrong — balances
+        # change ONLY through bookings, so the table must exist on the
+        # page. Most common cause: Ollama clipped the output mid-table
+        # because the JSON didn't fit in num_predict, leaving an empty
+        # (but parseable) outer object. Retry once with a much larger
+        # output budget; many statements that "lost" their bookings on
+        # the first try come back complete on the second.
+        if _looks_like_lost_bookings(data):
+            logger.warning(
+                "Statement extractor: opening/closing balance mismatch but "
+                "transactions=[]; retrying with larger output budget."
+            )
+            resp, data = self._call_and_parse(body, max_output_tokens=32000)
+            if _looks_like_lost_bookings(data):
+                warning = (
+                    "extraction returned 0 transactions but opening/closing "
+                    "balances differ — likely an output-truncation or model "
+                    "miss. Re-analyse this statement."
+                )
+                logger.warning(
+                    "Statement extractor: still empty after retry — flagging "
+                    "as suspicious so the next bulk reanalysis picks it up.",
+                )
         # Sanity check: if we ended up parsing a single transaction-
         # shaped inner object instead of the outer statement object,
         # the response was truncated. Log loud so the user can tell
@@ -482,6 +531,7 @@ class StatementExtractor:
             transactions=txs,
             raw_response=resp.raw_text[:64000],
             privacy_mode="pseudonymize" if pseudonymize else "local",
+            extraction_warning=warning,
         )
 
 
@@ -599,6 +649,7 @@ def backfill_statements(settings, db, classifier, *, dry_run: bool = False,
                 for t in stmt.transactions
             ],
             extra_json=stmt.raw_response,
+            extraction_warning=stmt.extraction_warning,
         )
         processed.append(doc_id)
     return {

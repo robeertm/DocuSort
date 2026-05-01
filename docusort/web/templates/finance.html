@@ -50,8 +50,8 @@
       <div class="flex-1 min-w-0">
         <div class="text-sm font-medium" x-show="!job.running"
              x-text="(counts.missing + counts.empty) > 0
-                       ? (`${counts.missing + counts.empty} Kontoauszug${(counts.missing + counts.empty) === 1 ? '' : 'e'} noch nicht ausgewertet` +
-                          (counts.empty ? ` (${counts.empty} mit leerem Ergebnis)` : ''))
+                       ? (`${counts.missing + counts.empty} Kontoauszug${(counts.missing + counts.empty) === 1 ? '' : 'e'} noch nicht (sauber) ausgewertet` +
+                          (counts.empty ? ` (${counts.empty} mit leerem oder verdächtigem Ergebnis)` : ''))
                        : `Alle ${counts.total} Kontoauszüge ausgewertet`"></div>
         <div class="text-sm font-medium flex items-center gap-2" x-show="job.running" x-cloak>
           <svg class="h-4 w-4 animate-spin text-cyan-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">

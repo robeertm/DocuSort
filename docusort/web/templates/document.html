@@ -330,6 +330,26 @@
       </div>
 
       {% if statement %}
+        {% if statement.extraction_warning %}
+          <div class="mb-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
+            <div class="flex items-start gap-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   class="h-4 w-4 shrink-0 mt-0.5 text-amber-300">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <div class="flex-1 min-w-0">
+                <div class="text-amber-200 font-medium">Auswertung verdächtig</div>
+                <div class="text-xs text-amber-200/80 mt-0.5">
+                  Anfangs- und Endsaldo unterscheiden sich, aber keine Buchung erkannt —
+                  das LLM hat die Tabelle vermutlich abgeschnitten oder übersprungen.
+                  Beim nächsten <em>„Alle auswerten"</em> wird dieser Auszug automatisch
+                  nochmal versucht.
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
         <div class="grid grid-cols-3 gap-2 text-sm mb-3">
           <div>
             <div class="text-[11px] text-ink-500 uppercase tracking-wider">{{ t('statement.opening') }}</div>
@@ -341,7 +361,7 @@
           </div>
           <div>
             <div class="text-[11px] text-ink-500 uppercase tracking-wider">{{ t('statement.tx_count_short') }}</div>
-            <div class="tabular-nums">{{ statement['transactions'] | length }}</div>
+            <div class="tabular-nums {% if statement.extraction_warning %}text-amber-300{% endif %}">{{ statement['transactions'] | length }}</div>
           </div>
         </div>
 
