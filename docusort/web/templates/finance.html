@@ -84,14 +84,31 @@
         </div>
       </div>
       <div class="flex flex-col items-end gap-1 shrink-0">
-        <button type="button" @click="run()" :disabled="job.running || (counts.missing + counts.empty) === 0"
+        <button type="button" @click="run()"
+                x-show="!job.running && !job.paused" x-cloak
+                :disabled="(counts.missing + counts.empty) === 0"
                 class="btn-primary text-xs"
-                :class="(job.running || (counts.missing + counts.empty) === 0) ? 'opacity-50 cursor-not-allowed' : ''">
-          <span x-show="!job.running">Alle auswerten</span>
-          <span x-show="job.running" x-cloak>läuft …</span>
+                :class="((counts.missing + counts.empty) === 0) ? 'opacity-50 cursor-not-allowed' : ''">
+          Alle auswerten
+        </button>
+        <button type="button" @click="pause()"
+                x-show="job.running" x-cloak
+                :disabled="job.pause_requested"
+                class="text-xs rounded-lg px-2.5 py-1.5 border"
+                style="border-color: rgba(251, 191, 36, 0.5); color: rgb(253, 224, 71); background-color: rgba(251, 191, 36, 0.1);"
+                :class="job.pause_requested ? 'opacity-50 cursor-not-allowed' : ''">
+          <span x-show="!job.pause_requested">⏸ Pause</span>
+          <span x-show="job.pause_requested" x-cloak>pausiere …</span>
+        </button>
+        <button type="button" @click="resume()"
+                x-show="(job.paused || resumable) && !job.running" x-cloak
+                class="text-xs rounded-lg px-2.5 py-1.5 border"
+                style="border-color: rgba(34, 211, 238, 0.5); color: rgb(165, 243, 252); background-color: rgba(34, 211, 238, 0.1);">
+          ▶ Fortsetzen
         </button>
         <button type="button" @click="forceAll()" :disabled="job.running"
-                class="text-[11px] text-cyan-300/80 hover:text-cyan-200 underline disabled:opacity-50 disabled:no-underline"
+                class="text-[11px] underline disabled:opacity-50 disabled:no-underline"
+                style="color: rgba(103, 232, 249, 0.8);"
                 title="Auch Auszüge mit bereits vorhandenen Buchungen werden komplett neu analysiert. Manuell gesetzte Kategorien bleiben erhalten.">
           ↺ Auch bereits verarbeitete neu auswerten
         </button>
@@ -1083,38 +1100,50 @@ function analyzeAll() {
   return {
     counts: { missing: 0, empty: 0, total: 0 },
     job: { running: false, total: 0, done: 0, current: '',
-           approved: [], failed: [], last_error: '' },
+           approved: [], failed: [], last_error: '',
+           pause_requested: false, paused: false },
+    resumable: false,
     visible: false,
     finishedRecently: false,
     _t: null,
     init() {
       this.refresh();
-      // Poll progress while we are running, status when we are not.
       this._t = setInterval(() => this.refresh(), 2500);
     },
     async refresh() {
       try {
-        const [a, b] = await Promise.all([
+        const [a, b, c] = await Promise.all([
           fetch('/api/finance/analyze-progress').then(r => r.json()),
           fetch('/api/finance/unanalyzed-count').then(r => r.json()),
+          fetch('/api/finance/resumable').then(r => r.json()),
         ]);
         const wasRunning = this.job.running;
-        this.job    = a;
-        this.counts = b;
-        if (wasRunning && !this.job.running) {
+        this.job       = a;
+        this.counts    = b;
+        this.resumable = !!c.resumable;
+        if (wasRunning && !this.job.running && !this.job.paused) {
           this.finishedRecently = true;
-          // Clear the "fertig" line after a minute so it doesn't
-          // stick around forever.
           setTimeout(() => this.finishedRecently = false, 60000);
         }
-        // Banner is visible while a job runs, while there are pending
-        // statements, OR when the library has any Kontoauszug at all
-        // (so the "force re-analyse" affordance stays discoverable).
-        this.visible = this.job.running ||
+        this.visible = this.job.running || this.job.paused || this.resumable ||
                        (this.counts.missing + this.counts.empty) > 0 ||
                        (this.counts.total || 0) > 0 ||
                        this.finishedRecently;
       } catch (e) {}
+    },
+    async pause() {
+      try {
+        await fetch('/api/finance/analyze-pause', { method: 'POST' });
+        this.refresh();
+      } catch (e) { alert(e.message || String(e)); }
+    },
+    async resume() {
+      try {
+        const r = await fetch('/api/finance/analyze-resume', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.refresh();
+      } catch (e) { alert(e.message || String(e)); }
     },
     async run() {
       if (this.job.running) return;

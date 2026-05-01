@@ -2,6 +2,61 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.26.0] – 2026-05-01
+
+### Added — Page-by-page statement extraction
+
+When the source PDF is reachable on disk, the extractor now sends each
+page as a separate small LLM call and merges the booking lists. Far
+more reliable on long Privatgirokontos than single-pass extraction —
+no output truncation, no cascade of 16k → 32k → 64k retries that
+sometimes still missed bookings on twelve-page statements.
+
+- New OCR helper `ocr.extract_pages` returns one string per PDF page
+  (with the existing OCR fallback for scanned documents).
+- New compact `_PAGE_SYSTEM_PROMPT` for the per-page calls. Header
+  fields (bank, IBAN, period, balances) are merged across pages:
+  first non-empty wins for identity fields, opening from the first
+  page that prints one, closing from the last.
+- Single-pass extraction stays as a fallback when `library_path` is
+  empty (legacy data) or per-page fails for any reason — keeps the
+  previous 16k → 32k → 64k output budget escalation.
+
+Verified locally with a 5-test mock-provider suite: per-page-merge,
+single-pass fallback, escalation cascade, corrupt-PDF fallback, and
+balance-mismatch warning all behave as expected.
+
+### Added — Pause / Resume bulk re-analysis
+
+A long re-analysis run can now be paused and continued later, **even
+across a service restart**.
+
+- **⏸ Pause** in the bulk-analyse banner sets a cooperative flag.
+  The worker stops after the current document, persists the
+  still-pending doc_id list under `meta.analyze_statements_pending`,
+  and releases the running flag.
+- **▶ Fortsetzen** picks the list up, runs only those documents.
+- After every successful document the persisted list shrinks by one,
+  so a hard service crash at any point loses at most the document in
+  flight — the resume retries from there.
+- New endpoints: `POST /api/finance/analyze-pause`,
+  `POST /api/finance/analyze-resume`, `GET /api/finance/resumable`.
+- Banner UI shows current state explicitly: a *"Pausiere nach
+  Auszug X …"* line during the pending-pause window, and a
+  *"Pausiert bei X/Y — über ▶ Fortsetzen weiter"* yellow banner
+  while paused.
+
+Verified with a Pause/Resume roundtrip: pause at 2/5 documents,
+3 pending in `meta`, resume processes those 3, pending list cleared.
+
+### Verified — pre-push test suite
+
+This release ships only after a 7-section local test suite turned
+green: imports, page-by-page extraction, single-pass fallback +
+escalation, corrupt-PDF fallback, balance-mismatch warning, pause /
+resume roundtrip, and `/finance` + 6 other routes against three
+database states (empty, clean ISO, messy non-ISO).
+
 ## [0.25.4] – 2026-05-01
 
 ### Fixed — `/finance` 500 on non-ISO booking dates
