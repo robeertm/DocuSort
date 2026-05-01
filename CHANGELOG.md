@@ -2,6 +2,48 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.24.0] – 2026-05-01
+
+### Added — Force re-analysis of every Kontoauszug, automatic on upgrade
+
+- **Auto-trigger on version change.** On every startup the watcher
+  compares the running `__version__` to a `last_reanalyzed_version`
+  flag in the DB. When they differ and the library already contains
+  statement rows, a bulk re-extraction is queued for every
+  Kontoauszug (and Bank-look-alike) document — same background
+  worker the dashboard banner already polls. The flag is written
+  back so the heavy job runs at most once per upgrade. First-install
+  is detected (no statements) and baselined silently.
+
+- **Manual button.** On `/finance` the bulk-analyse banner now stays
+  visible while there's at least one statement in the library. A new
+  *"↺ Auch bereits verarbeitete neu auswerten"* link triggers the
+  same job on demand — the obvious recourse when the user suspects a
+  past extraction missed bookings.
+
+- **`POST /api/finance/reanalyze-all`** — public endpoint behind the
+  manual button. Reuses the `analyze-statements` activity job, so
+  progress + notifications work without UI changes.
+
+### Added — Manual category overrides survive re-extraction
+
+- New `transaction_category_overrides` table, keyed by `tx_hash`.
+  When the user manually re-categorises a booking via
+  `/transactions`, the chosen category is also pinned in this
+  table.
+
+- After `upsert_statement` deletes and re-inserts transactions on a
+  re-extraction, the overrides are stamped back on. So an upgrade-
+  time bulk reanalysis no longer silently undoes the user's
+  *Sonstige* / *Lebensmittel* corrections — the LLM's output is
+  applied first, then the user's pins win.
+
+### Added — `meta` key/value table
+
+Generic `meta(key TEXT PRIMARY KEY, value TEXT)` for durable single-
+string state. First customer is `last_reanalyzed_version`; future
+single-value flags belong here too instead of growing the schema.
+
 ## [0.23.2] – 2026-05-01
 
 ### Changed

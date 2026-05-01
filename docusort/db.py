@@ -321,6 +321,31 @@ class Database:
             )
             logger.info("DB migration: added statements.acknowledged_empty")
 
+        # Per-tx category overrides — set when the user manually
+        # recategorises a booking via /transactions. Survives the
+        # delete-and-reinsert that upsert_statement performs on
+        # re-extraction, so an upgrade-time bulk reanalysis doesn't
+        # silently throw away the user's manual labels.
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS transaction_category_overrides (
+                   tx_hash  TEXT PRIMARY KEY,
+                   category TEXT NOT NULL,
+                   set_at   TEXT NOT NULL
+               )"""
+        )
+
+        # Generic key-value meta table. First customer is
+        # last_reanalyzed_version so the auto-reanalyse-on-upgrade hook
+        # can tell what version it last ran for, but anything else that
+        # needs a single durable string belongs here too instead of
+        # growing the schema.
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS meta (
+                   key   TEXT PRIMARY KEY,
+                   value TEXT NOT NULL
+               )"""
+        )
+
         # NOTE: 0.15.1 shipped a startup cleanup that deleted every
         # `statements` row whose document didn't have category =
         # 'Kontoauszug'. That was destructive — pre-0.13 installs
@@ -334,6 +359,63 @@ class Database:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    # ---------- Meta key/value ----------
+
+    def meta_get(self, key: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM meta WHERE key = ?", (key,)
+            ).fetchone()
+        return row["value"] if row else None
+
+    def meta_set(self, key: str, value: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO meta (key, value) VALUES (?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+                (key, value),
+            )
+            self._conn.commit()
+
+    # ---------- Transaction category overrides ----------
+
+    def tx_override_set(self, tx_hash: str, category: str) -> None:
+        """Record that the user manually pinned this booking to `category`.
+        Re-extraction will restore this label after wiping the row.
+        No-op when tx_hash is empty (legacy rows can lack the hash)."""
+        if not tx_hash:
+            return
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO transaction_category_overrides (tx_hash, category, set_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(tx_hash) DO UPDATE SET
+                     category = excluded.category,
+                     set_at   = excluded.set_at""",
+                (tx_hash, category, now),
+            )
+            self._conn.commit()
+
+    def _apply_overrides_to_statement(self, stmt_id: int) -> int:
+        """Re-stamp manual categories onto the freshly inserted rows of a
+        re-extracted statement. Called from inside upsert_statement under
+        the existing lock — does not commit on its own. Returns the row
+        count that was actually rewritten."""
+        cur = self._conn.execute(
+            """UPDATE transactions
+                  SET category = (
+                    SELECT o.category
+                    FROM transaction_category_overrides o
+                    WHERE o.tx_hash = transactions.tx_hash
+                  )
+                WHERE statement_id = ?
+                  AND tx_hash IS NOT NULL AND tx_hash != ''
+                  AND tx_hash IN (SELECT tx_hash FROM transaction_category_overrides)""",
+            (stmt_id,),
+        )
+        return cur.rowcount or 0
 
     def insert_document(self, rec: DocumentRecord) -> int:
         data = asdict(rec)
@@ -1067,6 +1149,11 @@ class Database:
                      tx.get("purpose") or "", tx.get("tx_type") or "",
                      tx.get("category") or "", tx.get("tx_hash") or "", i),
                 )
+            # Re-stamp manual category overrides over whatever the
+            # extractor produced. Without this an upgrade-time bulk
+            # reanalysis would silently undo the user's `Sonstige`
+            # tagging across thousands of bookings.
+            self._apply_overrides_to_statement(stmt_id)
         return stmt_id
 
     def get_statement(self, doc_id: int) -> dict[str, Any] | None:
@@ -1445,19 +1532,48 @@ class Database:
     ) -> int:
         """Bulk-recategorise a set of transactions. Returns the row count
         that was actually updated (skips ids that don't exist or already
-        carried the same category)."""
+        carried the same category).
+
+        Also pins the chosen category in the override table keyed by
+        tx_hash, so a later re-extraction (e.g. an upgrade-time bulk
+        reanalysis) restores the user's manual labels instead of
+        silently reverting to whatever the LLM picked this time."""
         if not tx_ids:
             return 0
         placeholders = ",".join("?" * len(tx_ids))
+        now = datetime.now().isoformat(timespec="seconds")
         with self._lock:
+            # Capture tx_hashes BEFORE the UPDATE so the override table
+            # gets stamped even for rows whose category was already the
+            # target (rowcount-skipped by the WHERE clause below).
+            hashes = [
+                row["tx_hash"]
+                for row in self._conn.execute(
+                    f"SELECT tx_hash FROM transactions "
+                    f"WHERE id IN ({placeholders}) "
+                    f"  AND tx_hash IS NOT NULL AND tx_hash != ''",
+                    [int(i) for i in tx_ids],
+                ).fetchall()
+            ]
             cur = self._conn.execute(
                 f"UPDATE transactions SET category = ? "
                 f"WHERE id IN ({placeholders}) "
                 f"  AND COALESCE(category, '') != ?",
                 [category, *[int(i) for i in tx_ids], category],
             )
+            n = cur.rowcount or 0
+            for h in hashes:
+                self._conn.execute(
+                    """INSERT INTO transaction_category_overrides
+                         (tx_hash, category, set_at)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(tx_hash) DO UPDATE SET
+                         category = excluded.category,
+                         set_at   = excluded.set_at""",
+                    (h, category, now),
+                )
             self._conn.commit()
-            return cur.rowcount or 0
+            return n
 
     # ---------- Finance: charts & analytics ----------
 

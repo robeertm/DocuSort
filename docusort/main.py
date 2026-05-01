@@ -415,6 +415,62 @@ def _ensure_dirs(settings: AppSettings) -> None:
         p.mkdir(parents=True, exist_ok=True)
 
 
+def _maybe_trigger_post_upgrade_reanalysis(
+    settings: AppSettings, db: Database, classifier: Classifier | None, log,
+) -> None:
+    """If the running version differs from the one stored in the DB
+    meta table, kick off a full re-extraction of every Kontoauszug
+    document in the background. Manual category overrides are
+    preserved by the transaction_category_overrides table, so the
+    user's `Sonstige`/`Lebensmittel` corrections survive.
+
+    Skips on first install (no statements yet) and on every subsequent
+    boot of the same version, so the heavy job runs at most once per
+    upgrade.
+    """
+    try:
+        last = db.meta_get("last_reanalyzed_version") or ""
+        if last == __version__:
+            return
+        with db._lock:
+            stmt_count = db._conn.execute(
+                "SELECT COUNT(*) AS n FROM statements"
+            ).fetchone()["n"]
+        if not last and stmt_count == 0:
+            db.meta_set("last_reanalyzed_version", __version__)
+            log.info("First-install: skipped post-upgrade reanalysis, baselining meta")
+            return
+        if classifier is None:
+            log.info("Skipping post-upgrade reanalysis: classifier not ready")
+            return
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
+        if settings.finance.local_only and not is_local:
+            log.info(
+                "Skipping post-upgrade reanalysis: finance.local_only is on but "
+                "provider %r is not local. Trigger the bulk job manually from "
+                "/finance after switching providers.",
+                settings.ai.provider,
+            )
+            db.meta_set("last_reanalyzed_version", __version__)
+            return
+        from .web.bulk_reanalyze import start_reanalyze_all_statements
+        result = start_reanalyze_all_statements(settings, db, classifier, force_all=True)
+        if result.get("started"):
+            log.info(
+                "Version changed (%s → %s); queued re-extraction for %d statement(s). "
+                "Manual category overrides will be preserved.",
+                last or "(none)", __version__, result.get("total", 0),
+            )
+            db.meta_set("last_reanalyzed_version", __version__)
+        else:
+            log.info(
+                "Post-upgrade reanalysis: not started (%s)",
+                result.get("reason", "unknown"),
+            )
+    except Exception:
+        log.exception("post-upgrade reanalysis hook errored — continuing startup")
+
+
 def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> None:
     """Run the FastAPI app with uvicorn in the current thread.
 
@@ -427,6 +483,8 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
 
     log = logging.getLogger("docusort.main")
     app = create_app(settings, db, classifier)
+
+    _maybe_trigger_post_upgrade_reanalysis(settings, db, classifier, log)
 
     ssl_kwargs: dict = {}
     cert, key = settings.web.ssl_cert, settings.web.ssl_key

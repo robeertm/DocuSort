@@ -1197,6 +1197,30 @@ def create_app(
         from .. import activity
         return activity.get_job("analyze-statements").as_dict()
 
+    @app.post("/api/finance/reanalyze-all")
+    def api_reanalyze_all_statements():
+        """Force re-extraction over EVERY Kontoauszug (and Bank-look-
+        alike) document, including ones that already have populated
+        statement rows. Use when a new release ships an extractor
+        improvement and the user wants the existing library refreshed
+        — manual category overrides are preserved by the
+        transaction_category_overrides table.
+
+        Same background worker + activity job as `/analyze-all`, so
+        the existing progress endpoint and dashboard banner both work
+        without changes.
+        """
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
+        if settings.finance.local_only and not is_local:
+            raise HTTPException(
+                403,
+                "finance.local_only is enabled but the active provider is not local.",
+            )
+        from .bulk_reanalyze import start_reanalyze_all_statements
+        return start_reanalyze_all_statements(settings, db, classifier, force_all=True)
+
     @app.get("/api/finance/unanalyzed-count")
     def api_unanalyzed_count():
         """Cheap count for the UI banner — how many statement-shaped
@@ -1233,8 +1257,25 @@ def create_app(
                      AND s.id NOT IN (SELECT statement_id FROM transactions)
                      AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
             ).fetchone()
+            total = db._conn.execute(
+                """SELECT COUNT(*) AS n FROM documents d
+                   WHERE d.deleted_at IS NULL
+                     AND (
+                       d.category = 'Kontoauszug'
+                       OR (d.category = 'Bank' AND (
+                         d.subcategory = 'Konto'
+                         OR d.subcategory = 'Karte'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kontoauszug%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%girokonto%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%tagesgeld%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kreditkart%'
+                         OR LOWER(COALESCE(d.subject,'')) LIKE '%paypal%auszug%'
+                       ))
+                     )"""
+            ).fetchone()
         return {"missing": int(missing["n"] if missing else 0),
-                "empty":   int(empty["n"]   if empty   else 0)}
+                "empty":   int(empty["n"]   if empty   else 0),
+                "total":   int(total["n"]   if total   else 0)}
 
     @app.get("/api/document/{doc_id}/status")
     def api_doc_status(doc_id: int):
