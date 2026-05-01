@@ -1028,7 +1028,8 @@ def create_app(
             missing = db._conn.execute(
                 """SELECT d.id AS doc_id, d.category AS category,
                           COALESCE(d.subject, d.filename) AS subject,
-                          d.extracted_text AS text
+                          d.extracted_text AS text,
+                          d.library_path AS library_path
                    FROM documents d
                    LEFT JOIN statements s ON s.doc_id = d.id
                    WHERE d.deleted_at IS NULL
@@ -1050,7 +1051,8 @@ def create_app(
             empty = db._conn.execute(
                 """SELECT d.id AS doc_id, d.category AS category,
                           COALESCE(d.subject, d.filename) AS subject,
-                          d.extracted_text AS text
+                          d.extracted_text AS text,
+                          d.library_path AS library_path
                    FROM documents d
                    JOIN statements s ON s.doc_id = d.id
                    WHERE d.deleted_at IS NULL
@@ -1062,18 +1064,16 @@ def create_app(
                      )"""
             ).fetchall()
 
-        # Dedup on doc_id (a doc could in theory match both queries,
-        # though our schema keeps them disjoint). Order: missing first,
-        # then empty — feels more natural progress-wise.
         seen: set[int] = set()
-        targets: list[tuple[int, str, str, str]] = []  # (doc_id, subject, text, category)
+        targets: list[tuple[int, str, str, str, str]] = []  # (doc_id, subject, text, category, library_path)
         for r in list(missing) + list(empty):
             doc_id = int(r["doc_id"])
             if doc_id in seen:
                 continue
             seen.add(doc_id)
             cat = (r["category"] if "category" in r.keys() else None) or ""
-            targets.append((doc_id, r["subject"] or f"doc {doc_id}", r["text"], cat))
+            targets.append((doc_id, r["subject"] or f"doc {doc_id}", r["text"], cat,
+                            r["library_path"] or ""))
 
         if not targets:
             return {"started": False, "reason": "nothing to analyse",
@@ -1091,7 +1091,7 @@ def create_app(
                 max_text_chars=max(settings.ai.max_text_chars, 32000),
                 holder_names=settings.finance.holder_names,
             )
-            for idx, (doc_id, subject, text, category) in enumerate(targets):
+            for idx, (doc_id, subject, text, category, library_path) in enumerate(targets):
                 if idx > 0:
                     _time.sleep(0.6)
                 activity.update_job(
@@ -1099,7 +1099,15 @@ def create_app(
                     current=str(subject)[:120], current_doc_id=doc_id,
                 )
                 try:
-                    stmt = extractor.extract(text, pseudonymize=do_pseudo)
+                    pdf_path = None
+                    if library_path:
+                        p = Path(library_path)
+                        if p.exists() and p.suffix.lower() == ".pdf":
+                            pdf_path = p
+                    stmt = extractor.extract(
+                        text, pseudonymize=do_pseudo,
+                        pdf_path=pdf_path, ocr_settings=settings.ocr,
+                    )
                     if not stmt.transactions:
                         # Persist the empty result with whatever
                         # metadata we got — diag banner will still
@@ -1202,6 +1210,37 @@ def create_app(
     def api_analyze_progress():
         from .. import activity
         return activity.get_job("analyze-statements").as_dict()
+
+    @app.post("/api/finance/analyze-pause")
+    def api_analyze_pause():
+        """Cooperative pause for the active statement-analysis run.
+        Worker stops after the current document, persists the
+        still-pending doc_ids, and clears `running`. /resume picks
+        them up later."""
+        from .. import activity
+        ok = activity.request_pause("analyze-statements")
+        return {"ok": ok, **activity.get_job("analyze-statements").as_dict()}
+
+    @app.post("/api/finance/analyze-resume")
+    def api_analyze_resume():
+        """Pick up a previously paused (or service-restart-interrupted)
+        run. Reads the persisted pending doc_id list from `meta` and
+        starts a fresh worker with those targets only."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        from .bulk_reanalyze import start_reanalyze_all_statements, has_resumable_run
+        if not has_resumable_run(db):
+            raise HTTPException(409, "nothing to resume")
+        return start_reanalyze_all_statements(
+            settings, db, classifier, force_all=True, resume=True,
+        )
+
+    @app.get("/api/finance/resumable")
+    def api_finance_resumable():
+        """Cheap pointer-check the UI uses to decide whether to surface
+        a Resume button after a service restart or a manual pause."""
+        from .bulk_reanalyze import has_resumable_run
+        return {"resumable": has_resumable_run(db)}
 
     @app.post("/api/finance/reanalyze-all")
     def api_reanalyze_all_statements():

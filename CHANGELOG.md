@@ -2,6 +2,50 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.25.0] – 2026-05-01
+
+### Added — Page-by-page statement extraction
+
+Default extraction path is now **page-by-page** when the source PDF
+is reachable on disk: each page is sent as a separate, small request
+and the booking lists are merged. This is far more reliable on long
+documents — single-pass extraction would lose bookings to output
+truncation on a 12-page Privatgirokonto, even at 64k output tokens.
+
+- New OCR helper `ocr.extract_pages` returns one string per PDF page.
+- New compact `_PAGE_SYSTEM_PROMPT` for the per-page calls — header
+  fields (bank, IBAN, period, balances) are merged across pages
+  (first non-empty wins; opening from the earliest page that has
+  one, closing from the latest).
+- Single-pass extraction stays as a fallback for legacy rows where
+  `library_path` is empty, with the previous 16k → 32k → 64k output
+  budget escalation.
+
+### Added — Pause / Resume bulk re-analysis
+
+A long re-analysis run can now be paused and continued later — even
+across a service restart.
+
+- **⏸ Pause** in the bulk-analyse banner sets a cooperative flag.
+  The worker stops after the current document, persists the still-
+  pending doc_id list under `meta.analyze_statements_pending`, and
+  releases the running flag.
+- **▶ Fortsetzen** picks the list up, runs only those documents.
+- After every successful document the persisted list shrinks by one,
+  so a hard service crash at any point loses at most the document
+  in flight — the resume will retry from there.
+- New endpoints: `POST /api/finance/analyze-pause`,
+  `POST /api/finance/analyze-resume`, `GET /api/finance/resumable`.
+
+### Fixed — Bulk-analyse banner progress bar invisible
+
+The progress bar relied on Tailwind classes (`bg-cyan-400/80`,
+`text-cyan-300`, `border-cyan-500/30`) that the JIT silently dropped
+from the bundle when they only appeared on this banner. The bar
+rendered but with a transparent fill — looked broken. Replaced every
+cyan utility on the banner with inline hex / rgba styles, immune to
+JIT pruning.
+
 ## [0.24.1] – 2026-05-01
 
 ### Fixed — Statements with mismatched balances and zero transactions

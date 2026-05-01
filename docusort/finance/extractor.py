@@ -26,6 +26,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from ..providers import Provider, ProviderError
@@ -272,6 +273,61 @@ _USER_TEMPLATE = (
 )
 
 
+# Compact prompt for page-by-page extraction. Used as a last-resort
+# fallback when single-pass extraction loses bookings on long
+# documents. The model only needs to emit transactions for ONE page
+# at a time, so we drop the header / few-shot bulk that would
+# otherwise be repeated 12 times for a 12-page statement.
+_PAGE_SYSTEM_PROMPT = f"""You extract data from a single OCR'd PAGE of a bank statement.
+
+Reply with ONE JSON object — no prose, no markdown fences:
+
+{{
+  "bank_name": "canonical bank name if printed on this page, else empty",
+  "account_iban_token": "the user's account IBAN_xxx if printed at the top of this page, else empty",
+  "account_holder_token": "the account holder NAME_xxx if printed, else empty",
+  "period_start": "YYYY-MM-DD if a booking-period start is printed, else empty",
+  "period_end": "YYYY-MM-DD if a booking-period end is printed, else empty",
+  "statement_no": "Auszug-Nr. if printed, else empty",
+  "opening_balance": signed_number_or_null,
+  "closing_balance": signed_number_or_null,
+  "currency": "ISO-3 letter, default EUR",
+  "transactions": [
+    {{
+      "booking_date": "YYYY-MM-DD",
+      "value_date": "YYYY-MM-DD or empty",
+      "amount": signed_number,
+      "counterparty": "string",
+      "counterparty_iban_token": "IBAN_xxx if printed, else empty",
+      "purpose": "Verwendungszweck / Mandatsreferenz",
+      "tx_type": "one of {list(TX_TYPES)}",
+      "category": "one of {list(TX_CATEGORIES)}"
+    }}
+  ]
+}}
+
+Rules:
+- Header fields (bank, IBAN, period, balances) only appear on a few pages
+  (typically the first and last). When the field is NOT printed on THIS
+  page, return "" or null — the merger combines values across pages.
+- Read EVERY booking row on the page. Just emit the rows you see on THIS
+  page — don't re-emit anything from earlier pages.
+- Numbers: dot is decimal, "1.234,56" → 1234.56. Outgoing/Lastschrift/
+  Belastung → NEGATIVE amount. Eingang/Gutschrift/Habenbuchung → POSITIVE.
+- Skip layout-only lines: "Übertrag", "Saldo neu", "Saldo alt", page
+  numbers, footer disclaimers, "Bitte beachten Sie", BIC-only lines.
+- Skip the opening / closing balance rows (those carry the running total,
+  not a booking).
+- "Übertrag" between own accounts of the same holder → category=uebertrag.
+
+Return ONLY the JSON object."""
+
+_PAGE_USER_TEMPLATE = (
+    "Page {page_no} of {total_pages}. Emit JSON for the bookings on "
+    "THIS page only.\n\n---\n{text}\n---"
+)
+
+
 def _parse_response(raw: str) -> dict[str, Any]:
     """Pull the first JSON object out of the model reply (same robust
     decoder as receipts.py — handles markdown fences and stray prose)."""
@@ -371,6 +427,112 @@ class StatementExtractor:
         # rationale.
         self.holder_names = list(holder_names or [])
 
+    def _extract_pages(self, pdf_path: Path, ocr_settings,
+                       *, pseudo: Pseudonymizer | None,
+                       pseudonymize: bool) -> tuple[dict, Any]:
+        """Page-by-page extraction. Each page is a small, standalone
+        request — even a 7B model with a tight context window can
+        reliably enumerate every booking on a single page. Header
+        fields (bank, IBAN, period, balances) are merged across pages:
+        first non-empty wins for identity-style fields, opening_balance
+        comes from the earliest page that has it, closing_balance from
+        the latest. Returns the merged-data dict and the LAST page
+        response (used by the caller for raw_response storage).
+        """
+        from .. import ocr as _ocr_mod
+
+        pages = _ocr_mod.extract_pages(pdf_path, ocr_settings)
+        if not pages:
+            raise ValueError(f"no pages extracted from {pdf_path}")
+        total_pages = len(pages)
+
+        merged: dict[str, Any] = {
+            "bank_name": "", "account_iban_token": "", "account_holder_token": "",
+            "period_start": "", "period_end": "", "statement_no": "",
+            "opening_balance": None, "closing_balance": None,
+            "currency": "EUR", "transactions": [],
+        }
+        last_resp = None
+
+        for idx, page_text in enumerate(pages, start=1):
+            text = (page_text or "").strip()
+            if not text or len(text) < 20:
+                continue
+            body = text[: self.max_text_chars]
+            if pseudonymize and pseudo is not None:
+                body = pseudo.pseudonymize(body)
+            try:
+                resp = self.provider.classify(
+                    system_prompt=_PAGE_SYSTEM_PROMPT,
+                    user_prompt=_PAGE_USER_TEMPLATE.format(
+                        page_no=idx, total_pages=total_pages, text=body,
+                    ),
+                    model=self.model,
+                    # 16k per page is comfortable: a single page caps
+                    # out at maybe 30 bookings, well within budget.
+                    max_output_tokens=16000,
+                    timeout=300.0,
+                )
+            except ProviderError as exc:
+                logger.warning(
+                    "Per-page extract page %d/%d failed: %s",
+                    idx, total_pages, exc,
+                )
+                continue
+            last_resp = resp
+            try:
+                page_data = _parse_response(resp.raw_text)
+            except ValueError:
+                logger.warning(
+                    "Per-page extract: unparseable response on page %d/%d",
+                    idx, total_pages,
+                )
+                continue
+            if not isinstance(page_data, dict):
+                continue
+
+            # Header merge: take the first non-empty value we encounter.
+            # On most statements the IBAN / holder block sits at the top
+            # of page 1, so this lands the right identity fields.
+            for key in ("bank_name", "account_iban_token",
+                        "account_holder_token", "statement_no"):
+                if not merged[key]:
+                    v = str(page_data.get(key) or "").strip()
+                    if v:
+                        merged[key] = v
+            cur = str(page_data.get("currency") or "").strip().upper()
+            if cur and cur != "EUR" and merged["currency"] == "EUR":
+                merged["currency"] = cur
+
+            # Period: keep the earliest start / latest end across pages.
+            ps = str(page_data.get("period_start") or "").strip()[:10]
+            pe = str(page_data.get("period_end")   or "").strip()[:10]
+            if ps and (not merged["period_start"] or ps < merged["period_start"]):
+                merged["period_start"] = ps
+            if pe and (not merged["period_end"]   or pe > merged["period_end"]):
+                merged["period_end"]   = pe
+
+            # Balances: opening from the first page that prints one
+            # (page 1), closing from the last (page N). Easy heuristic
+            # since pages are processed in order — earliest non-null
+            # opening wins, latest non-null closing wins.
+            ob = _coerce_float(page_data.get("opening_balance"))
+            cb = _coerce_float(page_data.get("closing_balance"))
+            if ob is not None and merged["opening_balance"] is None:
+                merged["opening_balance"] = ob
+            if cb is not None:
+                merged["closing_balance"] = cb
+
+            txs = page_data.get("transactions")
+            if isinstance(txs, list):
+                merged["transactions"].extend(
+                    t for t in txs if isinstance(t, dict)
+                )
+
+        if last_resp is None:
+            raise ValueError("no page produced a parseable response")
+        return merged, last_resp
+
     def _call_and_parse(self, body: str, *, max_output_tokens: int):
         """One LLM round-trip. Generating the full transaction list
         of a multi-page Privatgirokonto can take a couple of minutes,
@@ -389,48 +551,87 @@ class StatementExtractor:
         data = _parse_response(resp.raw_text)
         return resp, data
 
-    def extract(self, ocr_text: str, *, pseudonymize: bool = True) -> Statement:
+    def _extract_single_pass(self, ocr_text: str, *,
+                             pseudo: Pseudonymizer | None,
+                             pseudonymize: bool):
+        """Whole-document extraction in one LLM call. Used as a fallback
+        when there's no PDF on disk to drive the per-page path (e.g.
+        legacy rows where library_path is missing). Escalates the
+        output budget on balance-mismatch evidence: 16k → 32k → 64k."""
+        body = ocr_text[: self.max_text_chars]
+        if pseudonymize and pseudo is not None:
+            body = pseudo.pseudonymize(body)
+
+        resp, data = self._call_and_parse(body, max_output_tokens=16000)
+        if _looks_like_lost_bookings(data):
+            logger.warning(
+                "Statement extractor: balance mismatch but transactions=[]; "
+                "retrying at 32k output budget."
+            )
+            resp, data = self._call_and_parse(body, max_output_tokens=32000)
+        if _looks_like_lost_bookings(data):
+            logger.warning(
+                "Statement extractor: still empty at 32k; trying 64k."
+            )
+            resp, data = self._call_and_parse(body, max_output_tokens=64000)
+        return data, resp
+
+    def extract(self, ocr_text: str, *, pseudonymize: bool = True,
+                pdf_path: Path | None = None,
+                ocr_settings=None) -> Statement:
+        """Extract a statement from OCR text.
+
+        Preferred mode is **page-by-page**: each page is sent as a
+        separate, small request and the booking lists are merged. This
+        is reliable on long documents where single-pass extraction
+        loses bookings to output truncation, and it costs roughly the
+        same number of tokens overall — no large output buffers
+        wasted, no escalation ladder.
+
+        Falls back to **single-pass** only when there's no PDF on disk
+        to re-OCR (legacy data with stored OCR text but a missing
+        `library_path`)."""
         if not ocr_text:
             raise ValueError("no OCR text provided")
-        body = ocr_text[: self.max_text_chars]
 
         pseudo: Pseudonymizer | None = None
         if pseudonymize:
             pseudo = Pseudonymizer()
             if self.holder_names:
                 pseudo.seed_household_names(self.holder_names)
-            body = pseudo.pseudonymize(body)
 
-        # First attempt with a generous-but-not-extreme output budget.
-        # Most statements (1-3 pages, < 30 bookings) fit comfortably.
-        resp, data = self._call_and_parse(body, max_output_tokens=16000)
         warning = ""
+        resp = None  # populated by whichever path actually called the LLM
 
-        # Sanity check: if opening and closing balances both came back
-        # AND they differ by more than a rounding cent AND the model
-        # returned zero transactions, something went wrong — balances
-        # change ONLY through bookings, so the table must exist on the
-        # page. Most common cause: Ollama clipped the output mid-table
-        # because the JSON didn't fit in num_predict, leaving an empty
-        # (but parseable) outer object. Retry once with a much larger
-        # output budget; many statements that "lost" their bookings on
-        # the first try come back complete on the second.
-        if _looks_like_lost_bookings(data):
-            logger.warning(
-                "Statement extractor: opening/closing balance mismatch but "
-                "transactions=[]; retrying with larger output budget."
+        if pdf_path is not None and ocr_settings is not None:
+            try:
+                data, resp = self._extract_pages(
+                    pdf_path, ocr_settings,
+                    pseudo=pseudo, pseudonymize=pseudonymize,
+                )
+            except Exception:
+                logger.exception(
+                    "Per-page extraction failed for %s — falling back to "
+                    "single-pass on stored OCR text.", pdf_path,
+                )
+                data, resp = self._extract_single_pass(
+                    ocr_text, pseudo=pseudo, pseudonymize=pseudonymize,
+                )
+        else:
+            data, resp = self._extract_single_pass(
+                ocr_text, pseudo=pseudo, pseudonymize=pseudonymize,
             )
-            resp, data = self._call_and_parse(body, max_output_tokens=32000)
-            if _looks_like_lost_bookings(data):
-                warning = (
-                    "extraction returned 0 transactions but opening/closing "
-                    "balances differ — likely an output-truncation or model "
-                    "miss. Re-analyse this statement."
-                )
-                logger.warning(
-                    "Statement extractor: still empty after retry — flagging "
-                    "as suspicious so the next bulk reanalysis picks it up.",
-                )
+
+        if _looks_like_lost_bookings(data):
+            warning = (
+                "extraction returned 0 transactions but opening/closing "
+                "balances differ — likely a model miss. Re-analyse this "
+                "statement."
+            )
+            logger.warning(
+                "Statement extractor: balance mismatch but no transactions "
+                "for %s — flagging as suspicious.", self.model,
+            )
         # Sanity check: if we ended up parsing a single transaction-
         # shaped inner object instead of the outer statement object,
         # the response was truncated. Log loud so the user can tell
