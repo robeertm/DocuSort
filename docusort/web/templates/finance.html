@@ -311,6 +311,14 @@
                    class="text-ink-200 hover:text-emerald-300 truncate flex-1 min-w-0"
                    x-text="s.subject || ('doc ' + s.doc_id)"></a>
                 <button type="button"
+                        @click="reanalyzeOne(s.doc_id)"
+                        :disabled="busyDoc === s.doc_id"
+                        class="text-[10px] text-amber-300 hover:text-amber-200 underline shrink-0"
+                        title="Diesen Auszug einzeln neu durch den LLM jagen — auch bei abgeschnittenem extra_json">
+                  <span x-show="busyDoc !== s.doc_id">neu auswerten</span>
+                  <span x-show="busyDoc === s.doc_id" x-cloak>läuft…</span>
+                </button>
+                <button type="button"
                         @click="dismiss(s.doc_id)"
                         class="text-[10px] text-ink-500 hover:text-rose-300 underline shrink-0"
                         title="Mark as 'no transactions to extract' so the banner stops nagging">
@@ -321,10 +329,19 @@
           </ul>
         </details>
       </div>
-      <button type="button" @click="reextract()" :disabled="busy"
-              class="btn-secondary text-xs shrink-0"
-              :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
-              x-text="busy ? T['finance.diag.running'] : T['finance.diag.button']"></button>
+      <div class="flex flex-col gap-1.5 shrink-0">
+        <button type="button" @click="salvage()" :disabled="busy"
+                class="btn-secondary text-xs"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                title="Versucht Buchungen aus dem gespeicherten LLM-Output zurückzuholen (kein neuer LLM-Aufruf, kostenlos)">
+          <span x-show="!salvaging">Aus extra_json retten</span>
+          <span x-show="salvaging" x-cloak>retten…</span>
+        </button>
+        <button type="button" @click="reextract()" :disabled="busy"
+                class="btn-secondary text-xs"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                x-text="busy ? T['finance.diag.running'] : T['finance.diag.button']"></button>
+      </div>
     </div>
     <div x-show="result" x-cloak class="mt-3 text-xs rounded px-3 py-2"
          :class="resultOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
@@ -1380,7 +1397,8 @@ function financeDiag(initialItems, initialTotal) {
   return {
     items: initialItems || [],
     total: initialTotal || 0,
-    busy: false, result: '', resultOk: false,
+    busy: false, salvaging: false, busyDoc: null,
+    result: '', resultOk: false,
     pollHandle: null,
     init() {
       // Light background polling so the banner reflects state changes
@@ -1422,6 +1440,49 @@ function financeDiag(initialItems, initialTotal) {
         await fetch(`/api/document/${docId}/statement/dismiss-empty`,
                     { method: 'POST' });
       } catch (e) { this.refresh(); }
+    },
+    async salvage() {
+      this.salvaging = true; this.busy = true; this.result = '';
+      try {
+        const r = await fetch('/api/finance/salvage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.resultOk = d.recovered_count > 0;
+        const recovered = d.recovered_count || 0;
+        const remaining = d.unrecoverable_count || 0;
+        this.result = `Aus extra_json zurückgeholt: ${recovered} Auszug${recovered === 1 ? '' : 'e'}.` +
+          (remaining ? ` Weitere ${remaining} brauchen einen neuen LLM-Lauf (extra_json war leer / abgeschnitten).` : '');
+        await this.refresh();
+      } catch (e) {
+        this.resultOk = false;
+        this.result = e.message || String(e);
+      } finally {
+        this.salvaging = false; this.busy = false;
+      }
+    },
+    async reanalyzeOne(docId) {
+      this.busyDoc = docId; this.result = '';
+      try {
+        const r = await fetch('/api/finance/reanalyze-doc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doc_id: docId }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.resultOk = (d.transactions || 0) > 0;
+        this.result = `Doc ${docId}: ${d.transactions || 0} Buchungen extrahiert ` +
+          `(Periode ${d.period_start || '?'}..${d.period_end || '?'}).` +
+          (d.warning ? ` Warnung: ${d.warning}` : '');
+        await this.refresh();
+      } catch (e) {
+        this.resultOk = false;
+        this.result = `Doc ${docId}: ${e.message || String(e)}`;
+      } finally { this.busyDoc = null; }
     },
   };
 }

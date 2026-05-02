@@ -1030,6 +1030,134 @@ def create_app(
             "steps":         result.steps,
         }
 
+    @app.post("/api/finance/salvage")
+    def api_finance_salvage(payload: dict = Body(default={})):
+        """Recover transactions for statements where the table is empty
+        but extra_json holds parseable bookings. No LLM call.
+
+        Pass `{"dry_run": true}` to preview without writing. With no
+        body or `{"dry_run": false}` it actually inserts the rows."""
+        from ..finance.salvage import salvage_all_empty
+        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
+        try:
+            return salvage_all_empty(db, dry_run=dry)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"salvage failed: {type(exc).__name__}: {exc}") from exc
+
+    @app.post("/api/finance/reanalyze-doc")
+    def api_finance_reanalyze_doc(payload: dict = Body(...)):
+        """Force a fresh extraction on one specific doc — bypasses the
+        bulk worker so the user can target a statement whose extra_json
+        is truncated and won't be picked up by the empty-row scanner.
+
+        Runs synchronously with the foreground request: a single
+        statement on per-page mode takes ~30s on the local bridge,
+        which is short enough to wait for inline rather than spinning
+        up the analyze-statements worker for one doc.
+        """
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
+        if settings.finance.local_only and not is_local:
+            raise HTTPException(
+                403,
+                "finance.local_only is enabled but the active provider is not local.",
+            )
+
+        try:
+            doc_id = int(payload.get("doc_id"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "doc_id is required") from None
+
+        with db._lock:
+            doc = db._conn.execute(
+                "SELECT id, library_path, extracted_text, category "
+                "FROM documents WHERE id = ? AND deleted_at IS NULL",
+                (doc_id,),
+            ).fetchone()
+        if not doc:
+            raise HTTPException(404, f"doc {doc_id} not found")
+        if not doc["extracted_text"]:
+            raise HTTPException(409, f"doc {doc_id} has no OCR text on file")
+
+        from ..finance.extractor import StatementExtractor
+        from ..providers import ProviderError
+        from hashlib import sha256
+        from pathlib import Path
+
+        extractor = StatementExtractor(
+            classifier.provider, settings.ai.model,
+            max_text_chars=settings.ai.max_text_chars,
+            holder_names=settings.finance.holder_names,
+        )
+
+        pdf_path = None
+        if doc["library_path"]:
+            p = Path(doc["library_path"])
+            if p.exists() and p.suffix.lower() == ".pdf":
+                pdf_path = p
+
+        do_pseudo = settings.finance.pseudonymize and not is_local
+
+        try:
+            stmt = extractor.extract(
+                doc["extracted_text"],
+                pseudonymize=do_pseudo,
+                pdf_path=pdf_path,
+                ocr_settings=settings.ocr,
+            )
+        except ProviderError as exc:
+            raise HTTPException(502, f"LLM provider error: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"extraction failed: {type(exc).__name__}: {exc}") from exc
+
+        account_id = None
+        if stmt.iban_hash:
+            account_id = db.upsert_account(
+                bank_name=stmt.bank_name or "Unbekannt",
+                iban=stmt.iban, iban_last4=stmt.iban_last4,
+                iban_hash=stmt.iban_hash,
+                account_holder=stmt.account_holder,
+                currency=stmt.currency,
+            )
+        tx_payload = []
+        for tx in stmt.transactions:
+            key = (
+                (stmt.iban_hash or "no-iban") + "|" +
+                tx.booking_date + "|" + f"{tx.amount:.2f}" +
+                "|" + tx.purpose
+            )
+            d = tx.as_dict()
+            d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
+            tx_payload.append(d)
+        db.upsert_statement(
+            doc_id, account_id=account_id,
+            period_start=stmt.period_start, period_end=stmt.period_end,
+            statement_no=stmt.statement_no,
+            opening_balance=stmt.opening_balance,
+            closing_balance=stmt.closing_balance,
+            currency=stmt.currency, file_hash="",
+            privacy_mode=stmt.privacy_mode,
+            transactions=tx_payload,
+            extra_json=stmt.raw_response,
+            extraction_warning=stmt.extraction_warning,
+        )
+        if doc["category"] == "Bank" and stmt.transactions:
+            with db._lock:
+                db._conn.execute(
+                    "UPDATE documents SET category = 'Kontoauszug', "
+                    "subcategory = '' WHERE id = ?", (doc_id,))
+                db._conn.commit()
+        return {
+            "ok": True, "doc_id": doc_id,
+            "transactions": len(stmt.transactions),
+            "period_start": stmt.period_start,
+            "period_end":   stmt.period_end,
+            "opening": stmt.opening_balance,
+            "closing": stmt.closing_balance,
+            "warning": stmt.extraction_warning,
+        }
+
     @app.get("/api/finance/diagnostics")
     def api_finance_diagnostics():
         """Surface statements that came back without any transactions —

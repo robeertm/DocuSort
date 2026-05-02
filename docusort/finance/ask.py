@@ -31,8 +31,11 @@ _SYSTEM_PROMPT = """You answer the user's question about their personal bank tra
 
 Each turn you reply with ONE JSON object — either a tool call or the final answer. No markdown, no prose around the JSON.
 
-Tool call:
+Tool call (preferred form):
 {"action": "tool", "tool": "<name>", "args": {...}}
+
+Alternative shorter form (also accepted):
+{"action": "<tool_name>", "args": {...}}
 
 Final answer:
 {"action": "answer", "text": "<concise German answer with totals and date range>"}
@@ -68,6 +71,12 @@ Rules:
 """
 
 
+_TOOL_NAMES = {
+    "search_transactions", "aggregate_transactions",
+    "list_categories", "list_merchants", "get_date_range",
+}
+
+
 def _parse(raw: str) -> dict[str, Any]:
     """Pull the first valid JSON object out of the model's reply."""
     raw = (raw or "").strip()
@@ -85,6 +94,44 @@ def _parse(raw: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
     raise ValueError(f"no JSON in reply: {raw[:200]!r}")
+
+
+def _normalise_action(obj: dict[str, Any]) -> dict[str, Any]:
+    """Coerce common LLM output shapes into the canonical
+    {"action": "tool"|"answer", ...} form. Local 7B/14B models often
+    drop the wrapper and emit `{"action": "aggregate_transactions", ...}`
+    or `{"tool": "...", "args": {...}}` — accept those instead of
+    crashing the loop."""
+    if not isinstance(obj, dict):
+        return {"action": "_invalid"}
+
+    action = obj.get("action")
+
+    # Canonical shape — pass through.
+    if action in ("tool", "answer"):
+        return obj
+
+    # Shape: {"action": "<tool_name>", "args": {...}}
+    if isinstance(action, str) and action in _TOOL_NAMES:
+        return {"action": "tool", "tool": action, "args": obj.get("args") or {}}
+
+    # Shape: {"tool": "<tool_name>", "args": {...}}  (no action key)
+    tool = obj.get("tool")
+    if isinstance(tool, str) and tool in _TOOL_NAMES:
+        return {"action": "tool", "tool": tool, "args": obj.get("args") or {}}
+
+    # Shape: {"answer": "..."} or {"text": "..."}  (final answer without wrapper)
+    for key in ("answer", "text", "response", "reply"):
+        v = obj.get(key)
+        if isinstance(v, str) and v.strip():
+            return {"action": "answer", "text": v}
+
+    # Shape: tool name as a key with args as its value.
+    for tn in _TOOL_NAMES:
+        if tn in obj and isinstance(obj[tn], dict):
+            return {"action": "tool", "tool": tn, "args": obj[tn]}
+
+    return {"action": "_invalid", "raw": obj}
 
 
 def _normalise_filter(args: dict[str, Any]) -> dict[str, Any]:
@@ -291,11 +338,26 @@ def answer_question(db, classifier, question: str) -> AskResult:
         total_cost += resp.cost_usd
 
         try:
-            action = _parse(resp.raw_text)
+            parsed = _parse(resp.raw_text)
         except ValueError as exc:
             raise RuntimeError(f"LLM did not return valid JSON: {exc}") from exc
 
+        action = _normalise_action(parsed)
         kind = action.get("action")
+        if kind == "_invalid":
+            # Feed the malformed reply back as a tool error so the LLM
+            # gets a chance to fix its format on the next turn instead
+            # of crashing the whole request. Local models recover fast
+            # once they see "your last reply wasn't a valid action".
+            history.append({
+                "call": {"tool": "_format_error", "args": {}},
+                "result": {"error":
+                    "Your last reply was not a valid action. Reply with one of: "
+                    "{\"action\":\"tool\",\"tool\":\"<name>\",\"args\":{...}} "
+                    "OR {\"action\":\"answer\",\"text\":\"...\"}. "
+                    f"Your reply was: {json.dumps(parsed, ensure_ascii=False)[:200]}"},
+            })
+            continue
 
         if kind == "answer":
             text = str(action.get("text") or "").strip()

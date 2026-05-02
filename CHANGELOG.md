@@ -2,6 +2,46 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.1] – 2026-05-02
+
+### Fixed — Ask: lenient action parsing
+
+Local 7B/14B models often replied `{"action":"aggregate_transactions","args":{...}}`
+instead of the canonical `{"action":"tool","tool":"aggregate_transactions",...}` —
+which crashed the request with HTTP 500. The parser now also accepts the
+shorthand form, plain `{"tool":...}`, and `{"answer":...}` / `{"text":...}`
+final-answer shapes. Malformed replies are fed back as a tool error so the
+LLM gets a chance to fix its format on the next turn instead of taking down
+the whole request.
+
+### Added — Recover transactions from `extra_json` (no LLM)
+
+Some statements ended up with the LLM's good extraction stored in
+`extra_json` but **0 rows in the transactions table** — caused by a
+re-extraction that returned an empty list and overwrote the previous
+data. The new salvage path re-parses the stored JSON and inserts the
+bookings without burning another LLM call.
+
+- New `docusort/finance/salvage.py` finds every empty statement,
+  parses `extra_json`, recomputes `tx_hash` with the same scheme as
+  bulk re-analyze, and re-inserts via `upsert_statement`.
+- `POST /api/finance/salvage` runs it; `{"dry_run":true}` previews
+  without writing.
+- New "Aus extra_json retten" button in the empty-statements banner
+  on /finance.
+
+### Added — Force re-analyze a single statement
+
+The bulk worker can be a heavy hammer when only one statement needs
+rescuing — and statements with truncated `extra_json` aren't always
+picked up by the empty-row scanner. A new per-doc endpoint runs the
+extraction synchronously on one document.
+
+- `POST /api/finance/reanalyze-doc` with `{"doc_id": N}`.
+- New "neu auswerten"-Link per Auszug im Banner-Detail.
+
+Verified by a 17-test pre-push suite.
+
 ## [0.27.0] – 2026-05-02
 
 ### Added — Natural-language Q&A over your transactions
