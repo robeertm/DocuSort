@@ -1174,6 +1174,7 @@ def create_app(
                    LEFT JOIN accounts a ON a.id = s.account_id
                    WHERE d.deleted_at IS NULL
                      AND d.category = 'Kontoauszug'
+                     AND COALESCE(s.acknowledged_empty, 0) = 0
                      AND s.id NOT IN (SELECT statement_id FROM transactions)
                    ORDER BY d.doc_date DESC, d.id DESC"""
             ).fetchall()

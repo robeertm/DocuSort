@@ -2,6 +2,16 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.3] – 2026-05-02
+
+### Fixed — Diag banner respects acknowledged_empty
+
+`/api/finance/diagnostics` was the only finance endpoint not filtering
+on `COALESCE(s.acknowledged_empty, 0) = 0`, so duplicate statements
+that v0.27.2's salvage had auto-acknowledged kept showing up in the
+"some statements need review" banner. Filter added; the banner now
+only lists statements that genuinely need work.
+
 ## [0.27.2] – 2026-05-02
 
 ### Fixed — Salvage now detects duplicate statements
