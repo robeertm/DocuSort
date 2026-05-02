@@ -2,6 +2,22 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.8] – 2026-05-02
+
+### Fixed — Per-doc "Statement extrahieren" now uses per-page mode
+
+The doc-detail page's extract button (POST
+`/api/document/{id}/statement/extract`) called
+`extractor.extract(text)` without `pdf_path` / `ocr_settings`. The
+extractor only switches to per-page mode when both are passed, so
+every long Kontoauszug fell back to single-pass and got truncated
+at the model's output budget — visible as a `extra_json` that ends
+mid-string and 0 transactions in the table even though the page
+metadata says "intensive analyse" ran.
+
+The bulk worker was already passing the right arguments; the
+single-doc endpoint just missed them. Fixed at the call site.
+
 ## [0.27.7] – 2026-05-02
 
 ### Fixed — No more surprise reanalyses on version bump

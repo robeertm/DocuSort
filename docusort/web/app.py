@@ -2012,8 +2012,22 @@ def create_app(
             max_text_chars=max(settings.ai.max_text_chars, 32000),
             holder_names=settings.finance.holder_names,
         )
+        # Resolve the on-disk PDF so per-page extraction can fire — the
+        # extractor only switches modes when pdf_path AND ocr_settings
+        # are both provided. Without them every long statement falls
+        # back to single-pass and gets truncated at the model's output
+        # budget (e.g. a 9-page Kontoauszug stops mid-transaction).
+        pdf_path = None
+        lib = doc.get("library_path") or doc.get("processed_path") or ""
+        if lib:
+            p = Path(lib)
+            if p.exists() and p.suffix.lower() == ".pdf":
+                pdf_path = p
         try:
-            stmt = extractor.extract(text, pseudonymize=do_pseudo)
+            stmt = extractor.extract(
+                text, pseudonymize=do_pseudo,
+                pdf_path=pdf_path, ocr_settings=settings.ocr,
+            )
         except Exception as exc:
             logger.exception("Statement extract failed for %d", doc_id)
             raise HTTPException(500, f"extract failed: {exc}")
