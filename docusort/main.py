@@ -429,47 +429,21 @@ def _maybe_trigger_post_upgrade_reanalysis(
     boot of the same version, so the heavy job runs at most once per
     upgrade.
     """
+    # Auto-reanalyse on version bump used to live here. Pulled in
+    # v0.27.7 — the user wanted full control over when extraction
+    # runs ("eine re-analyse will ich anschieben, niemand anders").
+    # Only thing we still do is baseline the meta key so a later
+    # toggle could rebuild the trigger if needed.
     try:
-        last = db.meta_get("last_reanalyzed_version") or ""
-        if last == __version__:
-            return
-        with db._lock:
-            stmt_count = db._conn.execute(
-                "SELECT COUNT(*) AS n FROM statements"
-            ).fetchone()["n"]
-        if not last and stmt_count == 0:
+        if (db.meta_get("last_reanalyzed_version") or "") != __version__:
             db.meta_set("last_reanalyzed_version", __version__)
-            log.info("First-install: skipped post-upgrade reanalysis, baselining meta")
-            return
-        if classifier is None:
-            log.info("Skipping post-upgrade reanalysis: classifier not ready")
-            return
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        if settings.finance.local_only and not is_local:
             log.info(
-                "Skipping post-upgrade reanalysis: finance.local_only is on but "
-                "provider %r is not local. Trigger the bulk job manually from "
-                "/finance after switching providers.",
-                settings.ai.provider,
-            )
-            db.meta_set("last_reanalyzed_version", __version__)
-            return
-        from .web.bulk_reanalyze import start_reanalyze_all_statements
-        result = start_reanalyze_all_statements(settings, db, classifier, force_all=True)
-        if result.get("started"):
-            log.info(
-                "Version changed (%s → %s); queued re-extraction for %d statement(s). "
-                "Manual category overrides will be preserved.",
-                last or "(none)", __version__, result.get("total", 0),
-            )
-            db.meta_set("last_reanalyzed_version", __version__)
-        else:
-            log.info(
-                "Post-upgrade reanalysis: not started (%s)",
-                result.get("reason", "unknown"),
+                "Version bump to %s — auto-reanalyse intentionally disabled. "
+                "Trigger from /finance when you want to re-extract.",
+                __version__,
             )
     except Exception:
-        log.exception("post-upgrade reanalysis hook errored — continuing startup")
+        log.exception("post-upgrade reanalysis baseline failed — continuing startup")
 
 
 def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> None:
@@ -490,16 +464,28 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
     # from the LLM response. Safe to run on every boot — the SQL
     # filter only matches rows that aren't already YYYY-MM-DD.
     try:
-        from .finance.salvage import normalise_existing_dates
-        report = normalise_existing_dates(db, dry_run=False)
-        if report.get("fixed"):
+        from .finance.salvage import normalise_existing_dates, delete_absurd_amounts
+        date_report = normalise_existing_dates(db, dry_run=False)
+        if date_report.get("fixed"):
             log.info(
                 "Date migration: normalised %d non-ISO booking_date / "
                 "value_date row(s) to ISO YYYY-MM-DD.",
-                report["fixed"],
+                date_report["fixed"],
+            )
+        # Same idea for amounts: drop rows where the LLM clearly
+        # misparsed a date / balance / row-count into the amount
+        # field. Real personal accounts don't see single bookings
+        # past ten million euros.
+        amt_report = delete_absurd_amounts(db, dry_run=False)
+        if amt_report.get("deleted"):
+            log.info(
+                "Amount migration: deleted %d row(s) with |amount| > 10M €. "
+                "Sample: %s",
+                amt_report["deleted"],
+                amt_report["items"][0] if amt_report["items"] else None,
             )
     except Exception:
-        log.exception("Date migration failed — continuing startup")
+        log.exception("Data migration failed — continuing startup")
 
     _maybe_trigger_post_upgrade_reanalysis(settings, db, classifier, log)
 

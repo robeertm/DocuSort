@@ -2,6 +2,29 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.7] – 2026-05-02
+
+### Fixed — No more surprise reanalyses on version bump
+
+Every version bump kicked off the analyze-statements bulk worker on
+startup. With seven patch releases shipped in one afternoon, that's
+seven times the user got a 162-doc re-extraction queued without
+asking for it. The hook is now a baseline-only no-op: bumps update
+the meta marker but never touch the worker. Re-extraction has to be
+started explicitly from /finance.
+
+### Fixed — Reject absurd transaction amounts (the −322 Mio €)
+
+Live data exposed a row where the LLM mashed `25052022` (a date)
+into the amount field, producing a single −322,147,719 € entry that
+dominated every aggregate on the explorer page.
+
+- New 10 Mio € sanity cap in `_normalise_tx`. Anything past that
+  is logged and dropped — real personal accounts don't see single
+  bookings that large.
+- Idempotent startup migration deletes existing rows above the
+  threshold so the user doesn't have to chase them manually.
+
 ## [0.27.6] – 2026-05-02
 
 ### Added — Single-day picker + explicit "Auszug" link per row

@@ -26,6 +26,41 @@ from .pseudonymizer import iban_hash as _iban_hash
 logger = logging.getLogger("docusort.finance.salvage")
 
 
+def delete_absurd_amounts(db, *, threshold: float = 10_000_000.0,
+                          dry_run: bool = False) -> dict[str, Any]:
+    """Delete transactions whose absolute amount is over `threshold` €.
+
+    Live data caught an LLM that misparsed a date into the amount
+    field, producing a -322,147,719 € row that dominated every
+    aggregate. The new sanity-cap in `_normalise_tx` keeps fresh
+    extractions clean; this is the one-off cleanup for what already
+    sits in the table.
+    """
+    with db._lock:
+        rows = db._conn.execute(
+            "SELECT id, statement_id, booking_date, amount, counterparty, purpose "
+            "FROM transactions WHERE ABS(amount) > ?", (threshold,),
+        ).fetchall()
+    items = [dict(r) for r in rows]
+    if not items:
+        return {"candidates": 0, "deleted": 0, "items": [], "dry_run": dry_run}
+    if dry_run:
+        return {"candidates": len(items), "deleted": 0,
+                "items": items, "dry_run": True}
+    with db._lock:
+        db._conn.executemany(
+            "DELETE FROM transactions WHERE id = ?",
+            [(r["id"],) for r in items],
+        )
+        db._conn.commit()
+    logger.warning(
+        "Deleted %d absurd-amount transaction(s) above %.2f € threshold.",
+        len(items), threshold,
+    )
+    return {"candidates": len(items), "deleted": len(items),
+            "items": items, "dry_run": False}
+
+
 def normalise_existing_dates(db, *, dry_run: bool = False) -> dict[str, Any]:
     """One-off pass over the transactions table that converts every
     non-ISO booking_date / value_date into ISO YYYY-MM-DD.

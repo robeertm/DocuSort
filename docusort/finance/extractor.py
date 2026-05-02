@@ -445,9 +445,27 @@ def _normalise_date(raw: str) -> str:
     return ""
 
 
+_MAX_REASONABLE_AMOUNT_EUR = 10_000_000.0  # 10 Mio €
+
+
 def _normalise_tx(d: dict[str, Any]) -> Transaction | None:
     amount = _coerce_float(d.get("amount"))
     if amount is None:
+        return None
+    # Sanity-cap. Live data exposed an LLM that mashed a date string
+    # ("DATUM 25052022") into the amount field of a 2022 statement,
+    # producing -322,147,719 €. A real personal account never sees a
+    # single booking past ten million euros, so reject anything
+    # larger as "model misread, not a real transaction".
+    if abs(amount) > _MAX_REASONABLE_AMOUNT_EUR:
+        logger.warning(
+            "Statement extractor: rejecting tx with absurd amount %.2f € "
+            "(counterparty=%r, purpose=%r) — likely a date or balance "
+            "field misparsed as amount.",
+            amount,
+            str(d.get("counterparty") or "")[:40],
+            str(d.get("purpose") or "")[:40],
+        )
         return None
     cat = str(d.get("category") or "").strip().lower()
     if cat and cat not in TX_CATEGORIES:
