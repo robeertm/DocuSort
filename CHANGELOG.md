@@ -2,6 +2,24 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.2] – 2026-05-02
+
+### Fixed — Salvage now detects duplicate statements
+
+Live use of v0.27.1's salvage on the production DB exposed the real
+shape of the four "stuck" Kontoauszüge: two were genuine LLM-output
+truncations, but the other two were the same bank statement uploaded
+twice — so the bookings already lived on the older statement_id and
+INSERT OR IGNORE silently skipped every reconstructed row.
+
+- Salvage now checks for a sibling statement on the same account +
+  period_start whenever 0 rows were inserted but the payload was
+  non-empty. When found, marks the duplicate as `acknowledged_empty`
+  so the diag banner stops nagging about it.
+- `POST /api/finance/salvage` returns a new `duplicate_count` /
+  `duplicates` field alongside `recovered` and `unrecoverable`.
+- UI message clarified accordingly.
+
 ## [0.27.1] – 2026-05-02
 
 ### Fixed — Ask: lenient action parsing

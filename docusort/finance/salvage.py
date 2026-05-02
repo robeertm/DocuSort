@@ -159,31 +159,82 @@ def salvage_one(db, stmt_id: int, *, dry_run: bool = False) -> dict[str, Any]:
             (stmt_id,),
         ).fetchone()["n"]
 
-    return {"stmt_id": stmt_id, "ok": True, "inserted": int(n),
-            "skipped": skipped}
+    if int(n) > 0:
+        return {"stmt_id": stmt_id, "ok": True, "inserted": int(n),
+                "skipped": skipped}
+
+    # Inserted 0 rows even though we computed a payload — every tx_hash
+    # collided with an existing transaction. This happens when the user
+    # uploaded the same Kontoauszug twice (two PDFs, same period, same
+    # account → same hashes), and the bookings already live on the older
+    # statement_id. The current row is genuinely a duplicate; auto-ack
+    # so the diag banner stops complaining about it, and surface the
+    # sibling stmt_id so the user can double-check.
+    sibling = _find_duplicate_sibling(db, stmt_id, account_id, s["period_start"] or "")
+    if sibling is not None:
+        with db._lock:
+            db._conn.execute(
+                "UPDATE statements SET acknowledged_empty = 1 WHERE id = ?",
+                (stmt_id,),
+            )
+            db._conn.commit()
+        return {
+            "stmt_id": stmt_id, "ok": True, "inserted": 0,
+            "skipped": skipped, "duplicate_of": sibling,
+            "acknowledged": True,
+        }
+
+    return {"stmt_id": stmt_id, "ok": False, "inserted": 0,
+            "skipped": skipped,
+            "reason": "tx_hash collisions but no sibling found — manual investigation needed"}
+
+
+def _find_duplicate_sibling(db, stmt_id: int, account_id: int | None,
+                            period_start: str) -> int | None:
+    """Find a statement on the same account + period_start that has
+    transactions in the table. Returns its id or None."""
+    if account_id is None or not period_start:
+        return None
+    with db._lock:
+        row = db._conn.execute(
+            "SELECT id FROM statements "
+            "WHERE id != ? AND account_id = ? AND period_start = ? "
+            "  AND id IN (SELECT DISTINCT statement_id FROM transactions) "
+            "LIMIT 1",
+            (stmt_id, account_id, period_start),
+        ).fetchone()
+    return int(row["id"]) if row else None
 
 
 def salvage_all_empty(db, *, dry_run: bool = False) -> dict[str, Any]:
     """Try salvage on every statement with 0 transactions in the table.
 
-    Returns a summary with per-statement results split into `recovered`
-    (we re-inserted bookings) and `unrecoverable` (extra_json was empty,
-    truncated, or contained no parseable transactions — those need a
-    fresh LLM run)."""
+    Three buckets in the summary:
+      - recovered: we re-inserted bookings (or would, in dry-run mode)
+      - duplicates: 0 inserted because every booking already lives on a
+        sibling statement; auto-marked acknowledged_empty
+      - unrecoverable: extra_json was empty, truncated, or contained no
+        parseable transactions — those need a fresh LLM run
+    """
     candidates = _empty_statement_ids(db)
     recovered: list[dict[str, Any]] = []
+    duplicates: list[dict[str, Any]] = []
     unrecoverable: list[dict[str, Any]] = []
     for c in candidates:
         report = salvage_one(db, c["stmt_id"], dry_run=dry_run)
-        if report.get("ok") and (report.get("inserted") or report.get("would_insert", 0) > 0):
+        if report.get("duplicate_of"):
+            duplicates.append(report)
+        elif report.get("ok") and (report.get("inserted") or report.get("would_insert", 0) > 0):
             recovered.append(report)
         else:
             unrecoverable.append(report)
     return {
         "candidates": len(candidates),
         "recovered_count": len(recovered),
+        "duplicate_count": len(duplicates),
         "unrecoverable_count": len(unrecoverable),
         "recovered": recovered,
+        "duplicates": duplicates,
         "unrecoverable": unrecoverable,
         "dry_run": dry_run,
     }

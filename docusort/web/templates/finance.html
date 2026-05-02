@@ -1451,11 +1451,15 @@ function financeDiag(initialItems, initialTotal) {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.resultOk = d.recovered_count > 0;
-        const recovered = d.recovered_count || 0;
-        const remaining = d.unrecoverable_count || 0;
-        this.result = `Aus extra_json zurückgeholt: ${recovered} Auszug${recovered === 1 ? '' : 'e'}.` +
-          (remaining ? ` Weitere ${remaining} brauchen einen neuen LLM-Lauf (extra_json war leer / abgeschnitten).` : '');
+        const rec = d.recovered_count || 0;
+        const dup = d.duplicate_count || 0;
+        const rem = d.unrecoverable_count || 0;
+        this.resultOk = (rec + dup) > 0;
+        const parts = [];
+        if (rec) parts.push(`${rec} aus extra_json zurückgeholt`);
+        if (dup) parts.push(`${dup} als Duplikat erkannt + ignoriert`);
+        if (rem) parts.push(`${rem} brauchen einen neuen LLM-Lauf (extra_json leer / abgeschnitten)`);
+        this.result = parts.length ? parts.join(', ') + '.' : 'Nichts zu retten — alle Auszüge sind sauber.';
         await this.refresh();
       } catch (e) {
         this.resultOk = false;
