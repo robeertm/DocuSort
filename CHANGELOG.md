@@ -2,6 +2,38 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.5] – 2026-05-02
+
+### Fixed — Date format normalisation (the live "29.07.2" / "30.12.2" mess)
+
+The system prompt asks the LLM for ISO YYYY-MM-DD booking dates, but
+small local models (Qwen2.5-7B and friends) regularly returned the
+DD.MM.YYYY shape that sat verbatim on the source PDF. The extractor
+stored those without normalisation, which broke SQLite's strftime()
+on every monthly aggregate — the finance summary's monthly chart
+showed garbage like `29.07.2`, `30.12.2`, `31.05.2` (the first 7
+chars of `29.07.2024`).
+
+- New `_normalise_date()` at the extractor boundary accepts ISO,
+  DD.MM.YYYY, D.M.YYYY, two-digit-year DD.MM.YY, and YYYY/MM/DD —
+  validates ranges, returns blank on garbage so strftime fails
+  gracefully (the v0.25.4 NULL-projection guard takes care of
+  blanks).
+- `_normalise_tx()` runs both `booking_date` and `value_date`
+  through the normaliser, so the only shape that ever reaches the
+  transactions table is ISO.
+
+### Added — Backfill for existing non-ISO rows
+
+A new `normalise_existing_dates(db)` pass converts every legacy
+non-ISO row to ISO. Idempotent — re-running is a no-op because the
+SQL filter only matches rows that aren't already YYYY-MM-DD.
+
+- `POST /api/finance/normalise-dates` (with optional `dry_run`).
+- Auto-runs on every service start in `main._start_web` so the user
+  doesn't have to click anything to recover from the bug — the
+  monthly chart fixes itself silently after the v0.27.5 deploy.
+
 ## [0.27.4] – 2026-05-02
 
 ### Fixed — Per-doc reanalyze no longer deadlocks the server

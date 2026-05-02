@@ -485,6 +485,22 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
     log = logging.getLogger("docusort.main")
     app = create_app(settings, db, classifier)
 
+    # Idempotent data migration: convert any non-ISO booking_date /
+    # value_date rows that older extractor versions stored verbatim
+    # from the LLM response. Safe to run on every boot — the SQL
+    # filter only matches rows that aren't already YYYY-MM-DD.
+    try:
+        from .finance.salvage import normalise_existing_dates
+        report = normalise_existing_dates(db, dry_run=False)
+        if report.get("fixed"):
+            log.info(
+                "Date migration: normalised %d non-ISO booking_date / "
+                "value_date row(s) to ISO YYYY-MM-DD.",
+                report["fixed"],
+            )
+    except Exception:
+        log.exception("Date migration failed — continuing startup")
+
     _maybe_trigger_post_upgrade_reanalysis(settings, db, classifier, log)
 
     ssl_kwargs: dict = {}

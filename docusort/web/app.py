@@ -1030,6 +1030,24 @@ def create_app(
             "steps":         result.steps,
         }
 
+    @app.post("/api/finance/normalise-dates")
+    def api_finance_normalise_dates(payload: dict = Body(default={})):
+        """One-off DB pass: converts every non-ISO booking_date /
+        value_date row into ISO YYYY-MM-DD.
+
+        Up to v0.27.4 the extractor stored whatever shape the LLM
+        emitted — for small local models that's usually the source
+        PDF's DD.MM.YYYY. Those rows break SQLite's strftime() + the
+        monthly aggregates on /finance.
+
+        Pass `{"dry_run":true}` to preview without writing."""
+        from ..finance.salvage import normalise_existing_dates
+        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
+        try:
+            return normalise_existing_dates(db, dry_run=dry)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"normalise failed: {type(exc).__name__}: {exc}") from exc
+
     @app.post("/api/finance/salvage")
     def api_finance_salvage(payload: dict = Body(default={})):
         """Recover transactions for statements where the table is empty

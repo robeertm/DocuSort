@@ -19,11 +19,65 @@ import logging
 from hashlib import sha256
 from typing import Any
 
-from .extractor import _coerce_float, _normalise_tx
+from .extractor import _coerce_float, _normalise_date, _normalise_tx
 from .pseudonymizer import iban_hash as _iban_hash
 
 
 logger = logging.getLogger("docusort.finance.salvage")
+
+
+def normalise_existing_dates(db, *, dry_run: bool = False) -> dict[str, Any]:
+    """One-off pass over the transactions table that converts every
+    non-ISO booking_date / value_date into ISO YYYY-MM-DD.
+
+    Up to v0.27.4 the extractor stored whatever shape the LLM emitted
+    — for small local models that's often the source PDF's DD.MM.YYYY
+    instead of ISO. Those rows break SQLite's strftime + every monthly
+    chart on /finance. This is a pure data fix; no LLM calls.
+    """
+    with db._lock:
+        rows = db._conn.execute(
+            "SELECT id, booking_date, value_date FROM transactions "
+            "WHERE NOT (booking_date GLOB '20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]') "
+            "   OR (value_date != '' AND NOT "
+            "       (value_date GLOB '20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]'))"
+        ).fetchall()
+    fixed = 0
+    cleared = 0
+    samples: list[dict[str, Any]] = []
+    if dry_run:
+        for r in rows[:20]:
+            samples.append({
+                "id": r["id"],
+                "from_booking": r["booking_date"],
+                "to_booking":   _normalise_date(r["booking_date"] or ""),
+                "from_value":   r["value_date"],
+                "to_value":     _normalise_date(r["value_date"] or ""),
+            })
+    else:
+        with db._lock:
+            for r in rows:
+                old_b = r["booking_date"] or ""
+                old_v = r["value_date"] or ""
+                new_b = _normalise_date(old_b)
+                new_v = _normalise_date(old_v)
+                if not new_b and old_b:
+                    cleared += 1
+                if (new_b != old_b) or (new_v != old_v):
+                    db._conn.execute(
+                        "UPDATE transactions SET booking_date = ?, value_date = ? "
+                        "WHERE id = ?",
+                        (new_b, new_v, r["id"]))
+                    fixed += 1
+            db._conn.commit()
+
+    return {
+        "candidates": len(rows),
+        "fixed": fixed,
+        "cleared": cleared,
+        "dry_run": dry_run,
+        "samples": samples,
+    }
 
 
 def _empty_statement_ids(db) -> list[dict[str, Any]]:

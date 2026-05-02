@@ -387,6 +387,64 @@ def _looks_like_lost_bookings(data: dict[str, Any]) -> bool:
     return abs(opening - closing) > 0.01
 
 
+_ISO_RE   = __import__("re").compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_DE_RE    = __import__("re").compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$")
+_DE2_RE   = __import__("re").compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{2})$")
+_SLASH_RE = __import__("re").compile(r"^(\d{4})/(\d{2})/(\d{2})$")
+
+
+def _normalise_date(raw: str) -> str:
+    """Coerce a booking / value date into ISO YYYY-MM-DD.
+
+    The system prompt asks for ISO, but small local models (Qwen2.5-7B,
+    Llama-3.1-8B, …) regularly return the German DD.MM.YYYY shape that
+    sat verbatim on the source PDF. SQLite's `strftime` returns NULL on
+    those, breaking finance_by_weekday + every monthly aggregate. Catch
+    the format here at the single boundary so the rest of the code can
+    trust ISO."""
+    if not raw:
+        return ""
+    s = str(raw).strip()
+    if not s:
+        return ""
+    s = s.replace(" ", "")[:12]
+
+    def _validate(y: int, mo: int, d: int) -> str:
+        # Range checks before formatting — keeps "2024-13-99" out of
+        # the table where it would silently break strftime later.
+        if not (1900 <= y <= 2100):
+            return ""
+        if not (1 <= mo <= 12):
+            return ""
+        if not (1 <= d <= 31):
+            return ""
+        return f"{y:04d}-{mo:02d}-{d:02d}"
+
+    m = _ISO_RE.match(s)
+    if m:
+        y, mo, d = m.groups()
+        return _validate(int(y), int(mo), int(d))
+    m = _SLASH_RE.match(s)
+    if m:
+        y, mo, d = m.groups()
+        return _validate(int(y), int(mo), int(d))
+    m = _DE_RE.match(s)
+    if m:
+        d, mo, y = m.groups()
+        return _validate(int(y), int(mo), int(d))
+    m = _DE2_RE.match(s)
+    if m:
+        d, mo, yy = m.groups()
+        # Two-digit year: 00..69 → 2000s, 70..99 → 1900s. Same window
+        # the classifier uses for document dates.
+        y = 2000 + int(yy) if int(yy) < 70 else 1900 + int(yy)
+        return _validate(y, int(mo), int(d))
+    # Unknown shape — return blank so finance_by_weekday + co. simply
+    # skip the row (the v0.25.4 NULL-projection guard keeps /finance
+    # from 500'ing). Better than passing garbage downstream.
+    return ""
+
+
 def _normalise_tx(d: dict[str, Any]) -> Transaction | None:
     amount = _coerce_float(d.get("amount"))
     if amount is None:
@@ -398,8 +456,8 @@ def _normalise_tx(d: dict[str, Any]) -> Transaction | None:
     if typ and typ not in TX_TYPES:
         typ = "sonstiges"
     return Transaction(
-        booking_date=str(d.get("booking_date") or "").strip()[:10],
-        value_date=str(d.get("value_date") or "").strip()[:10],
+        booking_date=_normalise_date(d.get("booking_date") or ""),
+        value_date=_normalise_date(d.get("value_date") or ""),
         amount=amount,
         currency=str(d.get("currency") or "EUR").strip().upper()[:8] or "EUR",
         counterparty=_scrub_residual(str(d.get("counterparty") or "").strip()[:200]),
