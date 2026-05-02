@@ -102,10 +102,14 @@ def start_reanalyze_all_statements(
     *,
     force_all: bool = True,
     resume: bool = False,
+    only_doc_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     """Find every Kontoauszug-shaped document and queue a fresh
     extraction. `resume=True` reads the pending doc_id list from
-    `meta` instead of re-running the WHERE-clause scan."""
+    `meta` instead of re-running the WHERE-clause scan.
+    `only_doc_ids=[N, ...]` limits the run to specific documents —
+    used by the per-doc reanalyze endpoint to avoid blocking the
+    HTTP request handler with a multi-minute LLM call."""
     from .. import activity
 
     is_local = settings.ai.provider in ("openai_compat", "bridge")
@@ -117,7 +121,9 @@ def start_reanalyze_all_statements(
         return {"started": False, "reason": "already running",
                 **existing.as_dict()}
 
-    if resume:
+    if only_doc_ids:
+        rows = _select_targets_by_id(db, only_doc_ids)
+    elif resume:
         raw = db.meta_get(_RESUME_META_KEY) or ""
         try:
             pending_ids = json.loads(raw) if raw else []
@@ -148,8 +154,13 @@ def start_reanalyze_all_statements(
     activity.start_job("analyze-statements", total=len(targets))
     activity.clear_paused("analyze-statements")
     # Persist die volle Pending-Liste vorab. Bei einem Service-Crash
-    # mid-run kann der nächste Resume-Call dort weitermachen.
-    _persist_pending(db, [t[0] for t in targets])
+    # mid-run kann der nächste Resume-Call dort weitermachen. Skip
+    # für one-off reanalyze-doc-Jobs — sonst würde ein paused 160er
+    # Bulk-Run durch eine 1-Doc-Liste überschrieben und der Resume-
+    # Button stünde plötzlich vor einem völlig anderen Restjob.
+    is_single_doc = bool(only_doc_ids)
+    if not is_single_doc:
+        _persist_pending(db, [t[0] for t in targets])
 
     def worker() -> None:
         from ..finance import StatementExtractor
@@ -166,7 +177,8 @@ def start_reanalyze_all_statements(
 
         for idx, (doc_id, subject, text, category, library_path) in enumerate(targets):
             if activity.is_pause_requested("analyze-statements"):
-                _persist_pending(db, remaining)
+                if not is_single_doc:
+                    _persist_pending(db, remaining)
                 activity.mark_paused("analyze-statements")
                 logger.info(
                     "analyze-statements paused at %d/%d (%d remaining)",
@@ -258,12 +270,14 @@ def start_reanalyze_all_statements(
             # Crash davor → doc_id bleibt für Resume drin.
             try:
                 remaining.remove(doc_id)
-                _persist_pending(db, remaining)
+                if not is_single_doc:
+                    _persist_pending(db, remaining)
             except ValueError:
                 pass
 
         activity.finish_job("analyze-statements", current="")
-        _clear_pending(db)
+        if not is_single_doc:
+            _clear_pending(db)
         try:
             from .. import notifier as _n
             job = activity.get_job("analyze-statements")

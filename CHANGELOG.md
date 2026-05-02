@@ -2,6 +2,24 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.4] – 2026-05-02
+
+### Fixed — Per-doc reanalyze no longer deadlocks the server
+
+`/api/finance/reanalyze-doc` ran the LLM extraction synchronously
+inside the request handler. On a slow / disconnected bridge that
+single call could pin the FastAPI worker for minutes, queuing every
+other request behind it — `/api/version`, the diag banner, the
+update endpoint all stopped responding. The endpoint now queues the
+work into the existing `analyze-statements` background thread and
+returns 202 immediately; the user polls the diag banner to see the
+doc disappear from the empty-list when transactions land.
+
+- `start_reanalyze_all_statements` gains an `only_doc_ids` parameter.
+- Single-doc runs do NOT touch the resume meta key, so a paused
+  bulk run isn't clobbered by a one-off recovery click.
+- Endpoint refuses with 409 when the bulk worker is already busy.
+
 ## [0.27.3] – 2026-05-02
 
 ### Fixed — Diag banner respects acknowledged_empty
