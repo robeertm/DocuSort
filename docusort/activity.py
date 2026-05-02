@@ -42,6 +42,12 @@ class JobState:
     # every iteration; on True it persists pending state and exits.
     pause_requested: bool = False
     paused: bool = False
+    # Per-page progress for the currently processing statement.
+    # Reset to 0 between docs. The bulk worker shows e.g. "Seite 3/9"
+    # alongside "Auszug 12/162" so the user knows the long pause is
+    # the local 7B grinding through one big PDF, not a hung process.
+    current_page: int = 0
+    total_pages: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +59,8 @@ class JobState:
             "done":      self.done,
             "current":   self.current,
             "current_doc_id": self.current_doc_id,
+            "current_page":   self.current_page,
+            "total_pages":    self.total_pages,
             "approved":  list(self.approved),
             "failed":    list(self.failed),
             "last_error": self.last_error,

@@ -542,18 +542,29 @@ class StatementExtractor:
 
     def _extract_pages(self, pdf_path: Path, ocr_settings,
                        *, pseudo: Pseudonymizer | None,
-                       pseudonymize: bool) -> tuple[dict, Any]:
+                       pseudonymize: bool,
+                       on_page_progress=None) -> tuple[dict, Any]:
         """Page-by-page extraction. One LLM call per non-empty page;
         booking lists are concatenated and header fields are merged
         across pages. More reliable on long documents than single-pass
         — no output truncation since each request only emits the
-        bookings of one page."""
+        bookings of one page.
+
+        `on_page_progress(current_page, total_pages)` is called once
+        per page entry (before the LLM call) so the caller can push
+        progress to the activity tracker. Errors in the callback are
+        swallowed — they must never break extraction."""
         from .. import ocr as _ocr_mod
 
         pages = _ocr_mod.extract_pages(pdf_path, ocr_settings)
         if not pages:
             raise ValueError(f"no pages extracted from {pdf_path}")
         total_pages = len(pages)
+        if on_page_progress is not None:
+            try:
+                on_page_progress(0, total_pages)
+            except Exception:
+                pass
 
         merged: dict[str, Any] = {
             "bank_name": "", "account_iban_token": "",
@@ -565,6 +576,11 @@ class StatementExtractor:
         last_resp = None
 
         for idx, page_text in enumerate(pages, start=1):
+            if on_page_progress is not None:
+                try:
+                    on_page_progress(idx, total_pages)
+                except Exception:
+                    pass
             text = (page_text or "").strip()
             if not text or len(text) < 20:
                 continue
@@ -640,7 +656,8 @@ class StatementExtractor:
 
     def extract(self, ocr_text: str, *, pseudonymize: bool = True,
                 pdf_path: Path | None = None,
-                ocr_settings=None) -> Statement:
+                ocr_settings=None,
+                on_page_progress=None) -> Statement:
         """Extract a Kontoauszug from OCR text.
 
         Preferred mode is **page-by-page** when `pdf_path` and
@@ -650,7 +667,11 @@ class StatementExtractor:
 
         Falls back to single-pass with 16k → 32k → 64k output budget
         escalation when the PDF isn't reachable (legacy data with no
-        `library_path`)."""
+        `library_path`).
+
+        `on_page_progress(current_page, total_pages)` lets the caller
+        observe per-page progress for the activity tracker. Only fires
+        in per-page mode; single-pass has no page concept."""
         if not ocr_text:
             raise ValueError("no OCR text provided")
 
@@ -668,6 +689,7 @@ class StatementExtractor:
                 data, resp = self._extract_pages(
                     pdf_path, ocr_settings,
                     pseudo=pseudo, pseudonymize=pseudonymize,
+                    on_page_progress=on_page_progress,
                 )
             except Exception:
                 logger.exception(

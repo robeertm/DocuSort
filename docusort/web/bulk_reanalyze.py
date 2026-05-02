@@ -190,6 +190,7 @@ def start_reanalyze_all_statements(
             activity.update_job(
                 "analyze-statements",
                 current=str(subject)[:120], current_doc_id=doc_id,
+                current_page=0, total_pages=0,
             )
             try:
                 pdf_path = None
@@ -197,9 +198,15 @@ def start_reanalyze_all_statements(
                     p = Path(library_path)
                     if p.exists() and p.suffix.lower() == ".pdf":
                         pdf_path = p
+                def _on_page(cur: int, tot: int) -> None:
+                    activity.update_job(
+                        "analyze-statements",
+                        current_page=cur, total_pages=tot,
+                    )
                 stmt = extractor.extract(
                     text, pseudonymize=do_pseudo,
                     pdf_path=pdf_path, ocr_settings=settings.ocr,
+                    on_page_progress=_on_page,
                 )
                 account_id = None
                 if stmt.iban_hash:

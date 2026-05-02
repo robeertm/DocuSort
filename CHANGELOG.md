@@ -2,6 +2,31 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.9] – 2026-05-02
+
+### Added — "Seite X/Y" in extraction progress + bulk reflection on doc page
+
+Per-page progress now flows through every status surface so a long
+local-LLM extraction doesn't look like a hung process:
+
+- `JobState` carries `current_page` / `total_pages`.
+- `StatementExtractor.extract()` accepts an `on_page_progress(cur,
+  total)` callback, fired before each page's LLM call.
+- The bulk worker pushes the callback into the analyze-statements
+  job; `/api/finance/analyze-progress` exposes the new fields and
+  the /finance banner shows e.g.
+  "Analysiere Auszug 12 von 162 · Seite 3/9".
+- The single-doc extract endpoint pushes the same data into the
+  in-memory `_doc_jobs` registry; the doc-detail page reads it via
+  `/status` and shows "seit 1m 14s · Seite 5/9".
+
+Plus a new bulk-reflection banner on every doc-detail page when a
+bulk re-extraction is running. `/api/document/{id}/status` now
+returns a `bulk` block with `this_doc_current` / `this_doc_done` /
+`this_doc_failed` flags so each doc page shows whether THIS doc is
+currently being processed, already finished, failed, or still
+queued — without the user having to flip back to /finance.
+
 ## [0.27.8] – 2026-05-02
 
 ### Fixed — Per-doc "Statement extrahieren" now uses per-page mode

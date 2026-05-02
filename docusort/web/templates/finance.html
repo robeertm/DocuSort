@@ -58,6 +58,9 @@
             <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
           </svg>
           <span x-text="`Analysiere Auszug ${job.done + 1} von ${job.total}`"></span>
+          <template x-if="job.total_pages > 0">
+            <span class="text-cyan-200/70" x-text="`· Seite ${job.current_page || 0}/${job.total_pages}`"></span>
+          </template>
         </div>
         <p class="text-xs text-ink-400 mt-1" x-show="!job.running"
            x-text="(counts.missing + counts.empty) > 0
@@ -1248,6 +1251,7 @@ function analyzeAll() {
   return {
     counts: { missing: 0, empty: 0, total: 0 },
     job: { running: false, total: 0, done: 0, current: '',
+           current_page: 0, total_pages: 0,
            approved: [], failed: [], last_error: '',
            pause_requested: false, paused: false },
     resumable: false,

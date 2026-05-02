@@ -167,7 +167,25 @@ def _doc_job_status(doc_id: int) -> dict | None:
             # has a thread behind it.
             _doc_jobs.pop(doc_id, None)
             return None
-        return {"kind": j["kind"], "started_at": j["started_at"], "elapsed_s": elapsed}
+        return {
+            "kind": j["kind"],
+            "started_at": j["started_at"],
+            "elapsed_s": elapsed,
+            "current_page": j.get("current_page", 0),
+            "total_pages":  j.get("total_pages", 0),
+        }
+
+
+def _doc_job_progress(doc_id: int, *, current_page: int, total_pages: int) -> None:
+    """Update the per-doc job entry with per-page progress. Called by
+    the extractor's `on_page_progress` callback so the doc-detail page
+    can show "Seite X/Y" while a long PDF is grinding through."""
+    with _doc_jobs_lock:
+        j = _doc_jobs.get(doc_id)
+        if j is None:
+            return
+        j["current_page"] = int(current_page)
+        j["total_pages"] = int(total_pages)
 
 
 def create_app(
@@ -1555,6 +1573,49 @@ def create_app(
         if not doc:
             raise HTTPException(404, "document not found")
         running = _doc_job_status(doc_id)
+        # When the bulk worker is currently processing THIS doc, the
+        # per-doc registry is empty (the bulk path uses the activity
+        # tracker instead). Synthesise an equivalent running-snapshot
+        # so the doc-detail page shows "wird im Bulk-Run analysiert ·
+        # Seite 3/9" without the user having to know which entry
+        # point started the work.
+        from .. import activity as _activity
+        bulk = _activity.get_job("analyze-statements")
+        bulk_status: dict | None = None
+        if bulk.running or bulk.paused:
+            # Snapshot the bulk job so every doc-detail page shows
+            # whether a bulk run is in flight, even if THIS doc isn't
+            # the current one. Approved + failed lists tell the user
+            # whether their doc is already done.
+            bulk_status = {
+                "running":        bool(bulk.running),
+                "paused":         bool(bulk.paused),
+                "done":           int(bulk.done or 0),
+                "total":          int(bulk.total or 0),
+                "current_doc_id": int(bulk.current_doc_id or 0),
+                "current_page":   int(bulk.current_page or 0),
+                "total_pages":    int(bulk.total_pages or 0),
+                # Has THIS specific doc already been processed in
+                # this bulk run? approved + failed are doc_ids.
+                "this_doc_done":   int(doc_id) in (bulk.approved or []),
+                "this_doc_failed": any(
+                    isinstance(f, dict) and f.get("doc_id") == int(doc_id)
+                    for f in (bulk.failed or [])
+                ),
+                "this_doc_current": int(bulk.current_doc_id or 0) == int(doc_id),
+            }
+        if running is None and bulk.running and int(bulk.current_doc_id or 0) == int(doc_id):
+            started_at = float(bulk.started_at or 0.0)
+            running = {
+                "kind":        "statement",
+                "started_at":  started_at,
+                "elapsed_s":   max(0.0, time.time() - started_at) if started_at else 0.0,
+                "current_page": int(bulk.current_page or 0),
+                "total_pages":  int(bulk.total_pages or 0),
+                "via_bulk":    True,
+                "bulk_done":   int(bulk.done or 0),
+                "bulk_total":  int(bulk.total or 0),
+            }
         category = doc.get("category") or ""
         statement = None
         receipt = None
@@ -1584,6 +1645,7 @@ def create_app(
             "running":  running,
             "statement": statement,
             "receipt":   receipt,
+            "bulk":      bulk_status,
         }
 
     @app.post("/api/document/{doc_id}/statement/dismiss-empty")
@@ -2023,10 +2085,13 @@ def create_app(
             p = Path(lib)
             if p.exists() and p.suffix.lower() == ".pdf":
                 pdf_path = p
+        def _on_page(cur: int, tot: int) -> None:
+            _doc_job_progress(doc_id, current_page=cur, total_pages=tot)
         try:
             stmt = extractor.extract(
                 text, pseudonymize=do_pseudo,
                 pdf_path=pdf_path, ocr_settings=settings.ocr,
+                on_page_progress=_on_page,
             )
         except Exception as exc:
             logger.exception("Statement extract failed for %d", doc_id)

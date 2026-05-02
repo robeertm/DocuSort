@@ -484,6 +484,41 @@
         </div>
       </details>
 
+      <!-- Bulk-run hint: shown on every doc-detail page while a
+           bulk re-extraction is in flight, so the user knows what
+           state THIS doc is in (queued, currently processing,
+           already done, failed) without flipping back to /finance. -->
+      <div x-show="bulk && (bulk.running || bulk.paused)" x-cloak
+           class="mt-3 flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             class="h-4 w-4 shrink-0 text-cyan-300"
+             :class="bulk && bulk.running ? 'animate-spin' : ''">
+          <path d="M3 12h4l3-9 4 18 3-9h4"/>
+        </svg>
+        <div class="flex-1 min-w-0 text-cyan-100">
+          <template x-if="bulk && bulk.this_doc_current">
+            <span>Bulk-Lauf bearbeitet gerade <strong>dieses</strong> PDF
+              <template x-if="bulk.total_pages > 0">
+                <span class="text-cyan-200/90">· Seite <span x-text="bulk.current_page || 0"></span>/<span x-text="bulk.total_pages"></span></span>
+              </template>
+            </span>
+          </template>
+          <template x-if="bulk && bulk.this_doc_done">
+            <span>Im aktuellen Bulk-Lauf bereits fertig
+              <a href="javascript:location.reload()" class="ml-1 underline">aktualisieren</a></span>
+          </template>
+          <template x-if="bulk && bulk.this_doc_failed">
+            <span class="text-rose-200">Im aktuellen Bulk-Lauf fehlgeschlagen — siehe /finance für Details</span>
+          </template>
+          <template x-if="bulk && !bulk.this_doc_current && !bulk.this_doc_done && !bulk.this_doc_failed">
+            <span>Bulk-Lauf läuft im Hintergrund (anderer Auszug gerade dran)
+              <span x-show="bulk.paused" class="text-amber-200">· pausiert</span>
+            </span>
+          </template>
+          <span class="ml-1 text-cyan-300/80 tabular-nums" x-text="`${bulk.done}/${bulk.total}`"></span>
+        </div>
+      </div>
+
       <div x-show="running" x-cloak
            class="mt-3 flex items-center gap-3 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-sm">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -492,10 +527,26 @@
         </svg>
         <div class="flex-1 min-w-0">
           <div class="text-sky-200">
-            <span x-text="running && running.kind === 'receipt' ? 'Beleg-Auswertung läuft' : 'Auswertung läuft'"></span>
+            <template x-if="running && running.via_bulk">
+              <span>
+                Wird im Bulk-Lauf analysiert
+                <span class="text-sky-300/80 text-xs"
+                      x-text="`(${running.bulk_done + 1}/${running.bulk_total})`"></span>
+              </span>
+            </template>
+            <template x-if="!running || !running.via_bulk">
+              <span x-text="running && running.kind === 'receipt' ? 'Beleg-Auswertung läuft' : 'Auswertung läuft'"></span>
+            </template>
             …
           </div>
-          <div class="text-xs text-sky-300/70 tabular-nums" x-text="'seit ' + runningLabel()"></div>
+          <div class="text-xs text-sky-300/70 tabular-nums">
+            <span x-text="'seit ' + runningLabel()"></span>
+            <template x-if="running && running.total_pages > 0">
+              <span class="text-sky-200/90 ml-1">
+                · Seite <span x-text="running.current_page || 0"></span>/<span x-text="running.total_pages"></span>
+              </span>
+            </template>
+          </div>
         </div>
       </div>
 
@@ -753,6 +804,7 @@ function statementCard(docId, hasStatement) {
     // extraction kicked off in another tab still shows "Auswertung
     // läuft" instead of a stale "klick Auswerten" prompt.
     running: null,         // { kind, started_at, elapsed_s } or null
+    bulk: null,            // { running, paused, done, total, this_doc_* } or null
     runningElapsed: 0,     // seconds since the job started, kept fresh
     _statusTimer: null,
     _tickTimer: null,
@@ -766,6 +818,7 @@ function statementCard(docId, hasStatement) {
         const d = await r.json();
         const wasRunning = !!this.running;
         this.running = d.running || null;
+        this.bulk = d.bulk || null;
         if (this.running) {
           this.runningElapsed = Math.floor(this.running.elapsed_s || 0);
           this._scheduleTick();
@@ -773,6 +826,14 @@ function statementCard(docId, hasStatement) {
           // 5–10 minutes, so 4s is a comfortable cadence.
           clearTimeout(this._statusTimer);
           this._statusTimer = setTimeout(() => this.fetchStatus(false), 4000);
+        } else if (this.bulk && (this.bulk.running || this.bulk.paused)) {
+          // No own job, but a bulk run is going. Poll on the same
+          // cadence so the per-doc state (current / done / failed)
+          // stays accurate without the user having to refresh.
+          clearTimeout(this._statusTimer);
+          this._statusTimer = setTimeout(() => this.fetchStatus(false), 4000);
+          if (this._tickTimer) { clearInterval(this._tickTimer); this._tickTimer = null; }
+          if (wasRunning && !initial) location.reload();
         } else {
           if (this._tickTimer) { clearInterval(this._tickTimer); this._tickTimer = null; }
           if (wasRunning && !initial) {
