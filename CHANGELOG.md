@@ -2,6 +2,34 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.0] – 2026-05-02
+
+### Added — Natural-language Q&A over your transactions
+
+A new search box at the top of `/finance` lets you ask free-form
+questions like "zeige mir alle Ausgaben bei MediaMarkt 2025" or
+"wieviel hab ich 2024 für Versicherungen ausgegeben" — the configured
+LLM picks tool calls against the transactions table and returns a
+short German answer plus the matching rows in a compact table.
+
+- New `docusort/finance/ask.py` runs a JSON tool-use loop on top of
+  the existing provider abstraction (no provider-specific changes —
+  works with Anthropic, OpenAI, Gemini, Ollama and the local bridge).
+- Read-only tools wrap the existing DB methods: `search_transactions`,
+  `aggregate_transactions`, `list_categories`, `list_merchants`,
+  `get_date_range`. Year / month inputs are translated to `start` /
+  `end` server-side so the LLM doesn't have to compute date math.
+- Result rows fed back into the prompt are trimmed (max 30 rows,
+  slim fields) so a 5000-row sweep never blows the context window.
+- Endpoint `POST /api/finance/ask` honours `finance.local_only`
+  (403 when a cloud provider would be picked under local-only mode)
+  and rejects empty or oversized questions with 400.
+- Verified by a 14-test pre-push suite covering tool routing
+  (search/aggregate/metadata), error paths (unknown tool, malformed
+  JSON, empty question, runaway loop) and HTTP status codes
+  (200/400/403/503), plus a regression check that the existing
+  `/finance` routes and 23-probe diag still come back green.
+
 ## [0.26.0] – 2026-05-01
 
 ### Added — Page-by-page statement extraction

@@ -116,6 +116,98 @@
     </div>
   </div>
 
+  <!-- Ask box — natural-language Q&A over the transactions table.
+       Sends the question to the configured LLM with a small set of
+       read-only tools that wrap transactions_list / _aggregate. The
+       reply contains a German answer plus the rows the LLM looked at,
+       which we render as a compact table below. -->
+  {% if summary.statement_count > 0 %}
+  <div class="card p-4 mb-6 border-violet-500/30 bg-violet-500/5"
+       x-data="financeAsk()" x-cloak>
+    <div class="flex items-start gap-3">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-violet-300 shrink-0 mt-0.5">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium mb-1">Frag deine Buchungen</div>
+        <p class="text-xs text-ink-400 mb-2">
+          Frei formulierte Frage in natürlicher Sprache — die LLM sucht in allen ausgewerteten Kontoauszügen.
+          Beispiele: <span class="text-ink-300">„zeige mir alle Ausgaben bei MediaMarkt 2025"</span>,
+          <span class="text-ink-300">„wieviel hab ich 2024 für Versicherungen ausgegeben?"</span>,
+          <span class="text-ink-300">„welche Einnahmen über 1000 € gab es im August?"</span>
+        </p>
+        <form @submit.prevent="ask()" class="flex gap-2 flex-wrap">
+          <input type="text" x-model="question"
+                 :disabled="loading"
+                 placeholder="Stelle eine Frage zu deinen Transaktionen…"
+                 class="flex-1 min-w-[280px] rounded border border-ink-700 bg-ink-900 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none"
+                 maxlength="500" />
+          <button type="submit"
+                  :disabled="loading || !question.trim()"
+                  class="rounded px-4 py-2 text-sm font-medium"
+                  style="background:#7c3aed; color:#fff;"
+                  :style="(loading || !question.trim()) ? 'background:#3f3f46; color:#a1a1aa; cursor:not-allowed;' : 'background:#7c3aed; color:#fff;'">
+            <span x-show="!loading">Fragen</span>
+            <span x-show="loading" x-cloak>Suche…</span>
+          </button>
+        </form>
+
+        <div x-show="error" x-cloak class="mt-3 text-sm text-rose-300" x-text="error"></div>
+
+        <div x-show="result" x-cloak class="mt-4 space-y-3">
+          <div class="rounded bg-ink-900/60 border border-violet-500/20 p-3 text-sm leading-relaxed whitespace-pre-wrap"
+               x-text="result?.answer"></div>
+
+          <template x-if="result?.rows?.length">
+            <div>
+              <div class="text-xs text-ink-500 mb-1">
+                <span x-text="result.rows.length"></span> Treffer · Modell:
+                <span x-text="result.model"></span> ·
+                <span x-text="result.steps + ' Schritt' + (result.steps === 1 ? '' : 'e')"></span>
+                <template x-if="result.cost_usd > 0">
+                  <span> · ca. $<span x-text="result.cost_usd.toFixed(4)"></span></span>
+                </template>
+              </div>
+              <div class="overflow-x-auto rounded border border-ink-800">
+                <table class="w-full text-xs">
+                  <thead class="bg-ink-900 text-ink-400">
+                    <tr>
+                      <th class="px-2 py-1.5 text-left">Datum</th>
+                      <th class="px-2 py-1.5 text-left">Empfänger / Absender</th>
+                      <th class="px-2 py-1.5 text-left">Verwendungszweck</th>
+                      <th class="px-2 py-1.5 text-left">Kategorie</th>
+                      <th class="px-2 py-1.5 text-right">Betrag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="r in result.rows" :key="r.id">
+                      <tr class="border-t border-ink-800/60">
+                        <td class="px-2 py-1.5 whitespace-nowrap text-ink-300" x-text="r.booking_date || ''"></td>
+                        <td class="px-2 py-1.5" x-text="r.counterparty || '—'"></td>
+                        <td class="px-2 py-1.5 text-ink-400" x-text="(r.purpose || '').slice(0, 80)"></td>
+                        <td class="px-2 py-1.5 text-ink-400" x-text="r.category || ''"></td>
+                        <td class="px-2 py-1.5 text-right whitespace-nowrap font-mono"
+                            :class="r.amount < 0 ? 'text-rose-300' : 'text-emerald-300'"
+                            x-text="formatEur(r.amount)"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
+
+          <details x-show="result?.tools_used?.length" x-cloak class="text-xs text-ink-500">
+            <summary class="cursor-pointer hover:text-ink-300">Tool-Aufrufe anzeigen</summary>
+            <pre class="mt-2 overflow-x-auto rounded bg-ink-900/60 p-2 text-[11px]"
+                 x-text="JSON.stringify(result.tools_used, null, 2)"></pre>
+          </details>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Pending review banner — Kontoauszug docs paused before the
        second-pass LLM call when finance.review_before_send is on.
        Stays visible while an approve-all run is in progress so the
@@ -1095,6 +1187,45 @@
 
 <script>
 function financePage() { return {}; }
+
+function financeAsk() {
+  return {
+    question: '',
+    loading: false,
+    error: '',
+    result: null,
+    formatEur(amount) {
+      const n = Number(amount || 0);
+      const sign = n < 0 ? '−' : '';
+      return sign + Math.abs(n).toLocaleString('de-DE', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      }) + ' €';
+    },
+    async ask() {
+      const q = this.question.trim();
+      if (!q || this.loading) return;
+      this.loading = true;
+      this.error = '';
+      this.result = null;
+      try {
+        const res = await fetch('/api/finance/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: q }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+        this.result = await res.json();
+      } catch (e) {
+        this.error = (e && e.message) ? e.message : String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+  };
+}
 
 function analyzeAll() {
   return {

@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -981,6 +981,53 @@ def create_app(
             "ok_count": sum(1 for v in results.values() if v == "ok"),
             "fail_count": sum(1 for v in results.values() if v != "ok"),
             "results": results,
+        }
+
+    @app.post("/api/finance/ask")
+    def api_finance_ask(payload: dict = Body(...)):
+        """Answer a free-form question about the user's transactions
+        using LLM tool-use against the existing finance DB methods.
+
+        The provider abstraction has no native tool-use API, so the
+        loop is a JSON conversation: each turn the model returns one
+        JSON action (tool call or final answer). Tools are read-only
+        wrappers around `transactions_list` / `transactions_aggregate`
+        plus a couple of metadata helpers."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        is_local = settings.ai.provider in ("openai_compat", "bridge")
+        if settings.finance.local_only and not is_local:
+            raise HTTPException(
+                403,
+                "finance.local_only is enabled but the active provider is not local.",
+            )
+
+        question = str(payload.get("question") or "").strip()
+        if not question:
+            raise HTTPException(400, "question is required")
+        if len(question) > 500:
+            raise HTTPException(400, "question too long (max 500 chars)")
+
+        from ..finance.ask import answer_question
+        from ..providers import ProviderError
+
+        try:
+            result = answer_question(db, classifier, question)
+        except ProviderError as exc:
+            raise HTTPException(502, f"LLM provider error: {exc}") from exc
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(500, str(exc)) from exc
+
+        return {
+            "question":      result.question,
+            "answer":        result.answer,
+            "rows":          result.rows,
+            "tools_used":    result.tools_used,
+            "model":         result.model,
+            "cost_usd":      result.cost_usd,
+            "input_tokens":  result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "steps":         result.steps,
         }
 
     @app.get("/api/finance/diagnostics")
