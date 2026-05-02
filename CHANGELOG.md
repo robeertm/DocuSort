@@ -2,6 +2,20 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.6] – 2026-05-02
+
+### Added — Single-day picker + explicit "Auszug" link per row
+
+- New "Bestimmter Tag" date input on /transactions sets start = end =
+  the picked day in one click, so the table shows exactly that day's
+  bookings without typing both ends of the range.
+- Heute / Gestern as quick presets next to the existing month +
+  year ones.
+- Each row in the bookings table gets a dedicated "Auszug" column
+  with a small PDF-icon link to the source Kontoauszug
+  (`/document/<doc_id>`). The counterparty link stays as before;
+  the new column makes the source-document jump explicit.
+
 ## [0.27.5] – 2026-05-02
 
 ### Fixed — Date format normalisation (the live "29.07.2" / "30.12.2" mess)

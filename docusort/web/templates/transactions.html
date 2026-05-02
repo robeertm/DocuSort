@@ -76,6 +76,13 @@
         </div>
       </div>
 
+      <div class="md:col-span-2">
+        <label class="text-[11px] uppercase tracking-wider text-ink-500">Bestimmter Tag</label>
+        <input type="date" :value="oneDay" @change="setOneDay($event.target.value)"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2.5 text-sm mt-1"
+               title="Setzt Start- und End-Datum auf diesen Tag — zeigt alle Buchungen dieses Tages.">
+      </div>
+
       <div class="md:col-span-3">
         <label class="text-[11px] uppercase tracking-wider text-ink-500">Betrag (€, |abs|)</label>
         <div class="grid grid-cols-2 gap-1 mt-1">
@@ -284,6 +291,7 @@
             <th class="text-left px-3 py-2 font-medium">Konto</th>
             <th class="text-left px-3 py-2 font-medium">Kategorie</th>
             <th class="text-right px-3 py-2 font-medium">Betrag</th>
+            <th class="text-center px-2 py-2 font-medium" title="Quell-Kontoauszug">Auszug</th>
           </tr>
         </thead>
         <tbody>
@@ -317,10 +325,24 @@
                   :class="tx.amount < 0 ? 'text-rose-300' : 'text-emerald-300'">
                 <span x-text="(tx.amount > 0 ? '+' : '') + fmtEur(tx.amount)"></span>
               </td>
+              <td class="px-2 py-2 text-center whitespace-nowrap">
+                <template x-if="tx.doc_id">
+                  <a :href="'/document/' + tx.doc_id"
+                     class="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-emerald-300 underline decoration-dotted underline-offset-2"
+                     :title="'Quell-Auszug · doc ' + tx.doc_id">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         class="h-3.5 w-3.5">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+                    </svg>
+                    PDF
+                  </a>
+                </template>
+              </td>
             </tr>
           </template>
           <tr x-show="!loading && rows.length === 0" x-cloak>
-            <td colspan="7" class="px-3 py-10 text-center text-ink-500 text-sm">
+            <td colspan="8" class="px-3 py-10 text-center text-ink-500 text-sm">
               Keine Buchungen für diesen Filter.
             </td>
           </tr>
@@ -362,12 +384,21 @@ function txExplorer() {
     _reqToken: 0,
 
     periodPresets: [
-      { label: 'Dieses Jahr',     fn: 'thisYear'  },
-      { label: 'Letzte 12 Monate', fn: 'last12m'  },
-      { label: 'Letzter Monat',    fn: 'lastMonth' },
+      { label: 'Heute',            fn: 'today'     },
+      { label: 'Gestern',          fn: 'yesterday' },
       { label: 'Aktueller Monat',  fn: 'thisMonth' },
+      { label: 'Letzter Monat',    fn: 'lastMonth' },
+      { label: 'Letzte 12 Monate', fn: 'last12m'   },
+      { label: 'Dieses Jahr',      fn: 'thisYear'  },
       { label: 'Alle',             fn: 'all'       },
     ],
+
+    // True iff the filter is currently scoped to a single day —
+    // exposes that to the "Bestimmter Tag" picker so it round-trips.
+    get oneDay() {
+      return (this.filter.start && this.filter.start === this.filter.end)
+        ? this.filter.start : '';
+    },
 
     get parsedTokens() {
       return (this.filter.q || '')
@@ -484,9 +515,22 @@ function txExplorer() {
       this.reload();
     },
 
+    setOneDay(date) {
+      // Sets start = end = the picked day, so the table shows
+      // exactly that day's bookings in one shot.
+      if (!date) { this.filter.start = ''; this.filter.end = ''; }
+      else { this.filter.start = date; this.filter.end = date; }
+      this.reload();
+    },
+
     applyPreset(p) {
       const today = new Date();
       const fmt = (d) => d.toISOString().slice(0, 10);
+      if (p.fn === 'today')      { this.filter.start = fmt(today); this.filter.end = fmt(today); }
+      if (p.fn === 'yesterday')  {
+        const y = new Date(today); y.setDate(y.getDate() - 1);
+        this.filter.start = fmt(y); this.filter.end = fmt(y);
+      }
       if (p.fn === 'all')        { this.filter.start = ''; this.filter.end = ''; }
       if (p.fn === 'thisYear')   { this.filter.start = today.getFullYear() + '-01-01'; this.filter.end = ''; }
       if (p.fn === 'last12m')    {
