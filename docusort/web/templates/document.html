@@ -515,7 +515,10 @@
               <span x-show="bulk.paused" class="text-amber-200">· pausiert</span>
             </span>
           </template>
-          <span class="ml-1 text-cyan-300/80 tabular-nums" x-text="`${bulk.done}/${bulk.total}`"></span>
+          <template x-if="bulk">
+            <span class="ml-1 text-cyan-300/80 tabular-nums"
+                  x-text="`${bulk.done || 0}/${bulk.total || 0}`"></span>
+          </template>
         </div>
       </div>
 

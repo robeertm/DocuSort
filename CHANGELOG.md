@@ -2,6 +2,18 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.10] – 2026-05-02
+
+### Fixed — Bulk banner survives null bulk state
+
+The new bulk-status banner on the doc-detail page had a bare
+`x-text="${bulk.done}/${bulk.total}"` outside the `x-if="bulk"`
+guard. When `bulk` came back null between status polls Alpine
+would log a `Cannot read properties of null` error and the banner
+would render in an inconsistent state until the next poll. Wrapped
+the progress counter in `<template x-if="bulk">` and added `|| 0`
+fallbacks so a null is harmless.
+
 ## [0.27.9] – 2026-05-02
 
 ### Added — "Seite X/Y" in extraction progress + bulk reflection on doc page
