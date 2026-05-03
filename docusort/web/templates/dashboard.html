@@ -1,569 +1,467 @@
 {% extends "base.html" %}
-{% block title %}{{ t('dashboard.title') }} · DocuSort{% endblock %}
+{% block title %}Aktivität · DocuSort{% endblock %}
 {% block content %}
 
-<!-- Live upload progress (reads the same IndexedDB the service worker writes) -->
-<div x-data="uploadProgress()" x-init="init()" x-show="hasActive()" x-cloak
-     class="card p-4 mb-6 border-emerald-500/30 bg-emerald-500/5">
-  <div class="flex items-center justify-between gap-3 mb-2 text-sm">
-    <div class="flex items-center gap-2 min-w-0">
-      <svg class="h-4 w-4 animate-spin text-emerald-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
-      </svg>
-      <span class="font-medium truncate" x-text="label()"></span>
-    </div>
-    <a href="/upload" class="text-xs text-ink-400 hover:text-ink-200 shrink-0 underline">{{ t('dashboard.upload_open') }}</a>
-  </div>
-  <div class="h-1.5 rounded-full bg-ink-700/50 overflow-hidden">
-    <div class="h-full bg-emerald-500 transition-[width] duration-300" :style="`width: ${percent()}%`"></div>
-  </div>
-</div>
+<div x-data="dashboard()" x-init="init()" class="space-y-6 max-w-5xl mx-auto">
 
-{% set tot = stats.totals %}
-{% set cache_saved = (tot.cache_read_tokens or 0) * 0.9 / 1000000 %}
-{% set dup_saved = (tot.duplicates or 0) * 0.003 %}
-
-<div class="mb-8">
-  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('dashboard.title') }}</h1>
-  <p class="text-ink-400 mt-1 text-sm">{{ t('dashboard.subtitle') }}</p>
-</div>
-
-<!-- Stat cards -->
-<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4">
-  <div class="card p-4">
-    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.documents') }}</div>
-    <div class="mt-2 text-2xl sm:text-3xl font-semibold">{{ tot.n or 0 }}</div>
-    {% if tot.duplicates %}
-      <div class="text-xs text-ink-500 mt-0.5">
-        {% if tot.duplicates == 1 %}
-          {{ t('dashboard.of_which_duplicates_one', count=tot.duplicates) }}
-        {% else %}
-          {{ t('dashboard.of_which_duplicates_other', count=tot.duplicates) }}
-        {% endif %}
-      </div>
-    {% endif %}
-  </div>
-  <div class="card p-4">
-    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.total_cost') }}</div>
-    <div class="mt-2 text-2xl sm:text-3xl font-semibold">{{ (tot.cost_usd or 0) | usd }}</div>
-    <div class="text-xs text-ink-500 mt-0.5">≈ {{ (tot.cost_usd or 0) | eur }}</div>
-  </div>
-  <div class="card p-4">
-    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.tokens_in_out') }}</div>
-    <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums">
-      {{ '{:,}'.format(tot.input_tokens or 0) }}
-      <span class="text-ink-400 text-base font-normal">/</span>
-      {{ '{:,}'.format(tot.output_tokens or 0) }}
-    </div>
-  </div>
-  <div class="card p-4" x-data="reviewQueue()" x-init="init()">
-    <div class="text-xs text-ink-400 font-medium uppercase tracking-wide">{{ t('dashboard.review_open') }}</div>
-    <div class="mt-2 text-2xl sm:text-3xl font-semibold">
-      {% if review_count %}
-        <a href="/library?status=review" class="text-amber-300 hover:text-amber-200">{{ review_count }}</a>
-      {% else %}
-        <span class="text-ink-500">0</span>
-      {% endif %}
-    </div>
-    {% if review_count %}
-    <div class="mt-2">
-      <button type="button" @click="retryAll()" :disabled="job.running"
-              x-show="!job.running"
-              class="text-[11px] rounded-md px-2 py-1 border border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 disabled:opacity-40">
-        Re-queue all
-      </button>
-      <div x-show="job.running" x-cloak class="text-[11px] text-amber-200">
-        <div class="flex items-center justify-between gap-2 mb-1">
-          <span>Re-classifying… <span x-text="job.done + '/' + job.total"></span></span>
-          <span class="text-ink-500" x-text="job.current ? job.current.slice(0, 24) : ''"></span>
-        </div>
-        <div class="h-1.5 rounded bg-ink-800 overflow-hidden">
-          <div class="h-full bg-amber-400/80 transition-all"
-               :style="`width: ${job.total ? (100 * job.done / job.total) : 0}%`"></div>
-        </div>
-        <div x-show="job.last_error" x-cloak class="mt-1 text-rose-300/90 truncate"
-             x-text="'last error: ' + (job.last_error || '')"></div>
-      </div>
-      <div x-show="!job.running && job.done > 0" x-cloak class="text-[11px] text-ink-400 mt-1">
-        Done · <span x-text="(job.approved && job.approved.length) || 0"></span> ok,
-        <span x-text="(job.failed && job.failed.length) || 0"></span> failed.
-        <a href="/library?status=review" class="underline hover:text-ink-200">refresh →</a>
-      </div>
-    </div>
-    {% endif %}
-  </div>
-</div>
-
-<script>
-function reviewQueue() {
-  return {
-    job: { running: false, done: 0, total: 0, current: '', approved: [], failed: [], last_error: '' },
-    _t: null,
-    init() {
-      this.refresh();
-      this._t = setInterval(() => this.refresh(), 2000);
-    },
-    async refresh() {
-      try {
-        const r = await fetch('/api/library/retry-progress');
-        if (r.ok) this.job = await r.json();
-      } catch (e) {}
-    },
-    async retryAll() {
-      if (!confirm('Re-classify every document currently in review? Useful after switching the AI provider — runs through them one by one in the background.')) return;
-      try {
-        const r = await fetch('/api/library/retry-all-review', { method: 'POST' });
-        const d = await r.json();
-        if (d.started === false && d.reason !== 'queue empty') {
-          alert('Already running.');
-        }
-        this.refresh();
-      } catch (e) {
-        alert(e.message || String(e));
-      }
-    },
-  };
-}
-</script>
-
-{% if duplicate_groups %}
-<a href="/duplicates" class="card p-4 mb-4 flex items-center justify-between gap-4 border border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 transition">
-  <div class="flex items-center gap-3 min-w-0">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6 text-amber-300 shrink-0">
-      <rect x="8" y="8" width="12" height="12" rx="2"/><rect x="4" y="4" width="12" height="12" rx="2"/>
-    </svg>
-    <div class="min-w-0">
-      <div class="font-semibold text-amber-100">{{ duplicate_groups }} duplicate group{% if duplicate_groups != 1 %}s{% endif %} in the library</div>
-      <div class="text-xs text-amber-200/80 truncate">Click to review them and trash the extras with one click.</div>
-    </div>
-  </div>
-  <span class="text-amber-200/80 text-sm shrink-0">→</span>
-</a>
-{% endif %}
-
-<!-- Local AI bridge card: only renders if the bridge has ever been
-     touched (token configured or a client connected at least once).
-     Polls /api/bridge/status every 5 s while the page is open. -->
-<div x-data="bridgeDashboard()" x-init="init()" x-show="visible" x-cloak class="mb-8">
-  <div class="card p-5">
-    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-4">
-      <div class="flex items-center gap-3 flex-wrap">
-        <h2 class="font-semibold">Local AI Bridge</h2>
-        <span class="text-xs px-2 py-0.5 rounded-full"
-              :class="status.connected ? 'bg-emerald-500/15 text-emerald-300'
-                                       : 'bg-ink-800 text-ink-400'"
-              x-text="status.connected ? 'connected' : 'offline'"></span>
-        <span class="text-xs px-2 py-0.5 rounded-full"
-              :class="status.provider_active ? 'bg-cyan-500/15 text-cyan-200'
-                                              : 'bg-ink-800 text-ink-500'"
-              x-text="status.provider_active ? 'active provider' : 'standby'"></span>
-      </div>
-      <a href="/settings#bridge" class="text-xs text-ink-400 hover:text-ink-200">manage →</a>
-    </div>
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-sm">
-      <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-500">Host</div>
-        <div class="font-mono text-xs truncate" x-text="status.client?.host || '—'"></div>
-      </div>
-      <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-500">Model</div>
-        <div class="font-mono text-xs truncate" x-text="status.client?.model || '—'"></div>
-      </div>
-      <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-500">Requests</div>
-        <div class="text-xl font-semibold tabular-nums" x-text="status.calls_total ?? 0"></div>
-      </div>
-      <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-500">Failed</div>
-        <div class="text-xl font-semibold tabular-nums"
-             :class="(status.calls_failed ?? 0) > 0 ? 'text-rose-300' : ''"
-             x-text="status.calls_failed ?? 0"></div>
-      </div>
-      <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-500">Tokens in/out</div>
-        <div class="text-xs font-mono tabular-nums">
-          <span x-text="formatN(status.tokens_in ?? 0)"></span>
-          <span class="text-ink-500"> / </span>
-          <span x-text="formatN(status.tokens_out ?? 0)"></span>
-        </div>
-      </div>
-      <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-500">Avg latency</div>
-        <div class="text-xl font-semibold tabular-nums"
-             x-text="(status.avg_latency_s || 0).toFixed(1) + 's'"></div>
-      </div>
-    </div>
-    <div x-show="status.pending > 0" x-cloak
-         class="mt-3 text-xs text-cyan-200 bg-cyan-500/10 rounded-lg px-3 py-1.5 inline-flex items-center gap-2">
-      <span class="inline-block h-2 w-2 rounded-full bg-cyan-300 animate-pulse"></span>
-      <span x-text="status.pending + ' request' + (status.pending === 1 ? '' : 's') + ' in flight'"></span>
-    </div>
-  </div>
-</div>
-
-<script>
-function bridgeDashboard() {
-  return {
-    status: { connected: false, client: {}, calls_total: 0, calls_failed: 0,
-              tokens_in: 0, tokens_out: 0, pending: 0, avg_latency_s: 0,
-              provider_active: false },
-    visible: false,
-    _t: null,
-    init() {
-      this.refresh();
-      this._t = setInterval(() => this.refresh(), 5000);
-    },
-    async refresh() {
-      try {
-        const r = await fetch('/api/bridge/status');
-        if (!r.ok) return;
-        this.status = await r.json();
-        // Only show the card once the user has actually touched the
-        // bridge: either a client connected, the provider is active,
-        // or there have been calls. Otherwise the card is dead weight.
-        this.visible = this.status.connected ||
-                       this.status.provider_active ||
-                       (this.status.calls_total ?? 0) > 0;
-      } catch (e) {}
-    },
-    formatN(n) {
-      n = Number(n) || 0;
-      if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-      if (n >= 1_000)     return (n / 1_000).toFixed(1) + 'k';
-      return String(n);
-    },
-  };
-}
-</script>
-
-<!-- Savings strip -->
-{% if (tot.cache_read_tokens or 0) or (tot.duplicates or 0) %}
-<div class="card p-4 mb-8 flex flex-wrap items-center gap-4 text-sm">
-  <div class="flex items-center gap-2">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-emerald-300">
-      <path d="M20 12v9H4v-9M22 7H2v5h20zM12 22V7"/>
-    </svg>
-    <span class="text-ink-300">{{ t('dashboard.savings_label') }}</span>
-  </div>
-  {% if (tot.cache_read_tokens or 0) %}
-    <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">
-      {{ t('dashboard.cache_savings', tokens='{:,}'.format(tot.cache_read_tokens), amount='%.4f'|format(cache_saved)) }}
-    </span>
-  {% endif %}
-  {% if (tot.duplicates or 0) %}
-    <span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">
-      {% if tot.duplicates == 1 %}
-        {{ t('dashboard.duplicates_savings_one', count=tot.duplicates, amount='%.4f'|format(dup_saved)) }}
-      {% else %}
-        {{ t('dashboard.duplicates_savings_other', count=tot.duplicates, amount='%.4f'|format(dup_saved)) }}
-      {% endif %}
-    </span>
-  {% endif %}
-</div>
-{% endif %}
-
-<!-- Categories + months -->
-<div class="grid gap-4 sm:gap-6 lg:grid-cols-3 mb-8">
-
-  <div class="card p-5 lg:col-span-2">
-    <div class="flex items-baseline justify-between mb-4">
-      <h2 class="font-semibold">{{ t('dashboard.by_category') }}</h2>
-      <a href="/library" class="text-xs text-ink-400 hover:text-ink-200">{{ t('dashboard.see_all') }}</a>
-    </div>
-    {% if stats.by_category %}
-      {% set max_n = stats.by_category[0].n %}
-      <div class="space-y-2">
-        {% for c in stats.by_category %}
-          <a href="/library?category={{ c.category }}" class="block hover:bg-ink-700/30 rounded-lg p-2 -m-2 transition">
-            <div class="flex items-baseline justify-between mb-1 text-sm">
-              <span class="font-medium">{{ cat(c.category) }}</span>
-              <span class="tabular-nums text-ink-400">
-                {{ c.n }} <span class="text-ink-600 mx-1">·</span> {{ c.cost_usd | usd }}
-              </span>
-            </div>
-            <div class="h-1.5 rounded-full bg-ink-700/50 overflow-hidden">
-              <div class="h-full bg-emerald-500/80 rounded-full" style="width: {{ (c.n / max_n * 100) | round(1) }}%"></div>
-            </div>
-          </a>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="text-ink-400 text-sm">{{ t('dashboard.no_docs_yet') }}</p>
-    {% endif %}
-  </div>
-
-  <div class="card p-5">
-    <h2 class="font-semibold mb-4">{{ t('dashboard.last_12_months') }}</h2>
-    {% if stats.by_month %}
-      {% set max_m = stats.by_month | map(attribute='n') | max %}
-      <div class="space-y-1.5">
-        {% for m in stats.by_month %}
-          <div class="flex items-center gap-3 text-xs">
-            <span class="text-ink-400 w-16 tabular-nums">{{ m.month }}</span>
-            <div class="flex-1 h-5 rounded bg-ink-700/40 overflow-hidden">
-              <div class="h-full bg-emerald-500/70" style="width: {{ (m.n / max_m * 100) | round(1) }}%"></div>
-            </div>
-            <span class="tabular-nums text-ink-300 w-8 text-right">{{ m.n }}</span>
-          </div>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="text-ink-400 text-sm">—</p>
-    {% endif %}
-  </div>
-</div>
-
-<!-- Export + Cloud sync -->
-<div x-data="syncWidget()" x-init="fetchStatus()" class="card p-5 mb-8">
-  <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
-    <div>
-      <h2 class="font-semibold">{{ t('sync.heading') }}</h2>
-      <p class="text-xs text-ink-400 mt-1">{{ t('sync.subtitle') }}</p>
-    </div>
-    <a href="/api/export.zip" class="btn-secondary">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-      </svg>
-      {{ t('sync.export_zip') }}
-    </a>
-  </div>
-
-  <div class="grid gap-3 sm:grid-cols-[1fr_auto] items-center">
-    <div class="text-sm space-y-1">
-      <template x-if="!status.enabled">
-        <div class="text-ink-400">{{ t('sync.disabled_hint') | safe }}</div>
-      </template>
-      <template x-if="status.enabled && !status.rclone_installed">
-        <div class="text-amber-300">{{ t('sync.rclone_missing') | safe }}</div>
-      </template>
-      <template x-if="status.enabled && status.rclone_installed">
-        <div>
-          <div><span class="text-ink-400">{{ t('sync.remote') }}:</span> <code class="text-xs" x-text="status.remote"></code></div>
-          <div class="text-ink-400" x-show="status.last_finished_at">
-            <span x-text="tr('sync.last_run', { when: status.last_finished_at })"></span>
-            <span x-show="status.last_result === 'ok'" class="text-emerald-300">· ✓</span>
-            <span x-show="status.last_result === 'error'" class="text-rose-300">· ✕</span>
-            <span x-show="status.last_transferred" class="text-ink-500">·</span>
-            <span x-show="status.last_transferred" class="text-ink-500" x-text="status.last_transferred"></span>
-            <span x-show="status.last_files != null" class="text-ink-500" x-text="'(' + status.last_files + ')'"></span>
-          </div>
-          <div class="text-rose-300 text-xs truncate" x-show="status.last_result === 'error'" x-text="status.last_message"></div>
-        </div>
-      </template>
-    </div>
-    <div>
-      <button type="button" @click="run()" :disabled="!canRun()"
-              class="btn-primary" :class="!canRun() && 'opacity-50 cursor-not-allowed'">
-        <svg x-show="!status.running" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-          <path d="M21 12a9 9 0 1 1-3.51-7.13L21 8"/><path d="M21 3v5h-5"/>
+  <!-- =========== HEADER =========== -->
+  <header class="flex items-baseline justify-between gap-3 flex-wrap">
+    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Aktivität</h1>
+    <div class="flex items-center gap-2 text-xs text-ink-500">
+      <span x-show="lastUpdate" x-cloak>Stand <span x-text="lastUpdate"></span></span>
+      <button @click="refresh()" :disabled="loading"
+              class="rounded-lg border border-ink-700 px-2 py-1 hover:border-emerald-500/50 hover:text-emerald-300"
+              :class="loading ? 'opacity-50' : ''">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             class="h-3.5 w-3.5 inline" :class="loading ? 'animate-spin' : ''">
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>
         </svg>
-        <svg x-show="status.running" class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      </button>
+    </div>
+  </header>
+
+  <!-- =========== UPLOAD DROPZONE =========== -->
+  <section class="card p-4 sm:p-5"
+           :class="dragOver ? 'ring-2 ring-emerald-500/60 bg-emerald-500/5' : ''"
+           @dragover.prevent="dragOver = true"
+           @dragleave.prevent="dragOver = false"
+           @drop.prevent="dropFiles($event)">
+    <div class="flex items-center gap-3 mb-3">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-emerald-300 shrink-0">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+      </svg>
+      <h2 class="font-semibold">Dokumente importieren</h2>
+    </div>
+    <div class="grid gap-2 sm:grid-cols-[1fr_auto] items-stretch">
+      <label class="rounded-xl border-2 border-dashed border-ink-700 hover:border-emerald-500/60
+                    px-4 py-6 text-center text-sm cursor-pointer transition-colors block">
+        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp"
+               class="hidden" @change="pickFiles($event)">
+        <div class="text-ink-300 font-medium">PDF / JPG / PNG hier ablegen</div>
+        <div class="text-xs text-ink-500 mt-1">oder zum Auswählen tippen</div>
+      </label>
+      <a href="/upload"
+         class="hidden sm:flex items-center justify-center rounded-xl border border-ink-700
+                px-4 text-xs text-ink-400 hover:text-ink-200 hover:border-ink-600">
+        Erweiterte Upload-Seite
+      </a>
+    </div>
+    <!-- Pro-File Upload-Status (lokal, nicht serverseitig) -->
+    <ul x-show="uploads.length > 0" x-cloak class="mt-3 space-y-1.5 text-xs">
+      <template x-for="u in uploads" :key="u.id">
+        <li class="flex items-center gap-2">
+          <svg x-show="u.state === 'uploading'" class="h-3.5 w-3.5 animate-spin text-emerald-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+          </svg>
+          <svg x-show="u.state === 'done'" class="h-3.5 w-3.5 text-emerald-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M5 12l5 5L20 7"/>
+          </svg>
+          <svg x-show="u.state === 'error'" class="h-3.5 w-3.5 text-rose-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M6 6l12 12M18 6l-12 12"/>
+          </svg>
+          <span class="truncate flex-1 min-w-0" x-text="u.name"></span>
+          <span class="shrink-0 text-ink-500" x-show="u.state === 'uploading'" x-text="u.percent + '%'"></span>
+          <span class="shrink-0 text-rose-400" x-show="u.state === 'error'" x-text="u.error"></span>
+        </li>
+      </template>
+    </ul>
+  </section>
+
+  <!-- =========== LIVE PIPELINE =========== -->
+  <section class="card p-4 sm:p-5">
+    <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+      <div class="flex items-center gap-3">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             class="h-5 w-5 shrink-0"
+             :class="anyActivity ? 'text-cyan-300 animate-spin' : 'text-ink-500'">
           <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
         </svg>
-        <span x-text="status.running ? tr('sync.running') : tr('sync.run_now')"></span>
-      </button>
+        <h2 class="font-semibold">Was läuft gerade</h2>
+      </div>
+      <!-- Bridge status pill -->
+      <div class="flex items-center gap-2 text-xs">
+        <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1"
+              :class="state.bridge && state.bridge.connected
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : 'bg-rose-500/15 text-rose-300'">
+          <span class="h-1.5 w-1.5 rounded-full"
+                :class="state.bridge && state.bridge.connected ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+          <span x-text="state.bridge && state.bridge.connected ? 'Bridge verbunden' : 'Bridge offline'"></span>
+        </span>
+      </div>
     </div>
-  </div>
-</div>
 
-<!-- Recent docs -->
-<div class="card p-5">
-  <div class="flex items-baseline justify-between mb-4">
-    <h2 class="font-semibold">{{ t('dashboard.recent') }}</h2>
-    <a href="/library" class="text-xs text-ink-400 hover:text-ink-200">{{ t('dashboard.all') }}</a>
-  </div>
-  {% if recent %}
-    <div class="divide-y divide-ink-700/50 -my-3">
-      {% for d in recent %}
-        <a href="/document/{{ d.id }}" class="flex items-center gap-3 py-3 group">
-          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ink-700/60 text-ink-300 group-hover:bg-ink-700">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <path d="M14 2v6h6"/>
-            </svg>
+    <!-- Idle state -->
+    <div x-show="!anyActivity" x-cloak class="text-sm text-ink-400 py-4 text-center">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           class="h-8 w-8 mx-auto mb-2 text-ink-600">
+        <path d="M5 12l5 5L20 7"/>
+      </svg>
+      Aktuell läuft nichts. Lege Dokumente in den Import-Bereich oben oder
+      starte die Auswertung auf <a href="/finance" class="underline hover:text-emerald-300">/finance</a>.
+    </div>
+
+    <!-- LLM in flight (header dot) -->
+    <div x-show="state.in_flight > 0" x-cloak
+         class="rounded-xl bg-cyan-500/10 border border-cyan-500/30 px-3 py-2.5 text-sm flex items-center gap-3 mb-2">
+      <svg class="h-4 w-4 animate-spin text-cyan-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+      </svg>
+      <div class="text-cyan-100">
+        <span class="font-medium" x-text="state.in_flight"></span>
+        <span x-text="state.in_flight === 1 ? 'LLM-Aufruf läuft' : 'LLM-Aufrufe laufen'"></span>
+      </div>
+    </div>
+
+    <!-- Bulk re-analyse -->
+    <div x-show="bulk && (bulk.running || bulk.paused)" x-cloak
+         class="rounded-xl bg-cyan-500/5 border border-cyan-500/30 px-3 py-3 text-sm">
+      <div class="flex items-center gap-3 flex-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             class="h-4 w-4 text-cyan-300 shrink-0"
+             :class="bulk && bulk.running ? 'animate-spin' : ''">
+          <path d="M3 12h4l3-9 4 18 3-9h4"/>
+        </svg>
+        <div class="flex-1 min-w-0">
+          <div class="text-cyan-100 font-medium">
+            <template x-if="bulk && bulk.running">
+              <span>Bulk-Auswertung läuft</span>
+            </template>
+            <template x-if="bulk && bulk.paused">
+              <span class="text-amber-200">Bulk-Auswertung pausiert</span>
+            </template>
           </div>
-          <div class="min-w-0 flex-1">
-            <div class="truncate font-medium group-hover:text-white">{{ d.sender or '—' }} · {{ d.subject or d.filename }}</div>
-            <div class="text-xs text-ink-400 flex gap-2 items-center mt-0.5">
-              <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ cat(d.category) }}</span>
-              <span>{{ d.doc_date or '—' }}</span>
-              <span class="text-ink-500">·</span>
-              <span class="tabular-nums">{{ d.cost_usd | usd }}</span>
-              {% if d.status == 'review' %}<span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">{{ t('card.review') }}</span>{% endif %}
-              {% if d.status == 'failed' %}<span class="chip bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/20">{{ t('card.failed') }}</span>{% endif %}
-              {% if d.status == 'duplicate' %}<span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">{{ t('card.duplicate') }}</span>{% endif %}
+          <div class="text-xs text-cyan-200/80 mt-0.5 truncate" x-text="bulk && bulk.current"></div>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          <button x-show="bulk && bulk.running" @click="pauseBulk()"
+                  class="rounded-lg px-2.5 py-1 text-xs border border-amber-500/40 text-amber-200 hover:bg-amber-500/10">
+            ⏸ Pause
+          </button>
+          <button x-show="bulk && bulk.paused" @click="resumeBulk()"
+                  class="rounded-lg px-2.5 py-1 text-xs border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10">
+            ▶ Fortsetzen
+          </button>
+        </div>
+      </div>
+      <!-- Progress bars: docs + pages within current doc -->
+      <div class="mt-2.5 space-y-1.5">
+        <div>
+          <div class="h-1.5 rounded bg-ink-800 overflow-hidden">
+            <div class="h-full bg-cyan-400/80 transition-all"
+                 :style="`width: ${(bulk && bulk.total) ? (100 * bulk.done / bulk.total) : 0}%`"></div>
+          </div>
+          <div class="flex justify-between mt-1 text-[11px] text-ink-400">
+            <span>Auszug <span x-text="(bulk && bulk.done) || 0"></span> von <span x-text="(bulk && bulk.total) || 0"></span></span>
+            <span x-show="bulk && bulk.last_error" x-cloak class="text-rose-300/80 truncate ml-2"
+                  x-text="`zuletzt: ${bulk && bulk.last_error}`"></span>
+          </div>
+        </div>
+        <template x-if="bulk && bulk.total_pages > 0">
+          <div>
+            <div class="h-1 rounded bg-ink-800 overflow-hidden">
+              <div class="h-full bg-cyan-300/60 transition-all"
+                   :style="`width: ${(bulk.total_pages > 0) ? (100 * bulk.current_page / bulk.total_pages) : 0}%`"></div>
+            </div>
+            <div class="text-[11px] text-cyan-200/70 mt-0.5">
+              Seite <span x-text="bulk.current_page || 0"></span> von <span x-text="bulk.total_pages"></span>
             </div>
           </div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-ink-500 group-hover:text-ink-300">
-            <path d="m9 18 6-6-6-6"/>
-          </svg>
-        </a>
-      {% endfor %}
+        </template>
+      </div>
     </div>
-  {% else %}
-    <p class="text-ink-400 text-sm">{{ t('dashboard.nothing_yet') }} <a href="/upload" class="text-emerald-300 hover:underline">{{ t('dashboard.start_upload') }}</a></p>
-  {% endif %}
+  </section>
+
+  <!-- =========== STATS GRID =========== -->
+  <section class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+    <a href="/library" class="card p-3 hover:border-ink-600">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Dokumente</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="(state.counts && state.counts.total) || 0"></div>
+    </a>
+    <a href="/library?status=review" class="card p-3 hover:border-amber-500/40"
+       :class="(state.counts && state.counts.review > 0) ? 'border-amber-500/40 bg-amber-500/5' : ''">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Review</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums"
+           :class="(state.counts && state.counts.review > 0) ? 'text-amber-300' : ''"
+           x-text="(state.counts && state.counts.review) || 0"></div>
+    </a>
+    <a href="/library?status=failed" class="card p-3 hover:border-rose-500/40"
+       :class="(state.counts && state.counts.failed > 0) ? 'border-rose-500/40 bg-rose-500/5' : ''">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Fehler</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums"
+           :class="(state.counts && state.counts.failed > 0) ? 'text-rose-300' : ''"
+           x-text="(state.counts && state.counts.failed) || 0"></div>
+    </a>
+    <a href="/finance" class="card p-3 hover:border-cyan-500/40">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Auszüge</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="(state.counts && state.counts.kontoauszug) || 0"></div>
+      <div class="text-[10px] text-ink-500 mt-0.5"
+           x-show="state.counts && state.counts.empty_statements > 0" x-cloak>
+        <span x-text="state.counts && state.counts.empty_statements"></span> ohne Buchungen
+      </div>
+    </a>
+  </section>
+
+  <!-- =========== PROBLEMS / QUEUE =========== -->
+  <section class="card p-4 sm:p-5">
+    <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+      <h2 class="font-semibold">Was Aufmerksamkeit braucht</h2>
+      <div class="text-xs text-ink-500" x-show="(state.failed || []).length > 0" x-cloak>
+        <span x-text="(state.failed || []).length"></span> Einträge
+      </div>
+    </div>
+
+    <!-- Tab-Filter -->
+    <div class="flex gap-1.5 mb-3 overflow-x-auto -mx-1 px-1 pb-1">
+      <button @click="problemsTab = 'all'"
+              class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
+              :class="problemsTab === 'all'
+                       ? 'bg-ink-700 border-ink-600 text-ink-100'
+                       : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+        Alle <span class="ml-1 text-ink-500" x-text="`(${(state.failed || []).length})`"></span>
+      </button>
+      <button @click="problemsTab = 'failed'"
+              class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
+              :class="problemsTab === 'failed'
+                       ? 'bg-rose-500/20 border-rose-500/40 text-rose-200'
+                       : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+        Fehlgeschlagen <span class="ml-1 text-ink-500"
+                              x-text="`(${countByStatus('failed')})`"></span>
+      </button>
+      <button @click="problemsTab = 'review'"
+              class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
+              :class="problemsTab === 'review'
+                       ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+                       : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+        Niedrige Confidence <span class="ml-1 text-ink-500"
+                                   x-text="`(${countByStatus('review')})`"></span>
+      </button>
+      <button @click="problemsTab = 'pending_review'"
+              class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
+              :class="problemsTab === 'pending_review'
+                       ? 'bg-sky-500/20 border-sky-500/40 text-sky-200'
+                       : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+        Wartet auf Freigabe <span class="ml-1 text-ink-500"
+                                   x-text="`(${countByStatus('pending_review')})`"></span>
+      </button>
+    </div>
+
+    <ul x-show="filteredProblems().length > 0" x-cloak class="space-y-1">
+      <template x-for="d in filteredProblems()" :key="d.id">
+        <li class="rounded-xl border border-ink-800 bg-ink-900/40 p-3">
+          <div class="flex items-start gap-2">
+            <span class="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider"
+                  :class="statusClass(d.status)" x-text="statusLabel(d.status)"></span>
+            <div class="flex-1 min-w-0">
+              <a :href="'/document/' + d.id"
+                 class="block font-medium text-ink-100 hover:text-emerald-300 truncate"
+                 x-text="d.subject || d.original_name || ('Dok ' + d.id)"></a>
+              <div class="text-[11px] text-ink-500 mt-0.5">
+                <span x-text="d.sender || 'Unbekannter Absender'"></span>
+                <template x-if="d.doc_date"><span> · <span x-text="d.doc_date"></span></span></template>
+                <template x-if="d.reasoning">
+                  <span class="ml-2 text-rose-300/80" x-text="`„${d.reasoning.slice(0, 80)}"`"></span>
+                </template>
+              </div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <button @click="retryDoc(d.id)" :disabled="busyDoc === d.id"
+                      class="rounded-lg px-2 py-1 text-[11px] border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10"
+                      :class="busyDoc === d.id ? 'opacity-50' : ''"
+                      title="Erneut klassifizieren">
+                <span x-show="busyDoc !== d.id">↻</span>
+                <span x-show="busyDoc === d.id">…</span>
+              </button>
+              <a :href="'/document/' + d.id"
+                 class="rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500"
+                 title="Öffnen">→</a>
+            </div>
+          </div>
+        </li>
+      </template>
+    </ul>
+
+    <div x-show="filteredProblems().length === 0" x-cloak
+         class="text-sm text-ink-500 py-6 text-center">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           class="h-8 w-8 mx-auto mb-2 text-emerald-400/60">
+        <path d="M5 12l5 5L20 7"/>
+      </svg>
+      Nichts hängt — alles klassifiziert.
+    </div>
+  </section>
+
+  <!-- =========== RECENT FEED =========== -->
+  <section class="card p-4 sm:p-5">
+    <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+      <h2 class="font-semibold">Zuletzt eingegangen</h2>
+      <a href="/library" class="text-xs text-ink-400 hover:text-emerald-300 underline">
+        Alle ansehen →
+      </a>
+    </div>
+    <ul x-show="(state.recent || []).length > 0" class="divide-y divide-ink-800/60">
+      <template x-for="d in (state.recent || [])" :key="d.id">
+        <li class="py-2.5 first:pt-0 last:pb-0">
+          <div class="flex items-start gap-2">
+            <span class="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider"
+                  :class="statusClass(d.status)" x-text="statusLabel(d.status)"></span>
+            <div class="flex-1 min-w-0">
+              <a :href="'/document/' + d.id"
+                 class="block text-sm font-medium hover:text-emerald-300 truncate"
+                 x-text="d.subject || d.original_name || ('Dok ' + d.id)"></a>
+              <div class="text-[11px] text-ink-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span class="truncate" x-text="d.category + (d.subcategory ? ' / ' + d.subcategory : '')"></span>
+                <template x-if="d.sender"><span class="text-ink-600">·</span><span class="truncate" x-text="d.sender"></span></template>
+                <template x-if="d.doc_date"><span class="text-ink-600">·</span><span x-text="d.doc_date"></span></template>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-500 shrink-0 tabular-nums" x-text="ago(d.created_at)"></div>
+          </div>
+        </li>
+      </template>
+    </ul>
+    <div x-show="(state.recent || []).length === 0" x-cloak
+         class="text-sm text-ink-500 py-6 text-center">
+      Noch keine Dokumente. Lade welche oben hoch.
+    </div>
+  </section>
+
 </div>
 
 <script>
-// ---- Dashboard upload-progress widget (IDB + BroadcastChannel) ----
-const UP_DB = "docusort-uploads";
-const UP_STORE = "items";
-const UP_BC = "docusort-upload";
-const UP_TERMINAL = new Set(["filed","review","failed","duplicate","unknown","error"]);
-
-function _openUpDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(UP_DB, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(UP_STORE)) {
-        db.createObjectStore(UP_STORE, { keyPath: "id", autoIncrement: true });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function _allUp() {
-  try {
-    const db = await _openUpDB();
-    return await new Promise((resolve, reject) => {
-      const req = db.transaction(UP_STORE, "readonly").objectStore(UP_STORE).getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-  } catch (e) { return []; }
-}
-
-async function _patchUp(id, patch) {
-  try {
-    const db = await _openUpDB();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(UP_STORE, "readwrite");
-      const store = tx.objectStore(UP_STORE);
-      const getReq = store.get(id);
-      getReq.onsuccess = () => {
-        const cur = getReq.result;
-        if (!cur) { resolve(false); return; }
-        const next = { ...cur, ...patch };
-        const putReq = store.put(next);
-        putReq.onsuccess = () => resolve(true);
-        putReq.onerror = () => reject(putReq.error);
-      };
-      getReq.onerror = () => reject(getReq.error);
-    });
-  } catch (e) { return false; }
-}
-
-function uploadProgress() {
+function dashboard() {
   return {
-    items: [],
-    refreshTimer: null,
-
-    async init() {
-      this.items = await _allUp();
-      try {
-        const bc = new BroadcastChannel(UP_BC);
-        bc.onmessage = () => this.scheduleRefresh();
-      } catch (e) {}
-      // Self-heal: poll the server for each non-terminal IDB item every
-      // tick. Without this the dashboard sat on stale "processing" rows
-      // forever when the upload tab was closed mid-batch.
-      this.refresh();
-      setInterval(() => this.refresh(), 4000);
+    state: { counts: {}, recent: [], failed: [], bridge: {connected: false},
+             in_flight: 0, bulk_job: null },
+    loading: false,
+    lastUpdate: '',
+    pollHandle: null,
+    dragOver: false,
+    uploads: [],   // local upload queue: {id, name, percent, state, error}
+    _uploadCounter: 0,
+    problemsTab: 'all',
+    busyDoc: null,
+    get bulk() { return this.state.bulk_job; },
+    get anyActivity() {
+      return (this.state.in_flight > 0)
+          || (this.bulk && (this.bulk.running || this.bulk.paused));
     },
-    scheduleRefresh() {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = setTimeout(() => this.refresh(), 200);
+    init() {
+      this.refresh();
+      this.pollHandle = setInterval(() => this.refresh(), 2500);
     },
     async refresh() {
-      this.items = await _allUp();
-      await this.reconcile();
-      this.items = await _allUp();
-    },
-    async reconcile() {
-      // For each non-terminal IDB record, ask the server what state it
-      // really is in. The server is the source of truth — it knows
-      // whether the file is still in inbox/, has been classified, or has
-      // been forgotten entirely.
-      const stale = this.items.filter(
-        it => it.inbox_name && !UP_TERMINAL.has(it.stage)
-      );
-      if (stale.length === 0) return;
-      await Promise.allSettled(stale.map(async it => {
-        try {
-          const r = await fetch("/api/status/" + encodeURIComponent(it.inbox_name));
-          if (!r.ok) return;
-          const data = await r.json();
-          if (!data.status || data.status === it.stage) return;
-          const patch = { stage: data.status };
-          if (data.doc_id != null)     patch.doc_id    = data.doc_id;
-          if (data.category)           patch.category  = data.category;
-          if (data.confidence != null) patch.confidence = data.confidence;
-          if (data.cost_usd != null)   patch.cost_usd   = data.cost_usd;
-          await _patchUp(it.id, patch);
-        } catch (e) { /* network blip — try again next tick */ }
-      }));
-    },
-
-    hasActive() {
-      return this.items.some(it => !UP_TERMINAL.has(it.stage));
-    },
-    percent() {
-      if (this.items.length === 0) return 0;
-      const done = this.items.filter(it =>
-        UP_TERMINAL.has(it.stage) || it.stage === "filed" || it.stage === "review"
-      ).length;
-      return Math.round(done / this.items.length * 100);
-    },
-    label() {
-      const total = this.items.length;
-      const done = this.items.filter(it => UP_TERMINAL.has(it.stage)).length;
-      const uploading = this.items.filter(it => it.stage === "uploading" || it.stage === "pending-upload").length;
-      const processing = this.items.filter(it => it.stage === "queued" || it.stage === "server-queued" || it.stage === "processing").length;
-      // Build a concise "3 hochladen · 5 klassifizieren · 2/10 fertig"
-      const parts = [];
-      if (uploading)  parts.push(tr("dashboard.progress_uploading", { n: uploading }));
-      if (processing) parts.push(tr("dashboard.progress_processing", { n: processing }));
-      parts.push(tr("dashboard.progress_done", { done, total }));
-      return parts.join(" · ");
-    },
-  };
-}
-
-function syncWidget() {
-  return {
-    status: { enabled: false, rclone_installed: false, running: false },
-    pollTimer: null,
-    async fetchStatus() {
+      this.loading = true;
       try {
-        const r = await fetch('/api/sync/status');
-        if (r.ok) this.status = await r.json();
-      } catch (e) {}
-      if (this.status.running) {
-        clearTimeout(this.pollTimer);
-        this.pollTimer = setTimeout(() => this.fetchStatus(), 2500);
-      }
-    },
-    canRun() {
-      return this.status.enabled && this.status.rclone_installed && !this.status.running;
-    },
-    async run() {
-      if (!this.canRun()) return;
-      try {
-        const r = await fetch('/api/sync/run', { method: 'POST' });
-        if (!r.ok) {
-          const d = await r.json();
-          alert(d.detail || ('HTTP ' + r.status));
-          return;
+        const r = await fetch('/api/dashboard');
+        if (r.ok) {
+          this.state = await r.json();
+          this.lastUpdate = new Date().toLocaleTimeString('de-DE');
         }
-        this.status.running = true;
-        setTimeout(() => this.fetchStatus(), 1200);
-      } catch (e) {
-        alert(e.message || e);
+      } catch (e) { /* network blip */ }
+      finally { this.loading = false; }
+    },
+    countByStatus(s) {
+      return (this.state.failed || []).filter(d => d.status === s).length;
+    },
+    filteredProblems() {
+      const all = this.state.failed || [];
+      if (this.problemsTab === 'all') return all;
+      return all.filter(d => d.status === this.problemsTab);
+    },
+    statusClass(s) {
+      switch (s) {
+        case 'failed':         return 'bg-rose-500/20 text-rose-300';
+        case 'review':         return 'bg-amber-500/20 text-amber-300';
+        case 'pending_review': return 'bg-sky-500/20 text-sky-300';
+        case 'duplicate':      return 'bg-ink-700 text-ink-400';
+        case 'filed':          return 'bg-emerald-500/15 text-emerald-300';
+        default:               return 'bg-ink-700 text-ink-400';
       }
+    },
+    statusLabel(s) {
+      switch (s) {
+        case 'failed':         return 'Fehler';
+        case 'review':         return 'Review';
+        case 'pending_review': return 'Wartet';
+        case 'duplicate':      return 'Dup';
+        case 'filed':          return 'OK';
+        default:               return s || '?';
+      }
+    },
+    ago(iso) {
+      if (!iso) return '';
+      const t = new Date(iso).getTime();
+      const dt = (Date.now() - t) / 1000;
+      if (dt < 60)    return Math.max(1, Math.floor(dt)) + 's';
+      if (dt < 3600)  return Math.floor(dt / 60) + 'm';
+      if (dt < 86400) return Math.floor(dt / 3600) + 'h';
+      return Math.floor(dt / 86400) + 'd';
+    },
+    async pickFiles(ev) {
+      const files = Array.from(ev.target.files || []);
+      ev.target.value = '';
+      for (const f of files) await this.uploadOne(f);
+    },
+    async dropFiles(ev) {
+      this.dragOver = false;
+      const files = Array.from(ev.dataTransfer.files || []);
+      for (const f of files) await this.uploadOne(f);
+    },
+    async uploadOne(file) {
+      const id = ++this._uploadCounter;
+      const item = { id, name: file.name, percent: 0, state: 'uploading', error: '' };
+      this.uploads.unshift(item);
+      // Cap visible list to 8
+      if (this.uploads.length > 8) this.uploads.length = 8;
+      try {
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/upload');
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) item.percent = Math.round((e.loaded / e.total) * 100);
+          };
+          xhr.onload = () => xhr.status >= 200 && xhr.status < 300
+            ? resolve()
+            : reject(new Error('HTTP ' + xhr.status));
+          xhr.onerror = () => reject(new Error('Upload fehlgeschlagen'));
+          const fd = new FormData();
+          fd.append('files', file, file.name);
+          xhr.send(fd);
+        });
+        item.percent = 100;
+        item.state = 'done';
+      } catch (e) {
+        item.state = 'error';
+        item.error = e.message || String(e);
+      }
+      // Refresh immediately so the new doc appears in the feed
+      this.refresh();
+    },
+    async pauseBulk() {
+      try {
+        await fetch('/api/finance/analyze-pause', { method: 'POST' });
+        this.refresh();
+      } catch (e) { alert(e.message || String(e)); }
+    },
+    async resumeBulk() {
+      try {
+        await fetch('/api/finance/analyze-resume', { method: 'POST' });
+        this.refresh();
+      } catch (e) { alert(e.message || String(e)); }
+    },
+    async retryDoc(docId) {
+      this.busyDoc = docId;
+      try {
+        const r = await fetch('/api/document/' + docId + '/retry', { method: 'POST' });
+        if (!r.ok) {
+          const txt = await r.text();
+          throw new Error(txt || ('HTTP ' + r.status));
+        }
+        await this.refresh();
+      } catch (e) {
+        alert('Fehler: ' + (e.message || String(e)));
+      } finally { this.busyDoc = null; }
     },
   };
 }

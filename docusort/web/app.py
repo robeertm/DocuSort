@@ -1048,6 +1048,92 @@ def create_app(
             "steps":         result.steps,
         }
 
+    @app.get("/api/dashboard")
+    def api_dashboard():
+        """Live state aggregator for the activity hub on /. Pulls
+        every signal the dashboard needs in one round-trip so the
+        page can poll cheaply (every 2-3s) without firing six
+        independent calls. All counts honor `deleted_at IS NULL`."""
+        from .. import activity as _activity
+        bridge_status = {"connected": False, "info": None}
+        try:
+            from ..bridge.server import get_bridge
+            bridge = get_bridge()
+            bridge_status["connected"] = bridge.is_connected()
+            client_info = getattr(bridge, "last_client_info", None)
+            if client_info:
+                bridge_status["info"] = {
+                    "host":  client_info.get("host"),
+                    "model": client_info.get("model"),
+                }
+        except Exception:
+            pass
+
+        with db._lock:
+            counts = {
+                "total":     int(db._conn.execute(
+                    "SELECT COUNT(*) FROM documents WHERE deleted_at IS NULL"
+                ).fetchone()[0]),
+                "review":    int(db._conn.execute(
+                    "SELECT COUNT(*) FROM documents "
+                    "WHERE deleted_at IS NULL AND status = 'review'"
+                ).fetchone()[0]),
+                "pending_review": int(db._conn.execute(
+                    "SELECT COUNT(*) FROM documents "
+                    "WHERE deleted_at IS NULL AND status = 'pending_review'"
+                ).fetchone()[0]),
+                "failed":    int(db._conn.execute(
+                    "SELECT COUNT(*) FROM documents "
+                    "WHERE deleted_at IS NULL AND status = 'failed'"
+                ).fetchone()[0]),
+                "duplicate": int(db._conn.execute(
+                    "SELECT COUNT(*) FROM documents "
+                    "WHERE deleted_at IS NULL AND status = 'duplicate'"
+                ).fetchone()[0]),
+                "kontoauszug": int(db._conn.execute(
+                    "SELECT COUNT(*) FROM documents "
+                    "WHERE deleted_at IS NULL AND category = 'Kontoauszug'"
+                ).fetchone()[0]),
+                "empty_statements": int(db._conn.execute(
+                    "SELECT COUNT(*) FROM statements s "
+                    "JOIN documents d ON d.id = s.doc_id "
+                    "WHERE d.deleted_at IS NULL "
+                    "  AND COALESCE(s.acknowledged_empty,0) = 0 "
+                    "  AND s.id NOT IN (SELECT statement_id FROM transactions)"
+                ).fetchone()[0]),
+            }
+            # 12 most-recent docs (regardless of status) — feed.
+            recent = [dict(r) for r in db._conn.execute(
+                "SELECT id, filename, original_name, category, subcategory, "
+                "       sender, subject, doc_date, status, confidence, "
+                "       created_at, content_hash "
+                "FROM documents WHERE deleted_at IS NULL "
+                "ORDER BY datetime(created_at) DESC LIMIT 12"
+            ).fetchall()]
+            # Failed docs (always relevant, small list)
+            failed = [dict(r) for r in db._conn.execute(
+                "SELECT id, filename, original_name, sender, subject, "
+                "       doc_date, status, reasoning, created_at "
+                "FROM documents WHERE deleted_at IS NULL "
+                "  AND status IN ('failed','review','pending_review') "
+                "ORDER BY datetime(created_at) DESC LIMIT 50"
+            ).fetchall()]
+
+        bulk_job = _activity.get_job("analyze-statements").as_dict()
+        snap = _activity.snapshot()
+        in_flight = int(snap.get("in_flight") or 0)
+
+        return {
+            "now":           datetime.now().isoformat(timespec="seconds"),
+            "counts":        counts,
+            "bridge":        bridge_status,
+            "in_flight":     in_flight,
+            "bulk_job":      bulk_job,
+            "recent":        recent,
+            "failed":        failed,
+            "version":       __version__,
+        }
+
     @app.post("/api/finance/normalise-dates")
     def api_finance_normalise_dates(payload: dict = Body(default={})):
         """One-off DB pass: converts every non-ISO booking_date /

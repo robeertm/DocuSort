@@ -2,6 +2,39 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.28.0] – 2026-05-03
+
+### Added — Aktivitäts-Zentrale (new landing page on /)
+
+`/` is now a single dashboard that surfaces every pipeline state in
+one place, mobile-first. The user complained that the state of any
+given document was scattered across upload page, library, finance,
+and the document detail — fixed.
+
+Sections, top to bottom:
+
+1. **Import-Dropzone** — drag PDFs / images straight onto the page.
+   Per-file XHR upload with live percent + done/error indicators
+   pinned in the section.
+2. **Live-Pipeline** — bridge connection pill, in-flight LLM call
+   counter, and the bulk-statement-extraction job with **two**
+   progress bars (Auszug X/N + Seite Y/M for the current PDF) plus
+   pause / resume buttons inline.
+3. **Stats-Kacheln** — Dokumente · Review · Fehler · Auszüge.
+   Each tile colored when there's something to act on.
+4. **Was Aufmerksamkeit braucht** — tabbed list (Alle / Fehler /
+   Niedrige Confidence / Wartet auf Freigabe) with a one-click
+   retry button per row.
+5. **Zuletzt eingegangen** — last 12 docs with status pill +
+   relative timestamp.
+
+Backend: new `GET /api/dashboard` aggregator that returns counts,
+recent + failed lists, bridge status, the bulk-job snapshot, and
+the in-flight LLM counter — one round-trip every 2.5s.
+
+Mobile nav extended: Buchungen + Finance now reachable directly,
+all tabs scroll horizontally instead of cramming into one row.
+
 ## [0.27.11] – 2026-05-03
 
 ### Fixed — Kontoauszüge land as `Kontoauszug` from the start
