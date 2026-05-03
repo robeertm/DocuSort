@@ -135,8 +135,8 @@
 <body class="min-h-full bg-gradient-to-b from-ink-950 via-ink-900 to-ink-950 text-ink-100 antialiased">
 
 <header class="sticky top-0 z-20 backdrop-blur bg-ink-900/70 border-b border-ink-800">
-  <nav class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-4">
-    <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg">
+  <nav class="mx-auto max-w-6xl px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-1.5 sm:gap-4">
+    <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg shrink-0">
       <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
           <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>
@@ -144,7 +144,7 @@
           <path d="M7 14h10M7 18h7"/>
         </svg>
       </span>
-      <span>DocuSort</span>
+      <span class="hidden sm:inline">DocuSort</span>
       <span class="hidden sm:inline text-xs text-ink-400 font-normal ml-1">v{{ version }}</span>
     </a>
     <div class="flex-1"></div>
@@ -176,7 +176,7 @@
           <span class="relative inline-flex h-2 w-2 rounded-full"
                 :class="active ? 'bg-emerald-400' : 'bg-ink-600'"></span>
         </span>
-        <span x-show="active" x-cloak class="text-[11px] tabular-nums text-emerald-200/80"
+        <span x-show="active" x-cloak class="hidden sm:inline text-[11px] tabular-nums text-emerald-200/80"
               x-text="(T['nav.ai_label_short'] || '{n} active').replace('{n}', total)"></span>
       </button>
       <div x-show="open" x-cloak x-transition.opacity
@@ -254,11 +254,12 @@
       </div>
     </div>
 
-    <a href="/upload" class="btn-primary">
+    <a href="/upload" class="btn-primary !px-2 sm:!px-3 shrink-0"
+       :aria-label="'{{ t('nav.upload') }}'">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
         <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
       </svg>
-      <span>{{ t('nav.upload') }}</span>
+      <span class="hidden sm:inline">{{ t('nav.upload') }}</span>
     </a>
   </nav>
   <!-- mobile nav -->

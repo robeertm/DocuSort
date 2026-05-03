@@ -1,17 +1,18 @@
 {% extends "base.html" %}
-{% block title %}Aktivität · DocuSort{% endblock %}
+{% block title %}{{ t('hub.title') }} · DocuSort{% endblock %}
 {% block content %}
 
-<div x-data="dashboard()" x-init="init()" class="space-y-6 max-w-5xl mx-auto">
+<div x-data="dashboard()" x-init="init()" class="space-y-5 sm:space-y-6 max-w-5xl mx-auto">
 
   <!-- =========== HEADER =========== -->
   <header class="flex items-baseline justify-between gap-3 flex-wrap">
-    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Aktivität</h1>
+    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('hub.title') }}</h1>
     <div class="flex items-center gap-2 text-xs text-ink-500">
-      <span x-show="lastUpdate" x-cloak>Stand <span x-text="lastUpdate"></span></span>
+      <span x-show="lastUpdate" x-cloak>{{ t('hub.last_update') }} <span x-text="lastUpdate"></span></span>
       <button @click="refresh()" :disabled="loading"
               class="rounded-lg border border-ink-700 px-2 py-1 hover:border-emerald-500/50 hover:text-emerald-300"
-              :class="loading ? 'opacity-50' : ''">
+              :class="loading ? 'opacity-50' : ''"
+              :aria-label="'{{ t('hub.refresh') }}'">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              class="h-3.5 w-3.5 inline" :class="loading ? 'animate-spin' : ''">
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>
@@ -19,53 +20,6 @@
       </button>
     </div>
   </header>
-
-  <!-- =========== UPLOAD DROPZONE =========== -->
-  <section class="card p-4 sm:p-5"
-           :class="dragOver ? 'ring-2 ring-emerald-500/60 bg-emerald-500/5' : ''"
-           @dragover.prevent="dragOver = true"
-           @dragleave.prevent="dragOver = false"
-           @drop.prevent="dropFiles($event)">
-    <div class="flex items-center gap-3 mb-3">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-emerald-300 shrink-0">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-      </svg>
-      <h2 class="font-semibold">Dokumente importieren</h2>
-    </div>
-    <div class="grid gap-2 sm:grid-cols-[1fr_auto] items-stretch">
-      <label class="rounded-xl border-2 border-dashed border-ink-700 hover:border-emerald-500/60
-                    px-4 py-6 text-center text-sm cursor-pointer transition-colors block">
-        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp"
-               class="hidden" @change="pickFiles($event)">
-        <div class="text-ink-300 font-medium">PDF / JPG / PNG hier ablegen</div>
-        <div class="text-xs text-ink-500 mt-1">oder zum Auswählen tippen</div>
-      </label>
-      <a href="/upload"
-         class="hidden sm:flex items-center justify-center rounded-xl border border-ink-700
-                px-4 text-xs text-ink-400 hover:text-ink-200 hover:border-ink-600">
-        Erweiterte Upload-Seite
-      </a>
-    </div>
-    <!-- Pro-File Upload-Status (lokal, nicht serverseitig) -->
-    <ul x-show="uploads.length > 0" x-cloak class="mt-3 space-y-1.5 text-xs">
-      <template x-for="u in uploads" :key="u.id">
-        <li class="flex items-center gap-2">
-          <svg x-show="u.state === 'uploading'" class="h-3.5 w-3.5 animate-spin text-emerald-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
-          </svg>
-          <svg x-show="u.state === 'done'" class="h-3.5 w-3.5 text-emerald-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M5 12l5 5L20 7"/>
-          </svg>
-          <svg x-show="u.state === 'error'" class="h-3.5 w-3.5 text-rose-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M6 6l12 12M18 6l-12 12"/>
-          </svg>
-          <span class="truncate flex-1 min-w-0" x-text="u.name"></span>
-          <span class="shrink-0 text-ink-500" x-show="u.state === 'uploading'" x-text="u.percent + '%'"></span>
-          <span class="shrink-0 text-rose-400" x-show="u.state === 'error'" x-text="u.error"></span>
-        </li>
-      </template>
-    </ul>
-  </section>
 
   <!-- =========== LIVE PIPELINE =========== -->
   <section class="card p-4 sm:p-5">
@@ -76,7 +30,7 @@
              :class="anyActivity ? 'text-cyan-300 animate-spin' : 'text-ink-500'">
           <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
         </svg>
-        <h2 class="font-semibold">Was läuft gerade</h2>
+        <h2 class="font-semibold">{{ t('hub.live.title') }}</h2>
       </div>
       <!-- Bridge status pill -->
       <div class="flex items-center gap-2 text-xs">
@@ -86,7 +40,9 @@
                         : 'bg-rose-500/15 text-rose-300'">
           <span class="h-1.5 w-1.5 rounded-full"
                 :class="state.bridge && state.bridge.connected ? 'bg-emerald-400' : 'bg-rose-400'"></span>
-          <span x-text="state.bridge && state.bridge.connected ? 'Bridge verbunden' : 'Bridge offline'"></span>
+          <span x-text="state.bridge && state.bridge.connected
+                          ? '{{ t('hub.bridge.connected') }}'
+                          : '{{ t('hub.bridge.offline') }}'"></span>
         </span>
       </div>
     </div>
@@ -97,8 +53,10 @@
            class="h-8 w-8 mx-auto mb-2 text-ink-600">
         <path d="M5 12l5 5L20 7"/>
       </svg>
-      Aktuell läuft nichts. Lege Dokumente in den Import-Bereich oben oder
-      starte die Auswertung auf <a href="/finance" class="underline hover:text-emerald-300">/finance</a>.
+      {{ t('hub.live.idle') }}
+      <a href="/upload" class="underline hover:text-emerald-300">/upload</a>
+      ·
+      <a href="/finance" class="underline hover:text-emerald-300">/finance</a>
     </div>
 
     <!-- LLM in flight (header dot) -->
@@ -109,7 +67,9 @@
       </svg>
       <div class="text-cyan-100">
         <span class="font-medium" x-text="state.in_flight"></span>
-        <span x-text="state.in_flight === 1 ? 'LLM-Aufruf läuft' : 'LLM-Aufrufe laufen'"></span>
+        <span x-text="state.in_flight === 1
+                       ? '{{ t('hub.live.llm_one') }}'
+                       : '{{ t('hub.live.llm_many') }}'"></span>
       </div>
     </div>
 
@@ -125,10 +85,10 @@
         <div class="flex-1 min-w-0">
           <div class="text-cyan-100 font-medium">
             <template x-if="bulk && bulk.running">
-              <span>Bulk-Auswertung läuft</span>
+              <span>{{ t('hub.live.bulk_running') }}</span>
             </template>
             <template x-if="bulk && bulk.paused">
-              <span class="text-amber-200">Bulk-Auswertung pausiert</span>
+              <span class="text-amber-200">{{ t('hub.live.bulk_paused') }}</span>
             </template>
           </div>
           <div class="text-xs text-cyan-200/80 mt-0.5 truncate" x-text="bulk && bulk.current"></div>
@@ -136,11 +96,11 @@
         <div class="flex items-center gap-1 shrink-0">
           <button x-show="bulk && bulk.running" @click="pauseBulk()"
                   class="rounded-lg px-2.5 py-1 text-xs border border-amber-500/40 text-amber-200 hover:bg-amber-500/10">
-            ⏸ Pause
+            ⏸ {{ t('hub.bulk.pause') }}
           </button>
           <button x-show="bulk && bulk.paused" @click="resumeBulk()"
                   class="rounded-lg px-2.5 py-1 text-xs border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10">
-            ▶ Fortsetzen
+            ▶ {{ t('hub.bulk.resume') }}
           </button>
         </div>
       </div>
@@ -152,9 +112,16 @@
                  :style="`width: ${(bulk && bulk.total) ? (100 * bulk.done / bulk.total) : 0}%`"></div>
           </div>
           <div class="flex justify-between mt-1 text-[11px] text-ink-400">
-            <span>Auszug <span x-text="(bulk && bulk.done) || 0"></span> von <span x-text="(bulk && bulk.total) || 0"></span></span>
-            <span x-show="bulk && bulk.last_error" x-cloak class="text-rose-300/80 truncate ml-2"
-                  x-text="`zuletzt: ${bulk && bulk.last_error}`"></span>
+            <span>{{ t('hub.bulk.statement') }} <span x-text="(bulk && bulk.done) || 0"></span> {{ t('hub.bulk.of') }} <span x-text="(bulk && bulk.total) || 0"></span></span>
+            <!-- Only show "last error" when the current run is actually
+                 still running AND the error is fresh (within the last 5
+                 doc iterations). Stale messages from earlier paused
+                 runs were confusing — "bridge offline" shown while
+                 bridge is happily connected. -->
+            <template x-if="showLastError">
+              <span class="text-rose-300/80 truncate ml-2"
+                    x-text="`{{ t('hub.bulk.last_error') }} ${bulk.last_error}`"></span>
+            </template>
           </div>
         </div>
         <template x-if="bulk && bulk.total_pages > 0">
@@ -164,7 +131,7 @@
                    :style="`width: ${(bulk.total_pages > 0) ? (100 * bulk.current_page / bulk.total_pages) : 0}%`"></div>
             </div>
             <div class="text-[11px] text-cyan-200/70 mt-0.5">
-              Seite <span x-text="bulk.current_page || 0"></span> von <span x-text="bulk.total_pages"></span>
+              {{ t('hub.bulk.page') }} <span x-text="bulk.current_page || 0"></span> {{ t('hub.bulk.of') }} <span x-text="bulk.total_pages"></span>
             </div>
           </div>
         </template>
@@ -175,29 +142,29 @@
   <!-- =========== STATS GRID =========== -->
   <section class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
     <a href="/library" class="card p-3 hover:border-ink-600">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">Dokumente</div>
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.docs') }}</div>
       <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="(state.counts && state.counts.total) || 0"></div>
     </a>
     <a href="/library?status=review" class="card p-3 hover:border-amber-500/40"
        :class="(state.counts && state.counts.review > 0) ? 'border-amber-500/40 bg-amber-500/5' : ''">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">Review</div>
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.review') }}</div>
       <div class="mt-1 text-2xl font-semibold tabular-nums"
            :class="(state.counts && state.counts.review > 0) ? 'text-amber-300' : ''"
            x-text="(state.counts && state.counts.review) || 0"></div>
     </a>
     <a href="/library?status=failed" class="card p-3 hover:border-rose-500/40"
        :class="(state.counts && state.counts.failed > 0) ? 'border-rose-500/40 bg-rose-500/5' : ''">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">Fehler</div>
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.failed') }}</div>
       <div class="mt-1 text-2xl font-semibold tabular-nums"
            :class="(state.counts && state.counts.failed > 0) ? 'text-rose-300' : ''"
            x-text="(state.counts && state.counts.failed) || 0"></div>
     </a>
     <a href="/finance" class="card p-3 hover:border-cyan-500/40">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">Auszüge</div>
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.statements') }}</div>
       <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="(state.counts && state.counts.kontoauszug) || 0"></div>
       <div class="text-[10px] text-ink-500 mt-0.5"
            x-show="state.counts && state.counts.empty_statements > 0" x-cloak>
-        <span x-text="state.counts && state.counts.empty_statements"></span> ohne Buchungen
+        <span x-text="state.counts && state.counts.empty_statements"></span> {{ t('hub.tile.empty_suffix') }}
       </div>
     </a>
   </section>
@@ -205,9 +172,9 @@
   <!-- =========== PROBLEMS / QUEUE =========== -->
   <section class="card p-4 sm:p-5">
     <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
-      <h2 class="font-semibold">Was Aufmerksamkeit braucht</h2>
+      <h2 class="font-semibold">{{ t('hub.problems.title') }}</h2>
       <div class="text-xs text-ink-500" x-show="(state.failed || []).length > 0" x-cloak>
-        <span x-text="(state.failed || []).length"></span> Einträge
+        <span x-text="(state.failed || []).length"></span> {{ t('hub.problems.entries') }}
       </div>
     </div>
 
@@ -218,14 +185,14 @@
               :class="problemsTab === 'all'
                        ? 'bg-ink-700 border-ink-600 text-ink-100'
                        : 'border-ink-700 text-ink-400 hover:text-ink-200'">
-        Alle <span class="ml-1 text-ink-500" x-text="`(${(state.failed || []).length})`"></span>
+        {{ t('hub.problems.all') }} <span class="ml-1 text-ink-500" x-text="`(${(state.failed || []).length})`"></span>
       </button>
       <button @click="problemsTab = 'failed'"
               class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
               :class="problemsTab === 'failed'
                        ? 'bg-rose-500/20 border-rose-500/40 text-rose-200'
                        : 'border-ink-700 text-ink-400 hover:text-ink-200'">
-        Fehlgeschlagen <span class="ml-1 text-ink-500"
+        {{ t('hub.problems.failed') }} <span class="ml-1 text-ink-500"
                               x-text="`(${countByStatus('failed')})`"></span>
       </button>
       <button @click="problemsTab = 'review'"
@@ -233,7 +200,7 @@
               :class="problemsTab === 'review'
                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
                        : 'border-ink-700 text-ink-400 hover:text-ink-200'">
-        Niedrige Confidence <span class="ml-1 text-ink-500"
+        {{ t('hub.problems.review') }} <span class="ml-1 text-ink-500"
                                    x-text="`(${countByStatus('review')})`"></span>
       </button>
       <button @click="problemsTab = 'pending_review'"
@@ -241,7 +208,7 @@
               :class="problemsTab === 'pending_review'
                        ? 'bg-sky-500/20 border-sky-500/40 text-sky-200'
                        : 'border-ink-700 text-ink-400 hover:text-ink-200'">
-        Wartet auf Freigabe <span class="ml-1 text-ink-500"
+        {{ t('hub.problems.pending') }} <span class="ml-1 text-ink-500"
                                    x-text="`(${countByStatus('pending_review')})`"></span>
       </button>
     </div>
@@ -268,13 +235,13 @@
               <button @click="retryDoc(d.id)" :disabled="busyDoc === d.id"
                       class="rounded-lg px-2 py-1 text-[11px] border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10"
                       :class="busyDoc === d.id ? 'opacity-50' : ''"
-                      title="Erneut klassifizieren">
+                      :title="'{{ t('hub.problems.retry') }}'">
                 <span x-show="busyDoc !== d.id">↻</span>
                 <span x-show="busyDoc === d.id">…</span>
               </button>
               <a :href="'/document/' + d.id"
                  class="rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500"
-                 title="Öffnen">→</a>
+                 :title="'{{ t('hub.problems.open') }}'">→</a>
             </div>
           </div>
         </li>
@@ -287,16 +254,16 @@
            class="h-8 w-8 mx-auto mb-2 text-emerald-400/60">
         <path d="M5 12l5 5L20 7"/>
       </svg>
-      Nichts hängt — alles klassifiziert.
+      {{ t('hub.problems.empty') }}
     </div>
   </section>
 
   <!-- =========== RECENT FEED =========== -->
   <section class="card p-4 sm:p-5">
     <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
-      <h2 class="font-semibold">Zuletzt eingegangen</h2>
+      <h2 class="font-semibold">{{ t('hub.recent.title') }}</h2>
       <a href="/library" class="text-xs text-ink-400 hover:text-emerald-300 underline">
-        Alle ansehen →
+        {{ t('hub.recent.all') }} →
       </a>
     </div>
     <ul x-show="(state.recent || []).length > 0" class="divide-y divide-ink-800/60">
@@ -322,7 +289,7 @@
     </ul>
     <div x-show="(state.recent || []).length === 0" x-cloak
          class="text-sm text-ink-500 py-6 text-center">
-      Noch keine Dokumente. Lade welche oben hoch.
+      {{ t('hub.recent.empty') }} <a href="/upload" class="underline hover:text-emerald-300">/upload</a>
     </div>
   </section>
 
@@ -336,15 +303,30 @@ function dashboard() {
     loading: false,
     lastUpdate: '',
     pollHandle: null,
-    dragOver: false,
-    uploads: [],   // local upload queue: {id, name, percent, state, error}
-    _uploadCounter: 0,
     problemsTab: 'all',
     busyDoc: null,
     get bulk() { return this.state.bulk_job; },
     get anyActivity() {
       return (this.state.in_flight > 0)
           || (this.bulk && (this.bulk.running || this.bulk.paused));
+    },
+    // Only show the "zuletzt: …" line when the error is actually
+    // recent + still relevant. The bulk worker leaves last_error
+    // populated forever; without this gate a long-resolved
+    // "bridge offline" stays on screen even after the bridge has
+    // happily reconnected and dozens of statements went through.
+    get showLastError() {
+      if (!this.bulk || !this.bulk.last_error) return false;
+      // If approved > failed since the error showed up, the issue
+      // resolved itself — hide.
+      const ok = (this.bulk.approved || []).length;
+      const fail = (this.bulk.failed || []).length;
+      if (ok > 0 && ok >= fail) return false;
+      // If the error mentions "bridge … not connected" but the
+      // bridge is currently connected, hide.
+      const stale = /bridge.*not connected|client is connected/i.test(this.bulk.last_error);
+      if (stale && this.state.bridge && this.state.bridge.connected) return false;
+      return true;
     },
     init() {
       this.refresh();
@@ -356,7 +338,7 @@ function dashboard() {
         const r = await fetch('/api/dashboard');
         if (r.ok) {
           this.state = await r.json();
-          this.lastUpdate = new Date().toLocaleTimeString('de-DE');
+          this.lastUpdate = new Date().toLocaleTimeString();
         }
       } catch (e) { /* network blip */ }
       finally { this.loading = false; }
@@ -397,46 +379,6 @@ function dashboard() {
       if (dt < 3600)  return Math.floor(dt / 60) + 'm';
       if (dt < 86400) return Math.floor(dt / 3600) + 'h';
       return Math.floor(dt / 86400) + 'd';
-    },
-    async pickFiles(ev) {
-      const files = Array.from(ev.target.files || []);
-      ev.target.value = '';
-      for (const f of files) await this.uploadOne(f);
-    },
-    async dropFiles(ev) {
-      this.dragOver = false;
-      const files = Array.from(ev.dataTransfer.files || []);
-      for (const f of files) await this.uploadOne(f);
-    },
-    async uploadOne(file) {
-      const id = ++this._uploadCounter;
-      const item = { id, name: file.name, percent: 0, state: 'uploading', error: '' };
-      this.uploads.unshift(item);
-      // Cap visible list to 8
-      if (this.uploads.length > 8) this.uploads.length = 8;
-      try {
-        await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('POST', '/upload');
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) item.percent = Math.round((e.loaded / e.total) * 100);
-          };
-          xhr.onload = () => xhr.status >= 200 && xhr.status < 300
-            ? resolve()
-            : reject(new Error('HTTP ' + xhr.status));
-          xhr.onerror = () => reject(new Error('Upload fehlgeschlagen'));
-          const fd = new FormData();
-          fd.append('files', file, file.name);
-          xhr.send(fd);
-        });
-        item.percent = 100;
-        item.state = 'done';
-      } catch (e) {
-        item.state = 'error';
-        item.error = e.message || String(e);
-      }
-      // Refresh immediately so the new doc appears in the feed
-      this.refresh();
     },
     async pauseBulk() {
       try {

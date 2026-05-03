@@ -2,6 +2,27 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.28.1] – 2026-05-03
+
+### Changed — Dashboard polish + mobile nav + i18n
+
+User feedback after one day on v0.28.0:
+
+- **Removed Import-Sektion** from `/`. Upload happens via the
+  existing `/upload` page; the dashboard is purely status now.
+- **Stale "zuletzt: bridge offline" message** that lingered on the
+  bulk-progress bar even after the bridge had reconnected is gone.
+  New `showLastError` getter hides the line when the bridge is
+  currently connected and the bridge-disconnected-pattern matches,
+  or when the run has more successes than failures.
+- **Mobile nav**: top bar now `gap-1.5` on xs (was `gap-4`); logo
+  text hidden on xs; Upload button is icon-only on xs (label
+  comes back at sm). Mobile nav row uses `shrink-0` per link so
+  tabs scroll horizontally instead of cramming together.
+- **Full i18n**: 34 new `hub.*` keys translated into all 5 supported
+  languages (de / en / es / fr / it). The dashboard previously had
+  hardcoded German.
+
 ## [0.28.0] – 2026-05-03
 
 ### Added — Aktivitäts-Zentrale (new landing page on /)
