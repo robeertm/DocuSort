@@ -2,6 +2,27 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.27.11] – 2026-05-03
+
+### Fixed — Kontoauszüge land as `Kontoauszug` from the start
+
+The classifier prompt mapped Kontoauszüge to `category=Bank,
+subcategory=Konto`, leaving the finance pipeline blind until the
+bulk re-analyse worker eventually promoted them. Files even ended
+up named `2019-09-30_Bank_…Kontoauszug-September-2019.pdf` —
+visibly wrong.
+
+- New `classifier.maybe_promote_to_kontoauszug()` runs in the
+  pipeline right after classify and before `organize()`, so the
+  filename + DB row both end up at `Kontoauszug` for fresh
+  uploads. Triggers on subcategory `Konto` / `Karte` or any
+  subject containing kontoauszug / girokonto / tagesgeld /
+  kreditkart / paypal-auszug / depotauszug.
+- New idempotent startup migration `promote_bank_to_kontoauszug()`
+  catches every existing Bank/Konto doc that was filed before this
+  release. DB-only — file renames are deliberately skipped to
+  avoid breaking sync targets and bookmarks.
+
 ## [0.27.10] – 2026-05-02
 
 ### Fixed — Bulk banner survives null bulk state

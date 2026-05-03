@@ -145,6 +145,17 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                     reasoning=str(exc),
                 )
 
+        # Mutate Bank-shaped Kontoauszüge into category=Kontoauszug
+        # *before* organize() builds the destination filename, so the
+        # file lands as 2024-06-30_Kontoauszug_*.pdf instead of being
+        # filed under Bank where /finance can't see it.
+        from .classifier import maybe_promote_to_kontoauszug
+        before_cat = cls.category
+        maybe_promote_to_kontoauszug(cls)
+        if cls.category != before_cat:
+            log.info("Promoted %s: %s → %s (subject=%r)",
+                     path.name, before_cat, cls.category, cls.subject[:60])
+
         target = organize(path, ocr_res.path, cls, settings)
 
         if settings.dry_run:
@@ -464,13 +475,26 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
     # from the LLM response. Safe to run on every boot — the SQL
     # filter only matches rows that aren't already YYYY-MM-DD.
     try:
-        from .finance.salvage import normalise_existing_dates, delete_absurd_amounts
+        from .finance.salvage import (
+            normalise_existing_dates,
+            delete_absurd_amounts,
+            promote_bank_to_kontoauszug,
+        )
         date_report = normalise_existing_dates(db, dry_run=False)
         if date_report.get("fixed"):
             log.info(
                 "Date migration: normalised %d non-ISO booking_date / "
                 "value_date row(s) to ISO YYYY-MM-DD.",
                 date_report["fixed"],
+            )
+        # Promote any legacy Bank/Konto docs to Kontoauszug so they
+        # show up on /finance without a manual recategorisation. The
+        # ingest-time hook handles new uploads; this catches the rest.
+        promo_report = promote_bank_to_kontoauszug(db, dry_run=False)
+        if promo_report.get("promoted"):
+            log.info(
+                "Category migration: promoted %d Bank doc(s) to Kontoauszug.",
+                promo_report["promoted"],
             )
         # Same idea for amounts: drop rows where the LLM clearly
         # misparsed a date / balance / row-count into the amount

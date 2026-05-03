@@ -394,6 +394,39 @@ def _parse_response(raw: str) -> dict[str, Any]:
 _LOCAL_PROVIDERS = ("openai_compat", "bridge")
 
 
+# Subjects that mark a "Bank" doc as actually a bank statement, in
+# which case we promote category=Bank → category=Kontoauszug. The
+# finance pipeline keys off "Kontoauszug" specifically — leaving a
+# statement at "Bank/Konto" hides it from /finance and from the
+# bulk re-analyze worker until a manual recategorisation.
+_KONTOAUSZUG_SUBJECT_HINTS = (
+    "kontoauszug", "girokonto", "tagesgeld", "kreditkart",
+    "paypal-auszug", "paypal auszug", "depotauszug",
+)
+_KONTOAUSZUG_SUBCATS = {"konto", "karte"}
+
+
+def maybe_promote_to_kontoauszug(cls: "Classification") -> "Classification":
+    """If the classifier returned `Bank` with a kontoauszug-shaped
+    subcategory or subject, mutate it to `Kontoauszug` (no subcategory)
+    so the finance pipeline picks it up at ingest time instead of
+    waiting for the bulk re-analyse worker.
+
+    Mutates and returns the same instance for caller convenience."""
+    if (cls.category or "").strip() != "Bank":
+        return cls
+    sub = (cls.subcategory or "").strip().lower()
+    subj_lower = (cls.subject or "").lower()
+    looks_like_statement = (
+        sub in _KONTOAUSZUG_SUBCATS
+        or any(h in subj_lower for h in _KONTOAUSZUG_SUBJECT_HINTS)
+    )
+    if looks_like_statement:
+        cls.category = "Kontoauszug"
+        cls.subcategory = ""
+    return cls
+
+
 class Classifier:
     def __init__(self, api_key: str, settings: AISettings,
                  categories: list[dict[str, Any]],

@@ -26,6 +26,53 @@ from .pseudonymizer import iban_hash as _iban_hash
 logger = logging.getLogger("docusort.finance.salvage")
 
 
+def promote_bank_to_kontoauszug(db, *, dry_run: bool = False) -> dict[str, Any]:
+    """Find documents that look like Kontoauszüge but were classified
+    as `Bank` (with subcategory `Konto` / `Karte` or a kontoauszug-
+    shaped subject) and switch their category to `Kontoauszug`.
+
+    Older releases left this promotion to the bulk re-analyze worker,
+    so anything that was never re-analysed sat at `Bank/Konto` —
+    invisible to /finance and the day-picker. This is a one-shot
+    cleanup that mirrors what the new ingest-time promotion does for
+    fresh uploads.
+
+    File renames are intentionally NOT performed: changing the on-disk
+    library_path is a separate operation with much higher risk
+    (broken sync targets, dead bookmarks). The DB row update is what
+    /finance actually queries on."""
+    sql = (
+        "SELECT id, category, subcategory, subject, filename, library_path "
+        "FROM documents "
+        "WHERE deleted_at IS NULL AND category = 'Bank' "
+        "  AND ("
+        "      LOWER(COALESCE(subcategory,'')) IN ('konto', 'karte') "
+        "      OR LOWER(COALESCE(subject,'')) LIKE '%kontoauszug%' "
+        "      OR LOWER(COALESCE(subject,'')) LIKE '%girokonto%' "
+        "      OR LOWER(COALESCE(subject,'')) LIKE '%tagesgeld%' "
+        "      OR LOWER(COALESCE(subject,'')) LIKE '%kreditkart%' "
+        "      OR LOWER(COALESCE(subject,'')) LIKE '%paypal%auszug%' "
+        "      OR LOWER(COALESCE(subject,'')) LIKE '%depotauszug%' "
+        "  )"
+    )
+    with db._lock:
+        rows = db._conn.execute(sql).fetchall()
+    items = [dict(r) for r in rows]
+    if dry_run or not items:
+        return {"candidates": len(items), "promoted": 0,
+                "items": items, "dry_run": dry_run}
+    with db._lock:
+        ids = [(r["id"],) for r in items]
+        db._conn.executemany(
+            "UPDATE documents SET category = 'Kontoauszug', subcategory = '' "
+            "WHERE id = ?", ids,
+        )
+        db._conn.commit()
+    logger.info("Promoted %d Bank-classified docs to Kontoauszug.", len(items))
+    return {"candidates": len(items), "promoted": len(items),
+            "items": items, "dry_run": False}
+
+
 def delete_absurd_amounts(db, *, threshold: float = 10_000_000.0,
                           dry_run: bool = False) -> dict[str, Any]:
     """Delete transactions whose absolute amount is over `threshold` €.
