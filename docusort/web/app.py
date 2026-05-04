@@ -1135,6 +1135,47 @@ def create_app(
             "version":       __version__,
         }
 
+    @app.get("/api/finance/scan-suspicious")
+    def api_finance_scan_suspicious(limit: int = Query(50)):
+        """Read-only diagnostic: list statements whose transactions look
+        like OCR-comma damage that the auto-rescale couldn't fix
+        because the saldo itself is corrupted or missing.
+
+        Returned per item: amount fingerprints (max_abs, sum_abs,
+        all_integer), saldo state, and a `severity` field for sorting
+        in the UI."""
+        from ..finance.salvage import scan_suspicious_amounts
+        try:
+            return scan_suspicious_amounts(db, limit=int(limit))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"scan failed: {type(exc).__name__}: {exc}") from exc
+
+    @app.post("/api/finance/rescale-statement")
+    def api_finance_rescale_statement(payload: dict = Body(...)):
+        """Manually rescale every transaction (and the saldo) of a
+        single statement by a factor (default 0.01 = /100). For the
+        cases auto-rescale can't reach.
+
+        Body: `{"stmt_id": 42}` (or with optional `factor`,
+        `also_saldo`)."""
+        if not isinstance(payload, dict) or "stmt_id" not in payload:
+            raise HTTPException(400, "stmt_id is required")
+        try:
+            stmt_id = int(payload["stmt_id"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "stmt_id must be an int")
+        factor = float(payload.get("factor") or 0.01)
+        also_saldo = bool(payload.get("also_saldo", True))
+        from ..finance.salvage import rescale_statement_amounts
+        try:
+            return rescale_statement_amounts(
+                db, stmt_id, factor=factor, also_saldo=also_saldo,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"rescale failed: {type(exc).__name__}: {exc}") from exc
+
     @app.post("/api/finance/rescale-amounts")
     def api_finance_rescale_amounts(payload: dict = Body(default={})):
         """One-off DB pass: divide-by-100 the amounts on statements

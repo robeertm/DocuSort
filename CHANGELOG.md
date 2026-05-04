@@ -2,6 +2,33 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.29.3] – 2026-05-04
+
+### Added — Manual per-statement rescale for cases auto-fix can't reach
+
+The strict v0.29.0 heuristic only fires when `opening + Σtx ≈ closing`
+matches a /100 fingerprint. When the saldo itself is also OCR-damaged
+(or wasn't extracted), it skips the statement and the user reads
+"Nichts zu reparieren" while still seeing absurd numbers in the
+charts.
+
+New mechanism on `/finance` → "Komma-Skalierung prüfen":
+
+- Read-only diagnostic `GET /api/finance/scan-suspicious` lists
+  statements whose transactions look like OCR-comma damage based on
+  amount fingerprints alone (max_abs > 100k, all-integer + max > 10k,
+  Σ|tx| > 500k). Each row shows period, bank, max amount, sum, and
+  the raw saldo state, sorted by severity.
+- New "÷100" button per row → `POST /api/finance/rescale-statement`
+  with `{"stmt_id": N, "factor": 0.01, "also_saldo": true}` divides
+  every transaction AND the opening / closing balance, then
+  recomputes `tx_hash`. The list refreshes itself so corrected
+  statements drop off.
+
+UI walkthrough: "Prüfen" runs the saldo-consistent auto-fix as
+before; the new collapsible link below ("Auszüge mit verdächtig
+hohen Beträgen anzeigen") opens the manual table. All 5 languages.
+
 ## [0.29.2] – 2026-05-04
 
 ### Added — UI button for the rescale-amounts migration

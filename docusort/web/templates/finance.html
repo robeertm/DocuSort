@@ -403,6 +403,71 @@
         </template>
       </ul>
     </details>
+
+    <!-- Manual fallback list: statements that LOOK suspicious but the
+         strict heuristic couldn't auto-correct (saldo also corrupted
+         or missing). Each row gets a /100 button so the user can
+         decide per-statement. Loaded on demand. -->
+    <div class="mt-4 pt-3 border-t border-ink-700">
+      <button type="button" @click="loadSuspicious()" :disabled="busy"
+              class="text-xs text-ink-300 hover:text-ink-100 underline">
+        <span x-show="!suspicious">{{ t('finance.rescale.scan_button') }}</span>
+        <span x-show="loadingSuspicious" x-cloak>{{ t('finance.rescale.scanning') }}</span>
+        <span x-show="suspicious && !loadingSuspicious" x-cloak>{{ t('finance.rescale.scan_again') }}</span>
+      </button>
+      <p x-show="suspicious && !suspicious.items.length" x-cloak
+         class="mt-2 text-xs text-emerald-300">{{ t('finance.rescale.scan_none') }}</p>
+      <div x-show="suspicious && suspicious.items.length" x-cloak class="mt-2 overflow-x-auto -mx-2 px-2">
+        <p class="text-xs text-amber-300 mb-2"
+           x-text="(T['finance.rescale.scan_found'] || '{n} verdächtige Auszüge gefunden — bei jedem manuell entscheiden:').replace('{n}', suspicious ? suspicious.total_found : 0)"></p>
+        <table class="w-full text-xs">
+          <thead class="text-ink-500 text-left">
+            <tr>
+              <th class="py-1 pr-2 font-normal">{{ t('finance.rescale.col_period') }}</th>
+              <th class="py-1 pr-2 font-normal">{{ t('finance.rescale.col_bank') }}</th>
+              <th class="py-1 pr-2 font-normal text-right">{{ t('finance.rescale.col_max') }}</th>
+              <th class="py-1 pr-2 font-normal text-right">{{ t('finance.rescale.col_sum') }}</th>
+              <th class="py-1 pr-2 font-normal text-right">{{ t('finance.rescale.col_saldo') }}</th>
+              <th class="py-1 pr-2 font-normal text-center">{{ t('finance.rescale.col_actions') }}</th>
+            </tr>
+          </thead>
+          <tbody class="font-mono tabular-nums">
+            <template x-for="it in (suspicious ? suspicious.items : [])" :key="it.stmt_id">
+              <tr class="border-t border-ink-800/50"
+                  :class="it.severity === 'high' ? 'bg-rose-500/5' : (it.severity === 'medium' ? 'bg-amber-500/5' : '')">
+                <td class="py-1.5 pr-2 text-ink-300"
+                    x-text="(it.period_start || '?') + '..' + (it.period_end || '?')"></td>
+                <td class="py-1.5 pr-2">
+                  <a :href="'/document/' + it.doc_id"
+                     class="text-cyan-300 hover:text-cyan-200 truncate"
+                     :title="it.subject"
+                     x-text="(it.bank_name || '—') + ' #' + it.stmt_id"></a>
+                </td>
+                <td class="py-1.5 pr-2 text-right text-rose-300"
+                    x-text="it.max_abs.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'"></td>
+                <td class="py-1.5 pr-2 text-right text-rose-300"
+                    x-text="it.sum_abs.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'"></td>
+                <td class="py-1.5 pr-2 text-right text-ink-400">
+                  <span x-show="it.opening !== null && it.closing !== null"
+                        x-text="(it.opening !== null ? it.opening.toFixed(0) : '—') + ' / ' + (it.closing !== null ? it.closing.toFixed(0) : '—')"></span>
+                  <span x-show="it.opening === null || it.closing === null"
+                        class="italic text-ink-500">{{ t('finance.rescale.no_saldo') }}</span>
+                </td>
+                <td class="py-1.5 pr-2 text-center">
+                  <button type="button"
+                          @click="rescaleOne(it.stmt_id)"
+                          :disabled="busyStmt === it.stmt_id"
+                          class="text-[11px] text-amber-300 hover:text-amber-200 underline">
+                    <span x-show="busyStmt !== it.stmt_id">{{ t('finance.rescale.div100') }}</span>
+                    <span x-show="busyStmt === it.stmt_id" x-cloak>…</span>
+                  </button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
   {% endif %}
 
@@ -1562,6 +1627,50 @@ function financeRescale() {
     done: false,
     result: '',
     resultOk: false,
+    suspicious: null,
+    loadingSuspicious: false,
+    busyStmt: null,
+    async loadSuspicious() {
+      this.loadingSuspicious = true;
+      try {
+        const r = await fetch('/api/finance/scan-suspicious?limit=100');
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.suspicious = d;
+      } catch (e) {
+        this.resultOk = false;
+        this.result = e.message || String(e);
+      } finally {
+        this.loadingSuspicious = false;
+      }
+    },
+    async rescaleOne(stmtId) {
+      const msg = (T['finance.rescale.confirm_one'] ||
+        'Alle Buchungen UND den Saldo dieses Auszugs durch 100 teilen?');
+      if (!confirm(msg)) return;
+      this.busyStmt = stmtId;
+      try {
+        const r = await fetch('/api/finance/rescale-statement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stmt_id: stmtId, factor: 0.01, also_saldo: true }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.resultOk = true;
+        this.result = (T['finance.rescale.one_done'] ||
+          'Auszug #{id}: {rows} Buchungen + Saldo durch 100 geteilt.')
+          .replace('{id}', stmtId).replace('{rows}', d.updated_rows);
+        // Re-pull the list so the corrected statement falls off (or
+        // the next-worst one moves up) without a full page reload.
+        await this.loadSuspicious();
+      } catch (e) {
+        this.resultOk = false;
+        this.result = `Auszug #${stmtId}: ${e.message || String(e)}`;
+      } finally {
+        this.busyStmt = null;
+      }
+    },
     async check() {
       this.busy = true; this.result = ''; this.done = false;
       try {

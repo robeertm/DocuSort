@@ -153,6 +153,192 @@ def delete_absurd_amounts(db, *, threshold: float = 10_000_000.0,
             "items": items, "dry_run": False}
 
 
+def scan_suspicious_amounts(db, *, limit: int = 50) -> dict[str, Any]:
+    """Read-only diagnostic: list statements whose transactions look
+    suspiciously big — likely OCR-comma damage that the strict
+    `rescale_broken_amounts` heuristic couldn't auto-correct (because
+    the saldo itself is also x100, or the saldo wasn't extracted at
+    all).
+
+    Surfaces, per statement:
+      - `stmt_id`, `doc_id`, `period`, `bank_name`, `subject`
+      - `tx_count`, opening / closing balance (raw, possibly broken)
+      - `max_abs`, `sum_abs` of transactions
+      - `all_integer` — every booking is a whole number (typical OCR
+        fingerprint: "199143" instead of "1991,43")
+      - `saldo_consistent` — opening + Σtx ≈ closing
+      - `saldo_consistent_div100` — Σtx / 100 fits Δsaldo (the strict
+        heuristic would have caught this)
+      - `severity` — 'high' / 'medium' / 'low' so the UI can sort
+
+    Top `limit` rows by `severity` × `sum_abs` so the worst offenders
+    show first. No writes."""
+    with db._lock:
+        rows = db._conn.execute(
+            """SELECT s.id          AS stmt_id,
+                      s.doc_id      AS doc_id,
+                      s.period_start, s.period_end,
+                      s.opening_balance, s.closing_balance,
+                      a.bank_name, d.subject,
+                      COUNT(t.id)         AS tx_count,
+                      COALESCE(MAX(ABS(t.amount)), 0) AS max_abs,
+                      COALESCE(SUM(ABS(t.amount)), 0) AS sum_abs,
+                      COALESCE(SUM(t.amount), 0)      AS sum_signed,
+                      SUM(CASE
+                          WHEN ABS(t.amount - ROUND(t.amount)) < 0.005
+                          THEN 1 ELSE 0 END) AS integer_count
+               FROM statements s
+               JOIN documents  d ON d.id = s.doc_id AND d.deleted_at IS NULL
+               LEFT JOIN accounts a ON a.id = s.account_id
+               LEFT JOIN transactions t ON t.statement_id = s.id
+               GROUP BY s.id
+               HAVING tx_count > 0"""
+        ).fetchall()
+
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        n = int(d["tx_count"] or 0)
+        if n == 0:
+            continue
+        max_abs = float(d["max_abs"] or 0.0)
+        sum_abs = float(d["sum_abs"] or 0.0)
+        sum_signed = float(d["sum_signed"] or 0.0)
+        integer_count = int(d["integer_count"] or 0)
+        all_integer = integer_count == n
+        # Saldo consistency (only meaningful when both sides are present).
+        opening = d["opening_balance"]
+        closing = d["closing_balance"]
+        saldo_consistent = False
+        saldo_consistent_div100 = False
+        if opening is not None and closing is not None:
+            delta = float(closing) - float(opening)
+            if abs(delta) > 0.01:
+                err_raw = abs(sum_signed - delta)
+                err_div100 = abs((sum_signed / 100.0) - delta)
+                ratio_raw = err_raw / max(abs(delta), 1.0)
+                ratio_div100 = err_div100 / max(abs(delta), 1.0)
+                saldo_consistent = ratio_raw < 0.05
+                saldo_consistent_div100 = (ratio_div100 < 0.05 and ratio_raw > 0.5)
+            else:
+                saldo_consistent = abs(sum_signed) < 1.0
+        # Severity scoring — rough, just for sorting:
+        #  - HIGH: max_abs > 100k, or saldo_div100 fingerprint
+        #  - MED:  all_integer + max_abs > 10k
+        #  - LOW:  big sum_abs alone (could be a real high-volume account)
+        severity = "low"
+        if saldo_consistent_div100:
+            severity = "high"
+        elif max_abs > 100_000:
+            severity = "high"
+        elif all_integer and max_abs > 10_000:
+            severity = "medium"
+        elif sum_abs > 500_000:
+            severity = "medium"
+        # Only return statements that look at least suspicious.
+        if severity == "low" and not (all_integer and max_abs > 5000):
+            continue
+        items.append({
+            "stmt_id": int(d["stmt_id"]),
+            "doc_id":  int(d["doc_id"]),
+            "bank_name":   d["bank_name"] or "",
+            "subject":     d["subject"] or "",
+            "period_start": d["period_start"] or "",
+            "period_end":   d["period_end"] or "",
+            "tx_count":    n,
+            "max_abs":     round(max_abs, 2),
+            "sum_abs":     round(sum_abs, 2),
+            "opening":     None if opening is None else round(float(opening), 2),
+            "closing":     None if closing is None else round(float(closing), 2),
+            "all_integer":             all_integer,
+            "saldo_consistent":        saldo_consistent,
+            "saldo_consistent_div100": saldo_consistent_div100,
+            "severity":    severity,
+        })
+    sev_order = {"high": 0, "medium": 1, "low": 2}
+    items.sort(key=lambda it: (sev_order.get(it["severity"], 9), -it["sum_abs"]))
+    return {"items": items[:limit], "total_found": len(items)}
+
+
+def rescale_statement_amounts(db, stmt_id: int, *, factor: float = 0.01,
+                              also_saldo: bool = True) -> dict[str, Any]:
+    """Manually rescale every transaction (and optionally the
+    opening/closing balance) of a single statement by `factor`.
+
+    Used by the UI when the user looks at a suspicious statement and
+    decides "yes, divide everything in here by 100" — for the cases
+    the auto-rescale heuristic can't reach because the saldo itself
+    is corrupted too.
+
+    `factor=0.01` is the typical /100 fix. The function recomputes
+    `tx_hash` so future re-extracts dedup against the corrected rows
+    instead of re-inserting the broken originals."""
+    if factor <= 0 or factor >= 100:
+        raise ValueError(f"factor out of safe range: {factor}")
+    with db._lock:
+        s = db._conn.execute(
+            """SELECT s.id, s.opening_balance, s.closing_balance,
+                      a.iban_hash
+               FROM statements s
+               LEFT JOIN accounts a ON a.id = s.account_id
+               WHERE s.id = ?""",
+            (stmt_id,),
+        ).fetchone()
+    if s is None:
+        raise ValueError(f"statement {stmt_id} not found")
+    iban_h = s["iban_hash"] or "no-iban"
+    with db._lock:
+        txs = db._conn.execute(
+            "SELECT id, amount, booking_date, purpose "
+            "FROM transactions WHERE statement_id = ?",
+            (stmt_id,),
+        ).fetchall()
+    updated_rows = 0
+    for t in txs:
+        new_amount = round(float(t["amount"]) * factor, 2)
+        key = (
+            iban_h + "|" +
+            (t["booking_date"] or "") + "|" +
+            f"{new_amount:.2f}" + "|" +
+            (t["purpose"] or "")
+        )
+        new_hash = sha256(key.encode("utf-8")).hexdigest()
+        with db._lock:
+            db._conn.execute(
+                "UPDATE OR REPLACE transactions "
+                "SET amount = ?, tx_hash = ? WHERE id = ?",
+                (new_amount, new_hash, int(t["id"])),
+            )
+        updated_rows += 1
+    saldo_changed = False
+    if also_saldo:
+        ob = s["opening_balance"]
+        cb = s["closing_balance"]
+        new_ob = None if ob is None else round(float(ob) * factor, 2)
+        new_cb = None if cb is None else round(float(cb) * factor, 2)
+        if (new_ob is not None) or (new_cb is not None):
+            with db._lock:
+                db._conn.execute(
+                    "UPDATE statements "
+                    "SET opening_balance = ?, closing_balance = ? "
+                    "WHERE id = ?",
+                    (new_ob, new_cb, stmt_id),
+                )
+            saldo_changed = True
+    with db._lock:
+        db._conn.commit()
+    logger.warning(
+        "Manually rescaled statement %d by factor %.4f: %d tx rows, "
+        "saldo_changed=%s.", stmt_id, factor, updated_rows, saldo_changed,
+    )
+    return {
+        "stmt_id": stmt_id,
+        "factor":  factor,
+        "updated_rows": updated_rows,
+        "saldo_changed": saldo_changed,
+    }
+
+
 def rescale_broken_amounts(db, *, dry_run: bool = False) -> dict[str, Any]:
     """Apply the v0.29.0 saldo-mismatch / 100x-scale heuristic to rows
     already in the transactions table.
