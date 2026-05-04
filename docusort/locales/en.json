@@ -62,6 +62,8 @@
   "card.duplicate": "Duplicate",
   "card.ocr": "OCR",
   "document.back": "Back",
+  "document.nav.prev": "Older ({pos}/{total}) — left arrow",
+  "document.nav.next": "Newer ({pos}/{total}) — right arrow",
   "document.meta": "Metadata",
   "document.date": "Date",
   "document.confidence": "Confidence",

@@ -62,6 +62,8 @@
   "card.duplicate": "Duplikat",
   "card.ocr": "OCR",
   "document.back": "Zurück",
+  "document.nav.prev": "Älterer ({pos}/{total}) — Pfeil ←",
+  "document.nav.next": "Neuerer ({pos}/{total}) — Pfeil →",
   "document.meta": "Metadaten",
   "document.date": "Datum",
   "document.confidence": "Confidence",

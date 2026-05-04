@@ -568,6 +568,54 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
+    def siblings_of(
+        self,
+        doc_id: int,
+        *,
+        category: str | None = None,
+        subcategory: str | None = None,
+        tag: str | None = None,
+        status: str | None = None,
+        year: str | None = None,
+        query: str | None = None,
+        trash: bool = False,
+    ) -> dict[str, Any]:
+        """Return prev / next document IDs for `doc_id` inside the same
+        filtered listing — used by the document-detail keyboard nav so
+        ←/→ jump to the previous / next document in the same Kategorie
+        (and Jahr / Tag / etc.) ordering.
+
+        Sort order matches `list_documents` default: doc_date DESC,
+        falling back to created_at when doc_date is null. Returns
+        `position` (1-based), `total`, `prev_id`, `next_id`. Position
+        and prev/next are null when the doc isn't in the filter result
+        — happens when the user navigates directly via URL with a
+        filter the doc doesn't match."""
+        # Reuse list_documents to share the WHERE-clause logic. Pull a
+        # generous slice; finance / library accounts max out around a
+        # few thousand docs in any one filter, and we only need IDs.
+        rows = self.list_documents(
+            category=category, subcategory=subcategory, tag=tag,
+            status=status, year=year, query=query, trash=trash,
+            limit=5000,
+        )
+        ids = [int(r["id"]) for r in rows]
+        try:
+            idx = ids.index(int(doc_id))
+        except ValueError:
+            return {
+                "position": None, "total": len(ids),
+                "prev_id": None, "next_id": None,
+            }
+        # Older entries are LATER in the list (DESC sort). For UX we
+        # treat ←/→ as natural reading order: ← = older, → = newer.
+        prev_id = ids[idx + 1] if idx + 1 < len(ids) else None
+        next_id = ids[idx - 1] if idx - 1 >= 0           else None
+        return {
+            "position": idx + 1, "total": len(ids),
+            "prev_id":  prev_id, "next_id": next_id,
+        }
+
     def list_documents(
         self,
         *,

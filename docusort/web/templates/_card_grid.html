@@ -1,7 +1,22 @@
 {% if docs %}
+{# Build a query string from the active filter so clicking a card
+   forwards the same slice to the document detail page — the detail
+   page reads it back to wire up the prev/next arrow keys. Skip empty
+   values to keep the URL clean. #}
+{% set _qs_parts = [] %}
+{% if filter %}
+  {% if filter.category    %}{% set _ = _qs_parts.append('category='    ~ filter.category    | urlencode) %}{% endif %}
+  {% if filter.subcategory %}{% set _ = _qs_parts.append('subcategory=' ~ filter.subcategory | urlencode) %}{% endif %}
+  {% if filter.tag         %}{% set _ = _qs_parts.append('tag='         ~ filter.tag         | urlencode) %}{% endif %}
+  {% if filter.status      %}{% set _ = _qs_parts.append('status='      ~ filter.status      | urlencode) %}{% endif %}
+  {% if filter.year        %}{% set _ = _qs_parts.append('year='        ~ filter.year        | urlencode) %}{% endif %}
+  {% if filter.q           %}{% set _ = _qs_parts.append('q='           ~ filter.q           | urlencode) %}{% endif %}
+{% endif %}
+{% if trash %}{% set _ = _qs_parts.append('trash=1') %}{% endif %}
+{% set _qs = ('?' ~ _qs_parts | join('&')) if _qs_parts else '' %}
 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
   {% for d in docs %}
-    <a href="/document/{{ d.id }}"
+    <a href="/document/{{ d.id }}{{ _qs }}"
        class="card p-4 hover:border-emerald-500/40 hover:bg-ink-800/80 transition group relative"
        :class="selected.has({{ d.id }}) ? 'ring-2 ring-emerald-400/70 bg-emerald-500/5' : ''">
       <!-- Selection checkbox — sits over the link surface and stops navigation -->

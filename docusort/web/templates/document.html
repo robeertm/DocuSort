@@ -2,7 +2,30 @@
 {% block title %}{{ doc.subject or doc.filename }} · DocuSort{% endblock %}
 {% block content %}
 
-<div class="mb-6 flex items-start gap-3">
+{# Build the sibling-nav query string once so prev / next links keep
+   the active filter in the URL (lets the user F5 / share the link
+   and stay in the same slice). #}
+{% set _nav_parts = [] %}
+{% if nav_filters.category    %}{% set _ = _nav_parts.append('category='    ~ nav_filters.category    | urlencode) %}{% endif %}
+{% if nav_filters.subcategory %}{% set _ = _nav_parts.append('subcategory=' ~ nav_filters.subcategory | urlencode) %}{% endif %}
+{% if nav_filters.tag         %}{% set _ = _nav_parts.append('tag='         ~ nav_filters.tag         | urlencode) %}{% endif %}
+{% if nav_filters.status      %}{% set _ = _nav_parts.append('status='      ~ nav_filters.status      | urlencode) %}{% endif %}
+{% if nav_filters.year        %}{% set _ = _nav_parts.append('year='        ~ nav_filters.year        | urlencode) %}{% endif %}
+{% if nav_filters.q           %}{% set _ = _nav_parts.append('q='           ~ nav_filters.q           | urlencode) %}{% endif %}
+{% if nav_filters.trash       %}{% set _ = _nav_parts.append('trash=1') %}{% endif %}
+{% set _nav_qs = ('?' ~ _nav_parts | join('&')) if _nav_parts else '' %}
+
+<div class="mb-6 flex items-start gap-3"
+     x-data="{
+       prevId: {{ siblings.prev_id or 'null' }},
+       nextId: {{ siblings.next_id or 'null' }},
+       navQs:  {{ _nav_qs | tojson }},
+       go(id) {
+         if (id) window.location.href = '/document/' + id + this.navQs;
+       },
+     }"
+     @keydown.window.arrow-left.prevent="go(prevId)"
+     @keydown.window.arrow-right.prevent="go(nextId)">
   {%- set back_year = (doc.doc_date or doc.created_at)[:4] -%}
   <a href="/library?year={{ back_year }}&category={{ doc.category }}{% if doc.subcategory %}&subcategory={{ doc.subcategory }}{% endif %}"
      onclick="if (window.history.length > 1 && document.referrer) { event.preventDefault(); window.history.back(); }"
@@ -12,6 +35,41 @@
     </svg>
     {{ t('document.back') }}
   </a>
+
+  {# Sibling navigation: ←/→ buttons + position counter. Only render
+     when there's actually a sibling list (more than one doc in the
+     current filter), otherwise the chrome is just noise. #}
+  {% if siblings.total and siblings.total > 1 %}
+  <div class="hidden sm:flex items-center gap-1.5 shrink-0 ml-1">
+    <button type="button"
+            @click="go(prevId)"
+            :disabled="!prevId"
+            :class="!prevId ? 'opacity-30 cursor-not-allowed' : ''"
+            class="btn-ghost !p-1.5"
+            :title="(T['document.nav.prev'] || 'Älterer ({pos}/{total})')
+                     .replace('{pos}', {{ siblings.position or 0 }})
+                     .replace('{total}', {{ siblings.total }})">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="m15 18-6-6 6-6"/>
+      </svg>
+    </button>
+    <span class="text-xs text-ink-400 tabular-nums px-1 select-none whitespace-nowrap">
+      {{ siblings.position or '—' }} / {{ siblings.total }}
+    </span>
+    <button type="button"
+            @click="go(nextId)"
+            :disabled="!nextId"
+            :class="!nextId ? 'opacity-30 cursor-not-allowed' : ''"
+            class="btn-ghost !p-1.5"
+            :title="(T['document.nav.next'] || 'Neuerer ({pos}/{total})')
+                     .replace('{pos}', {{ siblings.position or 0 }})
+                     .replace('{total}', {{ siblings.total }})">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="m9 18 6-6-6-6"/>
+      </svg>
+    </button>
+  </div>
+  {% endif %}
   <div class="flex-1 min-w-0">
     <div class="flex flex-wrap gap-2 mb-2">
       <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ cat(doc.category) }}{% if doc.subcategory %} · {{ sub(doc.category, doc.subcategory) }}{% endif %}</span>

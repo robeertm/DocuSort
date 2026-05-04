@@ -62,6 +62,8 @@
   "card.duplicate": "Doublon",
   "card.ocr": "OCR",
   "document.back": "Retour",
+  "document.nav.prev": "Plus ancien ({pos}/{total}) — flèche ←",
+  "document.nav.next": "Plus récent ({pos}/{total}) — flèche →",
   "document.meta": "Métadonnées",
   "document.date": "Date",
   "document.confidence": "Confiance",

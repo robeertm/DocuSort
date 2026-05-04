@@ -2,6 +2,33 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.30.0] – 2026-05-04
+
+### Added — Keyboard navigation between sibling documents
+
+On the document detail page, ← / → arrow keys now jump to the
+previous / next document inside the same filtered slice the user
+came from. Click into a Kontoauszug from /library?year=2026, hit →
+and you walk through every 2026 Kontoauszug — the same applies to
+Rechnungen, Vertraege, any tag filter, etc.
+
+How it works:
+
+- `/library` cards now include the active filter as query string
+  on the `/document/{id}` link. The detail page reads it back and
+  passes it to `db.siblings_of(doc_id, **filters)`, which returns
+  the position (1-based), total, and prev/next document IDs in
+  doc-date-DESC order.
+- Direct visits (notification, bookmark) without an explicit
+  filter default to the doc's own category + year, so navigation
+  still works even without coming from a library page.
+- A position counter ("3 / 5") plus prev / next chevron buttons
+  sit next to the back button on desktop. Buttons disable when
+  there's no sibling on that side. Mobile stays clean — no buttons,
+  but ← / → on a hardware keyboard still work.
+
+UI strings translated into all 5 supported languages.
+
 ## [0.29.5] – 2026-05-04
 
 ### Added — Hallucination warning on /finance Q&A

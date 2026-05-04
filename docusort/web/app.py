@@ -347,11 +347,54 @@ def create_app(
 
     # ---------- Document detail ----------
     @app.get("/document/{doc_id}", response_class=HTMLResponse)
-    def document_detail(request: Request, doc_id: int):
+    def document_detail(
+        request: Request,
+        doc_id: int,
+        # Sibling-nav filters: when the user clicked through from
+        # /library?category=Kontoauszug&year=2026 the link forwards
+        # those query params here, so ←/→ keys can step through the
+        # same filtered slice instead of jumping randomly across the
+        # whole archive.
+        category: str | None = Query(None),
+        subcategory: str | None = Query(None),
+        tag: str | None = Query(None),
+        status: str | None = Query(None),
+        year: str | None = Query(None),
+        q: str | None = Query(None),
+        trash: bool = Query(False),
+    ):
         doc = db.get(doc_id)
         if not doc:
             raise HTTPException(404, "Document not found")
         _decode_tags(doc)
+        nav_filters = {
+            "category": category or None,
+            "subcategory": subcategory or None,
+            "tag": tag or None,
+            "status": status or None,
+            "year": year or None,
+            "q": q or None,
+            "trash": "1" if trash else None,
+        }
+        # Default the filter to the doc's own category + year when
+        # no explicit filter came in via the URL — direct visits
+        # (notification, bookmarked URL) still get sibling nav inside
+        # something sensible.
+        if not any(v for v in nav_filters.values()):
+            nav_filters["category"] = doc.get("category") or None
+            d_date = doc.get("doc_date") or ""
+            if len(d_date) >= 4 and d_date[:4].isdigit():
+                nav_filters["year"] = d_date[:4]
+        siblings = db.siblings_of(
+            doc_id,
+            category=nav_filters["category"],
+            subcategory=nav_filters["subcategory"],
+            tag=nav_filters["tag"],
+            status=nav_filters["status"],
+            year=nav_filters["year"],
+            query=nav_filters["q"],
+            trash=trash,
+        )
         receipt = db.get_receipt(doc_id) if doc.get("category") == "Kassenzettel" else None
         # Statement card surfaces for Kontoauszug AND any legacy Bank
         # document (the classifier picked Bank for actual statements
@@ -372,7 +415,9 @@ def create_app(
              "ai_provider": settings.ai.provider,
              "shop_types": list(SHOP_TYPES),
              "item_categories": list(ITEM_CATEGORIES),
-             "payment_methods": list(PAYMENT_METHODS)},
+             "payment_methods": list(PAYMENT_METHODS),
+             "siblings":      siblings,
+             "nav_filters":   nav_filters},
         )
 
     @app.get("/document/{doc_id}/file")
