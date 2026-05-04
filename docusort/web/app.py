@@ -1209,6 +1209,26 @@ def create_app(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(500, f"dedupe failed: {type(exc).__name__}: {exc}") from exc
 
+    @app.post("/api/finance/parse-all")
+    def api_finance_parse_all(payload: dict = Body(default={})):
+        """Run the deterministic regex parser over every Kontoauszug
+        in the DB. Applies the result on docs where the parser hits
+        ≥ 0.85 confidence with reconciled saldo, skips the rest.
+
+        Bulk equivalent of the per-doc parse-doc endpoint. Pass
+        `{"dry_run":true}` for a preview, `{"only_low_confidence":
+        false}` to re-parse docs that already have a deterministic
+        statement (otherwise we leave them alone)."""
+        from ..finance.salvage import bulk_deterministic_parse
+        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
+        only_lc = bool(payload.get("only_low_confidence", True))
+        try:
+            return bulk_deterministic_parse(
+                db, dry_run=dry, only_low_confidence=only_lc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"bulk parse failed: {type(exc).__name__}: {exc}") from exc
+
     @app.get("/api/finance/audit")
     def api_finance_audit(limit: int = Query(100)):
         """Per-statement health audit: flags saldo mismatches,

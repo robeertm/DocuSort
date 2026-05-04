@@ -398,6 +398,12 @@
           <span x-show="!busy">{{ t('finance.audit.refresh') }}</span>
           <span x-show="busy" x-cloak>{{ t('finance.audit.running') }}</span>
         </button>
+        <button type="button" @click="parseAll()" :disabled="busy"
+                class="btn-primary text-xs"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                :title="T['finance.audit.parse_all_hint'] || ''">
+          {{ t('finance.audit.parse_all_button') }}
+        </button>
         <button type="button" @click="dedupe()" :disabled="busy"
                 class="btn-secondary text-xs"
                 :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
@@ -1779,6 +1785,31 @@ function financeAudit() {
       } catch (e) {
         this.error = `Doc ${docId}: ${e.message || String(e)}`;
       } finally { this.busyDoc = null; }
+    },
+    async parseAll() {
+      this.busy = true; this.error = '';
+      try {
+        const dry = await fetch('/api/finance/parse-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dry_run: true }),
+        }).then(r => r.json());
+        const msg = (T['finance.audit.parse_all_confirm'] ||
+          'Deterministischer Parser über {n} Auszüge laufen lassen — schätzt {applied} würden übernommen.')
+          .replace('{n}', dry.found || 0)
+          .replace('{applied}', dry.applied || 0);
+        if (!confirm(msg)) return;
+        const r = await fetch('/api/finance/parse-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        await this.load();
+      } catch (e) {
+        this.error = e.message || String(e);
+      } finally { this.busy = false; }
     },
     async dedupe() {
       this.busy = true; this.error = '';

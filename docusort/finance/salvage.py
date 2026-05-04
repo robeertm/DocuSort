@@ -153,6 +153,157 @@ def delete_absurd_amounts(db, *, threshold: float = 10_000_000.0,
             "items": items, "dry_run": False}
 
 
+def bulk_deterministic_parse(
+    db, *, dry_run: bool = False,
+    only_low_confidence: bool = True,
+    min_confidence: float = 0.85,
+) -> dict[str, Any]:
+    """Run the deterministic regex parser over every Kontoauszug
+    that has OCR text on file. Apply the result when the parser is
+    confident AND the saldo reconciles.
+
+    `only_low_confidence`: skip documents whose existing statement
+    already came from the deterministic parser (their `extra_json`
+    starts with `deterministic:`). Default true so re-runs don't
+    fight themselves.
+
+    Reports counts per outcome:
+      - `applied`         : statement overwritten with parser output
+      - `skipped_lowconf` : parser ran but confidence < threshold
+      - `skipped_existing`: doc already had a deterministic statement
+      - `skipped_no_ocr`  : no OCR text → can't parse
+      - `errors`          : parser blew up (logged, not raised)
+    """
+    from .parser import parse as _parse_det
+    from .pseudonymizer import iban_hash as _iban_hash
+    from hashlib import sha256
+
+    with db._lock:
+        rows = db._conn.execute(
+            """SELECT d.id          AS doc_id,
+                      d.extracted_text,
+                      d.category,
+                      s.id          AS stmt_id,
+                      s.extra_json
+               FROM documents d
+               LEFT JOIN statements s ON s.doc_id = d.id
+               WHERE d.deleted_at IS NULL
+                 AND d.category = 'Kontoauszug'"""
+        ).fetchall()
+
+    counts = {
+        "found": len(rows),
+        "applied": 0,
+        "skipped_lowconf": 0,
+        "skipped_existing": 0,
+        "skipped_no_ocr": 0,
+        "errors": 0,
+    }
+    samples: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        doc_id = int(d["doc_id"])
+        if not d["extracted_text"]:
+            counts["skipped_no_ocr"] += 1
+            continue
+        if only_low_confidence and (d["extra_json"] or "").startswith("deterministic:"):
+            counts["skipped_existing"] += 1
+            continue
+        try:
+            result = _parse_det(d["extracted_text"])
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Bulk parse failed for doc %d: %s", doc_id, exc)
+            counts["errors"] += 1
+            continue
+        ok = result.confidence >= min_confidence and result.saldo_consistent
+        if not ok:
+            counts["skipped_lowconf"] += 1
+            if len(samples) < 20:
+                samples.append({
+                    "doc_id": doc_id,
+                    "applied": False,
+                    "layout": result.layout,
+                    "confidence": round(result.confidence, 2),
+                    "saldo_consistent": result.saldo_consistent,
+                    "tx_count": len(result.statement.transactions),
+                })
+            continue
+        if dry_run:
+            counts["applied"] += 1
+            if len(samples) < 20:
+                samples.append({
+                    "doc_id": doc_id,
+                    "applied": True,
+                    "layout": result.layout,
+                    "confidence": round(result.confidence, 2),
+                    "saldo_consistent": True,
+                    "tx_count": len(result.statement.transactions),
+                })
+            continue
+        # Apply
+        s = result.statement
+        account_id = None
+        if s.iban:
+            account_id = db.upsert_account(
+                bank_name=s.bank_name or "Unbekannt",
+                iban=s.iban, iban_last4=s.iban_last4,
+                iban_hash=_iban_hash(s.iban),
+                account_holder=s.account_holder or "",
+                currency=s.currency or "EUR",
+            )
+        h_iban = _iban_hash(s.iban) if s.iban else "no-iban"
+        tx_payload = []
+        for t in s.transactions:
+            key = f"{h_iban}|{t.booking_date}|{t.amount:.2f}|{t.purpose}"
+            td = t.as_dict()
+            td["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
+            tx_payload.append(td)
+        try:
+            db.upsert_statement(
+                doc_id, account_id=account_id,
+                period_start=s.period_start, period_end=s.period_end,
+                statement_no=s.statement_no,
+                opening_balance=s.opening_balance,
+                closing_balance=s.closing_balance,
+                currency=s.currency or "EUR",
+                file_hash="",
+                privacy_mode="local",
+                transactions=tx_payload,
+                extra_json=f"deterministic:{result.layout}:conf={result.confidence:.2f}",
+                extraction_warning=("; ".join(result.warnings)
+                                    if result.warnings else ""),
+            )
+            with db._lock:
+                if s.period_end:
+                    db._conn.execute(
+                        "UPDATE documents SET doc_date = ? WHERE id = ?",
+                        (s.period_end, doc_id),
+                    )
+                db._conn.commit()
+            counts["applied"] += 1
+            if len(samples) < 20:
+                samples.append({
+                    "doc_id": doc_id,
+                    "applied": True,
+                    "layout": result.layout,
+                    "confidence": round(result.confidence, 2),
+                    "saldo_consistent": True,
+                    "tx_count": len(s.transactions),
+                })
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Bulk parse: upsert failed for doc %d: %s", doc_id, exc)
+            counts["errors"] += 1
+
+    logger.info(
+        "Bulk deterministic parse: %d applied, %d low-confidence, "
+        "%d already deterministic, %d no OCR, %d errors of %d total.",
+        counts["applied"], counts["skipped_lowconf"],
+        counts["skipped_existing"], counts["skipped_no_ocr"],
+        counts["errors"], counts["found"],
+    )
+    return {**counts, "dry_run": dry_run, "samples": samples}
+
+
 def scan_suspicious_amounts(db, *, limit: int = 50) -> dict[str, Any]:
     """Read-only diagnostic: list statements whose transactions look
     suspiciously big — likely OCR-comma damage that the strict

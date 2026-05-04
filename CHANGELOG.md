@@ -2,6 +2,31 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.31.3] – 2026-05-04
+
+### Added — Bulk deterministic re-parse over the whole archive
+
+The audit card on /finance now has an "Alle deterministisch neu
+parsen" button. Click → dry-run preview ("hätte X von Y Auszügen
+übernommen") → confirm → actual run. Per Kontoauszug:
+
+  - parse OCR text with the regex parser
+  - apply when confidence ≥ 0.85 AND saldo reconciles
+  - skip when below threshold (suggest LLM re-extract on those)
+  - skip when the statement is already deterministic (idempotent)
+
+Counts come back as `applied`, `skipped_lowconf`,
+`skipped_existing`, `skipped_no_ocr`, `errors` so the user sees
+exactly what happened.
+
+`POST /api/finance/parse-all` is the underlying endpoint (with the
+same dry_run / only_low_confidence flags).
+
+This closes the v0.31.x storyline: every statement that the
+deterministic parser can handle is now reachable without an LLM
+call — no token cost, no hallucinations, full saldo
+reconciliation.
+
 ## [0.31.2] – 2026-05-04
 
 ### Added — Per-document deterministic parser button on /document/{id}
