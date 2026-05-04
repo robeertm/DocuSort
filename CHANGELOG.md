@@ -2,6 +2,33 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.29.5] – 2026-05-04
+
+### Added — Hallucination warning on /finance Q&A
+
+Live data caught Qwen2.5:7b answering "Die letzten drei Rossmann-
+Einkäufe …" with three rows that were actually Amazon, Bäckerei, and
+EnBW — a confident lie that small models love to produce. The model
+itself is hard to fix; instead the response now ships a heuristic
+double-check:
+
+- After the LLM produces an answer, the backend extracts distinctive
+  tokens from the user question (≥4 chars, non-stopword) and verifies
+  each one either appears in the returned rows' counterparty/purpose
+  OR is absent from the answer text. A token that appears in the
+  answer but in NO row triggers a warning.
+- The system prompt also gains an explicit anti-hallucination rule
+  with a worked "0 Treffer" example so future generations have
+  better training-time priors.
+- The UI renders warnings in an amber callout above the answer:
+  "Achtung: „rossmann" wird in der Antwort genannt, kommt aber in
+  keiner der gefundenen Buchungen vor."
+
+False-positive guard: only fires when the question contained a
+distinctive token AND the answer cited it AND no row backs it up. So
+"Wieviel habe ich diesen Monat ausgegeben?" never warns even when
+"diesen" doesn't appear in the rows.
+
 ## [0.29.4] – 2026-05-04
 
 ### Fixed — Q&A no longer 500s when small models lose the JSON loop

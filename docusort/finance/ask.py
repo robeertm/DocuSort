@@ -78,6 +78,20 @@ Rules:
 - If a tool returns 0 rows, say so explicitly. Never invent transactions.
 - If the question is ambiguous about year, prefer aggregate_transactions across all years.
 - Don't call the same tool with the same args twice — the result will not change.
+
+CRITICAL — anti-hallucination rule:
+
+NEVER claim a row matches a merchant name that doesn't actually appear in
+its counterparty or purpose field. If the user asks for "Rossmann" and
+search_transactions returns rows from Amazon, Lidl, EnBW, … — the correct
+answer is "Keine Rossmann-Buchungen gefunden." Do NOT label foreign rows
+as Rossmann. Returning unrelated rows under a wrong merchant name is the
+worst-possible failure mode and breaks the user's trust completely.
+
+Example — user asks "letzte drei Rossmann-Einkäufe":
+  → search_transactions(query="rossmann", limit=3)
+  ← {"count": 0, "rows": []}
+  → {"action":"answer","text":"Keine Rossmann-Buchungen in der Datenbank."}
 """
 
 
@@ -332,6 +346,100 @@ class AskResult:
     input_tokens: int = 0
     output_tokens: int = 0
     steps: int = 0
+    # Heuristic warnings the UI renders prominently above the answer —
+    # used when the LLM appears to have hallucinated (referenced a
+    # merchant that doesn't actually appear in the returned rows). The
+    # answer is shown anyway, but with a clear "verify this" badge.
+    warnings: list[str] = field(default_factory=list)
+
+
+# Common German + English filler / function words. We only flag a
+# question token as "search-worthy" if it's NOT in this list, because
+# we don't want a "wieviel"/"alle"/"vom" mismatch to trigger a false
+# warning. Keep it conservative — better to miss a hallucination than
+# scream "lie!" on a legit answer.
+_QUESTION_STOPWORDS = frozenset({
+    "und", "oder", "aber", "doch", "denn", "wenn", "weil", "dass", "ob",
+    "der", "die", "das", "des", "dem", "den", "ein", "eine", "einen",
+    "einem", "einer", "eines", "kein", "keine", "keinen", "keiner",
+    "ich", "mir", "mich", "mein", "meine", "meinen", "meiner", "meines",
+    "du", "dir", "dich", "dein", "deine", "deinen",
+    "wieviel", "wie", "viel", "viele", "vielen", "alle", "alles", "ganze",
+    "von", "vom", "vor", "für", "fuer", "mit", "ohne", "über", "ueber",
+    "auf", "aus", "bei", "nach", "zur", "zum", "zwischen",
+    "ist", "sind", "war", "waren", "wird", "werden", "haben", "habe", "hat",
+    "war", "war", "letzten", "letzte", "letztes", "letzter",
+    "ersten", "erste", "erstes", "erster", "drei", "vier", "fünf", "fuenf",
+    "zehn", "zwanzig", "zeige", "zeig", "liste", "liste", "gib", "gebe",
+    "monat", "monate", "monaten", "monatlich", "jahr", "jahre", "jahren",
+    "jährlich", "tag", "tage", "tagen", "woche", "wochen",
+    "rechnung", "rechnungen", "buchung", "buchungen", "ausgabe", "ausgaben",
+    "einnahme", "einnahmen", "betrag", "beträge", "betraege",
+    "the", "and", "for", "from", "with", "show", "list", "give", "tell",
+    "what", "much", "how", "all", "last", "first", "this", "that",
+})
+
+
+def _question_search_tokens(question: str) -> list[str]:
+    """Tokens from the user question that would plausibly need to
+    appear somewhere in the result rows for the answer to be honest.
+    Stripped of stopwords, ≥4 characters, lowercased. Designed to
+    catch merchant names ("rossmann", "mediamarkt") and category-ish
+    words while ignoring filler ("alle", "letzten", "wieviel")."""
+    import re as _re
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for raw in _re.findall(r"\w+", (question or "").lower()):
+        if len(raw) < 4:
+            continue
+        if raw in _QUESTION_STOPWORDS:
+            continue
+        if raw.isdigit():
+            continue
+        if raw not in seen:
+            seen.add(raw)
+            tokens.append(raw)
+    return tokens
+
+
+def _validate_answer(question: str, answer: str,
+                     rows: list[dict[str, Any]]) -> list[str]:
+    """Flag answers that mention something the row data doesn't
+    support — most often "the LLM cited a merchant we never returned".
+    Returns a list of human-readable German warnings the UI surfaces.
+
+    Heuristic, not perfect: only fires when (a) the user mentioned a
+    distinctive token, (b) that same token appears in the LLM's
+    answer, AND (c) it doesn't appear in any returned row. So a
+    legitimate "0 Treffer" answer (which would NOT repeat the merchant
+    name from the question) doesn't trigger; only a confident answer
+    that names something we never matched.
+    """
+    if not answer or not rows:
+        # No rows + no answer either = nothing to validate; the
+        # fallback synthesiser already adds its own caveat.
+        return []
+    qtokens = _question_search_tokens(question)
+    if not qtokens:
+        return []
+    answer_lower = answer.lower()
+    row_text = " ".join(
+        ((r.get("counterparty") or "") + " " + (r.get("purpose") or "")).lower()
+        for r in rows
+    )
+    warnings: list[str] = []
+    for tok in qtokens:
+        if tok in answer_lower and tok not in row_text:
+            warnings.append(
+                "Achtung: „" + tok + "“ wird in der Antwort "
+                "genannt, kommt aber in keiner der gefundenen Buchungen "
+                "vor. Die Antwort könnte halluziniert sein — prüfe die "
+                "Tabelle."
+            )
+            # One warning is enough; multiple tokens missing usually
+            # share the same root cause.
+            break
+    return warnings
 
 
 def answer_question(db, classifier, question: str) -> AskResult:
@@ -412,16 +520,19 @@ def answer_question(db, classifier, question: str) -> AskResult:
             text = str(action.get("text") or "").strip()
             if not text:
                 raise RuntimeError("LLM returned empty answer")
+            kept_rows = rows_collected[:_MAX_RESULT_ROWS]
+            warnings = _validate_answer(question, text, kept_rows)
             return AskResult(
                 question=question,
                 answer=text,
-                rows=rows_collected[:_MAX_RESULT_ROWS],
+                rows=kept_rows,
                 tools_used=[h["call"] for h in history],
                 model=last_model,
                 cost_usd=total_cost,
                 input_tokens=total_in,
                 output_tokens=total_out,
                 steps=step + 1,
+                warnings=warnings,
             )
 
         if kind != "tool":
