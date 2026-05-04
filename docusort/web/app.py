@@ -1312,6 +1312,135 @@ def create_app(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(500, f"salvage failed: {type(exc).__name__}: {exc}") from exc
 
+    @app.post("/api/finance/parse-doc")
+    def api_finance_parse_doc(payload: dict = Body(...)):
+        """Run the deterministic regex parser on one document, no
+        LLM call at all. Returns a `ParseResult`-shaped dict with
+        confidence, layout, opening/closing, transactions list, and
+        a saldo_consistent flag. The caller (typically the document
+        detail UI) shows it as a preview; the user confirms before
+        the result overwrites the existing statement.
+
+        When the user confirms, pass `apply=true` and we upsert the
+        parsed statement straight into the DB — no LLM, no cost.
+        Refuses to apply when confidence < 0.85 or saldo doesn't
+        reconcile, unless `force=true` is also set."""
+        try:
+            doc_id = int(payload.get("doc_id"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "doc_id is required") from None
+        apply = bool(payload.get("apply") or False)
+        force = bool(payload.get("force") or False)
+
+        with db._lock:
+            doc = db._conn.execute(
+                "SELECT id, extracted_text, library_path, category "
+                "FROM documents WHERE id = ? AND deleted_at IS NULL",
+                (doc_id,),
+            ).fetchone()
+        if not doc:
+            raise HTTPException(404, f"doc {doc_id} not found")
+        if not doc["extracted_text"]:
+            raise HTTPException(409, f"doc {doc_id} has no OCR text on file")
+
+        from ..finance.parser import parse as _parse_det
+        try:
+            result = _parse_det(doc["extracted_text"])
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"parser failed: {type(exc).__name__}: {exc}") from exc
+
+        preview = {
+            "doc_id":     doc_id,
+            "layout":     result.layout,
+            "confidence": round(result.confidence, 2),
+            "saldo_consistent": result.saldo_consistent,
+            "warnings":   result.warnings,
+            "statement": {
+                "bank_name":   result.statement.bank_name,
+                "iban":        result.statement.iban,
+                "iban_last4":  result.statement.iban_last4,
+                "period_start": result.statement.period_start,
+                "period_end":   result.statement.period_end,
+                "statement_no": result.statement.statement_no,
+                "opening_balance": result.statement.opening_balance,
+                "closing_balance": result.statement.closing_balance,
+                "currency":    result.statement.currency,
+                "tx_count":    len(result.statement.transactions),
+            },
+            "tx_sample": [
+                {"date": t.booking_date, "amount": t.amount,
+                 "counterparty": t.counterparty, "purpose": t.purpose[:80],
+                 "category": t.category, "tx_type": t.tx_type}
+                for t in result.statement.transactions[:10]
+            ],
+        }
+
+        if not apply:
+            return preview
+
+        # Apply path — refuse low-quality parses unless forced.
+        ok = result.confidence >= 0.85 and result.saldo_consistent
+        if not ok and not force:
+            raise HTTPException(
+                409,
+                "Parser output is below the trust threshold (confidence "
+                f"{result.confidence:.2f}, saldo_consistent="
+                f"{result.saldo_consistent}). Pass force=true to apply "
+                "anyway, or run /api/finance/reanalyze-doc to retry "
+                "with the LLM.",
+            )
+
+        # Resolve / upsert account, write statement, mirror what the
+        # bulk re-analyze worker does.
+        from ..finance.pseudonymizer import iban_hash as _iban_hash
+        from hashlib import sha256
+        s = result.statement
+        account_id = None
+        if s.iban:
+            account_id = db.upsert_account(
+                bank_name=s.bank_name or "Unbekannt",
+                iban=s.iban, iban_last4=s.iban_last4,
+                iban_hash=_iban_hash(s.iban),
+                account_holder=s.account_holder or "",
+                currency=s.currency or "EUR",
+            )
+        h_iban = _iban_hash(s.iban) if s.iban else "no-iban"
+        tx_payload = []
+        for t in s.transactions:
+            key = f"{h_iban}|{t.booking_date}|{t.amount:.2f}|{t.purpose}"
+            d = t.as_dict()
+            d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
+            tx_payload.append(d)
+        db.upsert_statement(
+            doc_id, account_id=account_id,
+            period_start=s.period_start, period_end=s.period_end,
+            statement_no=s.statement_no,
+            opening_balance=s.opening_balance,
+            closing_balance=s.closing_balance,
+            currency=s.currency or "EUR",
+            file_hash="",
+            privacy_mode="local",
+            transactions=tx_payload,
+            extra_json=f"deterministic:{result.layout}:conf={result.confidence:.2f}",
+            extraction_warning="; ".join(result.warnings) if result.warnings else "",
+        )
+        # Promote to Kontoauszug if needed + align doc_date.
+        with db._lock:
+            if (doc["category"] or "") != "Kontoauszug":
+                db._conn.execute(
+                    "UPDATE documents SET category='Kontoauszug', "
+                    "subcategory='' WHERE id = ?",
+                    (doc_id,),
+                )
+            if s.period_end:
+                db._conn.execute(
+                    "UPDATE documents SET doc_date = ? WHERE id = ?",
+                    (s.period_end, doc_id),
+                )
+            db._conn.commit()
+        preview["applied"] = True
+        return preview
+
     @app.post("/api/finance/reanalyze-doc")
     def api_finance_reanalyze_doc(payload: dict = Body(...)):
         """Queue a fresh extraction on one specific doc.

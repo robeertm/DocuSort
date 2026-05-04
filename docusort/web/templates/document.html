@@ -625,14 +625,84 @@
                   :class="(extracting || skipping || running) ? 'opacity-50 cursor-not-allowed' : ''"
                   x-text="skipping ? T['doc.statement.skipping'] : T['doc.statement.skip']"></button>
         {% else %}
-          <button type="button" @click="extract()" :disabled="extracting || running"
+          <button type="button" @click="extract()" :disabled="extracting || running || parsing"
                   class="btn-primary text-sm"
-                  :class="(extracting || running) ? 'opacity-50 cursor-not-allowed' : ''"
+                  :class="(extracting || running || parsing) ? 'opacity-50 cursor-not-allowed' : ''"
                   x-text="(extracting || running) ? T['statement.extracting'] : (hasStatement ? T['statement.reextract'] : T['statement.extract_now'])"></button>
         {% endif %}
+        <button type="button" @click="parseDeterministic()"
+                :disabled="parsing || extracting || running"
+                class="btn-secondary text-sm"
+                :class="(parsing || extracting || running) ? 'opacity-50 cursor-not-allowed' : ''"
+                :title="T['statement.parse_det.hint'] || ''">
+          <span x-show="!parsing">{{ t('statement.parse_det.button') }}</span>
+          <span x-show="parsing" x-cloak>{{ t('statement.parse_det.running') }}</span>
+        </button>
         <span x-show="extractMessage" x-cloak class="text-xs"
               :class="extractOk ? 'text-emerald-300' : 'text-rose-300'"
               x-text="extractMessage"></span>
+      </div>
+
+      <!-- Deterministic-parse preview pane: shows what the regex
+           parser would produce so the user can compare before
+           applying. -->
+      <div x-show="parsePreview" x-cloak class="mt-4 rounded border border-cyan-500/30 bg-cyan-500/5 p-3 text-xs">
+        <div class="flex flex-wrap items-center gap-3 mb-2">
+          <span class="font-semibold text-cyan-200">{{ t('statement.parse_det.preview_title') }}</span>
+          <span class="text-ink-300">
+            <span x-text="parsePreview ? parsePreview.layout : ''"></span>
+            · <span x-text="(T['statement.parse_det.confidence'] || 'Konfidenz') + ' ' + (parsePreview ? (parsePreview.confidence * 100).toFixed(0) : 0) + '%'"></span>
+            <span x-show="parsePreview && parsePreview.saldo_consistent"
+                  class="text-emerald-300">· {{ t('statement.parse_det.saldo_ok') }}</span>
+            <span x-show="parsePreview && !parsePreview.saldo_consistent"
+                  class="text-rose-300">· {{ t('statement.parse_det.saldo_off') }}</span>
+          </span>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 font-mono tabular-nums">
+          <div><span class="text-ink-500">Period:</span>
+            <span x-text="(parsePreview && parsePreview.statement.period_start || '—') + '..' + (parsePreview && parsePreview.statement.period_end || '—')"></span>
+          </div>
+          <div><span class="text-ink-500">{{ t('statement.opening') }}:</span>
+            <span x-text="parsePreview && parsePreview.statement.opening_balance !== null ? parsePreview.statement.opening_balance.toFixed(2) : '—'"></span>
+          </div>
+          <div><span class="text-ink-500">{{ t('statement.closing') }}:</span>
+            <span x-text="parsePreview && parsePreview.statement.closing_balance !== null ? parsePreview.statement.closing_balance.toFixed(2) : '—'"></span>
+          </div>
+          <div><span class="text-ink-500">{{ t('statement.tx_count_short') }}:</span>
+            <span x-text="parsePreview ? parsePreview.statement.tx_count : 0"></span>
+          </div>
+        </div>
+        <details x-show="parsePreview && parsePreview.tx_sample && parsePreview.tx_sample.length"
+                 x-cloak class="mt-2">
+          <summary class="cursor-pointer text-cyan-200 hover:text-cyan-100">{{ t('statement.parse_det.show_sample') }}</summary>
+          <ul class="mt-2 space-y-0.5 text-[11px] font-mono tabular-nums">
+            <template x-for="t in (parsePreview ? parsePreview.tx_sample : [])" :key="t.date + t.amount + t.purpose">
+              <li class="flex gap-2">
+                <span class="text-ink-500" x-text="t.date"></span>
+                <span :class="t.amount < 0 ? 'text-rose-300' : 'text-emerald-300'"
+                      class="w-20 text-right" x-text="t.amount.toFixed(2)"></span>
+                <span class="text-ink-300 truncate" x-text="t.purpose"></span>
+              </li>
+            </template>
+          </ul>
+        </details>
+        <div class="mt-3 flex gap-2">
+          <button type="button" @click="applyParse(false)"
+                  :disabled="parsing || !parsePreview || !parsePreview.saldo_consistent || parsePreview.confidence < 0.85"
+                  class="btn-primary text-xs"
+                  :class="(parsing || !parsePreview || !parsePreview.saldo_consistent || parsePreview.confidence < 0.85) ? 'opacity-50 cursor-not-allowed' : ''">
+            {{ t('statement.parse_det.apply') }}
+          </button>
+          <button type="button" @click="applyParse(true)"
+                  :disabled="parsing"
+                  class="btn-ghost text-xs"
+                  x-show="parsePreview && (parsePreview.confidence < 0.85 || !parsePreview.saldo_consistent)">
+            {{ t('statement.parse_det.force') }}
+          </button>
+          <button type="button" @click="parsePreview = null" class="btn-ghost text-xs">
+            {{ t('statement.parse_det.cancel') }}
+          </button>
+        </div>
       </div>
     </div>
     {% endif %}
@@ -861,6 +931,8 @@ function statementCard(docId, hasStatement) {
     preview: null, previewing: false, error: '',
     extracting: false, extractMessage: '', extractOk: false,
     skipping: false,
+    // Deterministic-parser state
+    parsing: false, parsePreview: null,
     // Server-reported job state. Survives page reloads, so a long
     // extraction kicked off in another tab still shows "Auswertung
     // läuft" instead of a stale "klick Auswerten" prompt.
@@ -973,6 +1045,44 @@ function statementCard(docId, hasStatement) {
         this.extractOk = false;
         this.extractMessage = e.message || String(e);
       } finally { this.skipping = false; }
+    },
+    async parseDeterministic() {
+      this.parsing = true; this.extractMessage = ''; this.parsePreview = null;
+      try {
+        const r = await fetch('/api/finance/parse-doc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doc_id: this.docId }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.parsePreview = d;
+      } catch (e) {
+        this.extractOk = false;
+        this.extractMessage = e.message || String(e);
+      } finally { this.parsing = false; }
+    },
+    async applyParse(force) {
+      if (!confirm(T['statement.parse_det.confirm'] ||
+                   'Mit den Parser-Ergebnissen den Auszug überschreiben?')) {
+        return;
+      }
+      this.parsing = true; this.extractMessage = '';
+      try {
+        const r = await fetch('/api/finance/parse-doc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doc_id: this.docId, apply: true, force: !!force }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.extractOk = true;
+        this.extractMessage = T['statement.parse_det.applied'] || 'Auszug deterministisch geparst.';
+        setTimeout(() => location.reload(), 600);
+      } catch (e) {
+        this.extractOk = false;
+        this.extractMessage = e.message || String(e);
+      } finally { this.parsing = false; }
     },
   };
 }

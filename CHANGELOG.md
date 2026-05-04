@@ -2,6 +2,34 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.31.2] – 2026-05-04
+
+### Added — Per-document deterministic parser button on /document/{id}
+
+Next to the existing "Auswertung anstoßen" button on the statement
+card, every Kontoauszug-shaped document now has a "Deterministisch
+parsen" button that runs the regex parser without any LLM call.
+
+Flow:
+
+1. Click → preview pane appears with layout, confidence, period,
+   opening / closing, saldo-reconciliation badge, plus the first 10
+   parsed transactions for visual sanity-check.
+2. "Übernehmen" overwrites the existing statement with the parsed
+   one, recomputes tx_hashes, promotes the doc to Kontoauszug if
+   needed, aligns doc_date with period_end. Refuses to apply when
+   confidence < 0.85 or saldo doesn't reconcile, unless the user
+   clicks "Trotzdem übernehmen".
+3. Free, fast, idempotent. No bridge / OpenAI / Anthropic call.
+
+`POST /api/finance/parse-doc` is the underlying endpoint:
+
+  - `{"doc_id": 42}`                       → preview
+  - `{"doc_id": 42, "apply": true}`        → apply (gate-checked)
+  - `{"doc_id": 42, "apply": true, "force": true}` → force-apply
+
+UI translated into all 5 supported languages.
+
 ## [0.31.1] – 2026-05-04
 
 ### Added — Six more bank-specific layouts
