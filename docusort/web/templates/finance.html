@@ -403,9 +403,12 @@
        expense, net). Bars-on-bars before this got squashed by the one
        big month, lines stay readable across orders of magnitude. -->
   <div class="card p-5 mb-6">
-    <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.last_12_months') }}</h2>
+    <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.monthly_timeline') }}</h2>
     {% if monthly %}
       {% set n = monthly | length %}
+      {# Thin out month labels when the timeline is long, otherwise the
+         x-axis becomes an unreadable smudge. #}
+      {% set label_step = 1 if n <= 18 else (3 if n <= 36 else 6) %}
       {% set max_in  = (monthly | map(attribute='income')  | max) or 0 %}
       {% set max_out = -((monthly | map(attribute='expense') | min) or 0) %}
       {% set vmax = [max_in, max_out, 1] | max %}
@@ -457,7 +460,9 @@
             {% set y_out = (H - 20) - (-m.expense / vmax) * (H - 40) %}
             <circle cx="{{ x }}" cy="{{ y_in }}" r="3" fill="rgb(16 185 129)"><title>{{ m.month }} · {{ "%.0f"|format(m.income) }} € rein</title></circle>
             <circle cx="{{ x }}" cy="{{ y_out }}" r="3" fill="rgb(244 63 94)"><title>{{ m.month }} · {{ "%.0f"|format(-m.expense) }} € raus</title></circle>
-            <text x="{{ x }}" y="{{ H - 4 }}" text-anchor="middle" class="fill-ink-500" font-size="10">{{ m.month[5:] }}/{{ m.month[2:4] }}</text>
+            {% if loop.index0 % label_step == 0 or loop.last %}
+              <text x="{{ x }}" y="{{ H - 4 }}" text-anchor="middle" class="fill-ink-500" font-size="10">{{ m.month[5:] }}/{{ m.month[2:4] }}</text>
+            {% endif %}
           {% endfor %}
         </svg>
       </div>

@@ -28,36 +28,81 @@ logger = logging.getLogger("docusort.finance.salvage")
 
 def promote_bank_to_kontoauszug(db, *, dry_run: bool = False) -> dict[str, Any]:
     """Find documents that look like Kontoauszüge but were classified
-    as `Bank` (with subcategory `Konto` / `Karte` or a kontoauszug-
-    shaped subject) and switch their category to `Kontoauszug`.
+    as something else (Bank, Sonstiges, Rechnungen, Vertraege, Steuer)
+    and switch their category to `Kontoauszug`.
 
-    Older releases left this promotion to the bulk re-analyze worker,
-    so anything that was never re-analysed sat at `Bank/Konto` —
-    invisible to /finance and the day-picker. This is a one-shot
-    cleanup that mirrors what the new ingest-time promotion does for
-    fresh uploads.
+    Two-tier match:
+
+    1. Cheap SQL hints — `Bank` with subcategory Konto/Karte or any
+       category whose subject already mentions "Kontoauszug" /
+       "Girokonto" / etc. These are unambiguous.
+    2. OCR-text scan — any other promotable category gets its
+       `extracted_text` checked against the same heuristic the
+       classifier uses at ingest time
+       (`classifier.text_looks_like_kontoauszug`). Catches the case
+       where an LLM dumped a clear bank-statement OCR into Sonstiges
+       because it ran out of output budget or returned low confidence.
 
     File renames are intentionally NOT performed: changing the on-disk
     library_path is a separate operation with much higher risk
     (broken sync targets, dead bookmarks). The DB row update is what
     /finance actually queries on."""
-    sql = (
+    from ..classifier import text_looks_like_kontoauszug
+
+    sql_obvious = (
         "SELECT id, category, subcategory, subject, filename, library_path "
         "FROM documents "
-        "WHERE deleted_at IS NULL AND category = 'Bank' "
+        "WHERE deleted_at IS NULL "
+        "  AND category != 'Kontoauszug' "
         "  AND ("
-        "      LOWER(COALESCE(subcategory,'')) IN ('konto', 'karte') "
-        "      OR LOWER(COALESCE(subject,'')) LIKE '%kontoauszug%' "
-        "      OR LOWER(COALESCE(subject,'')) LIKE '%girokonto%' "
-        "      OR LOWER(COALESCE(subject,'')) LIKE '%tagesgeld%' "
-        "      OR LOWER(COALESCE(subject,'')) LIKE '%kreditkart%' "
-        "      OR LOWER(COALESCE(subject,'')) LIKE '%paypal%auszug%' "
-        "      OR LOWER(COALESCE(subject,'')) LIKE '%depotauszug%' "
+        "       (category = 'Bank' AND LOWER(COALESCE(subcategory,'')) IN ('konto','karte')) "
+        "    OR LOWER(COALESCE(subject,'')) LIKE '%kontoauszug%' "
+        "    OR LOWER(COALESCE(subject,'')) LIKE '%girokonto%' "
+        "    OR LOWER(COALESCE(subject,'')) LIKE '%tagesgeld%' "
+        "    OR LOWER(COALESCE(subject,'')) LIKE '%kreditkart%' "
+        "    OR LOWER(COALESCE(subject,'')) LIKE '%paypal%auszug%' "
+        "    OR LOWER(COALESCE(subject,'')) LIKE '%depotauszug%' "
         "  )"
     )
+    # Tier-2 candidates: any document in a promotable category whose
+    # subject didn't already trigger the cheap SQL match. We pull
+    # extracted_text and run the heuristic on each one. Limit the
+    # candidate set by skipping rows that obviously don't qualify
+    # (image-only docs with no OCR text, deleted rows, …).
+    sql_text = (
+        "SELECT id, category, subcategory, subject, filename, library_path, "
+        "       extracted_text "
+        "FROM documents "
+        "WHERE deleted_at IS NULL "
+        "  AND category IN ('Bank','Sonstiges','Rechnungen','Vertraege','Steuer') "
+        "  AND category != 'Kontoauszug' "
+        "  AND extracted_text IS NOT NULL AND extracted_text != '' "
+        "  AND LOWER(COALESCE(subject,'')) NOT LIKE '%kontoauszug%' "
+        "  AND LOWER(COALESCE(subject,'')) NOT LIKE '%girokonto%' "
+    )
     with db._lock:
-        rows = db._conn.execute(sql).fetchall()
-    items = [dict(r) for r in rows]
+        obvious = db._conn.execute(sql_obvious).fetchall()
+        text_candidates = db._conn.execute(sql_text).fetchall()
+    items_by_id: dict[int, dict] = {}
+    for r in obvious:
+        items_by_id[int(r["id"])] = {
+            k: r[k] for k in (
+                "id", "category", "subcategory", "subject",
+                "filename", "library_path",
+            )
+        }
+    for r in text_candidates:
+        if int(r["id"]) in items_by_id:
+            continue
+        if not text_looks_like_kontoauszug(r["extracted_text"] or ""):
+            continue
+        items_by_id[int(r["id"])] = {
+            k: r[k] for k in (
+                "id", "category", "subcategory", "subject",
+                "filename", "library_path",
+            )
+        }
+    items = list(items_by_id.values())
     if dry_run or not items:
         return {"candidates": len(items), "promoted": 0,
                 "items": items, "dry_run": dry_run}
@@ -68,7 +113,7 @@ def promote_bank_to_kontoauszug(db, *, dry_run: bool = False) -> dict[str, Any]:
             "WHERE id = ?", ids,
         )
         db._conn.commit()
-    logger.info("Promoted %d Bank-classified docs to Kontoauszug.", len(items))
+    logger.info("Promoted %d misclassified docs to Kontoauszug.", len(items))
     return {"candidates": len(items), "promoted": len(items),
             "items": items, "dry_run": False}
 

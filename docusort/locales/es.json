@@ -458,6 +458,7 @@
   "finance.statements": "extractos",
   "finance.accounts": "cuentas",
   "finance.last_12_months": "Flujo últimos 12 meses",
+  "finance.monthly_timeline": "Flujo en el tiempo",
   "finance.no_monthly_data": "Aún no hay movimientos con fecha.",
   "finance.accounts_heading": "Cuentas",
   "finance.by_category": "Por categoría",

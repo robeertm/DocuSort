@@ -405,25 +405,107 @@ _KONTOAUSZUG_SUBJECT_HINTS = (
 )
 _KONTOAUSZUG_SUBCATS = {"konto", "karte"}
 
+# Categories that we treat as "could be anything"  — when the OCR text
+# clearly shows a bank-statement layout (IBAN + period + booking lines)
+# we override the LLM's guess and route the doc through the finance
+# pipeline. Without this an LLM that hits its token cap or returns
+# low confidence will dump statements into Sonstiges, where /finance
+# never sees them.
+_PROMOTABLE_CATEGORIES = {
+    "Bank", "Sonstiges", "Rechnungen", "Vertraege", "Steuer",
+}
 
-def maybe_promote_to_kontoauszug(cls: "Classification") -> "Classification":
-    """If the classifier returned `Bank` with a kontoauszug-shaped
-    subcategory or subject, mutate it to `Kontoauszug` (no subcategory)
-    so the finance pipeline picks it up at ingest time instead of
-    waiting for the bulk re-analyse worker.
+_IBAN_RE = re.compile(r"\bDE\s?\d{2}[\s\d]{18,28}\b", re.IGNORECASE)
+_BALANCE_RE = re.compile(
+    r"\b(anfangssaldo|endsaldo|alter\s+saldo|neuer\s+saldo|"
+    r"alter\s+kontostand|neuer\s+kontostand|saldo\s+vortrag|"
+    r"übertrag|kontostand|saldo\s+alt|saldo\s+neu)\b",
+    re.IGNORECASE,
+)
+_BOOKING_KEYWORDS_RE = re.compile(
+    r"\b(sepa[-\s]?lastschrift|sepa[-\s]?überweisung|dauerauftrag|"
+    r"kartenzahlung|gutschrift|lastschrifteinzug|bargeldauszahlung|"
+    r"habenzinsen|sollzinsen|kontoführungsentgelt|auszug[-\s]?nr|"
+    r"buchungstag|valuta|wertstellung|verwendungszweck)\b",
+    re.IGNORECASE,
+)
+_BANK_NAME_RE = re.compile(
+    r"\b(sparkasse|volksbank|raiffeisenbank|postbank|commerzbank|"
+    r"deutsche\s+bank|hypovereinsbank|targobank|comdirect|consorsbank|"
+    r"dkb|ing[-\s]?diba|ing\s+bank|n26|santander|paypal[-\s]?kontoauszug|"
+    r"kreditkartenabrechnung)\b",
+    re.IGNORECASE,
+)
+
+
+def text_looks_like_kontoauszug(text: str) -> bool:
+    """Heuristic: does the OCR text look like a bank statement?
+
+    True when the document has the structural shape of a Kontoauszug —
+    IBAN plus either a balance label or several booking-row keywords,
+    or a known bank name plus booking keywords. Designed to be
+    conservative: a single hit isn't enough, we want corroboration so
+    a contract that happens to mention "IBAN" doesn't get promoted.
+    """
+    if not text:
+        return False
+    sample = text[:20000]
+    has_iban = bool(_IBAN_RE.search(sample))
+    has_balance = bool(_BALANCE_RE.search(sample))
+    bookings = len(_BOOKING_KEYWORDS_RE.findall(sample))
+    has_bank = bool(_BANK_NAME_RE.search(sample))
+    if has_iban and (has_balance or bookings >= 3):
+        return True
+    if has_bank and has_balance and bookings >= 2:
+        return True
+    if has_balance and bookings >= 4:
+        return True
+    return False
+
+
+def maybe_promote_to_kontoauszug(
+    cls: "Classification", text: str | None = None,
+) -> "Classification":
+    """Mutate a Classification to category=Kontoauszug when it looks
+    like a bank statement.
+
+    Three promotion paths:
+    1. category=Bank with a kontoauszug-shaped subcategory or subject
+       (the original v0.27.11 behaviour).
+    2. Any promotable category (Sonstiges, Rechnungen, Vertraege, Steuer,
+       Bank) when the OCR text shows the structural Kontoauszug shape.
+    3. Subject hints alone when the doc is in a promotable category —
+       catches cases where the LLM dumped to Sonstiges with confidence
+       0.4 but still wrote "Kontoauszug 03/2024" into the subject.
 
     Mutates and returns the same instance for caller convenience."""
-    if (cls.category or "").strip() != "Bank":
-        return cls
+    cat = (cls.category or "").strip()
     sub = (cls.subcategory or "").strip().lower()
     subj_lower = (cls.subject or "").lower()
-    looks_like_statement = (
-        sub in _KONTOAUSZUG_SUBCATS
-        or any(h in subj_lower for h in _KONTOAUSZUG_SUBJECT_HINTS)
-    )
-    if looks_like_statement:
-        cls.category = "Kontoauszug"
-        cls.subcategory = ""
+    tags_lower = " ".join((cls.tags or [])).lower()
+
+    if cat == "Bank":
+        looks_like_statement = (
+            sub in _KONTOAUSZUG_SUBCATS
+            or any(h in subj_lower for h in _KONTOAUSZUG_SUBJECT_HINTS)
+            or any(h in tags_lower for h in _KONTOAUSZUG_SUBJECT_HINTS)
+        )
+        if looks_like_statement:
+            cls.category = "Kontoauszug"
+            cls.subcategory = ""
+            return cls
+
+    if cat in _PROMOTABLE_CATEGORIES and cat != "Kontoauszug":
+        if text and text_looks_like_kontoauszug(text):
+            cls.category = "Kontoauszug"
+            cls.subcategory = ""
+            return cls
+        if any(h in subj_lower for h in _KONTOAUSZUG_SUBJECT_HINTS) or \
+           any(h in tags_lower for h in _KONTOAUSZUG_SUBJECT_HINTS):
+            cls.category = "Kontoauszug"
+            cls.subcategory = ""
+            return cls
+
     return cls
 
 
@@ -468,18 +550,56 @@ class Classifier:
                      self.provider.name, self.settings.model, len(text),
                      bool(pseudo))
 
-        try:
-            resp = self.provider.classify(
-                system_prompt=self._system_prompt,
-                user_prompt=user,
-                model=self.settings.model,
-                max_output_tokens=600,
-            )
-        except ProviderError as exc:
-            logger.error("Provider %s failed: %s", self.provider.name, exc)
-            raise
-
-        data = _parse_response(resp.raw_text)
+        # One retry on transient provider errors. Live data showed long
+        # OCR documents (8+ page PDFs) occasionally tripping a provider
+        # timeout or returning malformed JSON; without a retry the doc
+        # was permanently shelved as "Klassifizierung-fehlgeschlagen".
+        # Sleep briefly between tries so we're not hammering during a
+        # rate-limit blip.
+        last_exc: Exception | None = None
+        resp = None
+        data: dict[str, Any] | None = None
+        for attempt in range(2):
+            try:
+                resp = self.provider.classify(
+                    system_prompt=self._system_prompt,
+                    user_prompt=user,
+                    model=self.settings.model,
+                    max_output_tokens=600,
+                )
+            except ProviderError as exc:
+                last_exc = exc
+                logger.warning(
+                    "Provider %s classify attempt %d/2 failed: %s",
+                    self.provider.name, attempt + 1, exc,
+                )
+                if attempt == 0:
+                    import time as _time
+                    _time.sleep(2.0)
+                    continue
+                logger.error("Provider %s failed (final): %s",
+                             self.provider.name, exc)
+                raise
+            try:
+                data = _parse_response(resp.raw_text)
+                break
+            except ValueError as exc:
+                last_exc = exc
+                logger.warning(
+                    "Provider %s returned unparseable JSON on attempt %d/2: %s",
+                    self.provider.name, attempt + 1, exc,
+                )
+                if attempt == 0:
+                    import time as _time
+                    _time.sleep(1.0)
+                    continue
+                # Out of retries — re-raise so the pipeline routes the
+                # doc to review with the original error message.
+                raise
+        # Loop guarantees data is set before this point — but make the
+        # invariant explicit so static analysis / future refactors
+        # don't silently break it.
+        assert data is not None and resp is not None
         if pseudo is not None:
             data = pseudo.restore(data)
 

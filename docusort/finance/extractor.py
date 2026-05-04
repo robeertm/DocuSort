@@ -169,6 +169,8 @@ Schema:
 # Rules
 
 - Numbers use a dot as decimal separator: "1.234,56" → 1234.56.
+- **Decimal places matter** — German private-account amounts ALWAYS carry cents (e.g. 1.991,43 / 89,00 / 1.150,00). If the OCR text shows a number without a comma where a euro amount belongs (e.g. "199143" sitting in an amount column), the OCR almost certainly dropped the comma. Insert it before the last two digits: "199143" → 1991.43, "8900" → 89.00. NEVER emit a Privatgirokonto booking like 199143.00 — that's 100x too large.
+- **Opening / closing balance synonyms** — "Anfangssaldo", "alter Saldo", "Saldo Vortrag", "Saldo alt", "alter Kontostand", "Übertrag" (when at top of page or labelled "Übertrag a.n.S." / "von Vorseite") are all opening_balance. "Endsaldo", "neuer Saldo", "Saldo neu", "neuer Kontostand", "Endbestand" are closing_balance. Sparkasse/Volksbank statements often print these in an aside, sometimes vertically; ALWAYS look for them and fill both fields when present. Without these the analytics breaks.
 - amount sign: outgoing/Abbuchung/Lastschrift → NEGATIVE.  Incoming/Eingang/Gutschrift → POSITIVE. The user wants to plot cashflow, so a wrong sign breaks everything.
 - bank_name: snap to the canonical form. Allowed examples: {", ".join(BANK_NAMES)}. Anything else → keep verbatim.
 - tx_type guidance:
@@ -315,10 +317,20 @@ _PAGE_SYSTEM_PROMPT = (
     "  page — don't re-emit anything from earlier pages.\n"
     "- Numbers: dot is decimal, \"1.234,56\" → 1234.56. Outgoing/Lastschrift/\n"
     "  Belastung → NEGATIVE. Eingang/Gutschrift → POSITIVE.\n"
-    "- Skip layout-only lines: \"Übertrag\", \"Saldo neu/alt\", page numbers,\n"
+    "- DECIMAL PLACES: German private-account amounts ALWAYS have cents.\n"
+    "  If the OCR text shows a bare integer where an amount belongs\n"
+    "  (e.g. \"199143\" in the amount column), the comma was dropped\n"
+    "  by OCR — insert it before the last two digits: \"199143\" → 1991.43,\n"
+    "  \"8900\" → 89.00. NEVER emit something like 199143.00 for a\n"
+    "  private booking; that's 100x too large.\n"
+    "- BALANCE SYNONYMS: opening_balance ← \"Anfangssaldo\", \"alter Saldo\",\n"
+    "  \"Saldo Vortrag\", \"alter Kontostand\", \"Übertrag\" (when at top of page).\n"
+    "  closing_balance ← \"Endsaldo\", \"neuer Saldo\", \"Saldo neu\",\n"
+    "  \"neuer Kontostand\", \"Endbestand\". Fill both whenever printed.\n"
+    "- Skip layout-only lines: \"Übertrag a.n.S.\" (running carry), page numbers,\n"
     "  footer disclaimers, BIC-only lines.\n"
-    "- Skip the opening / closing balance rows (those carry the running total,\n"
-    "  not a booking).\n"
+    "- Skip the opening / closing balance rows themselves (they go into the\n"
+    "  opening_balance / closing_balance fields, not into transactions).\n"
     "- ALWAYS keep IBAN_xxx / NAME_xxx / ADDR_xxx tokens verbatim — do not\n"
     "  invent real-looking values.\n\n"
     "Return ONLY the JSON object."
@@ -774,6 +786,56 @@ class StatementExtractor:
         period_end   = str(data.get("period_end")   or "").strip()[:10]
         if period_start and period_end and period_start > period_end:
             period_start, period_end = period_end, period_start
+
+        # Saldo-Konsistenz: opening + sum(tx) sollte closing sein. Wenn
+        # die Differenz exakt 100x daneben liegt, hat OCR Kommas
+        # verschluckt und die LLM hat ganze Zahlen statt 1234,56 → 12.34
+        # akzeptiert. Versuche das zu reparieren statt die Beträge zu
+        # verwerfen — sonst stimmt die Heatmap nie. Wir korrigieren nur
+        # wenn der ratio-test EINDEUTIG ist (alle ganzzahligen Beträge,
+        # die entstandene Differenz zum Saldo nahe Null), sonst lieber
+        # warnen als falsch korrigieren.
+        if (txs and opening is not None and closing is not None
+                and abs(closing - opening) > 0.01):
+            tx_sum = sum(t.amount for t in txs)
+            target_delta = closing - opening
+            err_raw = abs(tx_sum - target_delta)
+            err_div100 = abs((tx_sum / 100.0) - target_delta)
+            ratio_raw = err_raw / max(abs(target_delta), 1.0)
+            ratio_div100 = err_div100 / max(abs(target_delta), 1.0)
+            # Only auto-correct when:
+            #  - the /100 hypothesis fits MUCH better than the raw sum
+            #  - the corrected residual is below 5% of the target delta
+            #  - every transaction is an integer (cents == 0) → strong
+            #    fingerprint that OCR ate the comma uniformly across
+            #    rows. Mixed integer + decimal rows mean something else
+            #    is wrong; we shouldn't gamble.
+            all_integer = all(abs(t.amount - round(t.amount)) < 0.005 for t in txs)
+            if (all_integer and ratio_div100 < 0.05 and ratio_raw > 0.5
+                    and len(txs) >= 2):
+                logger.warning(
+                    "Statement extractor: scaling %d tx amounts by 1/100 — "
+                    "raw sum %.2f doesn't match Δsaldo %.2f (err %.2f), "
+                    "but sum/100 = %.2f does (err %.2f). OCR likely "
+                    "swallowed the decimal commas.",
+                    len(txs), tx_sum, target_delta, err_raw,
+                    tx_sum / 100.0, err_div100,
+                )
+                for t in txs:
+                    t.amount = round(t.amount / 100.0, 2)
+                # Recompute for the warning below.
+                tx_sum = sum(t.amount for t in txs)
+                err_raw = abs(tx_sum - target_delta)
+            # Whether or not we corrected, surface a non-fatal warning
+            # when the residual is still > 1 € so the user sees the
+            # "extraction looks suspicious" badge instead of trusting
+            # the numbers blindly.
+            if not warning and err_raw > 1.0:
+                warning = (
+                    f"Saldo mismatch: opening + Σtx = {opening + tx_sum:.2f}, "
+                    f"closing = {closing:.2f} (diff {tx_sum - target_delta:+.2f}). "
+                    f"Buchungen evtl. unvollständig oder ein Betrag falsch."
+                )
 
         # Auto-promote transactions where the counterparty matches the
         # account holder name to category=uebertrag. The LLM often gets

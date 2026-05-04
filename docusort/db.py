@@ -1256,31 +1256,74 @@ class Database:
             "transfer_volume": float(transfers["net"]) if transfers else 0.0,
         }
 
-    def finance_monthly(self, months: int = 12) -> list[dict[str, Any]]:
-        """Income + expense per month for the last N months, oldest first.
+    def finance_monthly(self, months: int | None = None) -> list[dict[str, Any]]:
+        """Income + expense per month, oldest first.
+
+        Defaults to ALL months that contain bookings — earlier versions
+        capped at the most recent 12 months, which silently dropped
+        years of history when the user uploaded statements going back
+        to 2016. Pass `months=N` to limit explicitly.
+
+        Gaps within the visible range are filled with zero-rows so the
+        chart shows a contiguous timeline instead of compressing months
+        with no bookings out of existence (which made it look like
+        statements were missing).
 
         Excludes internal transfers (category=uebertrag) for the same
         reason as `finance_summary`: a single big move between own
         accounts would dwarf every other month and make the chart
         useless."""
+        params: list[Any] = []
+        sql = (
+            "SELECT substr(t.booking_date, 1, 7) AS month, "
+            "       COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS income, "
+            "       COALESCE(SUM(CASE WHEN t.amount < 0 THEN t.amount ELSE 0 END), 0) AS expense, "
+            "       COUNT(*) AS n "
+            "FROM transactions t "
+            "JOIN statements   s ON s.id = t.statement_id "
+            "JOIN documents    d ON d.id = s.doc_id "
+            "WHERE d.deleted_at IS NULL "
+            "  AND t.booking_date IS NOT NULL AND t.booking_date != '' "
+            "  AND t.category != 'uebertrag' "
+            "GROUP BY month "
+            "ORDER BY month DESC "
+        )
+        if months is not None:
+            sql += "LIMIT ? "
+            params.append(months)
         with self._lock:
-            rows = self._conn.execute(
-                """SELECT substr(t.booking_date, 1, 7) AS month,
-                          COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS income,
-                          COALESCE(SUM(CASE WHEN t.amount < 0 THEN t.amount ELSE 0 END), 0) AS expense,
-                          COUNT(*) AS n
-                   FROM transactions t
-                   JOIN statements   s ON s.id = t.statement_id
-                   JOIN documents    d ON d.id = s.doc_id
-                   WHERE d.deleted_at IS NULL
-                     AND t.booking_date IS NOT NULL AND t.booking_date != ''
-                     AND t.category != 'uebertrag'
-                   GROUP BY month
-                   ORDER BY month DESC
-                   LIMIT ?""",
-                (months,),
-            ).fetchall()
-        return [dict(r) for r in reversed(rows)]
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
+        results = [dict(r) for r in reversed(rows)]
+        if not results:
+            return results
+        # Fill gaps so the chart x-axis stays contiguous. Without this,
+        # a year with only Jan + Dec bookings rendered as two adjacent
+        # bars and looked like "everything in between is missing".
+        try:
+            from datetime import date as _date
+            def _ym(s: str) -> tuple[int, int]:
+                return int(s[:4]), int(s[5:7])
+            first_y, first_m = _ym(results[0]["month"])
+            last_y, last_m   = _ym(results[-1]["month"])
+            filled: list[dict[str, Any]] = []
+            existing = {r["month"]: r for r in results}
+            cur_y, cur_m = first_y, first_m
+            while (cur_y, cur_m) <= (last_y, last_m):
+                key = f"{cur_y:04d}-{cur_m:02d}"
+                if key in existing:
+                    filled.append(existing[key])
+                else:
+                    filled.append({
+                        "month": key, "income": 0.0,
+                        "expense": 0.0, "n": 0,
+                    })
+                cur_m += 1
+                if cur_m > 12:
+                    cur_m = 1
+                    cur_y += 1
+            return filled
+        except Exception:
+            return results
 
     def finance_top_counterparties(
         self, *, direction: str = "expense", limit: int = 15,

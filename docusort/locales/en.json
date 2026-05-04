@@ -458,6 +458,7 @@
   "finance.statements": "statements",
   "finance.accounts": "accounts",
   "finance.last_12_months": "Cashflow — last 12 months",
+  "finance.monthly_timeline": "Cashflow over time",
   "finance.no_monthly_data": "No dated transactions yet.",
   "finance.accounts_heading": "Accounts",
   "finance.by_category": "By category",

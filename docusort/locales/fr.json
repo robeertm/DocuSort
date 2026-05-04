@@ -458,6 +458,7 @@
   "finance.statements": "relevés",
   "finance.accounts": "comptes",
   "finance.last_12_months": "Flux des 12 derniers mois",
+  "finance.monthly_timeline": "Flux au fil du temps",
   "finance.no_monthly_data": "Aucune opération datée pour l'instant.",
   "finance.accounts_heading": "Comptes",
   "finance.by_category": "Par catégorie",

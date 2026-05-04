@@ -717,7 +717,8 @@ def create_app(
         account_id = _coerce_int(account_id)
         from ..finance.categories import TX_CATEGORIES, TX_TYPES
         summary       = db.finance_summary()
-        monthly       = db.finance_monthly(months=12)
+        # months=None → full timeline; the chart renderer scales itself.
+        monthly       = db.finance_monthly()
         accounts      = db.list_accounts()
         top_outgoing  = db.finance_top_counterparties(direction="expense", limit=10)
         top_incoming  = db.finance_top_counterparties(direction="income",  limit=10)
@@ -912,7 +913,7 @@ def create_app(
     def api_finance_stats():
         return {
             "summary": db.finance_summary(),
-            "monthly": db.finance_monthly(months=12),
+            "monthly": db.finance_monthly(),
             "accounts": db.list_accounts(),
             "recurring": db.finance_recurring(),
         }

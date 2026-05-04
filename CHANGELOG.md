@@ -2,6 +2,49 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.29.0] – 2026-05-04
+
+### Fixed — Statement extraction + classification accuracy
+
+User reports surfaced four interlocking problems:
+
+- **Amounts without commas** ("1991,43 €" coming out as 199143.00 €):
+  the extractor now compares `opening_balance + Σtx` against
+  `closing_balance` and, when every transaction is integer-valued and
+  the residual collapses to zero after dividing by 100, scales the
+  amounts back into euros instead of accepting OCR-corrupt values. If
+  the residual remains > 1 € after correction, the statement is
+  flagged with an `extraction_warning` so the user sees a "needs
+  review" badge instead of trusting bogus numbers.
+- **Opening / closing balance often missing**: prompt now lists every
+  Sparkasse / Volksbank synonym ("Anfangssaldo", "Saldo Vortrag",
+  "alter Kontostand", "Übertrag", "Endsaldo", "neuer Saldo", …) and
+  insists both fields are filled when present. Same hint reaches the
+  per-page extraction prompt.
+- **Bank statements landing in "Sonstiges"**: the ingest-time
+  promotion is no longer restricted to `category=Bank`. A new
+  `text_looks_like_kontoauszug` heuristic (IBAN + balance keyword + ≥2
+  booking-row keywords, or bank-name + balance + bookings) routes any
+  promotable category to `Kontoauszug` when the OCR text shape is
+  unambiguous. The salvage migration that runs at startup now scans
+  `extracted_text` for the same shape, so previously-misclassified
+  documents get rescued without manual recategorisation.
+- **Classifier failures**: provider errors and unparseable JSON now
+  retry once before falling through to "Klassifizierung-fehlgeschlagen".
+  When the retry also fails, the heuristic checks the OCR text — if it
+  looks like a Kontoauszug, the doc lands in the right bucket with
+  confidence 0.3 instead of being buried in Sonstiges.
+
+### Changed — Cashflow chart shows the full timeline
+
+`finance_monthly` no longer caps at the most recent 12 months —
+default is now the full available range, with gap-filled zero-rows so
+months with no bookings stay visible instead of being silently
+compressed out. Title changed from "Last 12 months" to "Cashflow over
+time" (translated in all 5 languages). X-axis labels thin out
+automatically on long timelines (every 3rd month above 18 points,
+every 6th above 36).
+
 ## [0.28.1] – 2026-05-03
 
 ### Changed — Dashboard polish + mobile nav + i18n

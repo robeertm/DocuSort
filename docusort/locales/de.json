@@ -458,6 +458,7 @@
   "finance.statements": "Auszüge",
   "finance.accounts": "Konten",
   "finance.last_12_months": "Cashflow letzte 12 Monate",
+  "finance.monthly_timeline": "Cashflow im Verlauf",
   "finance.no_monthly_data": "Noch keine datierten Buchungen.",
   "finance.accounts_heading": "Konten",
   "finance.by_category": "Nach Kategorie",

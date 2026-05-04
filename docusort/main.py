@@ -139,11 +139,31 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                 )
             except Exception as exc:
                 log.exception("Classification failed for %s: %s", path.name, exc)
-                cls = Classification(
-                    category="Sonstiges", date="", sender="Unbekannt",
-                    subject="Klassifizierung-fehlgeschlagen", confidence=0.0,
-                    reasoning=str(exc),
-                )
+                # Even when the LLM gave up, the OCR text often makes the
+                # doc type obvious. Check the Kontoauszug heuristic so a
+                # bank statement at least lands in the right bucket and
+                # the bulk re-analyze worker can pick it up later — way
+                # better than burying it in Sonstiges/review forever.
+                from .classifier import text_looks_like_kontoauszug
+                if ocr_res.text and text_looks_like_kontoauszug(ocr_res.text):
+                    log.info(
+                        "Heuristic salvage: %s looks like a Kontoauszug — "
+                        "routing to review under Kontoauszug instead of "
+                        "Sonstiges.",
+                        path.name,
+                    )
+                    cls = Classification(
+                        category="Kontoauszug", date="", sender="Unbekannt",
+                        subject="Kontoauszug (LLM-Klassifizierung fehlgeschlagen)",
+                        confidence=0.3,
+                        reasoning=f"LLM error, salvaged by heuristic: {exc}",
+                    )
+                else:
+                    cls = Classification(
+                        category="Sonstiges", date="", sender="Unbekannt",
+                        subject="Klassifizierung-fehlgeschlagen", confidence=0.0,
+                        reasoning=str(exc),
+                    )
 
         # Mutate Bank-shaped Kontoauszüge into category=Kontoauszug
         # *before* organize() builds the destination filename, so the
@@ -151,7 +171,7 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         # filed under Bank where /finance can't see it.
         from .classifier import maybe_promote_to_kontoauszug
         before_cat = cls.category
-        maybe_promote_to_kontoauszug(cls)
+        maybe_promote_to_kontoauszug(cls, text=ocr_res.text)
         if cls.category != before_cat:
             log.info("Promoted %s: %s → %s (subject=%r)",
                      path.name, before_cat, cls.category, cls.subject[:60])

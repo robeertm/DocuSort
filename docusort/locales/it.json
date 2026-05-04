@@ -458,6 +458,7 @@
   "finance.statements": "estratti",
   "finance.accounts": "conti",
   "finance.last_12_months": "Flussi ultimi 12 mesi",
+  "finance.monthly_timeline": "Flussi nel tempo",
   "finance.no_monthly_data": "Nessun movimento datato.",
   "finance.accounts_heading": "Conti",
   "finance.by_category": "Per categoria",
