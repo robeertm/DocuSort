@@ -498,6 +498,44 @@ def _normalise_tx(d: dict[str, Any]) -> Transaction | None:
     )
 
 
+def _statement_from_parsed(det, *, privacy_mode: str) -> Statement:
+    """Convert a `parser.ParseResult` into the `Statement` shape the
+    rest of the codebase expects. Same fields, same types — the
+    difference is provenance, which we record in privacy_mode.
+    """
+    s = det.statement
+    return Statement(
+        bank_name=s.bank_name or "",
+        iban=s.iban or "",
+        iban_hash=iban_hash(s.iban) if s.iban else "",
+        iban_last4=s.iban_last4 or (s.iban[-4:] if len(s.iban) >= 4 else ""),
+        account_holder=s.account_holder or "",
+        period_start=s.period_start or "",
+        period_end=s.period_end or "",
+        statement_no=s.statement_no or "",
+        opening_balance=s.opening_balance,
+        closing_balance=s.closing_balance,
+        currency=s.currency or "EUR",
+        transactions=[
+            Transaction(
+                booking_date=t.booking_date,
+                value_date=t.value_date,
+                amount=t.amount,
+                currency=t.currency,
+                counterparty=t.counterparty,
+                counterparty_iban=t.counterparty_iban,
+                purpose=t.purpose,
+                tx_type=t.tx_type,
+                category=t.category,
+            )
+            for t in s.transactions
+        ],
+        raw_response=f"deterministic:{det.layout}:conf={det.confidence:.2f}",
+        privacy_mode=privacy_mode,
+        extraction_warning="; ".join(det.warnings) if det.warnings else "",
+    )
+
+
 class StatementExtractor:
     """Wraps a Provider to extract a Kontoauszug from OCR text.
 
@@ -669,23 +707,64 @@ class StatementExtractor:
     def extract(self, ocr_text: str, *, pseudonymize: bool = True,
                 pdf_path: Path | None = None,
                 ocr_settings=None,
-                on_page_progress=None) -> Statement:
+                on_page_progress=None,
+                allow_deterministic: bool = True) -> Statement:
         """Extract a Kontoauszug from OCR text.
 
-        Preferred mode is **page-by-page** when `pdf_path` and
-        `ocr_settings` are provided: each page becomes a separate
-        small LLM call, much more reliable on long documents than
-        single-pass extraction (no output truncation).
+        v0.31.0+ flow:
 
-        Falls back to single-pass with 16k → 32k → 64k output budget
-        escalation when the PDF isn't reachable (legacy data with no
-        `library_path`).
+        1. Try the deterministic regex parser first (no LLM call).
+           When confidence ≥ 0.85 AND opening + Σtx ≈ closing, we
+           accept the result and skip the LLM entirely. Fast, cheap,
+           hallucination-proof.
+        2. Otherwise fall through to the LLM extractor as before:
+           per-page when `pdf_path` is reachable, single-pass with
+           token-budget escalation when not.
 
-        `on_page_progress(current_page, total_pages)` lets the caller
-        observe per-page progress for the activity tracker. Only fires
-        in per-page mode; single-pass has no page concept."""
+        `allow_deterministic=False` forces the LLM path (used by the
+        bulk re-analyze worker when the user explicitly asked for a
+        fresh LLM run).
+
+        `on_page_progress(current_page, total_pages)` reports progress
+        in per-page LLM mode. The deterministic path is fast enough
+        that we just emit (1, 1) when it succeeds.
+        """
         if not ocr_text:
             raise ValueError("no OCR text provided")
+
+        # ---- Deterministic regex parser pass --------------------
+        if allow_deterministic:
+            try:
+                from .parser import parse as _parse_det
+                det = _parse_det(ocr_text)
+                # Trust threshold: high confidence + balanced saldo
+                # is the only combination we accept without LLM
+                # backup. Anything else falls through.
+                if det.confidence >= 0.85 and det.saldo_consistent:
+                    if on_page_progress is not None:
+                        try:
+                            on_page_progress(1, 1)
+                        except Exception:
+                            pass
+                    logger.info(
+                        "Deterministic parser %s succeeded "
+                        "(conf=%.2f, %d tx, saldo_consistent).",
+                        det.layout, det.confidence,
+                        len(det.statement.transactions),
+                    )
+                    return _statement_from_parsed(
+                        det, privacy_mode="local",
+                    )
+                logger.debug(
+                    "Deterministic parser %s rejected (conf=%.2f, "
+                    "saldo_consistent=%s) — falling through to LLM.",
+                    det.layout, det.confidence, det.saldo_consistent,
+                )
+            except Exception:
+                logger.exception(
+                    "Deterministic parser blew up — falling through "
+                    "to LLM. (Bug worth fixing, not a hard error.)"
+                )
 
         pseudo: Pseudonymizer | None = None
         if pseudonymize:

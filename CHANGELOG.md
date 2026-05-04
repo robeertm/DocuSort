@@ -2,6 +2,48 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.31.0] – 2026-05-04
+
+### Added — Deterministic regex-based bank-statement parser
+
+`docusort/finance/parser/` is a new module that parses Kontoauszug
+OCR text WITHOUT calling an LLM. No hallucinations, no token cost,
+no nondeterminism. The extractor calls it FIRST; the LLM is now a
+fallback for layouts the regex parser can't reach.
+
+This release ships:
+
+- `parser/base.py` — shared dataclasses (`ParsedStatement`,
+  `ParsedTransaction`, `ParseResult`), German-aware amount + date
+  helpers (`+1.234,56 H` / `Soll-Marker` / `DD.MM.YYYY` / hint-year
+  rollover for short dates), page-chrome line filtering
+  (`Seite X von Y`, `Übertrag a.n.S.`, …).
+- `parser/layouts/generic.py` — line-anchored booking-row scanner
+  that recognises any "starts-with-German-date, ends-with-amount"
+  shape and back-fills tx_type / category from a built-in keyword
+  table. Confidence stays ≤ 0.45 so any specific layout outranks
+  it.
+- `parser/layouts/sparkasse.py` — Ostsächsische / Stadt- /
+  Kreis-Sparkassen are recognised by header pattern + the H/S
+  Haben/Soll markers, with extra page-boundary cleanup
+  (`Übertrag a.n.S.`, `Übertrag von vorh. Seite`, BIC-only lines,
+  "Bitte beachten Sie") before the generic parser sees the text.
+  Reconciled samples score 0.99 confidence.
+
+### Changed — Extractor uses parser first, LLM second
+
+`StatementExtractor.extract()` now runs the deterministic parser
+before any LLM call. When confidence ≥ 0.85 AND `opening + Σtx ≈
+closing` to within 1 €, we accept the parser's result and skip the
+LLM entirely. Otherwise the existing LLM path takes over (per-page
+when `pdf_path` is reachable, single-pass with token escalation
+otherwise). Pass `allow_deterministic=False` to force-LLM if you
+want the LLM's opinion.
+
+`Statement.raw_response` now starts with `deterministic:<layout>:
+conf=…` when the parser path was taken — easy to grep for in the
+DB to compare layouts vs. LLM extractions.
+
 ## [0.30.3] – 2026-05-04
 
 ### Added — Statement audit + cross-statement dedup + missing-balance backfill
