@@ -153,6 +153,118 @@ def delete_absurd_amounts(db, *, threshold: float = 10_000_000.0,
             "items": items, "dry_run": False}
 
 
+def rescale_broken_amounts(db, *, dry_run: bool = False) -> dict[str, Any]:
+    """Apply the v0.29.0 saldo-mismatch / 100x-scale heuristic to rows
+    already in the transactions table.
+
+    For every statement that has an `opening_balance` and
+    `closing_balance` recorded:
+
+    - sum the existing transactions
+    - if `Σtx / 100 ≈ closing - opening` (within 5 % residual) AND the
+      raw sum is way off (> 50 % residual) AND every booking is
+      integer-valued AND there are at least 2 bookings,
+    - divide each amount by 100 and rewrite `tx_hash` so future
+      re-extracts dedup correctly.
+
+    Same rule as the live extractor — kept in lock-step so a
+    re-extraction won't disagree with the migration result.
+
+    No LLM calls. Pure data fix. Idempotent: a second run after a
+    successful first run is a no-op (the residual collapses below the
+    trigger threshold)."""
+    with db._lock:
+        stmts = db._conn.execute(
+            """SELECT s.id        AS stmt_id,
+                      s.opening_balance AS opening,
+                      s.closing_balance AS closing,
+                      a.iban_hash  AS iban_hash
+               FROM statements s
+               LEFT JOIN accounts a ON a.id = s.account_id
+               WHERE s.opening_balance IS NOT NULL
+                 AND s.closing_balance IS NOT NULL"""
+        ).fetchall()
+    candidates: list[dict[str, Any]] = []
+    for s in stmts:
+        opening = float(s["opening"])
+        closing = float(s["closing"])
+        delta = closing - opening
+        if abs(delta) < 0.01:
+            continue
+        with db._lock:
+            txs = db._conn.execute(
+                "SELECT id, amount, tx_hash, booking_date, purpose "
+                "FROM transactions WHERE statement_id = ?",
+                (s["stmt_id"],),
+            ).fetchall()
+        if len(txs) < 2:
+            continue
+        all_integer = all(abs(t["amount"] - round(t["amount"])) < 0.005 for t in txs)
+        if not all_integer:
+            continue
+        tx_sum = sum(float(t["amount"]) for t in txs)
+        err_raw = abs(tx_sum - delta)
+        err_div100 = abs((tx_sum / 100.0) - delta)
+        ratio_raw = err_raw / max(abs(delta), 1.0)
+        ratio_div100 = err_div100 / max(abs(delta), 1.0)
+        if not (ratio_div100 < 0.05 and ratio_raw > 0.5):
+            continue
+        candidates.append({
+            "stmt_id": int(s["stmt_id"]),
+            "iban_hash": s["iban_hash"] or "no-iban",
+            "tx_count": len(txs),
+            "tx_sum_before": round(tx_sum, 2),
+            "tx_sum_after":  round(tx_sum / 100.0, 2),
+            "delta_target":  round(delta, 2),
+            "txs": txs,
+        })
+    if dry_run:
+        return {
+            "candidates": len(candidates),
+            "would_update_rows": sum(c["tx_count"] for c in candidates),
+            "samples": [
+                {k: v for k, v in c.items() if k != "txs"}
+                for c in candidates[:20]
+            ],
+            "dry_run": True,
+        }
+    updated_rows = 0
+    for c in candidates:
+        iban_h = c["iban_hash"]
+        for t in c["txs"]:
+            new_amount = round(float(t["amount"]) / 100.0, 2)
+            key = (
+                iban_h + "|" +
+                (t["booking_date"] or "") + "|" +
+                f"{new_amount:.2f}" + "|" +
+                (t["purpose"] or "")
+            )
+            new_hash = sha256(key.encode("utf-8")).hexdigest()
+            with db._lock:
+                # OR REPLACE handles the (extremely unlikely) case where
+                # rescaling produces a tx_hash collision with another
+                # row — the colliding row is a logical duplicate, so
+                # collapsing them is the right behaviour.
+                db._conn.execute(
+                    "UPDATE OR REPLACE transactions "
+                    "SET amount = ?, tx_hash = ? WHERE id = ?",
+                    (new_amount, new_hash, int(t["id"])),
+                )
+            updated_rows += 1
+    with db._lock:
+        db._conn.commit()
+    logger.warning(
+        "Rescaled %d transactions across %d statements (OCR-comma "
+        "recovery).", updated_rows, len(candidates),
+    )
+    return {
+        "candidates": len(candidates),
+        "updated_statements": len(candidates),
+        "updated_rows": updated_rows,
+        "dry_run": False,
+    }
+
+
 def normalise_existing_dates(db, *, dry_run: bool = False) -> dict[str, Any]:
     """One-off pass over the transactions table that converts every
     non-ISO booking_date / value_date into ISO YYYY-MM-DD.

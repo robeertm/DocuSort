@@ -1135,6 +1135,24 @@ def create_app(
             "version":       __version__,
         }
 
+    @app.post("/api/finance/rescale-amounts")
+    def api_finance_rescale_amounts(payload: dict = Body(default={})):
+        """One-off DB pass: divide-by-100 the amounts on statements
+        whose Σtx vs. Δsaldo fingerprint says OCR ate the decimal
+        commas. Mirrors the extraction-time check from v0.29.0
+        (`_normalise_tx` post-hoc scale correction) so users don't
+        have to re-extract every Kontoauszug just to fix existing
+        broken numbers.
+
+        Pass `{"dry_run":true}` for a preview that returns the
+        statement IDs and before/after sums without writing."""
+        from ..finance.salvage import rescale_broken_amounts
+        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
+        try:
+            return rescale_broken_amounts(db, dry_run=dry)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"rescale failed: {type(exc).__name__}: {exc}") from exc
+
     @app.post("/api/finance/normalise-dates")
     def api_finance_normalise_dates(payload: dict = Body(default={})):
         """One-off DB pass: converts every non-ISO booking_date /

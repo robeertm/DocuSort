@@ -2,6 +2,17 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.29.1] – 2026-05-04
+
+### Added — Rescale broken amounts in place
+
+`POST /api/finance/rescale-amounts` runs the same /100 scale-correction
+heuristic as the live extractor against the existing transactions
+table — fix the OCR-comma damage on statements already in the DB
+without re-extracting through the LLM. Idempotent: a second run after
+a successful first pass is a no-op. Pass `{"dry_run":true}` for a
+preview that lists candidate statements + before/after sums.
+
 ## [0.29.0] – 2026-05-04
 
 ### Fixed — Statement extraction + classification accuracy
