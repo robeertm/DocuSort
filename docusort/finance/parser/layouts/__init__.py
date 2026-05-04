@@ -11,17 +11,30 @@ from __future__ import annotations
 import logging
 
 from ..base import Layout
+from .commerzbank import CommerzbankLayout
+from .dkb import DKBLayout
 from .generic import GenericLayout
+from .ing import INGLayout
+from .paypal import PayPalLayout
+from .postbank import PostbankLayout
 from .sparkasse import SparkasseLayout
+from .volksbank import VolksbankLayout
 
 logger = logging.getLogger("docusort.finance.parser")
 
 
 _GENERIC = GenericLayout()
+# Order matters mildly: when two layouts return identical scores
+# (rare), the first wins. We put the most-specific / least-likely-
+# to-collide layouts first so they can outrank the catch-alls.
 _LAYOUTS: list[Layout] = [
     SparkasseLayout(),
-    # DKB / PayPal / Volksbank / ING come in v0.31.1 — for now the
-    # generic layout catches them at lower confidence.
+    DKBLayout(),
+    PayPalLayout(),
+    INGLayout(),
+    CommerzbankLayout(),
+    PostbankLayout(),
+    VolksbankLayout(),
 ]
 
 

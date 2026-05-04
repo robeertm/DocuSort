@@ -2,6 +2,28 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.31.1] – 2026-05-04
+
+### Added — Six more bank-specific layouts
+
+- `dkb.py` — DKB AG / Deutsche Kreditbank (Cash + Visa)
+- `paypal.py` — PayPal-Kontoauszug
+- `volksbank.py` — Volksbanken-Raiffeisenbanken-Verbund
+- `ing.py` — ING (formerly ING-DiBa)
+- `commerzbank.py` — Commerzbank + comdirect
+- `postbank.py` — Postbank / Deutsche Bank
+
+Plus extended balance-keyword recognition in the generic parser so
+"Saldo Vormonat", "Saldo aus Vormonat", "Saldo vom Vorauszug" and
+the English "beginning balance" / "ending balance" all work.
+"Abrechnungszeitraum" added to the period-line synonyms (DKB Visa
+uses it).
+
+DKB Visa, Volksbank, ING, Commerzbank, Postbank and Sparkasse all
+hit ≥ 0.95 confidence with `saldo_consistent` = True on
+representative samples — the LLM is no longer in the hot path for
+these layouts.
+
 ## [0.31.0] – 2026-05-04
 
 ### Added — Deterministic regex-based bank-statement parser

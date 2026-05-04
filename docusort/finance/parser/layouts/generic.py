@@ -27,16 +27,21 @@ _BOOKING_PREFIX_RE = re.compile(
 # Header-only synonyms — used to lift opening / closing balance.
 _OPENING_RE = re.compile(
     r"\b(anfangssaldo|alter\s+saldo|saldo\s+vortrag|saldo\s+alt|"
-    r"alter\s+kontostand|übertrag\s+vom\s+vormonat|Übertrag)\b",
+    r"alter\s+kontostand|übertrag\s+vom\s+vormonat|"
+    r"saldo\s+vormonat|saldo\s+aus\s+vormonat|"
+    r"saldo\s+vom\s+vorauszug|beginning\s+balance|"
+    r"Übertrag)\b",
     re.IGNORECASE,
 )
 _CLOSING_RE = re.compile(
     r"\b(endsaldo|neuer\s+saldo|saldo\s+neu|neuer\s+kontostand|"
-    r"endbestand)\b",
+    r"endbestand|neuer\s+kontostand|new\s+balance|"
+    r"ending\s+balance)\b",
     re.IGNORECASE,
 )
 _PERIOD_RE = re.compile(
-    r"(?:Zeitraum|Buchungszeitraum|Kontoauszug)\D{0,40}?"
+    r"(?:Zeitraum|Buchungszeitraum|Abrechnungszeitraum|Kontoauszug)"
+    r"\D{0,40}?"
     r"(\d{1,2}\.\d{1,2}\.\d{2,4})\D{0,8}?(?:bis|–|-|—)\D{0,8}?"
     r"(\d{1,2}\.\d{1,2}\.\d{2,4})",
     re.IGNORECASE,
