@@ -2,6 +2,16 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.30.1] – 2026-05-04
+
+### Fixed — Sibling navigation buttons + arrow keys not working
+
+The v0.30.0 x-data attribute used double quotes both for the HTML
+attribute *and* for the embedded JSON string from `tojson`, so the
+browser truncated the attribute at the first inner `"` and Alpine
+saw a malformed expression. Switched to single-quoted attribute
+plus double-quoted inner strings.
+
 ## [0.30.0] – 2026-05-04
 
 ### Added — Keyboard navigation between sibling documents

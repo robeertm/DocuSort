@@ -16,14 +16,14 @@
 {% set _nav_qs = ('?' ~ _nav_parts | join('&')) if _nav_parts else '' %}
 
 <div class="mb-6 flex items-start gap-3"
-     x-data="{
-       prevId: {{ siblings.prev_id or 'null' }},
-       nextId: {{ siblings.next_id or 'null' }},
+     x-data='{
+       prevId: {{ siblings.prev_id or "null" }},
+       nextId: {{ siblings.next_id or "null" }},
        navQs:  {{ _nav_qs | tojson }},
        go(id) {
-         if (id) window.location.href = '/document/' + id + this.navQs;
+         if (id) window.location.href = "/document/" + id + this.navQs;
        },
-     }"
+     }'
      @keydown.window.arrow-left.prevent="go(prevId)"
      @keydown.window.arrow-right.prevent="go(nextId)">
   {%- set back_year = (doc.doc_date or doc.created_at)[:4] -%}
