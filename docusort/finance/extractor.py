@@ -787,6 +787,31 @@ class StatementExtractor:
         if period_start and period_end and period_start > period_end:
             period_start, period_end = period_end, period_start
 
+        # Fill missing balances from arithmetic. Local 7B models often
+        # miss "Anfangssaldo" / "alter Saldo" on the cover page even
+        # when it's printed in 14pt — but if we have the closing
+        # balance and every transaction, opening = closing - Σtx is
+        # exact. Same trick the other way around for the rare
+        # statements that print the opening but truncate before the
+        # closing. Only fires when transactions look reasonable
+        # (they passed the 10M sanity cap above).
+        if txs:
+            tx_sum = sum(t.amount for t in txs)
+            if opening is None and closing is not None:
+                opening = round(closing - tx_sum, 2)
+                logger.info(
+                    "Statement extractor: opening_balance was missing, "
+                    "computed %.2f = closing %.2f − Σtx %.2f.",
+                    opening, closing, tx_sum,
+                )
+            elif closing is None and opening is not None:
+                closing = round(opening + tx_sum, 2)
+                logger.info(
+                    "Statement extractor: closing_balance was missing, "
+                    "computed %.2f = opening %.2f + Σtx %.2f.",
+                    closing, opening, tx_sum,
+                )
+
         # Saldo-Konsistenz: opening + sum(tx) sollte closing sein. Wenn
         # die Differenz exakt 100x daneben liegt, hat OCR Kommas
         # verschluckt und die LLM hat ganze Zahlen statt 1234,56 → 12.34

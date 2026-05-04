@@ -1196,6 +1196,32 @@ def create_app(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(500, f"scan failed: {type(exc).__name__}: {exc}") from exc
 
+    @app.post("/api/finance/dedupe")
+    def api_finance_dedupe(payload: dict = Body(default={})):
+        """One-off DB pass: drop transactions that appear in multiple
+        statements of the same account on the same date / amount /
+        counterparty (typical of overlapping re-uploads). Pass
+        `{"dry_run":true}` for a preview."""
+        from ..finance.salvage import dedupe_cross_statement_transactions
+        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
+        try:
+            return dedupe_cross_statement_transactions(db, dry_run=dry)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"dedupe failed: {type(exc).__name__}: {exc}") from exc
+
+    @app.get("/api/finance/audit")
+    def api_finance_audit(limit: int = Query(100)):
+        """Per-statement health audit: flags saldo mismatches,
+        out-of-period transactions, cross-statement duplicates,
+        missing balances / periods. Read-only diagnostic — used by
+        the /finance audit table to surface broken extractions
+        without having to look at every Kontoauszug manually."""
+        from ..finance.salvage import audit_statements
+        try:
+            return audit_statements(db, limit=int(limit))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"audit failed: {type(exc).__name__}: {exc}") from exc
+
     @app.post("/api/finance/align-doc-dates")
     def api_finance_align_doc_dates(payload: dict = Body(default={})):
         """One-off DB pass: for every Kontoauszug, set doc_date to the

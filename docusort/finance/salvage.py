@@ -451,6 +451,299 @@ def rescale_broken_amounts(db, *, dry_run: bool = False) -> dict[str, Any]:
     }
 
 
+def dedupe_cross_statement_transactions(db, *, dry_run: bool = False) -> dict[str, Any]:
+    """Drop transactions that appear in multiple statements of the
+    same account on the same booking_date / amount / counterparty.
+
+    Live data showed bookings from one Kontoauszug bleeding into a
+    sibling: re-extracting an overlapping period sometimes inserted
+    the row again under a slightly different tx_hash, so the unique
+    constraint didn't catch it. This pass groups by
+    (account_id, booking_date, ROUND(amount,2), LOWER(counterparty),
+     LOWER(purpose)) and keeps only the FIRST tx in each group
+    (lowest tx.id), deletes the rest.
+
+    Conservative: requires a non-trivial counterparty (≥2 chars) so
+    we don't collapse legitimate "—" placeholder rows. Idempotent."""
+    with db._lock:
+        groups = db._conn.execute(
+            """SELECT MIN(t.id)        AS keep_id,
+                      COUNT(*)         AS dup_count,
+                      GROUP_CONCAT(t.id) AS all_ids,
+                      t.account_id,
+                      t.booking_date,
+                      ROUND(t.amount, 2) AS amt,
+                      LOWER(COALESCE(t.counterparty, '')) AS cp,
+                      LOWER(COALESCE(t.purpose, ''))      AS pp
+               FROM transactions t
+               JOIN statements s ON s.id = t.statement_id
+               JOIN documents  d ON d.id = s.doc_id AND d.deleted_at IS NULL
+               WHERE t.account_id IS NOT NULL
+                 AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                 AND LENGTH(COALESCE(t.counterparty,'')) >= 2
+               GROUP BY t.account_id, t.booking_date,
+                        ROUND(t.amount, 2),
+                        LOWER(COALESCE(t.counterparty, '')),
+                        LOWER(COALESCE(t.purpose, ''))
+               HAVING dup_count > 1"""
+        ).fetchall()
+    delete_ids: list[int] = []
+    samples: list[dict[str, Any]] = []
+    for g in groups:
+        all_ids = [int(x) for x in (g["all_ids"] or "").split(",") if x]
+        keep = int(g["keep_id"])
+        drop = [i for i in all_ids if i != keep]
+        delete_ids.extend(drop)
+        if len(samples) < 20:
+            samples.append({
+                "keep_id": keep,
+                "drop_ids": drop,
+                "booking_date": g["booking_date"],
+                "amount": float(g["amt"]),
+                "counterparty": g["cp"],
+            })
+    if dry_run or not delete_ids:
+        return {
+            "groups": len(groups),
+            "would_delete": len(delete_ids),
+            "deleted": 0,
+            "samples": samples,
+            "dry_run": dry_run,
+        }
+    with db._lock:
+        db._conn.executemany(
+            "DELETE FROM transactions WHERE id = ?",
+            [(i,) for i in delete_ids],
+        )
+        db._conn.commit()
+    logger.warning(
+        "Cross-statement dedup: dropped %d duplicate booking(s) "
+        "across %d group(s).", len(delete_ids), len(groups),
+    )
+    return {
+        "groups": len(groups),
+        "would_delete": len(delete_ids),
+        "deleted": len(delete_ids),
+        "samples": samples,
+        "dry_run": False,
+    }
+
+
+def audit_statements(db, *, limit: int = 100) -> dict[str, Any]:
+    """Read-only audit: every statement gets a health score plus a
+    list of concrete issues so the user can see at a glance which
+    Kontoauszüge are trustworthy and which need re-extraction.
+
+    Issues we flag per statement:
+      - `saldo_mismatch`: opening + Σtx differs from closing by > 1 €
+      - `out_of_period`: a transaction's booking_date sits outside
+        [period_start, period_end] (likely a row from a sibling
+        statement that bled in)
+      - `duplicate_in_other_stmt`: a tx_hash from this statement also
+        appears in a different statement of the same account → the
+        same booking got captured twice across overlapping uploads
+      - `no_balance`: neither opening nor closing balance present
+        (extractor missed the totals row entirely)
+      - `no_period`: no period_start/period_end (year filter on
+        /library will misplace the doc)
+
+    Severity ranking:
+      - HIGH: saldo_mismatch | duplicate_in_other_stmt | out_of_period
+      - MED : no_balance | no_period
+      - LOW : everything else
+    """
+    with db._lock:
+        # All statements with rolled-up tx aggregates, plus the doc
+        # subject so the UI can identify each row at a glance.
+        rows = db._conn.execute(
+            """SELECT s.id            AS stmt_id,
+                      s.doc_id        AS doc_id,
+                      s.account_id    AS account_id,
+                      s.period_start, s.period_end,
+                      s.opening_balance, s.closing_balance,
+                      d.subject, d.doc_date,
+                      a.bank_name,
+                      COUNT(t.id)                AS tx_count,
+                      COALESCE(SUM(t.amount),0)  AS tx_sum,
+                      COALESCE(MIN(t.booking_date), '') AS first_tx,
+                      COALESCE(MAX(t.booking_date), '') AS last_tx
+               FROM statements s
+               JOIN documents  d ON d.id = s.doc_id AND d.deleted_at IS NULL
+               LEFT JOIN accounts a ON a.id = s.account_id
+               LEFT JOIN transactions t ON t.statement_id = s.id
+               GROUP BY s.id"""
+        ).fetchall()
+
+        # Build a tx_hash → list of statement_ids index so we can find
+        # duplicates across statements without an N×N scan in Python.
+        # Same hash in 2+ statements = same booking captured twice.
+        dup_rows = db._conn.execute(
+            """SELECT t.tx_hash, COUNT(DISTINCT t.statement_id) AS n,
+                      GROUP_CONCAT(DISTINCT t.statement_id)     AS stmts
+               FROM transactions t
+               JOIN statements s ON s.id = t.statement_id
+               JOIN documents  d ON d.id = s.doc_id AND d.deleted_at IS NULL
+               WHERE t.tx_hash IS NOT NULL AND t.tx_hash != ''
+               GROUP BY t.tx_hash
+               HAVING n > 1"""
+        ).fetchall()
+    # stmt_id → set of duplicate-with stmt ids
+    dup_index: dict[int, set[int]] = {}
+    for r in dup_rows:
+        ids = [int(x) for x in (r["stmts"] or "").split(",") if x]
+        for sid in ids:
+            dup_index.setdefault(sid, set()).update(i for i in ids if i != sid)
+
+    items: list[dict[str, Any]] = []
+    counts = {"high": 0, "medium": 0, "low": 0, "ok": 0}
+    for r in rows:
+        d = dict(r)
+        issues: list[str] = []
+        opening = d["opening_balance"]
+        closing = d["closing_balance"]
+        tx_sum = float(d["tx_sum"] or 0.0)
+        tx_count = int(d["tx_count"] or 0)
+        ps = (d["period_start"] or "").strip()
+        pe = (d["period_end"]   or "").strip()
+
+        if not ps and not pe:
+            issues.append("no_period")
+        if opening is None and closing is None:
+            issues.append("no_balance")
+        elif opening is not None and closing is not None and tx_count > 0:
+            delta = float(closing) - float(opening)
+            if abs(tx_sum - delta) > 1.0:
+                issues.append("saldo_mismatch")
+        # Out-of-period check: only when we know the period AND have
+        # at least one tx — a run of out-of-period rows is the typical
+        # "bookings from a sibling statement bled in" footprint.
+        if ps and pe and tx_count > 0:
+            first = d["first_tx"]
+            last  = d["last_tx"]
+            if first and first < ps:
+                issues.append("out_of_period")
+            elif last and last > pe:
+                issues.append("out_of_period")
+        # Duplicate-in-other-statement
+        if int(d["stmt_id"]) in dup_index:
+            issues.append("duplicate_in_other_stmt")
+
+        if not issues:
+            counts["ok"] += 1
+            continue
+        if any(i in issues for i in (
+            "saldo_mismatch", "out_of_period", "duplicate_in_other_stmt"
+        )):
+            severity = "high"
+        elif any(i in issues for i in ("no_balance", "no_period")):
+            severity = "medium"
+        else:
+            severity = "low"
+        counts[severity] += 1
+
+        items.append({
+            "stmt_id":       int(d["stmt_id"]),
+            "doc_id":        int(d["doc_id"]),
+            "subject":       d["subject"] or "",
+            "doc_date":      d["doc_date"] or "",
+            "bank_name":     d["bank_name"] or "",
+            "period_start":  ps, "period_end": pe,
+            "opening":       None if opening is None else round(float(opening), 2),
+            "closing":       None if closing is None else round(float(closing), 2),
+            "tx_count":      tx_count,
+            "tx_sum":        round(tx_sum, 2),
+            "first_tx":      d["first_tx"] or "",
+            "last_tx":       d["last_tx"]  or "",
+            "issues":        issues,
+            "severity":      severity,
+            "duplicate_with": sorted(dup_index.get(int(d["stmt_id"]), [])),
+        })
+    sev_order = {"high": 0, "medium": 1, "low": 2}
+    items.sort(key=lambda it: (sev_order[it["severity"]], -it["tx_count"]))
+    return {
+        "items":         items[:limit],
+        "total_flagged": len(items),
+        "counts":        counts,
+    }
+
+
+def compute_missing_opening_balances(db, *, dry_run: bool = False) -> dict[str, Any]:
+    """Fill `opening_balance` from arithmetic on existing rows.
+
+    Whenever a statement has `closing_balance` set and at least one
+    transaction but `opening_balance IS NULL`, we know the answer:
+    `opening = closing - Σtx`. Local 7B models often miss the
+    "Anfangssaldo" line on the cover page even when it's clearly
+    printed; this back-fills without another LLM call.
+
+    Same arithmetic in the other direction for the rare statements
+    where opening is set but closing isn't (model truncated before
+    the totals row). Idempotent."""
+    with db._lock:
+        rows = db._conn.execute(
+            """SELECT s.id        AS stmt_id,
+                      s.opening_balance,
+                      s.closing_balance,
+                      COALESCE(SUM(t.amount), 0)      AS tx_sum,
+                      COUNT(t.id)                     AS tx_count
+               FROM statements s
+               JOIN documents  d ON d.id = s.doc_id AND d.deleted_at IS NULL
+               LEFT JOIN transactions t ON t.statement_id = s.id
+               GROUP BY s.id
+               HAVING tx_count > 0
+                  AND (
+                       (s.opening_balance IS NULL AND s.closing_balance IS NOT NULL)
+                    OR (s.closing_balance IS NULL AND s.opening_balance IS NOT NULL)
+                  )"""
+        ).fetchall()
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        if d["opening_balance"] is None:
+            new_opening = round(float(d["closing_balance"]) - float(d["tx_sum"]), 2)
+            items.append({
+                "stmt_id": int(d["stmt_id"]),
+                "fixed":   "opening",
+                "value":   new_opening,
+                "tx_sum":  round(float(d["tx_sum"]), 2),
+                "closing": round(float(d["closing_balance"]), 2),
+            })
+        else:
+            new_closing = round(float(d["opening_balance"]) + float(d["tx_sum"]), 2)
+            items.append({
+                "stmt_id": int(d["stmt_id"]),
+                "fixed":   "closing",
+                "value":   new_closing,
+                "tx_sum":  round(float(d["tx_sum"]), 2),
+                "opening": round(float(d["opening_balance"]), 2),
+            })
+    if dry_run or not items:
+        return {
+            "candidates": len(items),
+            "updated": 0,
+            "samples": items[:20],
+            "dry_run": dry_run,
+        }
+    with db._lock:
+        for it in items:
+            col = "opening_balance" if it["fixed"] == "opening" else "closing_balance"
+            db._conn.execute(
+                f"UPDATE statements SET {col} = ? WHERE id = ?",
+                (it["value"], it["stmt_id"]),
+            )
+        db._conn.commit()
+    logger.info(
+        "Filled missing balance for %d statement(s) via arithmetic.",
+        len(items),
+    )
+    return {
+        "candidates": len(items),
+        "updated": len(items),
+        "samples": items[:20],
+        "dry_run": False,
+    }
+
+
 def align_doc_dates_to_statement_period(db, *, dry_run: bool = False) -> dict[str, Any]:
     """One-off migration: for every Kontoauszug whose `doc_date`
     differs from its statement's `period_end`, set `doc_date =

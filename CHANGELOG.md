@@ -2,6 +2,43 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.30.3] – 2026-05-04
+
+### Added — Statement audit + cross-statement dedup + missing-balance backfill
+
+The Q&A and finance dashboard kept showing wrong totals because the
+statement table was full of partially-extracted rows: missing
+opening balances, bookings sitting in the wrong statement, the same
+booking captured in two overlapping uploads. Three new mechanisms
+on `/finance`, all read-only-by-default with explicit confirm steps:
+
+- **Audit card** — every statement gets a health score with concrete
+  issues:
+  - `saldo_mismatch`: opening + Σtx differs from closing by > 1 €
+  - `out_of_period`: a transaction's booking_date sits outside
+    [period_start, period_end] (sibling-statement bleed)
+  - `duplicate_in_other_stmt`: same `tx_hash` appears in 2+ stmts
+  - `no_balance` / `no_period`: extractor missed the totals row
+  Sorted by severity (high / medium / low / ok counts in the header)
+  with a per-row "neu auswerten" button that runs the doc through
+  the LLM again.
+- **Drop-duplicates button** — one-click pass over the transactions
+  table. Groups by `(account_id, booking_date, ROUND(amount,2),
+  LOWER(counterparty), LOWER(purpose))`, keeps the row with the
+  lowest `id`, deletes the rest. Dry-run preview, confirm dialog,
+  idempotent. Catches overlapping re-uploads where the unique
+  constraint missed because tx_hash differed.
+- **Auto-fill missing opening balance** — when the extractor returns
+  null `opening_balance` but has `closing_balance` and at least one
+  transaction, compute `opening = closing - Σtx`. Local 7B models
+  miss the "Anfangssaldo" line surprisingly often even when it's
+  printed clearly. Same arithmetic in reverse for missing
+  `closing_balance`. Runs on every fresh extraction; one-shot
+  startup migration back-fills existing rows.
+
+Endpoints: `GET /api/finance/audit`, `POST /api/finance/dedupe`,
+plus the migration is wired into the service-start sequence.
+
 ## [0.30.2] – 2026-05-04
 
 ### Fixed — Kontoauszüge mis-filed in the wrong year on /library

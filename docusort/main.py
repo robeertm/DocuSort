@@ -515,6 +515,7 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
             delete_absurd_amounts,
             promote_bank_to_kontoauszug,
             align_doc_dates_to_statement_period,
+            compute_missing_opening_balances,
         )
         date_report = normalise_existing_dates(db, dry_run=False)
         if date_report.get("fixed"):
@@ -554,6 +555,16 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
                 "Date alignment: updated doc_date for %d Kontoauszug(e) "
                 "to match the statement period_end.",
                 align_report["updated"],
+            )
+        # Back-fill missing opening / closing balances by arithmetic
+        # (opening = closing − Σtx). Local 7B models miss the
+        # Anfangssaldo line on the cover page surprisingly often.
+        bal_report = compute_missing_opening_balances(db, dry_run=False)
+        if bal_report.get("updated"):
+            log.info(
+                "Balance backfill: filled %d missing opening/closing "
+                "value(s) via arithmetic.",
+                bal_report["updated"],
             )
     except Exception:
         log.exception("Data migration failed — continuing startup")

@@ -365,6 +365,120 @@
          x-text="result"></div>
   </div>
 
+  <!-- Statement-Audit: zeigt jedem Auszug seinen Gesundheitszustand
+       (Saldo-Konsistenz, Buchungen außerhalb der Periode, Duplikate
+       zwischen Auszügen, fehlende Salden/Perioden). Klar, lesbar,
+       mit direkten Links ins Dokument zum Reanalysieren. -->
+  {% if summary.statement_count > 0 %}
+  <div class="card p-4 mb-6 border-rose-500/30 bg-rose-500/5"
+       x-data="financeAudit()" x-init="load()">
+    <div class="flex items-start gap-3">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-rose-300 shrink-0 mt-0.5">
+        <circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium">{{ t('finance.audit.title') }}</div>
+        <p class="text-xs text-ink-400 mt-1">{{ t('finance.audit.hint') }}</p>
+        <div x-show="data" x-cloak class="mt-2 flex flex-wrap gap-3 text-xs">
+          <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300">
+            <span x-text="data?.counts?.ok || 0"></span> {{ t('finance.audit.label_ok') }}
+          </span>
+          <span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300">
+            <span x-text="data?.counts?.medium || 0"></span> {{ t('finance.audit.label_medium') }}
+          </span>
+          <span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-300">
+            <span x-text="data?.counts?.high || 0"></span> {{ t('finance.audit.label_high') }}
+          </span>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1.5 shrink-0">
+        <button type="button" @click="load()" :disabled="busy"
+                class="btn-secondary text-xs"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''">
+          <span x-show="!busy">{{ t('finance.audit.refresh') }}</span>
+          <span x-show="busy" x-cloak>{{ t('finance.audit.running') }}</span>
+        </button>
+        <button type="button" @click="dedupe()" :disabled="busy"
+                class="btn-secondary text-xs"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                :title="T['finance.audit.dedupe_hint'] || ''">
+          {{ t('finance.audit.dedupe_button') }}
+        </button>
+      </div>
+    </div>
+
+    <div x-show="data && data.items && data.items.length" x-cloak
+         class="mt-3 overflow-x-auto -mx-2 px-2">
+      <table class="w-full text-xs">
+        <thead class="text-ink-500 text-left">
+          <tr>
+            <th class="py-1 pr-2 font-normal">{{ t('finance.audit.col_period') }}</th>
+            <th class="py-1 pr-2 font-normal">{{ t('finance.audit.col_doc') }}</th>
+            <th class="py-1 pr-2 font-normal text-right">{{ t('finance.audit.col_tx') }}</th>
+            <th class="py-1 pr-2 font-normal text-right">{{ t('finance.audit.col_saldo') }}</th>
+            <th class="py-1 pr-2 font-normal">{{ t('finance.audit.col_issues') }}</th>
+            <th class="py-1 pr-2 font-normal text-center">{{ t('finance.audit.col_action') }}</th>
+          </tr>
+        </thead>
+        <tbody class="font-mono tabular-nums">
+          <template x-for="it in (data ? data.items : [])" :key="it.stmt_id">
+            <tr class="border-t border-ink-800/50"
+                :class="it.severity === 'high' ? 'bg-rose-500/5' : (it.severity === 'medium' ? 'bg-amber-500/5' : '')">
+              <td class="py-1.5 pr-2 text-ink-300 whitespace-nowrap">
+                <span x-show="it.period_start" x-text="it.period_start + ' .. ' + it.period_end"></span>
+                <span x-show="!it.period_start" class="italic text-rose-300">{{ t('finance.audit.no_period') }}</span>
+              </td>
+              <td class="py-1.5 pr-2">
+                <a :href="'/document/' + it.doc_id"
+                   class="text-cyan-300 hover:text-cyan-200"
+                   :title="it.subject"
+                   x-text="(it.bank_name || '—') + ' #' + it.stmt_id"></a>
+              </td>
+              <td class="py-1.5 pr-2 text-right text-ink-300" x-text="it.tx_count"></td>
+              <td class="py-1.5 pr-2 text-right text-ink-300">
+                <span x-show="it.opening !== null && it.closing !== null"
+                      x-text="it.opening.toFixed(2) + ' / ' + it.closing.toFixed(2)"></span>
+                <span x-show="it.opening === null && it.closing === null"
+                      class="italic text-rose-300">—</span>
+                <span x-show="(it.opening !== null && it.closing === null) || (it.opening === null && it.closing !== null)"
+                      class="italic text-amber-300">{{ t('finance.audit.partial_saldo') }}</span>
+              </td>
+              <td class="py-1.5 pr-2">
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="iss in it.issues" :key="iss">
+                    <span class="px-1.5 py-0.5 rounded text-[10px]"
+                          :class="['saldo_mismatch','out_of_period','duplicate_in_other_stmt'].includes(iss)
+                                  ? 'bg-rose-500/15 text-rose-300'
+                                  : 'bg-amber-500/15 text-amber-300'"
+                          x-text="T['finance.audit.issue.' + iss] || iss"></span>
+                  </template>
+                </div>
+              </td>
+              <td class="py-1.5 pr-2 text-center">
+                <button type="button"
+                        @click="reanalyze(it.doc_id)"
+                        :disabled="busyDoc === it.doc_id"
+                        class="text-[11px] text-amber-300 hover:text-amber-200 underline">
+                  <span x-show="busyDoc !== it.doc_id">{{ t('finance.audit.reanalyze') }}</span>
+                  <span x-show="busyDoc === it.doc_id" x-cloak>…</span>
+                </button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <p x-show="data && data.total_flagged > data.items.length" x-cloak
+         class="mt-2 text-xs text-ink-500"
+         x-text="(T['finance.audit.truncated'] || 'Es gibt {n} weitere Treffer — die ersten {shown} sind hier.')
+                  .replace('{n}', data ? data.total_flagged - data.items.length : 0)
+                  .replace('{shown}', data ? data.items.length : 0)"></p>
+    </div>
+    <div x-show="data && data.items && data.items.length === 0" x-cloak
+         class="mt-3 text-xs text-emerald-300">{{ t('finance.audit.all_clean') }}</div>
+    <div x-show="error" x-cloak class="mt-3 text-xs text-rose-300" x-text="error"></div>
+  </div>
+  {% endif %}
+
   <!-- Daten-Wartung: einmal-pro-Statement Skalen-Korrektur, läuft ohne
        LLM. Sichtbar sobald es überhaupt Statements gibt. Der Button
        holt erst einen Dry-Run (zeigt Anzahl + Beispiele), danach kann
@@ -1630,6 +1744,69 @@ function financeDiag(initialItems, initialTotal) {
         this.resultOk = false;
         this.result = `Doc ${docId}: ${e.message || String(e)}`;
       } finally { this.busyDoc = null; }
+    },
+  };
+}
+
+function financeAudit() {
+  return {
+    busy: false,
+    busyDoc: null,
+    data: null,
+    error: '',
+    async load() {
+      this.busy = true; this.error = '';
+      try {
+        const r = await fetch('/api/finance/audit?limit=100');
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.data = d;
+      } catch (e) {
+        this.error = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+    async reanalyze(docId) {
+      this.busyDoc = docId; this.error = '';
+      try {
+        const r = await fetch('/api/finance/reanalyze-doc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doc_id: docId }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        await this.load();
+      } catch (e) {
+        this.error = `Doc ${docId}: ${e.message || String(e)}`;
+      } finally { this.busyDoc = null; }
+    },
+    async dedupe() {
+      this.busy = true; this.error = '';
+      try {
+        const dry = await fetch('/api/finance/dedupe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dry_run: true }),
+        }).then(r => r.json());
+        if (!dry.would_delete) {
+          this.error = T['finance.audit.dedupe_none'] || 'Keine Duplikate gefunden.';
+          return;
+        }
+        const msg = (T['finance.audit.dedupe_confirm'] ||
+          '{n} doppelte Buchungen werden gelöscht. Fortfahren?')
+          .replace('{n}', dry.would_delete);
+        if (!confirm(msg)) return;
+        const r = await fetch('/api/finance/dedupe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        await this.load();
+      } catch (e) {
+        this.error = e.message || String(e);
+      } finally { this.busy = false; }
     },
   };
 }
