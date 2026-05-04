@@ -188,11 +188,15 @@ class GenericLayout:
         stmt.closing_balance = closing
 
         # -------- Booking rows -------------------------------------
+        # Group multi-line bookings: first line carries date + amount,
+        # follow-up lines without a date prefix extend the purpose.
+        # This is critical for real OCR — many German banks print the
+        # Verwendungszweck across 2-4 lines and naive line-by-line
+        # parsing would lose those continuation lines entirely.
+        blocks = _group_booking_blocks(lines)
         txs: list[ParsedTransaction] = []
-        for line in lines:
-            if is_page_chrome(line):
-                continue
-            tx = _parse_booking_line(line, hint_year=hint_year)
+        for block in blocks:
+            tx = _parse_booking_block(block, hint_year=hint_year)
             if tx is not None:
                 txs.append(tx)
 
@@ -269,6 +273,183 @@ def _scan_balances(text: str) -> tuple[float | None, float | None]:
         elif is_close:
             closing = value  # latest one wins
     return opening, closing
+
+
+def _group_booking_blocks(lines: list[str]) -> list[list[str]]:
+    """Group OCR lines into booking blocks. A block STARTS with a
+    date-prefixed line and CONTINUES until the next date-prefixed
+    line or a page-chrome line. Continuation lines (no date prefix,
+    not page chrome) belong to the previous booking's purpose.
+
+    Examples (each `→` starts a new block):
+
+      → 03.04.2026 SEPA-Lastschrift Stadtwerke München
+        Mandatsreferenz 123456 Kunden-Nr. 4711
+        Verwendungszweck: Strom Q2 -89,00
+
+    The amount can appear on the FIRST line or on a CONTINUATION
+    line — the block parser handles both.
+    """
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if is_page_chrome(line):
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        if _BOOKING_PREFIX_RE.match(line):
+            if current:
+                blocks.append(current)
+            current = [line]
+        elif current:
+            # Continuation line — only attach when it doesn't look
+            # like a header / footer / standalone-balance line.
+            if _looks_like_balance_row(line):
+                # Treat balance row as block terminator, not part of
+                # the previous booking.
+                blocks.append(current)
+                current = []
+                continue
+            # Skip empty continuation marks ("|", "_", page numbers).
+            stripped = line.strip()
+            if not stripped or stripped in ("|", "_", "-"):
+                continue
+            # Don't keep continuation lines that are absurdly long
+            # (footer disclaimers etc.) — > 200 chars is suspicious.
+            if len(stripped) > 200:
+                continue
+            current.append(line)
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _parse_booking_block(block: list[str], *, hint_year: int | None
+                         ) -> ParsedTransaction | None:
+    """Parse a multi-line booking block into one transaction.
+
+    Strategy:
+    1. The first line carries the booking date (always).
+    2. Look for the amount at the end of the FIRST line first; if
+       missing, scan continuation lines for a stand-alone amount or
+       an amount at the end of a line.
+    3. Concatenate the cleaned text (sans date and amount) to form
+       the purpose, with the counterparty being the most prominent
+       capitalised noun phrase from the first non-prefix line.
+    """
+    if not block:
+        return None
+    first = block[0]
+    m = _BOOKING_PREFIX_RE.match(first)
+    if not m:
+        return None
+    raw_date = m.group(1)
+    booking_iso = parse_de_date(raw_date, hint_year=hint_year)
+    if not booking_iso:
+        return None
+
+    # Pull the date(s) off the first line. Sparkasse-style: two dates
+    # back-to-back ("DD.MM. DD.MM."). The second is the value date.
+    first_rest = first[m.end():].strip()
+    value_iso = ""
+    m2 = re.match(r"(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)\s+(.*)", first_rest)
+    if m2:
+        v_iso = parse_de_date(m2.group(1), hint_year=hint_year)
+        if v_iso:
+            value_iso = v_iso
+            first_rest = m2.group(2).strip()
+
+    # Try amount on first line.
+    amount: float | None = None
+    purpose_segments: list[str] = []
+    amt_split = parse_amount_at_end(first_rest)
+    if amt_split is not None:
+        amount, prefix = amt_split
+        purpose_segments.append(prefix.strip())
+    else:
+        purpose_segments.append(first_rest)
+
+    # Walk continuation lines. If the amount is still missing, look
+    # for it at the end of each one. Otherwise just collect text.
+    for cont in block[1:]:
+        c = cont.strip()
+        if amount is None:
+            amt_split = parse_amount_at_end(c)
+            if amt_split is not None:
+                amount, prefix = amt_split
+                if prefix.strip():
+                    purpose_segments.append(prefix.strip())
+                continue
+            # Standalone amount on its own line — only when the WHOLE
+            # line shape passes the STRICT amount tail check (so a
+            # bare "4711" reference number doesn't get accepted).
+            standalone_split = parse_amount_at_end(" " + c)
+            if standalone_split is not None and len(c) < 30 and not standalone_split[1].strip():
+                amount = standalone_split[0]
+                continue
+        purpose_segments.append(c)
+
+    if amount is None or abs(amount) > 10_000_000:
+        return None
+
+    purpose = " ".join(p for p in purpose_segments if p).strip()
+    if len(purpose) < 2:
+        return None
+
+    counterparty = _extract_counterparty(purpose)
+    iban_in_block = _strip_iban(purpose)
+    tx_type, category = _classify_purpose(counterparty, purpose, amount)
+
+    return ParsedTransaction(
+        booking_date=booking_iso,
+        value_date=value_iso,
+        amount=amount,
+        currency="EUR",
+        counterparty=counterparty,
+        counterparty_iban=iban_in_block,
+        purpose=purpose[:500],
+        tx_type=tx_type,
+        category=category,
+    )
+
+
+def _extract_counterparty(purpose: str) -> str:
+    """Best-effort counterparty pull from a booking purpose string.
+    Heuristics, ranked:
+
+    1. Strip well-known booking-type prefixes (SEPA-Lastschrift,
+       Kartenzahlung, …).
+    2. Take the first chunk before a long whitespace gap, or before
+       "Mandatsreferenz" / "Kunden-Nr." / "Glaeubiger-ID" — those are
+       always trailers.
+    3. Drop pseudonym placeholders like NAME_001 / IBAN_001 (those
+       belong to a cloud-LLM pseudonymisation scheme; the regex
+       parser doesn't introduce them, but pasted samples might).
+    """
+    s = purpose.strip()
+    # Strip booking-type prefix
+    s = re.sub(
+        r"^(?:SEPA[-\s]?(?:Lastschrift|Überweisung|gutschr|belast)|"
+        r"Auftrag|Dauerauftrag|Kartenzahlung|Lastschrift(?:einzug)?|"
+        r"Gutschrift|Bargeldauszahlung|GAA|Lohn[/\\]?Gehalt|"
+        r"Habenzinsen|Sollzinsen|Kontoführungsentgelt|Übertrag)\s+",
+        "", s, flags=re.IGNORECASE,
+    )
+    # Cut at trailer keywords
+    cut = re.split(
+        r"\s+(?:Mandatsreferenz|Kunden-?Nr\.?|Glaeubiger-?ID|"
+        r"Glä?ubiger-?ID|End-zu-End-Referenz|Ref\.|Verwendungszweck:?|"
+        r"BIC:|IBAN:|BIC\s+[A-Z]{4,}|"
+        r"DE\d{2}\d{18,}|"
+        r"\b\d{6,}\b)",
+        s, maxsplit=1, flags=re.IGNORECASE,
+    )
+    head = cut[0].strip()
+    # Trim trailing punctuation, drop "EUR"
+    head = re.sub(r"\s+EUR\s*$", "", head, flags=re.IGNORECASE)
+    head = head.rstrip(",;:.- ").strip()
+    return head[:80]
 
 
 def _parse_booking_line(line: str, *, hint_year: int | None) -> ParsedTransaction | None:

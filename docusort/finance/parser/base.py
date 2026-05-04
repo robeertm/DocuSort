@@ -31,6 +31,23 @@ AMOUNT_RE = re.compile(_AMOUNT_RE_STR)
 # amount last on the row.
 AMOUNT_TAIL_RE = re.compile(r"\s" + _AMOUNT_RE_STR + r"\s*$")
 
+# STRICT amount tail for booking rows. Always requires explicit
+# cents (",dd" or ".dd"). Optional leading sign, optional trailing
+# sign / H/S Haben-Soll marker, optional EUR/€ in either position.
+# Reference numbers like "Kunden-Nr. 4711" don't have cents, so they
+# never match.
+_STRICT_AMOUNT_TAIL_RE = re.compile(
+    r"(?:^|[\s\t])"
+    r"(?P<core>"
+        r"(?:[-+]\s*)?"                            # optional leading sign
+        r"\d{1,3}(?:[.\s]\d{3})*[,.]\d{2}"  # digits with required cents
+    r")"
+    r"\s*(?:EUR|€)?"                                # optional EUR/€
+    r"(?:\s*(?P<trail>[-+HS]))?"                    # optional trailing marker
+    r"\s*(?:EUR|€)?"                                # EUR/€ either side
+    r"\s*$"
+)
+
 # Date forms we see in German bank statements. ISO is the target.
 DATE_DE_FULL_RE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b")
 DATE_DE_SHORT_RE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{2})(?!\d)\b")
@@ -71,16 +88,19 @@ def parse_amount(s: str) -> float | None:
 
 def parse_amount_at_end(line: str) -> tuple[float, str] | None:
     """Pull the amount off the END of `line`, return (amount, prefix)
-    where prefix is everything left of the matched amount. Used to
-    split booking rows like
-        "03.04.2026 SEPA Stadtwerke ... -89,00"
-    into ("03.04.2026 SEPA Stadtwerke ...", -89.00).
-    None when no plausible amount lives at the end.
+    where prefix is everything left of the matched amount.
+
+    Uses the STRICT amount pattern (cents required, OR sign / H/S
+    marker) so reference numbers like "4711" or "002" embedded at
+    the end of a continuation line don't get misread as amounts.
+    Returns None when no plausible money-shaped amount lives at the
+    end.
     """
-    m = AMOUNT_TAIL_RE.search(line)
+    m = _STRICT_AMOUNT_TAIL_RE.search(line)
     if not m:
         return None
-    amt = parse_amount(line[m.start():])
+    matched = line[m.start():].lstrip()
+    amt = parse_amount(matched)
     if amt is None:
         return None
     return amt, line[:m.start()].rstrip()

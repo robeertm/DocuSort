@@ -2,6 +2,35 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.31.4] – 2026-05-04
+
+### Fixed — Parser handles multi-line bookings + reference numbers
+
+Real OCR output from the live archive showed two failure modes that
+the v0.31.0-3 line-by-line parser couldn't handle:
+
+1. **Multi-line bookings** — German banks frequently print the
+   Verwendungszweck across 2-4 lines:
+       03.01.2026 SEPA-Lastschrift Stadtwerke München
+            Mandatsreferenz 123456 Kunden-Nr. 4711
+            Strom Q1 2026                       -89,00 S
+   The line-anchored parser kept the first line and dropped the
+   continuation lines. New `_group_booking_blocks` collects each
+   block until the next date-prefixed line, then `_parse_booking_
+   block` walks the block and finds the amount on whichever line
+   carries it.
+2. **Trailing reference numbers** — "Kunden-Nr. 4711" / "IBAN_002"
+   at the end of a continuation line was being picked up as the
+   booking amount (4711 → 4711.00 €). The amount-tail regex now
+   STRICTLY requires explicit cents ("12,34" / "1.234,56") plus
+   optional sign or H/S marker. Bare integers no longer match.
+
+Plus a smarter counterparty extractor: strips well-known booking-
+type prefixes (SEPA-Lastschrift, Kartenzahlung, …) AND splits at
+trailer keywords (Mandatsreferenz, Kunden-Nr., Glaeubiger-ID,
+End-zu-End-Referenz, IBAN, …) so the saved counterparty is the
+actual business name, not the booking line's bookkeeping noise.
+
 ## [0.31.3] – 2026-05-04
 
 ### Added — Bulk deterministic re-parse over the whole archive
