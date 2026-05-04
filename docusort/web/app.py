@@ -407,6 +407,7 @@ def create_app(
         is_statement_candidate = doc.get("category") in ("Kontoauszug", "Bank")
         statement = db.get_statement(doc_id) if is_statement_candidate else None
         from ..receipts import SHOP_TYPES, ITEM_CATEGORIES, PAYMENT_METHODS
+        from ..finance.categories import TX_CATEGORIES, TX_TYPES
         return templates.TemplateResponse(
             request, "document.html",
             {**base_ctx(request), "doc": doc, "receipt": receipt,
@@ -416,6 +417,8 @@ def create_app(
              "shop_types": list(SHOP_TYPES),
              "item_categories": list(ITEM_CATEGORIES),
              "payment_methods": list(PAYMENT_METHODS),
+             "tx_categories": list(TX_CATEGORIES),
+             "tx_types":      list(TX_TYPES),
              "siblings":      siblings,
              "nav_filters":   nav_filters},
         )
@@ -2249,6 +2252,166 @@ def create_app(
         if with_aggregates:
             result["aggregate"] = db.transactions_aggregate(**f)
         return result
+
+    @app.patch("/api/transaction/{tx_id}")
+    def api_transaction_update(tx_id: int, payload: dict = Body(...)):
+        """Edit a single transaction. Body fields are all optional —
+        only the keys present in `payload` get updated. Allowed:
+        booking_date, value_date, amount, counterparty,
+        counterparty_iban, purpose, tx_type, category.
+
+        Recomputes tx_hash whenever amount / booking_date / purpose
+        change so future re-extracts dedup against the corrected
+        row. Used by the per-statement editor on /document/{id}."""
+        from ..finance.categories import TX_CATEGORIES, TX_TYPES
+        from hashlib import sha256
+        with db._lock:
+            row = db._conn.execute(
+                "SELECT t.*, a.iban_hash AS account_iban_hash "
+                "FROM transactions t "
+                "LEFT JOIN accounts a ON a.id = t.account_id "
+                "WHERE t.id = ?",
+                (tx_id,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(404, f"transaction {tx_id} not found")
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "payload must be an object")
+
+        allowed = {"booking_date", "value_date", "amount",
+                   "counterparty", "counterparty_iban", "purpose",
+                   "tx_type", "category"}
+        updates: dict = {}
+        for k, v in payload.items():
+            if k not in allowed:
+                continue
+            if k == "amount":
+                try:
+                    updates[k] = round(float(v), 2)
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f"amount must be a number, got {v!r}") from None
+                if abs(updates[k]) > 10_000_000:
+                    raise HTTPException(400, "amount out of safe range")
+            elif k == "category":
+                cat = str(v).strip().lower()
+                if cat and cat not in TX_CATEGORIES:
+                    raise HTTPException(400, f"category must be one of {list(TX_CATEGORIES)}")
+                updates[k] = cat
+            elif k == "tx_type":
+                t = str(v).strip().lower()
+                if t and t not in TX_TYPES:
+                    raise HTTPException(400, f"tx_type must be one of {list(TX_TYPES)}")
+                updates[k] = t
+            elif k in ("booking_date", "value_date"):
+                from ..finance.extractor import _normalise_date
+                updates[k] = _normalise_date(str(v or "").strip())
+            else:
+                updates[k] = str(v or "").strip()[:500]
+        if not updates:
+            return {"ok": True, "updated": 0, "tx_id": tx_id}
+
+        # Recompute tx_hash when amount / booking_date / purpose
+        # change. Keep account_iban_hash from the existing row.
+        new_amount = updates.get("amount", row["amount"])
+        new_bd = updates.get("booking_date", row["booking_date"])
+        new_pp = updates.get("purpose", row["purpose"])
+        h_iban = row["account_iban_hash"] or "no-iban"
+        key = f"{h_iban}|{new_bd or ''}|{float(new_amount):.2f}|{new_pp or ''}"
+        updates["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
+
+        cols = ", ".join(f"{k} = ?" for k in updates)
+        params = list(updates.values()) + [tx_id]
+        with db._lock:
+            try:
+                db._conn.execute(
+                    f"UPDATE transactions SET {cols} WHERE id = ?",
+                    params,
+                )
+                db._conn.commit()
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(500, f"update failed: {exc}") from exc
+        return {"ok": True, "updated": 1, "tx_id": tx_id, "fields": list(updates)}
+
+    @app.delete("/api/transaction/{tx_id}")
+    def api_transaction_delete(tx_id: int):
+        """Hard-delete a transaction. Used by the manual editor when
+        a row is wrong / a duplicate that the dedup tool didn't
+        catch / a balance row that snuck in."""
+        with db._lock:
+            cur = db._conn.execute(
+                "DELETE FROM transactions WHERE id = ?", (tx_id,),
+            )
+            db._conn.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(404, f"transaction {tx_id} not found")
+        return {"ok": True, "deleted": 1, "tx_id": tx_id}
+
+    @app.post("/api/statement/{stmt_id}/transaction")
+    def api_transaction_create(stmt_id: int, payload: dict = Body(...)):
+        """Add a new transaction to an existing statement. Required
+        body fields: booking_date, amount. Optional: value_date,
+        counterparty, counterparty_iban, purpose, tx_type, category.
+
+        Used when the OCR / parser missed a row and the user wants
+        to type it in. The new tx joins the statement's account, so
+        cross-statement dedup keeps working."""
+        from ..finance.categories import TX_CATEGORIES, TX_TYPES
+        from ..finance.extractor import _normalise_date
+        from hashlib import sha256
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "payload must be an object")
+        with db._lock:
+            stmt = db._conn.execute(
+                "SELECT s.*, a.iban_hash AS account_iban_hash "
+                "FROM statements s "
+                "LEFT JOIN accounts a ON a.id = s.account_id "
+                "WHERE s.id = ?",
+                (stmt_id,),
+            ).fetchone()
+        if stmt is None:
+            raise HTTPException(404, f"statement {stmt_id} not found")
+
+        try:
+            amount = round(float(payload.get("amount")), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "amount is required and must be a number") from None
+        if abs(amount) > 10_000_000:
+            raise HTTPException(400, "amount out of safe range")
+        booking_date = _normalise_date(str(payload.get("booking_date") or "").strip())
+        if not booking_date:
+            raise HTTPException(400, "booking_date is required (ISO YYYY-MM-DD)")
+        value_date = _normalise_date(str(payload.get("value_date") or "").strip())
+        counterparty = str(payload.get("counterparty") or "").strip()[:200]
+        counterparty_iban = str(payload.get("counterparty_iban") or "").strip()[:34]
+        purpose = str(payload.get("purpose") or "").strip()[:500]
+        tx_type = str(payload.get("tx_type") or "").strip().lower()
+        if tx_type and tx_type not in TX_TYPES:
+            raise HTTPException(400, f"tx_type must be one of {list(TX_TYPES)}")
+        category = str(payload.get("category") or "").strip().lower()
+        if category and category not in TX_CATEGORIES:
+            raise HTTPException(400, f"category must be one of {list(TX_CATEGORIES)}")
+
+        h_iban = stmt["account_iban_hash"] or "no-iban"
+        key = f"{h_iban}|{booking_date}|{amount:.2f}|{purpose}"
+        tx_hash = sha256(key.encode("utf-8")).hexdigest()
+
+        with db._lock:
+            try:
+                cur = db._conn.execute(
+                    "INSERT INTO transactions (statement_id, account_id, "
+                    " booking_date, value_date, amount, currency, "
+                    " counterparty, counterparty_iban, purpose, tx_type, "
+                    " category, tx_hash) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (stmt_id, stmt["account_id"], booking_date, value_date,
+                     amount, stmt["currency"] or "EUR", counterparty,
+                     counterparty_iban, purpose, tx_type or "sonstiges",
+                     category or "sonstiges", tx_hash),
+                )
+                db._conn.commit()
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(500, f"insert failed: {exc}") from exc
+        return {"ok": True, "tx_id": cur.lastrowid, "tx_hash": tx_hash}
 
     @app.post("/api/transactions/categorize")
     def api_transactions_categorize(payload: dict):

@@ -2,6 +2,47 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.32.0] – 2026-05-04
+
+### Added — Manual transaction editor on /document/{id}
+
+When the parser AND the LLM both fail to capture a statement
+correctly, the user now has a last-resort manual editing path.
+The transaction table on the statement card gains a
+"Bearbeiten"-Button. Toggle on:
+
+- Every cell becomes a live input — date picker, counterparty
+  text field, category dropdown, amount field. Changes auto-save
+  on blur (with a 400ms debounce so each keystroke doesn't fire
+  a request).
+- "+ Buchung hinzufügen" inserts a blank row that becomes a real
+  transaction once you've filled in date + amount.
+- "×" per row deletes that booking after a confirm.
+- `tx_hash` is recomputed server-side whenever amount /
+  booking_date / purpose change so future re-extracts dedup
+  against the corrected row.
+
+New endpoints powering the UI:
+
+- `PATCH /api/transaction/{id}` — partial update; whitelisted
+  fields only, validates category against TX_CATEGORIES and
+  tx_type against TX_TYPES.
+- `DELETE /api/transaction/{id}` — hard delete.
+- `POST /api/statement/{id}/transaction` — create a new tx
+  bound to the statement's account.
+
+UI translated into all 5 supported languages.
+
+This closes the v0.31-32 storyline. The data-quality recovery
+toolchain on /finance and /document is now:
+
+  Audit (v0.30.3)            → see what's broken
+  Parse-doc (v0.31.2)        → deterministic single-doc fix
+  Parse-all (v0.31.3)        → deterministic bulk fix
+  Re-analyze (v0.27.4+)      → LLM re-extract single doc
+  Bulk re-analyze (v0.26)    → LLM re-extract everything
+  Manual editor (v0.32.0)    → fix what nothing else catches
+
 ## [0.31.4] – 2026-05-04
 
 ### Fixed — Parser handles multi-line bookings + reference numbers
