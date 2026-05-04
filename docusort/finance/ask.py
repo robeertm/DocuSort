@@ -23,9 +23,19 @@ from ..providers import ProviderError
 logger = logging.getLogger("docusort.finance.ask")
 
 
-_MAX_STEPS = 6
-_MAX_ROWS_IN_PROMPT = 30
+_MAX_STEPS = 8
+# Trim aggressively — small local models (Qwen-7B / Llama-8B with
+# 8k–12k ctx) get stuck looping when history grows past ~3-4k tokens
+# and output gets truncated mid-JSON.
+_MAX_ROWS_IN_PROMPT = 15
 _MAX_RESULT_ROWS = 200
+_MAX_RESULT_JSON_CHARS = 2500
+_HISTORY_KEEP_LAST = 3
+# After this many tool calls the system prompt switches to
+# "answer-now" mode — no more tools, just produce the final answer
+# with whatever's been collected. Stops the loop where the model keeps
+# refining the query forever and never commits.
+_FORCE_FINAL_AFTER = 4
 
 _SYSTEM_PROMPT = """You answer the user's question about their personal bank transactions by calling tools, then producing one short German answer.
 
@@ -270,24 +280,44 @@ def _trim_for_prompt(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _build_user_prompt(question: str, history: list[dict[str, Any]]) -> str:
+def _build_user_prompt(question: str, history: list[dict[str, Any]],
+                       *, force_final: bool = False) -> str:
     today = _date.today().isoformat()
     parts = [
         f"Today is {today}.",
         f"User question: {question}",
     ]
     if history:
-        parts.append("\nPrevious tool calls and trimmed results:")
-        for h in history:
+        # Only the last N calls in full; older ones get a one-line
+        # summary so the LLM still knows it tried something but
+        # doesn't drown in the data.
+        older = history[:-_HISTORY_KEEP_LAST] if len(history) > _HISTORY_KEEP_LAST else []
+        recent = history[-_HISTORY_KEEP_LAST:]
+        if older:
+            summary = ", ".join(
+                f"{h['call']['tool']}({json.dumps(h['call'].get('args') or {}, ensure_ascii=False)[:60]})"
+                for h in older
+            )
+            parts.append(f"\nEarlier tool calls (results omitted): {summary}")
+        parts.append("\nRecent tool calls and trimmed results:")
+        for h in recent:
             call = h["call"]
             args_json = json.dumps(call.get("args", {}), ensure_ascii=False)
             parts.append(f"\n→ {call['tool']}({args_json})")
             trimmed = _trim_for_prompt(h["result"])
             result_json = json.dumps(trimmed, ensure_ascii=False, default=str)
-            if len(result_json) > 6000:
-                result_json = result_json[:6000] + "...<truncated>"
+            if len(result_json) > _MAX_RESULT_JSON_CHARS:
+                result_json = result_json[:_MAX_RESULT_JSON_CHARS] + "...<truncated>"
             parts.append(f"← {result_json}")
-    parts.append("\nReply with the next JSON action.")
+    if force_final:
+        parts.append(
+            "\n*** ANSWER NOW. ***\n"
+            "You have made enough tool calls. Reply with exactly:\n"
+            "{\"action\":\"answer\",\"text\":\"<short German answer with totals>\"}\n"
+            "Do NOT call any more tools. Use the data you already have."
+        )
+    else:
+        parts.append("\nReply with the next JSON action.")
     return "\n".join(parts)
 
 
@@ -321,7 +351,8 @@ def answer_question(db, classifier, question: str) -> AskResult:
     last_model = ""
 
     for step in range(_MAX_STEPS):
-        user = _build_user_prompt(question, history)
+        force_final = step >= _FORCE_FINAL_AFTER
+        user = _build_user_prompt(question, history, force_final=force_final)
         try:
             resp = classifier.provider.classify(
                 system_prompt=_SYSTEM_PROMPT,
@@ -340,7 +371,25 @@ def answer_question(db, classifier, question: str) -> AskResult:
         try:
             parsed = _parse(resp.raw_text)
         except ValueError as exc:
-            raise RuntimeError(f"LLM did not return valid JSON: {exc}") from exc
+            # Distinguish "model returned text we couldn't parse" from
+            # "model truncated mid-JSON" — the recovery hint differs.
+            raw_preview = (resp.raw_text or "")[:200]
+            looks_truncated = (resp.raw_text or "").rstrip().endswith(("{", "[", ":", ","))
+            history.append({
+                "call": {"tool": "_format_error", "args": {}},
+                "result": {"error": (
+                    "Your last reply was truncated before producing valid JSON. "
+                    "Be MUCH shorter — emit only the JSON action, no commentary. "
+                    if looks_truncated else
+                    "Your last reply was not valid JSON. Reply with one JSON object only. "
+                ) + f"Reply preview: {raw_preview}"},
+            })
+            if step + 1 >= _MAX_STEPS:
+                raise RuntimeError(
+                    f"LLM did not return valid JSON after {step + 1} steps "
+                    f"(last reply: {exc})"
+                ) from exc
+            continue
 
         action = _normalise_action(parsed)
         kind = action.get("action")
@@ -401,4 +450,58 @@ def answer_question(db, classifier, question: str) -> AskResult:
 
         history.append({"call": {"tool": tool, "args": args}, "result": result})
 
-    raise RuntimeError(f"LLM did not produce a final answer in {_MAX_STEPS} steps")
+    # Loop exhausted without an answer. Don't 500 the request — synth a
+    # best-effort summary from whatever data the tool calls produced.
+    # The user gets *something* useful instead of an error message.
+    fallback = _synthesise_fallback_answer(question, history, rows_collected)
+    return AskResult(
+        question=question,
+        answer=fallback,
+        rows=rows_collected[:_MAX_RESULT_ROWS],
+        tools_used=[h["call"] for h in history],
+        model=last_model,
+        cost_usd=total_cost,
+        input_tokens=total_in,
+        output_tokens=total_out,
+        steps=_MAX_STEPS,
+    )
+
+
+def _synthesise_fallback_answer(
+    question: str,
+    history: list[dict[str, Any]],
+    rows_collected: list[dict[str, Any]],
+) -> str:
+    """Best-effort German answer when the LLM ran out of steps without
+    producing one — typical on small local models that loop on tool
+    refinement until the context fills. Pulls totals from the most
+    recent aggregate result, otherwise summarises the row list."""
+    # Prefer the latest aggregate_transactions result.
+    for h in reversed(history):
+        if h["call"].get("tool") == "aggregate_transactions":
+            res = h["result"] or {}
+            if isinstance(res, dict) and not res.get("error"):
+                income = float(res.get("income") or 0.0)
+                expense = float(res.get("expense") or 0.0)
+                count = int(res.get("count") or 0)
+                first = res.get("first_date") or ""
+                last = res.get("last_date") or ""
+                period = f" ({first}..{last})" if first and last else ""
+                return (
+                    f"Habe {count} Buchungen gefunden{period}: "
+                    f"Einnahmen {income:.2f} €, Ausgaben {expense:.2f} €. "
+                    f"(LLM-Antwort hat sich verschluckt — Rohdaten unten.)"
+                )
+    # Otherwise summarise rows we collected.
+    if rows_collected:
+        n = len(rows_collected)
+        total = sum(float(r.get("amount") or 0.0) for r in rows_collected)
+        return (
+            f"Habe {n} passende Buchungen gefunden, Summe {total:.2f} €. "
+            f"(LLM-Antwort hat sich verschluckt — siehe Liste unten.)"
+        )
+    return (
+        "Konnte keine Antwort finden — das LLM hat sich in Tool-Aufrufen "
+        "verschluckt, bevor es ein Ergebnis lieferte. Versuche eine "
+        "konkretere Frage (z.B. mit Jahr und Empfänger)."
+    )

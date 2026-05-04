@@ -2,6 +2,31 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.29.4] – 2026-05-04
+
+### Fixed — Q&A no longer 500s when small models lose the JSON loop
+
+`POST /api/finance/ask` was failing with "LLM did not produce a final
+answer in 6 steps" on local 7B–8B models (Qwen / Llama) whose context
+filled up and started truncating mid-JSON. Three fixes:
+
+- **History trimming** — only the last three tool calls go back in
+  full; older calls become a one-line summary. Per-result JSON capped
+  at 2500 chars (was 6000), per-row tools to 15 rows (was 30).
+- **Force-final mode** — after four tool calls the system prompt
+  switches to "ANSWER NOW. Do NOT call any more tools." so the model
+  commits with whatever data it has instead of refining the query
+  forever.
+- **Truncation recovery** — when a reply isn't valid JSON, the loop
+  feeds back a tool error explaining the failure mode (truncated vs.
+  malformed) so the model can retry shorter, instead of crashing the
+  request.
+- **Best-effort fallback** — if the loop still exhausts its budget
+  (now 8 steps), the response is synthesised from the latest
+  `aggregate_transactions` result or the collected rows instead of
+  returning a 500. The user sees totals and a "LLM-Antwort hat sich
+  verschluckt" note plus the raw rows underneath.
+
 ## [0.29.3] – 2026-05-04
 
 ### Added — Manual per-statement rescale for cases auto-fix can't reach
