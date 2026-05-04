@@ -2,6 +2,29 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.30.2] – 2026-05-04
+
+### Fixed — Kontoauszüge mis-filed in the wrong year on /library
+
+The classifier reads the print / generation date off the letterhead
+("Auszug erstellt 30.04.2026") and stores that as `doc_date`, even
+when the actual booking period is months earlier (10/2025). The
+/library year + month filter ranks docs by `doc_date`, so this made
+statements show up in the wrong year — a 10/2025 Sparkasse statement
+landing under "2026" because the page header carried the print date.
+
+The statement extractor already records the real booking range in
+`statements.period_end`. Now both ingest paths (fresh upload and
+bulk re-analyze) update `documents.doc_date = statements.period_end`
+right after the extractor finishes, so /library and the year picker
+agree with the booking reality.
+
+For statements already in the DB, a startup migration
+(`align_doc_dates_to_statement_period`) walks the table once and
+realigns every Kontoauszug whose `doc_date` differs from its
+`period_end`. Idempotent. Same logic also exposed as
+`POST /api/finance/align-doc-dates` for ad-hoc runs.
+
 ## [0.30.1] – 2026-05-04
 
 ### Fixed — Sibling navigation buttons + arrow keys not working

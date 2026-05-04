@@ -1196,6 +1196,20 @@ def create_app(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(500, f"scan failed: {type(exc).__name__}: {exc}") from exc
 
+    @app.post("/api/finance/align-doc-dates")
+    def api_finance_align_doc_dates(payload: dict = Body(default={})):
+        """One-off DB pass: for every Kontoauszug, set doc_date to the
+        statement's period_end so /library year+month filters point at
+        the booking period instead of the letterhead print date.
+
+        Pass `{"dry_run":true}` for a preview."""
+        from ..finance.salvage import align_doc_dates_to_statement_period
+        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
+        try:
+            return align_doc_dates_to_statement_period(db, dry_run=dry)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"align failed: {type(exc).__name__}: {exc}") from exc
+
     @app.post("/api/finance/rescale-statement")
     def api_finance_rescale_statement(payload: dict = Body(...)):
         """Manually rescale every transaction (and the saldo) of a

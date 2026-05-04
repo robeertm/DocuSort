@@ -248,6 +248,18 @@ def start_reanalyze_all_statements(
                             (doc_id,),
                         )
                         db._conn.commit()
+                # Mirror the v0.30.x ingest-time fix: re-align the
+                # document's doc_date to the statement's period_end
+                # so /library year+month filters point at the booking
+                # period instead of the letterhead print date.
+                if stmt.period_end:
+                    with db._lock:
+                        db._conn.execute(
+                            "UPDATE documents SET doc_date = ? "
+                            "WHERE id = ? AND COALESCE(doc_date,'') != ?",
+                            (stmt.period_end, doc_id, stmt.period_end),
+                        )
+                        db._conn.commit()
                 job = activity.get_job("analyze-statements")
                 if stmt.extraction_warning:
                     job.failed.append({"doc_id": doc_id,

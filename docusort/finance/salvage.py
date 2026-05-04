@@ -451,6 +451,61 @@ def rescale_broken_amounts(db, *, dry_run: bool = False) -> dict[str, Any]:
     }
 
 
+def align_doc_dates_to_statement_period(db, *, dry_run: bool = False) -> dict[str, Any]:
+    """One-off migration: for every Kontoauszug whose `doc_date`
+    differs from its statement's `period_end`, set `doc_date =
+    period_end`.
+
+    The classifier reads the print / generation date off the
+    letterhead (e.g. "2026-04-30") and stores that as `doc_date`,
+    even when the actual booking period is months earlier
+    (10/2025). The /library year + month filter ranks docs by
+    `doc_date`, so that mismatch makes statements show up in the
+    wrong year. The statement extractor stores the real booking
+    period in `statements.period_end`, which is the truer answer
+    for "when does this Kontoauszug belong".
+
+    Idempotent — once aligned, subsequent runs find nothing to
+    update."""
+    with db._lock:
+        rows = db._conn.execute(
+            """SELECT d.id AS doc_id, d.doc_date AS old_date,
+                      s.period_end AS new_date,
+                      d.subject
+               FROM documents d
+               JOIN statements s ON s.doc_id = d.id
+               WHERE d.deleted_at IS NULL
+                 AND d.category = 'Kontoauszug'
+                 AND s.period_end IS NOT NULL
+                 AND s.period_end != ''
+                 AND COALESCE(d.doc_date, '') != s.period_end"""
+        ).fetchall()
+    items = [dict(r) for r in rows]
+    if dry_run or not items:
+        return {
+            "candidates": len(items),
+            "updated": 0,
+            "samples": items[:20],
+            "dry_run": dry_run,
+        }
+    with db._lock:
+        db._conn.executemany(
+            "UPDATE documents SET doc_date = ? WHERE id = ?",
+            [(r["new_date"], r["doc_id"]) for r in items],
+        )
+        db._conn.commit()
+    logger.warning(
+        "Aligned doc_date to statement.period_end for %d Kontoauszüge.",
+        len(items),
+    )
+    return {
+        "candidates": len(items),
+        "updated": len(items),
+        "samples": items[:20],
+        "dry_run": False,
+    }
+
+
 def normalise_existing_dates(db, *, dry_run: bool = False) -> dict[str, Any]:
     """One-off pass over the transactions table that converts every
     non-ISO booking_date / value_date into ISO YYYY-MM-DD.

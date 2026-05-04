@@ -424,6 +424,21 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                                 "subcategory = '' WHERE id = ?",
                                 (doc_id,),
                             )
+                    # Align the document's doc_date with the statement
+                    # period. The classifier often picks the print /
+                    # generation date from the letterhead (e.g.
+                    # 2026-04-30) while the actual booking period is
+                    # months earlier (10/2025). Once the statement
+                    # extractor has period_end, that's the better truth
+                    # for "when does this statement belong" in the
+                    # year/month filter on /library.
+                    if stmt.period_end:
+                        with db._lock:
+                            db._conn.execute(
+                                "UPDATE documents SET doc_date = ? "
+                                "WHERE id = ? AND COALESCE(doc_date,'') != ?",
+                                (stmt.period_end, doc_id, stmt.period_end),
+                            )
                     log.info(
                         "Statement extracted for %s: bank=%s period=%s..%s tx=%d privacy=%s",
                         target.name, stmt.bank_name, stmt.period_start,
@@ -499,6 +514,7 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
             normalise_existing_dates,
             delete_absurd_amounts,
             promote_bank_to_kontoauszug,
+            align_doc_dates_to_statement_period,
         )
         date_report = normalise_existing_dates(db, dry_run=False)
         if date_report.get("fixed"):
@@ -527,6 +543,17 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
                 "Sample: %s",
                 amt_report["deleted"],
                 amt_report["items"][0] if amt_report["items"] else None,
+            )
+        # Realign doc_date for Kontoauszüge whose classifier date came
+        # from the letterhead (e.g. 2026-04-30) but whose actual
+        # booking period is months earlier — uses statements.period_end
+        # as the truer answer for the /library year+month filter.
+        align_report = align_doc_dates_to_statement_period(db, dry_run=False)
+        if align_report.get("updated"):
+            log.info(
+                "Date alignment: updated doc_date for %d Kontoauszug(e) "
+                "to match the statement period_end.",
+                align_report["updated"],
             )
     except Exception:
         log.exception("Data migration failed — continuing startup")
