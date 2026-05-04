@@ -351,6 +351,61 @@
          x-text="result"></div>
   </div>
 
+  <!-- Daten-Wartung: einmal-pro-Statement Skalen-Korrektur, läuft ohne
+       LLM. Sichtbar sobald es überhaupt Statements gibt. Der Button
+       holt erst einen Dry-Run (zeigt Anzahl + Beispiele), danach kann
+       der User mit einer zweiten Bestätigung den echten Lauf starten. -->
+  {% if summary.statement_count > 0 %}
+  <div class="card p-4 mb-6 border-cyan-500/30 bg-cyan-500/5"
+       x-data="financeRescale()">
+    <div class="flex items-start gap-3">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-cyan-300 shrink-0 mt-0.5">
+        <path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium">{{ t('finance.rescale.title') }}</div>
+        <p class="text-xs text-ink-400 mt-1">{{ t('finance.rescale.hint') }}</p>
+      </div>
+      <div class="flex flex-col gap-1.5 shrink-0">
+        <button type="button" @click="check()" :disabled="busy"
+                class="btn-secondary text-xs"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''">
+          <span x-show="!busy && !preview">{{ t('finance.rescale.button_check') }}</span>
+          <span x-show="busy" x-cloak>{{ t('finance.rescale.running') }}</span>
+          <span x-show="preview && !busy" x-cloak>{{ t('finance.rescale.button_recheck') }}</span>
+        </button>
+        <button type="button" @click="apply()"
+                x-show="preview && preview.candidates > 0 && !done"
+                x-cloak
+                :disabled="busy"
+                class="btn-primary text-xs"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                x-text="busy ? T['finance.rescale.running'] : T['finance.rescale.button_apply']"></button>
+      </div>
+    </div>
+    <div x-show="result" x-cloak class="mt-3 text-xs rounded px-3 py-2"
+         :class="resultOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="result"></div>
+    <details x-show="preview && preview.samples && preview.samples.length"
+             x-cloak class="mt-2">
+      <summary class="cursor-pointer text-xs text-ink-300 hover:text-ink-100 select-none">
+        {{ t('finance.rescale.show_samples') }}
+      </summary>
+      <ul class="mt-2 space-y-1 text-xs font-mono tabular-nums">
+        <template x-for="s in (preview ? preview.samples : [])" :key="s.stmt_id">
+          <li class="flex items-baseline gap-3">
+            <span class="text-ink-500" x-text="'#' + s.stmt_id"></span>
+            <span class="text-ink-400" x-text="s.tx_count + ' Buch.'"></span>
+            <span class="text-rose-300" x-text="s.tx_sum_before.toFixed(2) + ' →'"></span>
+            <span class="text-emerald-300" x-text="s.tx_sum_after.toFixed(2) + ' €'"></span>
+            <span class="text-ink-500" x-text="'(Δ ' + s.delta_target.toFixed(2) + ')'"></span>
+          </li>
+        </template>
+      </ul>
+    </details>
+  </div>
+  {% endif %}
+
   {% if summary.statement_count == 0 %}
     <div class="card p-10 text-center">
       <div class="inline-flex h-14 w-14 items-center justify-center rounded-full bg-ink-700/40 text-ink-400 mb-4">
@@ -1496,6 +1551,68 @@ function financeDiag(initialItems, initialTotal) {
         this.resultOk = false;
         this.result = `Doc ${docId}: ${e.message || String(e)}`;
       } finally { this.busyDoc = null; }
+    },
+  };
+}
+
+function financeRescale() {
+  return {
+    busy: false,
+    preview: null,
+    done: false,
+    result: '',
+    resultOk: false,
+    async check() {
+      this.busy = true; this.result = ''; this.done = false;
+      try {
+        const r = await fetch('/api/finance/rescale-amounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dry_run: true }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.preview = d;
+        if ((d.candidates || 0) === 0) {
+          this.resultOk = true;
+          this.result = T['finance.rescale.none'] || 'Nichts zu reparieren — alle Auszüge sind sauber.';
+        } else {
+          this.resultOk = true;
+          this.result = (T['finance.rescale.preview'] ||
+            '{n} Auszüge mit OCR-Komma-Schaden gefunden ({rows} Buchungen). Druck „Reparieren" zum Anwenden.')
+            .replace('{n}', d.candidates).replace('{rows}', d.would_update_rows);
+        }
+      } catch (e) {
+        this.resultOk = false;
+        this.result = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+    async apply() {
+      const msg = (T['finance.rescale.confirm'] ||
+        '{rows} Buchungen werden durch 100 geteilt. Fortfahren?')
+        .replace('{rows}', this.preview ? this.preview.would_update_rows : '?');
+      if (!confirm(msg)) return;
+      this.busy = true; this.result = '';
+      try {
+        const r = await fetch('/api/finance/rescale-amounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.resultOk = true;
+        this.done = true;
+        this.preview = null;
+        this.result = (T['finance.rescale.done'] ||
+          '{rows} Buchungen in {n} Auszügen korrigiert. Lade Seite neu für aktuelle Zahlen.')
+          .replace('{rows}', d.updated_rows).replace('{n}', d.updated_statements);
+        // Refresh after a beat so the user sees the success message first.
+        setTimeout(() => location.reload(), 1500);
+      } catch (e) {
+        this.resultOk = false;
+        this.result = e.message || String(e);
+      } finally { this.busy = false; }
     },
   };
 }

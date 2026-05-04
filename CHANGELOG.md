@@ -2,6 +2,23 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.29.2] – 2026-05-04
+
+### Added — UI button for the rescale-amounts migration
+
+A "Komma-Skalierung prüfen" card on `/finance` (always visible when
+the install has at least one statement) wraps the v0.29.1 endpoint:
+
+- First click → dry-run preview. Shows how many statements / rows
+  would be touched, plus the first 20 candidates with before/after
+  sums and the Δsaldo target.
+- Second click on "Reparieren" → confirm dialog → real run, then
+  auto-reload so the corrected numbers are visible on the same page.
+- Idempotent — pressing "Erneut prüfen" after a successful run
+  reports "Nichts zu reparieren".
+
+Translated into all 5 supported languages.
+
 ## [0.29.1] – 2026-05-04
 
 ### Added — Rescale broken amounts in place
