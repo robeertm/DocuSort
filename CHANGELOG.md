@@ -2,6 +2,34 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.32.1] – 2026-05-05
+
+### Fixed — "Alle deterministisch neu parsen" gave no visible feedback
+
+Clicking the bulk-parse button used to do this:
+  1. Show a confirm dialog with numbers
+  2. After confirm, silently run for several seconds
+  3. Reload the audit table without saying anything happened
+
+People assumed the click had been swallowed. Now:
+
+- The button text switches to "Prüfe…" while the dry-run probes the
+  archive, then to "Parse läuft…" while the real run executes.
+  Visible state instead of just a CSS spinner class.
+- Result banner under the audit header shows concrete counts after
+  every run: "X übernommen · Y zu unsicher · Z schon ok · K ohne
+  OCR" with colour-coded numbers, plus an error count when any
+  rows blew up.
+- "Seite neu laden für aktualisierte Zahlen"-Link appears when at
+  least one statement was applied — clicking refreshes /finance so
+  the cashflow chart, summary tiles, and audit list all reflect
+  the new data without a manual F5.
+- Even when the user CANCELS the confirm, the dry-run numbers are
+  shown in the result banner so the click wasn't completely
+  invisible.
+
+UI strings in all 5 supported languages.
+
 ## [0.32.0] – 2026-05-04
 
 ### Added — Manual transaction editor on /document/{id}

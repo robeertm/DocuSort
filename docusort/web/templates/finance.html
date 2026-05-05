@@ -402,7 +402,8 @@
                 class="btn-primary text-xs"
                 :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
                 :title="T['finance.audit.parse_all_hint'] || ''">
-          {{ t('finance.audit.parse_all_button') }}
+          <span x-show="!parseAllBusy">{{ t('finance.audit.parse_all_button') }}</span>
+          <span x-show="parseAllBusy" x-cloak x-text="parseAllPhase"></span>
         </button>
         <button type="button" @click="dedupe()" :disabled="busy"
                 class="btn-secondary text-xs"
@@ -411,6 +412,46 @@
           {{ t('finance.audit.dedupe_button') }}
         </button>
       </div>
+    </div>
+
+    <!-- Result banner from parseAll / dedupe so the user actually
+         sees what happened. Shows applied / skipped counts plus a
+         link to refresh the page (so /finance totals reflect the
+         new statements). -->
+    <div x-show="parseAllResult" x-cloak class="mt-3 rounded border p-3 text-xs"
+         :class="(parseAllResult && parseAllResult.applied > 0)
+                  ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200'
+                  : 'border-ink-700 bg-ink-900/40 text-ink-300'">
+      <div class="font-medium mb-1" x-text="parseAllResult ? parseAllResultTitle : ''"></div>
+      <div class="font-mono tabular-nums">
+        <template x-if="parseAllResult">
+          <span>
+            <span class="text-emerald-300" x-text="parseAllResult.applied"></span>
+            {{ t('finance.audit.parse_all_applied') }}
+            ·
+            <span class="text-amber-300" x-text="parseAllResult.skipped_lowconf"></span>
+            {{ t('finance.audit.parse_all_skipped_lowconf') }}
+            ·
+            <span class="text-ink-400" x-text="parseAllResult.skipped_existing"></span>
+            {{ t('finance.audit.parse_all_skipped_existing') }}
+            ·
+            <span class="text-ink-400" x-text="parseAllResult.skipped_no_ocr"></span>
+            {{ t('finance.audit.parse_all_skipped_noocr') }}
+            <template x-if="parseAllResult.errors > 0">
+              <span> ·
+                <span class="text-rose-300" x-text="parseAllResult.errors"></span>
+                {{ t('finance.audit.parse_all_errors') }}
+              </span>
+            </template>
+          </span>
+        </template>
+      </div>
+      <button type="button" @click="location.reload()"
+              x-show="parseAllResult && parseAllResult.applied > 0"
+              x-cloak
+              class="mt-2 underline hover:text-emerald-100">
+        {{ t('finance.audit.parse_all_reload') }}
+      </button>
     </div>
 
     <div x-show="data && data.items && data.items.length" x-cloak
@@ -1760,6 +1801,20 @@ function financeAudit() {
     busyDoc: null,
     data: null,
     error: '',
+    parseAllBusy: false,
+    parseAllPhase: '',
+    parseAllResult: null,
+    get parseAllResultTitle() {
+      if (!this.parseAllResult) return '';
+      const r = this.parseAllResult;
+      if (r.applied > 0) {
+        return (T['finance.audit.parse_all_done'] ||
+                'Fertig: {n} Auszüge mit Parser erfasst.')
+                  .replace('{n}', r.applied);
+      }
+      return (T['finance.audit.parse_all_nothing'] ||
+              'Parser hat nichts angewendet (alle Auszüge schon ok oder zu unsicher).');
+    },
     async load() {
       this.busy = true; this.error = '';
       try {
@@ -1787,18 +1842,35 @@ function financeAudit() {
       } finally { this.busyDoc = null; }
     },
     async parseAll() {
-      this.busy = true; this.error = '';
+      this.busy = true;
+      this.parseAllBusy = true;
+      this.parseAllResult = null;
+      this.error = '';
       try {
+        // Phase 1: dry-run preview so we can quote concrete numbers
+        // in the confirm dialog. Show "Prüfe..." in the button while
+        // it runs (the audit endpoint can take seconds on big DBs).
+        this.parseAllPhase = T['finance.audit.parse_all_phase_check'] || 'Prüfe…';
         const dry = await fetch('/api/finance/parse-all', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dry_run: true }),
         }).then(r => r.json());
+        if (!dry || dry.found === undefined) {
+          throw new Error(dry && dry.detail ? dry.detail : 'invalid response');
+        }
         const msg = (T['finance.audit.parse_all_confirm'] ||
           'Deterministischer Parser über {n} Auszüge laufen lassen — schätzt {applied} würden übernommen.')
           .replace('{n}', dry.found || 0)
           .replace('{applied}', dry.applied || 0);
-        if (!confirm(msg)) return;
+        if (!confirm(msg)) {
+          // User said no — show the dry numbers as the result so the
+          // click wasn't completely silent.
+          this.parseAllResult = {...dry, applied: 0};
+          return;
+        }
+        // Phase 2: actually run.
+        this.parseAllPhase = T['finance.audit.parse_all_phase_run'] || 'Parse läuft…';
         const r = await fetch('/api/finance/parse-all', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1806,10 +1878,16 @@ function financeAudit() {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.parseAllResult = d;
         await this.load();
       } catch (e) {
         this.error = e.message || String(e);
-      } finally { this.busy = false; }
+        this.parseAllResult = null;
+      } finally {
+        this.busy = false;
+        this.parseAllBusy = false;
+        this.parseAllPhase = '';
+      }
     },
     async dedupe() {
       this.busy = true; this.error = '';
