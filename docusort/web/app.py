@@ -123,6 +123,25 @@ def _coerce_float(v: str | float | None) -> float | None:
         return None
 
 
+def _report_to_dict(report) -> dict:
+    """Convert an `ImportReport` dataclass into a JSON-friendly dict
+    for the upload endpoint. Kept here (rather than as a method)
+    because the dataclass lives in finance/csv_import.py and we want
+    the API shape decoupled from the importer."""
+    return {
+        "file_label":       report.file_label,
+        "rows_seen":        report.rows_seen,
+        "rows_inserted":    report.rows_inserted,
+        "rows_duplicate":   report.rows_duplicate,
+        "rows_skipped":     report.rows_skipped,
+        "rows_invalid":     report.rows_invalid,
+        "accounts_touched": report.accounts_touched,
+        "period_start":     report.period_start,
+        "period_end":       report.period_end,
+        "errors":           report.errors,
+    }
+
+
 # Per-document long-running jobs (statement / receipt extraction). Process-
 # local, in-memory: a request that hits api_extract_statement registers
 # itself here so concurrent doc-page reloads can see "Auswertung läuft"
@@ -891,43 +910,6 @@ def create_app(
             by_weekday = []; by_day_of_month = []; by_tx_type = []
             largest_tx = []; balance_history = []; cp_treemap = []
             kpis = {}
-        # Inspect the privacy mode of the most recent statement so the
-        # header badge tells the user how their last upload was handled.
-        with db._lock:
-            last_mode_row = db._conn.execute(
-                "SELECT privacy_mode FROM statements ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            # Surface "needs review" docs prominently — the user expects
-            # every uploaded Kontoauszug to be evaluated, so empties get
-            # called out instead of silently inflating the statement
-            # count.
-            empty_stmts = db._conn.execute(
-                """SELECT s.doc_id, COALESCE(d.subject, d.filename) AS subject,
-                          d.doc_date, a.bank_name
-                   FROM statements s
-                   JOIN documents d ON d.id = s.doc_id
-                   LEFT JOIN accounts a ON a.id = s.account_id
-                   WHERE d.deleted_at IS NULL
-                     AND d.category = 'Kontoauszug'
-                     AND COALESCE(s.acknowledged_empty, 0) = 0
-                     AND s.id NOT IN (SELECT statement_id FROM transactions)
-                   ORDER BY d.doc_date DESC, d.id DESC
-                   LIMIT 20"""
-            ).fetchall()
-            kontoauszug_total = db._conn.execute(
-                """SELECT COUNT(*) FROM documents
-                   WHERE category = 'Kontoauszug' AND deleted_at IS NULL"""
-            ).fetchone()[0]
-            pending_review = db._conn.execute(
-                """SELECT id AS doc_id, COALESCE(subject, filename) AS subject,
-                          doc_date, sender
-                   FROM documents
-                   WHERE status = 'pending_review'
-                     AND category = 'Kontoauszug'
-                     AND deleted_at IS NULL
-                   ORDER BY doc_date DESC, id DESC"""
-            ).fetchall()
-        privacy_mode = (last_mode_row["privacy_mode"] if last_mode_row else "") or ""
         return templates.TemplateResponse(
             request, "finance.html",
             {**base_ctx(request),
@@ -936,10 +918,7 @@ def create_app(
              "recurring": recurring, "transactions": transactions,
              "tx_categories": list(TX_CATEGORIES),
              "tx_types": list(TX_TYPES),
-             "privacy_mode": privacy_mode,
-             "empty_statements":   [dict(r) for r in empty_stmts],
-             "kontoauszug_total":  int(kontoauszug_total),
-             "pending_review":     [dict(r) for r in pending_review],
+             "has_data": bool(accounts) and summary.get("tx_count", 0) > 0,
              "heatmap_grid":    heatmap_grid,
              "heatmap_periods": periods,
              "cat_monthly":     cat_monthly,
@@ -964,138 +943,6 @@ def create_app(
             "monthly": db.finance_monthly(),
             "accounts": db.list_accounts(),
             "recurring": db.finance_recurring(),
-        }
-
-    @app.get("/api/finance/diag-render")
-    def api_finance_diag_render():
-        """Read-only Diagnose: ruft jede DB-Methode auf, die /finance
-        nutzt, und liefert pro Methode `ok` oder den Fehlertext. Nutzt
-        ausschließlich die selben Methoden wie der Page-Endpoint, in
-        der gleichen Reihenfolge — wenn hier alles `ok` ist und
-        /finance trotzdem 500 wirft, liegt es an der Template-Render-
-        Phase, nicht am DB-Layer.
-
-        Diese Route ist isoliert von /finance: Read-only, kein
-        Render, keine Closure auf nested helpers — sie kann nicht
-        kaputtgehen wenn /finance kaputtgeht."""
-        import traceback as _tb
-        results: dict[str, str] = {}
-
-        def probe(name: str, fn) -> None:
-            try:
-                fn()
-                results[name] = "ok"
-            except Exception as exc:
-                results[name] = f"{type(exc).__name__}: {exc}"
-
-        probe("finance_summary",          lambda: db.finance_summary())
-        probe("finance_monthly",          lambda: db.finance_monthly(months=12))
-        probe("list_accounts",            lambda: db.list_accounts())
-        probe("finance_top_counterparties_expense",
-              lambda: db.finance_top_counterparties(direction="expense", limit=10))
-        probe("finance_top_counterparties_income",
-              lambda: db.finance_top_counterparties(direction="income", limit=10))
-        probe("finance_recurring",        lambda: db.finance_recurring(min_months=3, limit=20))
-        probe("transactions_list",        lambda: db.transactions_list(limit=200))
-        probe("finance_available_periods", lambda: db.finance_available_periods())
-        probe("finance_heatmap",          lambda: db.finance_heatmap())
-        probe("finance_category_monthly", lambda: db.finance_category_monthly(start=None, end=None))
-        probe("finance_category_totals_spend",
-              lambda: db.finance_category_totals(start=None, end=None, direction="spend"))
-        probe("finance_category_totals_income",
-              lambda: db.finance_category_totals(start=None, end=None, direction="income"))
-        probe("finance_by_weekday",       lambda: db.finance_by_weekday())
-        probe("finance_by_day_of_month",  lambda: db.finance_by_day_of_month())
-        probe("finance_by_tx_type",       lambda: db.finance_by_tx_type())
-        probe("finance_largest_tx",       lambda: db.finance_largest_tx(limit=15))
-        probe("finance_balance_history",  lambda: db.finance_balance_history(account_id=None))
-        probe("finance_counterparty_treemap",
-              lambda: db.finance_counterparty_treemap(limit=24))
-        probe("finance_kpis",             lambda: db.finance_kpis())
-
-        def _direct(label: str, sql: str) -> None:
-            try:
-                with db._lock:
-                    db._conn.execute(sql).fetchall()
-                results[label] = "ok"
-            except Exception as exc:
-                results[label] = f"{type(exc).__name__}: {exc}"
-
-        _direct("direct: last_privacy_mode",
-                "SELECT privacy_mode FROM statements ORDER BY id DESC LIMIT 1")
-        _direct("direct: empty_stmts",
-                """SELECT s.doc_id, COALESCE(d.subject, d.filename) AS subject,
-                          d.doc_date, a.bank_name
-                   FROM statements s
-                   JOIN documents d ON d.id = s.doc_id
-                   LEFT JOIN accounts a ON a.id = s.account_id
-                   WHERE d.deleted_at IS NULL
-                     AND d.category = 'Kontoauszug'
-                     AND COALESCE(s.acknowledged_empty, 0) = 0
-                     AND s.id NOT IN (SELECT statement_id FROM transactions)
-                   ORDER BY d.doc_date DESC, d.id DESC LIMIT 20""")
-        _direct("direct: kontoauszug_total",
-                """SELECT COUNT(*) FROM documents
-                   WHERE category = 'Kontoauszug' AND deleted_at IS NULL""")
-        _direct("direct: pending_review",
-                """SELECT id AS doc_id, COALESCE(subject, filename) AS subject,
-                          doc_date, sender
-                   FROM documents
-                   WHERE status = 'pending_review' AND category = 'Kontoauszug'
-                     AND deleted_at IS NULL""")
-
-        return {
-            "ok_count": sum(1 for v in results.values() if v == "ok"),
-            "fail_count": sum(1 for v in results.values() if v != "ok"),
-            "results": results,
-        }
-
-    @app.post("/api/finance/ask")
-    def api_finance_ask(payload: dict = Body(...)):
-        """Answer a free-form question about the user's transactions
-        using LLM tool-use against the existing finance DB methods.
-
-        The provider abstraction has no native tool-use API, so the
-        loop is a JSON conversation: each turn the model returns one
-        JSON action (tool call or final answer). Tools are read-only
-        wrappers around `transactions_list` / `transactions_aggregate`
-        plus a couple of metadata helpers."""
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        if settings.finance.local_only and not is_local:
-            raise HTTPException(
-                403,
-                "finance.local_only is enabled but the active provider is not local.",
-            )
-
-        question = str(payload.get("question") or "").strip()
-        if not question:
-            raise HTTPException(400, "question is required")
-        if len(question) > 500:
-            raise HTTPException(400, "question too long (max 500 chars)")
-
-        from ..finance.ask import answer_question
-        from ..providers import ProviderError
-
-        try:
-            result = answer_question(db, classifier, question)
-        except ProviderError as exc:
-            raise HTTPException(502, f"LLM provider error: {exc}") from exc
-        except (RuntimeError, ValueError) as exc:
-            raise HTTPException(500, str(exc)) from exc
-
-        return {
-            "question":      result.question,
-            "answer":        result.answer,
-            "rows":          result.rows,
-            "tools_used":    result.tools_used,
-            "model":         result.model,
-            "cost_usd":      result.cost_usd,
-            "input_tokens":  result.input_tokens,
-            "output_tokens": result.output_tokens,
-            "steps":         result.steps,
-            "warnings":      result.warnings,
         }
 
     @app.get("/api/dashboard")
@@ -1184,846 +1031,6 @@ def create_app(
             "version":       __version__,
         }
 
-    @app.get("/api/finance/scan-suspicious")
-    def api_finance_scan_suspicious(limit: int = Query(50)):
-        """Read-only diagnostic: list statements whose transactions look
-        like OCR-comma damage that the auto-rescale couldn't fix
-        because the saldo itself is corrupted or missing.
-
-        Returned per item: amount fingerprints (max_abs, sum_abs,
-        all_integer), saldo state, and a `severity` field for sorting
-        in the UI."""
-        from ..finance.salvage import scan_suspicious_amounts
-        try:
-            return scan_suspicious_amounts(db, limit=int(limit))
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"scan failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/finance/dedupe")
-    def api_finance_dedupe(payload: dict = Body(default={})):
-        """One-off DB pass: drop transactions that appear in multiple
-        statements of the same account on the same date / amount /
-        counterparty (typical of overlapping re-uploads). Pass
-        `{"dry_run":true}` for a preview."""
-        from ..finance.salvage import dedupe_cross_statement_transactions
-        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
-        try:
-            return dedupe_cross_statement_transactions(db, dry_run=dry)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"dedupe failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/finance/uncategorize-non-statements")
-    def api_finance_uncategorize_non_statements(payload: dict = Body(default={})):
-        """Recategorise docs filed as Kontoauszug that DON'T look
-        like bank statements (no period, no balances, no booking
-        rows in OCR) back to Sonstiges/review. Catches the typical
-        LLM-misclassification of contracts / Bescheide / letters
-        that share a bank as the sender.
-
-        Body: `{"dry_run": true}` for a preview."""
-        from ..finance.salvage import uncategorize_non_statements
-        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
-        try:
-            return uncategorize_non_statements(db, dry_run=dry)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"uncategorize failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.get("/api/finance/parse-debug/{doc_id}")
-    def api_finance_parse_debug(doc_id: int):
-        """Diagnostic: run the parser on ONE doc and return the full
-        report (layout, confidence, opening/closing, all parsed
-        transactions, warnings, saldo math, plus the first 4kB of
-        the raw OCR text). Used to figure out why the parser bounces
-        every statement off as "too uncertain"."""
-        with db._lock:
-            doc = db._conn.execute(
-                "SELECT id, extracted_text, category, sender, subject "
-                "FROM documents WHERE id = ? AND deleted_at IS NULL",
-                (doc_id,),
-            ).fetchone()
-        if doc is None:
-            raise HTTPException(404, f"doc {doc_id} not found")
-        ocr = doc["extracted_text"] or ""
-        if not ocr:
-            return {"doc_id": doc_id, "ocr_present": False,
-                    "result": None, "ocr_preview": ""}
-        from ..finance.parser import parse as _parse_det
-        try:
-            result = _parse_det(ocr)
-        except Exception as exc:  # noqa: BLE001
-            return {"doc_id": doc_id, "ocr_present": True,
-                    "ocr_preview": ocr[:4000],
-                    "ocr_total_chars": len(ocr),
-                    "error": f"{type(exc).__name__}: {exc}"}
-        s = result.statement
-        delta = None
-        if s.opening_balance is not None and s.closing_balance is not None:
-            delta = round(s.closing_balance - s.opening_balance, 2)
-        tx_sum = round(sum(t.amount for t in s.transactions), 2)
-        return {
-            "doc_id": doc_id,
-            "category": doc["category"],
-            "sender": doc["sender"],
-            "subject": doc["subject"],
-            "ocr_present": True,
-            "ocr_preview": ocr[:4000],
-            "ocr_total_chars": len(ocr),
-            "result": {
-                "layout": result.layout,
-                "confidence": round(result.confidence, 3),
-                "saldo_consistent": result.saldo_consistent,
-                "warnings": result.warnings,
-                "statement": {
-                    "bank_name": s.bank_name,
-                    "iban": s.iban,
-                    "period_start": s.period_start,
-                    "period_end": s.period_end,
-                    "opening_balance": s.opening_balance,
-                    "closing_balance": s.closing_balance,
-                    "delta_saldo": delta,
-                    "tx_count": len(s.transactions),
-                    "tx_sum": tx_sum,
-                    "tx_sum_minus_delta": (round(tx_sum - delta, 2)
-                                           if delta is not None else None),
-                },
-                "transactions": [t.as_dict() for t in s.transactions],
-            },
-        }
-
-    @app.post("/api/finance/parse-all")
-    def api_finance_parse_all(payload: dict = Body(default={})):
-        """Run the deterministic regex parser over every Kontoauszug
-        in the DB. Applies the result on docs where the parser hits
-        ≥ 0.85 confidence with reconciled saldo, skips the rest.
-
-        Bulk equivalent of the per-doc parse-doc endpoint. Pass
-        `{"dry_run":true}` for a preview, `{"only_low_confidence":
-        false}` to re-parse docs that already have a deterministic
-        statement (otherwise we leave them alone)."""
-        from ..finance.salvage import bulk_deterministic_parse
-        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
-        only_lc = bool(payload.get("only_low_confidence", True))
-        try:
-            return bulk_deterministic_parse(
-                db, dry_run=dry, only_low_confidence=only_lc,
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"bulk parse failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.get("/api/finance/audit")
-    def api_finance_audit(limit: int = Query(100)):
-        """Per-statement health audit: flags saldo mismatches,
-        out-of-period transactions, cross-statement duplicates,
-        missing balances / periods. Read-only diagnostic — used by
-        the /finance audit table to surface broken extractions
-        without having to look at every Kontoauszug manually."""
-        from ..finance.salvage import audit_statements
-        try:
-            return audit_statements(db, limit=int(limit))
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"audit failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/finance/align-doc-dates")
-    def api_finance_align_doc_dates(payload: dict = Body(default={})):
-        """One-off DB pass: for every Kontoauszug, set doc_date to the
-        statement's period_end so /library year+month filters point at
-        the booking period instead of the letterhead print date.
-
-        Pass `{"dry_run":true}` for a preview."""
-        from ..finance.salvage import align_doc_dates_to_statement_period
-        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
-        try:
-            return align_doc_dates_to_statement_period(db, dry_run=dry)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"align failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/finance/rescale-statement")
-    def api_finance_rescale_statement(payload: dict = Body(...)):
-        """Manually rescale every transaction (and the saldo) of a
-        single statement by a factor (default 0.01 = /100). For the
-        cases auto-rescale can't reach.
-
-        Body: `{"stmt_id": 42}` (or with optional `factor`,
-        `also_saldo`)."""
-        if not isinstance(payload, dict) or "stmt_id" not in payload:
-            raise HTTPException(400, "stmt_id is required")
-        try:
-            stmt_id = int(payload["stmt_id"])
-        except (TypeError, ValueError):
-            raise HTTPException(400, "stmt_id must be an int")
-        factor = float(payload.get("factor") or 0.01)
-        also_saldo = bool(payload.get("also_saldo", True))
-        from ..finance.salvage import rescale_statement_amounts
-        try:
-            return rescale_statement_amounts(
-                db, stmt_id, factor=factor, also_saldo=also_saldo,
-            )
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"rescale failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/finance/rescale-amounts")
-    def api_finance_rescale_amounts(payload: dict = Body(default={})):
-        """One-off DB pass: divide-by-100 the amounts on statements
-        whose Σtx vs. Δsaldo fingerprint says OCR ate the decimal
-        commas. Mirrors the extraction-time check from v0.29.0
-        (`_normalise_tx` post-hoc scale correction) so users don't
-        have to re-extract every Kontoauszug just to fix existing
-        broken numbers.
-
-        Pass `{"dry_run":true}` for a preview that returns the
-        statement IDs and before/after sums without writing."""
-        from ..finance.salvage import rescale_broken_amounts
-        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
-        try:
-            return rescale_broken_amounts(db, dry_run=dry)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"rescale failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/finance/normalise-dates")
-    def api_finance_normalise_dates(payload: dict = Body(default={})):
-        """One-off DB pass: converts every non-ISO booking_date /
-        value_date row into ISO YYYY-MM-DD.
-
-        Up to v0.27.4 the extractor stored whatever shape the LLM
-        emitted — for small local models that's usually the source
-        PDF's DD.MM.YYYY. Those rows break SQLite's strftime() + the
-        monthly aggregates on /finance.
-
-        Pass `{"dry_run":true}` to preview without writing."""
-        from ..finance.salvage import normalise_existing_dates
-        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
-        try:
-            return normalise_existing_dates(db, dry_run=dry)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"normalise failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/finance/salvage")
-    def api_finance_salvage(payload: dict = Body(default={})):
-        """Recover transactions for statements where the table is empty
-        but extra_json holds parseable bookings. No LLM call.
-
-        Pass `{"dry_run": true}` to preview without writing. With no
-        body or `{"dry_run": false}` it actually inserts the rows."""
-        from ..finance.salvage import salvage_all_empty
-        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
-        try:
-            return salvage_all_empty(db, dry_run=dry)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"salvage failed: {type(exc).__name__}: {exc}") from exc
-
-    @app.post("/api/finance/parse-doc")
-    def api_finance_parse_doc(payload: dict = Body(...)):
-        """Run the deterministic regex parser on one document, no
-        LLM call at all. Returns a `ParseResult`-shaped dict with
-        confidence, layout, opening/closing, transactions list, and
-        a saldo_consistent flag. The caller (typically the document
-        detail UI) shows it as a preview; the user confirms before
-        the result overwrites the existing statement.
-
-        When the user confirms, pass `apply=true` and we upsert the
-        parsed statement straight into the DB — no LLM, no cost.
-        Refuses to apply when confidence < 0.85 or saldo doesn't
-        reconcile, unless `force=true` is also set."""
-        try:
-            doc_id = int(payload.get("doc_id"))
-        except (TypeError, ValueError):
-            raise HTTPException(400, "doc_id is required") from None
-        apply = bool(payload.get("apply") or False)
-        force = bool(payload.get("force") or False)
-
-        with db._lock:
-            doc = db._conn.execute(
-                "SELECT id, extracted_text, library_path, category "
-                "FROM documents WHERE id = ? AND deleted_at IS NULL",
-                (doc_id,),
-            ).fetchone()
-        if not doc:
-            raise HTTPException(404, f"doc {doc_id} not found")
-        if not doc["extracted_text"]:
-            raise HTTPException(409, f"doc {doc_id} has no OCR text on file")
-
-        from ..finance.parser import parse as _parse_det
-        try:
-            result = _parse_det(doc["extracted_text"])
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"parser failed: {type(exc).__name__}: {exc}") from exc
-
-        preview = {
-            "doc_id":     doc_id,
-            "layout":     result.layout,
-            "confidence": round(result.confidence, 2),
-            "saldo_consistent": result.saldo_consistent,
-            "warnings":   result.warnings,
-            "statement": {
-                "bank_name":   result.statement.bank_name,
-                "iban":        result.statement.iban,
-                "iban_last4":  result.statement.iban_last4,
-                "period_start": result.statement.period_start,
-                "period_end":   result.statement.period_end,
-                "statement_no": result.statement.statement_no,
-                "opening_balance": result.statement.opening_balance,
-                "closing_balance": result.statement.closing_balance,
-                "currency":    result.statement.currency,
-                "tx_count":    len(result.statement.transactions),
-            },
-            "tx_sample": [
-                {"date": t.booking_date, "amount": t.amount,
-                 "counterparty": t.counterparty, "purpose": t.purpose[:80],
-                 "category": t.category, "tx_type": t.tx_type}
-                for t in result.statement.transactions[:10]
-            ],
-        }
-
-        if not apply:
-            return preview
-
-        # Apply path — refuse low-quality parses unless forced.
-        ok = result.confidence >= 0.85 and result.saldo_consistent
-        if not ok and not force:
-            raise HTTPException(
-                409,
-                "Parser output is below the trust threshold (confidence "
-                f"{result.confidence:.2f}, saldo_consistent="
-                f"{result.saldo_consistent}). Pass force=true to apply "
-                "anyway, or run /api/finance/reanalyze-doc to retry "
-                "with the LLM.",
-            )
-
-        # Resolve / upsert account, write statement, mirror what the
-        # bulk re-analyze worker does.
-        from ..finance.pseudonymizer import iban_hash as _iban_hash
-        from hashlib import sha256
-        s = result.statement
-        account_id = None
-        if s.iban:
-            account_id = db.upsert_account(
-                bank_name=s.bank_name or "Unbekannt",
-                iban=s.iban, iban_last4=s.iban_last4,
-                iban_hash=_iban_hash(s.iban),
-                account_holder=s.account_holder or "",
-                currency=s.currency or "EUR",
-            )
-        h_iban = _iban_hash(s.iban) if s.iban else "no-iban"
-        tx_payload = []
-        for t in s.transactions:
-            key = f"{h_iban}|{t.booking_date}|{t.amount:.2f}|{t.purpose}"
-            d = t.as_dict()
-            d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
-            tx_payload.append(d)
-        db.upsert_statement(
-            doc_id, account_id=account_id,
-            period_start=s.period_start, period_end=s.period_end,
-            statement_no=s.statement_no,
-            opening_balance=s.opening_balance,
-            closing_balance=s.closing_balance,
-            currency=s.currency or "EUR",
-            file_hash="",
-            privacy_mode="local",
-            transactions=tx_payload,
-            extra_json=f"deterministic:{result.layout}:conf={result.confidence:.2f}",
-            extraction_warning="; ".join(result.warnings) if result.warnings else "",
-        )
-        # Promote to Kontoauszug if needed + align doc_date.
-        with db._lock:
-            if (doc["category"] or "") != "Kontoauszug":
-                db._conn.execute(
-                    "UPDATE documents SET category='Kontoauszug', "
-                    "subcategory='' WHERE id = ?",
-                    (doc_id,),
-                )
-            if s.period_end:
-                db._conn.execute(
-                    "UPDATE documents SET doc_date = ? WHERE id = ?",
-                    (s.period_end, doc_id),
-                )
-            db._conn.commit()
-        preview["applied"] = True
-        return preview
-
-    @app.post("/api/finance/reanalyze-doc")
-    def api_finance_reanalyze_doc(payload: dict = Body(...)):
-        """Queue a fresh extraction on one specific doc.
-
-        Returns 202 immediately and runs the work in the same
-        background thread the bulk re-analyze uses (so it's tracked
-        on `/api/finance/analyze-progress`). Synchronous extraction
-        from a request handler used to deadlock the single-worker
-        FastAPI process whenever the bridge was slow / offline —
-        every other endpoint started returning HTTP 000 / timing
-        out. The user polls the existing diagnostic banner to see
-        the doc disappear from the empty-list when transactions
-        land."""
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        if settings.finance.local_only and not is_local:
-            raise HTTPException(
-                403,
-                "finance.local_only is enabled but the active provider is not local.",
-            )
-
-        try:
-            doc_id = int(payload.get("doc_id"))
-        except (TypeError, ValueError):
-            raise HTTPException(400, "doc_id is required") from None
-
-        with db._lock:
-            doc = db._conn.execute(
-                "SELECT id, extracted_text "
-                "FROM documents WHERE id = ? AND deleted_at IS NULL",
-                (doc_id,),
-            ).fetchone()
-        if not doc:
-            raise HTTPException(404, f"doc {doc_id} not found")
-        if not doc["extracted_text"]:
-            raise HTTPException(409, f"doc {doc_id} has no OCR text on file")
-
-        from .bulk_reanalyze import start_reanalyze_all_statements
-        result = start_reanalyze_all_statements(
-            settings, db, classifier,
-            force_all=True, only_doc_ids=[doc_id],
-        )
-        # If the bulk worker is busy with the full sweep, refuse
-        # explicitly — race-free thanks to the activity-job lock.
-        if not result.get("started", True) and result.get("reason"):
-            raise HTTPException(409, str(result["reason"]))
-        return JSONResponse(
-            status_code=202,
-            content={"queued": True, "doc_id": doc_id, **result},
-        )
-
-    @app.get("/api/finance/diagnostics")
-    def api_finance_diagnostics():
-        """Surface statements that came back without any transactions —
-        the user wants every uploaded Kontoauszug in the evaluation, so
-        we list the gaps explicitly rather than burying them in the
-        aggregate counts."""
-        with db._lock:
-            empty = db._conn.execute(
-                """SELECT s.id AS stmt_id, s.doc_id, a.bank_name,
-                          s.period_start, s.period_end, s.account_id,
-                          d.subject, d.doc_date, d.created_at
-                   FROM statements s
-                   JOIN documents d ON d.id = s.doc_id
-                   LEFT JOIN accounts a ON a.id = s.account_id
-                   WHERE d.deleted_at IS NULL
-                     AND d.category = 'Kontoauszug'
-                     AND COALESCE(s.acknowledged_empty, 0) = 0
-                     AND s.id NOT IN (SELECT statement_id FROM transactions)
-                   ORDER BY d.doc_date DESC, d.id DESC"""
-            ).fetchall()
-            unattached = db._conn.execute(
-                """SELECT COUNT(*) FROM statements s
-                   JOIN documents d ON d.id = s.doc_id
-                   WHERE d.deleted_at IS NULL AND s.account_id IS NULL"""
-            ).fetchone()[0]
-            kontoauszug_total = db._conn.execute(
-                """SELECT COUNT(*) FROM documents
-                   WHERE category = 'Kontoauszug' AND deleted_at IS NULL"""
-            ).fetchone()[0]
-            statements_total = db._conn.execute(
-                """SELECT COUNT(*) FROM statements s
-                   JOIN documents d ON d.id = s.doc_id
-                   WHERE d.deleted_at IS NULL
-                     AND d.category = 'Kontoauszug'"""
-            ).fetchone()[0]
-        return {
-            "kontoauszug_docs":       int(kontoauszug_total),
-            "statements_extracted":   int(statements_total),
-            "without_transactions":   [dict(r) for r in empty],
-            "without_account":        int(unattached),
-        }
-
-    @app.post("/api/finance/reocr-all")
-    def api_reocr_all():
-        """Re-read every Kontoauszug / Bank PDF and refresh the stored
-        OCR text. Pure local work — no LLM call, no cost. Fixes
-        truncated text from earlier installs that capped at the
-        classifier's input limit, leaving the booking table in
-        multi-page statements unreadable to the second-pass extractor."""
-        from ..ocr import extract_text as _extract_text
-        with db._lock:
-            rows = db._conn.execute(
-                """SELECT id, library_path, length(extracted_text) AS old_len
-                   FROM documents
-                   WHERE deleted_at IS NULL
-                     AND category IN ('Kontoauszug', 'Bank')
-                     AND library_path IS NOT NULL"""
-            ).fetchall()
-        refreshed: list[dict] = []
-        failed: list[dict] = []
-        for r in rows:
-            doc_id = int(r["id"])
-            path = Path(r["library_path"])
-            if not path.exists():
-                failed.append({"doc_id": doc_id, "error": "file missing"})
-                continue
-            try:
-                ocr_res = _extract_text(path, settings.ocr)
-            except Exception as exc:
-                failed.append({"doc_id": doc_id, "error": str(exc)})
-                continue
-            new_text = ocr_res.text[:200_000]
-            with db._lock:
-                db._conn.execute(
-                    "UPDATE documents SET extracted_text = ?, ocr_used = ? WHERE id = ?",
-                    (new_text, 1 if ocr_res.ocr_used else 0, doc_id),
-                )
-            refreshed.append({
-                "doc_id": doc_id,
-                "old_len": int(r["old_len"] or 0),
-                "new_len": len(new_text),
-            })
-        return {"found": len(rows), "refreshed": refreshed, "failed": failed}
-
-    @app.post("/api/finance/analyze-all")
-    def api_analyze_all_statements():
-        """One-click bulk analysis for every Kontoauszug that does not
-        yet have a populated statement row. Covers two distinct cases
-        the user can hit:
-
-        - Document classified as Kontoauszug but **no statement row**
-          (extraction was skipped at upload time, e.g. the bridge
-          was offline, or local_only blocked a cloud call).
-        - Statement row exists but has **zero transactions** (extraction
-          ran but the model returned an empty/garbled JSON).
-
-        Runs in a background thread so the HTTP request returns
-        instantly. Local 7B inference can spend 30–90 s per statement,
-        and a backlog of dozens would otherwise run past every
-        reasonable HTTP timeout. Poll /api/finance/analyze-progress."""
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        if settings.finance.local_only and not is_local:
-            raise HTTPException(
-                403,
-                "finance.local_only is enabled but the active provider is not local.",
-            )
-        from .. import activity
-        existing = activity.get_job("analyze-statements")
-        if existing.running:
-            return {"started": False, "reason": "already running",
-                    **existing.as_dict()}
-
-        # Two SELECTs unioned manually so we can keep the queries
-        # readable. Both return doc rows with stored OCR text — we
-        # never re-OCR, since /api/finance/reocr-all is the entry
-        # point for that.
-        #
-        # The "missing" leg also catches legacy Bank-tagged docs that
-        # are clearly statements (subject mentions Kontoauszug /
-        # Girokonto / Tagesgeld / Kreditkarte / paypal-auszug, or the
-        # subcategory says Konto). After successful extraction the
-        # worker promotes them to category=Kontoauszug so /finance and
-        # all category filters pick them up — same logic backfill
-        # already uses.
-        with db._lock:
-            missing = db._conn.execute(
-                """SELECT d.id AS doc_id, d.category AS category,
-                          COALESCE(d.subject, d.filename) AS subject,
-                          d.extracted_text AS text,
-                          d.library_path AS library_path
-                   FROM documents d
-                   LEFT JOIN statements s ON s.doc_id = d.id
-                   WHERE d.deleted_at IS NULL
-                     AND s.id IS NULL
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''
-                     AND (
-                       d.category = 'Kontoauszug'
-                       OR (d.category = 'Bank' AND (
-                         d.subcategory = 'Konto'
-                         OR d.subcategory = 'Karte'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kontoauszug%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%girokonto%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%tagesgeld%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kreditkart%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%paypal%auszug%'
-                       ))
-                     )"""
-            ).fetchall()
-            empty = db._conn.execute(
-                """SELECT d.id AS doc_id, d.category AS category,
-                          COALESCE(d.subject, d.filename) AS subject,
-                          d.extracted_text AS text,
-                          d.library_path AS library_path
-                   FROM documents d
-                   JOIN statements s ON s.doc_id = d.id
-                   WHERE d.deleted_at IS NULL
-                     AND COALESCE(s.acknowledged_empty, 0) = 0
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''
-                     AND (
-                       s.id NOT IN (SELECT statement_id FROM transactions)
-                       OR COALESCE(s.extraction_warning, '') != ''
-                     )"""
-            ).fetchall()
-
-        # Dedup on doc_id (a doc could in theory match both queries,
-        # though our schema keeps them disjoint). Order: missing first,
-        # then empty — feels more natural progress-wise.
-        seen: set[int] = set()
-        targets: list[tuple[int, str, str, str, str]] = []  # +library_path
-        for r in list(missing) + list(empty):
-            doc_id = int(r["doc_id"])
-            if doc_id in seen:
-                continue
-            seen.add(doc_id)
-            cat = (r["category"] if "category" in r.keys() else None) or ""
-            targets.append((doc_id, r["subject"] or f"doc {doc_id}",
-                            r["text"], cat, r["library_path"] or ""))
-
-        if not targets:
-            return {"started": False, "reason": "nothing to analyse",
-                    "total": 0, "approved": [], "failed": []}
-
-        do_pseudo = settings.finance.pseudonymize and not is_local
-        activity.start_job("analyze-statements", total=len(targets))
-
-        def worker():
-            from ..finance import StatementExtractor
-            from hashlib import sha256
-            import time as _time
-            extractor = StatementExtractor(
-                classifier.provider, settings.ai.model,
-                max_text_chars=max(settings.ai.max_text_chars, 32000),
-                holder_names=settings.finance.holder_names,
-            )
-            for idx, (doc_id, subject, text, category, library_path) in enumerate(targets):
-                if idx > 0:
-                    _time.sleep(0.6)
-                activity.update_job(
-                    "analyze-statements",
-                    current=str(subject)[:120], current_doc_id=doc_id,
-                )
-                try:
-                    pdf_path = None
-                    if library_path:
-                        p = Path(library_path)
-                        if p.exists() and p.suffix.lower() == ".pdf":
-                            pdf_path = p
-                    stmt = extractor.extract(
-                        text, pseudonymize=do_pseudo,
-                        pdf_path=pdf_path, ocr_settings=settings.ocr,
-                    )
-                    if not stmt.transactions:
-                        # Persist the empty result with whatever
-                        # metadata we got — diag banner will still
-                        # call it out and the user can retry per-doc.
-                        db.upsert_statement(
-                            doc_id, account_id=None,
-                            period_start=stmt.period_start,
-                            period_end=stmt.period_end,
-                            statement_no=stmt.statement_no,
-                            opening_balance=stmt.opening_balance,
-                            closing_balance=stmt.closing_balance,
-                            currency=stmt.currency, file_hash="",
-                            privacy_mode=stmt.privacy_mode,
-                            transactions=[],
-                            extra_json=stmt.raw_response,
-                            extraction_warning=stmt.extraction_warning,
-                        )
-                        job = activity.get_job("analyze-statements")
-                        err = stmt.extraction_warning or "no transactions extracted"
-                        job.failed.append({"doc_id": doc_id, "error": err})
-                        activity.update_job(
-                            "analyze-statements", done=idx + 1,
-                            last_error=("suspicious empty result"
-                                        if stmt.extraction_warning else "empty result"),
-                        )
-                        continue
-                    account_id = None
-                    if stmt.iban_hash:
-                        account_id = db.upsert_account(
-                            bank_name=stmt.bank_name or "Unbekannt",
-                            iban=stmt.iban, iban_last4=stmt.iban_last4,
-                            iban_hash=stmt.iban_hash,
-                            account_holder=stmt.account_holder,
-                            currency=stmt.currency,
-                        )
-                    tx_payload = []
-                    for tx in stmt.transactions:
-                        key = (
-                            (stmt.iban_hash or "no-iban") + "|" +
-                            tx.booking_date + "|" + f"{tx.amount:.2f}" +
-                            "|" + tx.purpose
-                        )
-                        d = tx.as_dict()
-                        d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
-                        tx_payload.append(d)
-                    db.upsert_statement(
-                        doc_id, account_id=account_id,
-                        period_start=stmt.period_start,
-                        period_end=stmt.period_end,
-                        statement_no=stmt.statement_no,
-                        opening_balance=stmt.opening_balance,
-                        closing_balance=stmt.closing_balance,
-                        currency=stmt.currency, file_hash="",
-                        privacy_mode=stmt.privacy_mode,
-                        transactions=tx_payload,
-                        extra_json=stmt.raw_response,
-                        extraction_warning=stmt.extraction_warning,
-                    )
-                    # Promote a legacy Bank-tagged doc to category=
-                    # Kontoauszug now that we've confirmed it's a real
-                    # statement (transactions came back). Same logic
-                    # as backfill_statements.
-                    if category == "Bank":
-                        with db._lock:
-                            db._conn.execute(
-                                "UPDATE documents SET category = 'Kontoauszug', "
-                                "subcategory = '' WHERE id = ?",
-                                (doc_id,),
-                            )
-                            db._conn.commit()
-                    job = activity.get_job("analyze-statements")
-                    job.approved.append(doc_id)
-                    activity.update_job("analyze-statements", done=idx + 1)
-                except Exception as exc:
-                    job = activity.get_job("analyze-statements")
-                    job.failed.append({"doc_id": doc_id, "error": str(exc)})
-                    activity.update_job(
-                        "analyze-statements", done=idx + 1,
-                        last_error=str(exc),
-                    )
-            activity.finish_job("analyze-statements", current="")
-            try:
-                from .. import notifier as _n
-                job = activity.get_job("analyze-statements")
-                ok, fail_n = len(job.approved), len(job.failed)
-                _n.fire(_n.NotificationEvent(
-                    kind="bulk_done",
-                    title=f"Statement analysis done — {ok} ok, {fail_n} failed",
-                    body=f"Processed {ok + fail_n} of {len(targets)} unanalysed Kontoauszüge.",
-                ))
-            except Exception:
-                pass
-
-        threading.Thread(target=worker, name="analyze-statements",
-                         daemon=True).start()
-        return {"started": True,
-                **activity.get_job("analyze-statements").as_dict()}
-
-    @app.get("/api/finance/analyze-progress")
-    def api_analyze_progress():
-        from .. import activity
-        return activity.get_job("analyze-statements").as_dict()
-
-    @app.post("/api/finance/reanalyze-all")
-    def api_reanalyze_all_statements():
-        """Force re-extraction over EVERY Kontoauszug (and Bank-look-
-        alike) document, including ones that already have populated
-        statement rows. Use when a new release ships an extractor
-        improvement and the user wants the existing library refreshed
-        — manual category overrides are preserved by the
-        transaction_category_overrides table.
-
-        Same background worker + activity job as `/analyze-all`, so
-        the existing progress endpoint and dashboard banner both work
-        without changes.
-        """
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        if settings.finance.local_only and not is_local:
-            raise HTTPException(
-                403,
-                "finance.local_only is enabled but the active provider is not local.",
-            )
-        from .bulk_reanalyze import start_reanalyze_all_statements
-        return start_reanalyze_all_statements(settings, db, classifier, force_all=True)
-
-    @app.post("/api/finance/analyze-pause")
-    def api_analyze_pause():
-        """Cooperative pause for the active statement-analysis run.
-        Worker stops after the current document, persists the
-        still-pending doc_ids, and clears `running`."""
-        from .. import activity
-        ok = activity.request_pause("analyze-statements")
-        return {"ok": ok, **activity.get_job("analyze-statements").as_dict()}
-
-    @app.post("/api/finance/analyze-resume")
-    def api_analyze_resume():
-        """Pick up a previously paused (or service-restart-interrupted)
-        run. Reads pending doc_ids from `meta` and starts a fresh
-        worker on those targets only."""
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        from .bulk_reanalyze import start_reanalyze_all_statements, has_resumable_run
-        if not has_resumable_run(db):
-            raise HTTPException(409, "nothing to resume")
-        return start_reanalyze_all_statements(
-            settings, db, classifier, force_all=True, resume=True,
-        )
-
-    @app.get("/api/finance/resumable")
-    def api_finance_resumable():
-        """Cheap pointer: does meta hold a non-empty pending doc_id list?
-        UI uses this to decide whether to surface a Resume button after
-        a service restart."""
-        from .bulk_reanalyze import has_resumable_run
-        return {"resumable": has_resumable_run(db)}
-
-    @app.get("/api/finance/unanalyzed-count")
-    def api_unanalyzed_count():
-        """Cheap count for the UI banner — how many statement-shaped
-        docs still need a populated statement row? Includes legacy
-        Bank-tagged docs that look like statements (subject mentions
-        Kontoauszug / Girokonto / Tagesgeld / Kreditkarte / paypal-auszug)
-        — those get promoted to category=Kontoauszug after extraction."""
-        with db._lock:
-            missing = db._conn.execute(
-                """SELECT COUNT(*) AS n FROM documents d
-                   LEFT JOIN statements s ON s.doc_id = d.id
-                   WHERE d.deleted_at IS NULL
-                     AND s.id IS NULL
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''
-                     AND (
-                       d.category = 'Kontoauszug'
-                       OR (d.category = 'Bank' AND (
-                         d.subcategory = 'Konto'
-                         OR d.subcategory = 'Karte'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kontoauszug%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%girokonto%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%tagesgeld%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kreditkart%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%paypal%auszug%'
-                       ))
-                     )"""
-            ).fetchone()
-            empty = db._conn.execute(
-                """SELECT COUNT(*) AS n FROM documents d
-                   JOIN statements s ON s.doc_id = d.id
-                   WHERE d.deleted_at IS NULL
-                     AND d.category = 'Kontoauszug'
-                     AND COALESCE(s.acknowledged_empty, 0) = 0
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''
-                     AND (
-                       s.id NOT IN (SELECT statement_id FROM transactions)
-                       OR COALESCE(s.extraction_warning, '') != ''
-                     )"""
-            ).fetchone()
-            total = db._conn.execute(
-                """SELECT COUNT(*) AS n FROM documents d
-                   WHERE d.deleted_at IS NULL
-                     AND (
-                       d.category = 'Kontoauszug'
-                       OR (d.category = 'Bank' AND (
-                         d.subcategory = 'Konto'
-                         OR d.subcategory = 'Karte'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kontoauszug%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%girokonto%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%tagesgeld%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%kreditkart%'
-                         OR LOWER(COALESCE(d.subject,'')) LIKE '%paypal%auszug%'
-                       ))
-                     )"""
-            ).fetchone()
-        return {"missing": int(missing["n"] if missing else 0),
-                "empty":   int(empty["n"]   if empty   else 0),
-                "total":   int(total["n"]   if total   else 0)}
-
     @app.get("/api/document/{doc_id}/status")
     def api_doc_status(doc_id: int):
         """Snapshot of everything the document page needs to render the
@@ -2109,142 +1116,6 @@ def create_app(
             "receipt":   receipt,
             "bulk":      bulk_status,
         }
-
-    @app.post("/api/document/{doc_id}/statement/dismiss-empty")
-    def api_dismiss_empty_statement(doc_id: int):
-        """Mark this statement as 'genuinely empty, stop nagging about
-        it'. The diag banner and the bulk-analyse counter will skip
-        it from now on. Reversible by clicking 'Erneut auswerten' on
-        the document page — that flips the flag back to 0 and runs
-        extraction afresh."""
-        with db._lock:
-            row = db._conn.execute(
-                "SELECT id FROM statements WHERE doc_id = ?", (doc_id,),
-            ).fetchone()
-            if not row:
-                raise HTTPException(404, "no statement row for this doc")
-            db._conn.execute(
-                "UPDATE statements SET acknowledged_empty = 1 WHERE doc_id = ?",
-                (doc_id,),
-            )
-            db._conn.commit()
-        return {"ok": True, "doc_id": doc_id}
-
-    @app.post("/api/finance/reextract-empty")
-    def api_reextract_empty():
-        """One-click bulk re-extraction for every statement that came
-        back without any transactions. Cheaper than --backfill-statements
-        because it doesn't touch already-extracted statements; uses the
-        stored OCR text so no re-OCR cost either."""
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        if settings.finance.local_only and not is_local:
-            raise HTTPException(
-                403,
-                "finance.local_only is enabled but the active provider is not local.",
-            )
-        do_pseudo = settings.finance.pseudonymize and not is_local
-
-        from ..finance import StatementExtractor
-        from hashlib import sha256
-        import time as _time
-
-        extractor = StatementExtractor(
-            classifier.provider, settings.ai.model,
-            max_text_chars=max(settings.ai.max_text_chars, 32000),
-            holder_names=settings.finance.holder_names,
-        )
-
-        with db._lock:
-            empty_rows = db._conn.execute(
-                """SELECT s.doc_id, d.extracted_text
-                   FROM statements s
-                   JOIN documents d ON d.id = s.doc_id
-                   WHERE d.deleted_at IS NULL
-                     AND COALESCE(s.acknowledged_empty, 0) = 0
-                     AND s.id NOT IN (SELECT statement_id FROM transactions)
-                     AND d.extracted_text IS NOT NULL AND d.extracted_text != ''"""
-            ).fetchall()
-
-        recovered: list[int] = []
-        still_empty: list[int] = []
-        failed: list[dict] = []
-        for idx, row in enumerate(empty_rows):
-            if idx > 0:
-                _time.sleep(1.5)   # gentle pacing for rate limits
-            doc_id = int(row["doc_id"])
-            try:
-                stmt = extractor.extract(row["extracted_text"], pseudonymize=do_pseudo)
-            except Exception as exc:
-                failed.append({"doc_id": doc_id, "error": str(exc)})
-                continue
-            if not stmt.transactions:
-                still_empty.append(doc_id)
-                continue
-            account_id = None
-            if stmt.iban_hash:
-                account_id = db.upsert_account(
-                    bank_name=stmt.bank_name or "Unbekannt",
-                    iban=stmt.iban, iban_last4=stmt.iban_last4,
-                    iban_hash=stmt.iban_hash, account_holder=stmt.account_holder,
-                    currency=stmt.currency,
-                )
-            tx_payload = []
-            for tx in stmt.transactions:
-                key = (
-                    (stmt.iban_hash or "no-iban") + "|" + tx.booking_date + "|"
-                    + f"{tx.amount:.2f}" + "|" + tx.purpose
-                )
-                d = tx.as_dict()
-                d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
-                tx_payload.append(d)
-            db.upsert_statement(
-                doc_id, account_id=account_id,
-                period_start=stmt.period_start, period_end=stmt.period_end,
-                statement_no=stmt.statement_no,
-                opening_balance=stmt.opening_balance,
-                closing_balance=stmt.closing_balance,
-                currency=stmt.currency, file_hash="",
-                privacy_mode=stmt.privacy_mode,
-                transactions=tx_payload, extra_json=stmt.raw_response,
-                extraction_warning=stmt.extraction_warning,
-            )
-            recovered.append(doc_id)
-        return {
-            "found": len(empty_rows),
-            "recovered": recovered,
-            "still_empty": still_empty,
-            "failed": failed,
-        }
-
-    @app.post("/api/finance/backfill-statements")
-    def api_backfill_statements():
-        """Run the full statement backfill — picks up every Kontoauszug
-        / legacy Bank doc that has stored OCR text but NO statement row
-        yet, and runs the extractor on it. Recovery path for the data
-        loss caused by 0.15.1's startup cleanup. Idempotent thanks to
-        the tx_hash unique constraint, so it's safe to call repeatedly.
-        Same per-call rate-limit pacing as the CLI flag."""
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        if settings.finance.local_only and not is_local:
-            raise HTTPException(
-                403,
-                "finance.local_only is enabled but the active provider is not local.",
-            )
-        from ..finance.extractor import backfill_statements
-        local_only = settings.finance.local_only and is_local
-        try:
-            result = backfill_statements(
-                settings, db, classifier,
-                dry_run=False, local_only=local_only,
-            )
-        except Exception as exc:
-            logger.exception("Statement backfill via API failed")
-            raise HTTPException(500, f"backfill failed: {exc}")
-        return result
 
     @app.delete("/api/finance/account/{account_id}")
     def api_delete_account(account_id: int):
@@ -2381,7 +1252,7 @@ def create_app(
                     raise HTTPException(400, f"tx_type must be one of {list(TX_TYPES)}")
                 updates[k] = t
             elif k in ("booking_date", "value_date"):
-                from ..finance.extractor import _normalise_date
+                from ..finance.dates import normalise_date as _normalise_date
                 updates[k] = _normalise_date(str(v or "").strip())
             else:
                 updates[k] = str(v or "").strip()[:500]
@@ -2424,30 +1295,25 @@ def create_app(
             raise HTTPException(404, f"transaction {tx_id} not found")
         return {"ok": True, "deleted": 1, "tx_id": tx_id}
 
-    @app.post("/api/statement/{stmt_id}/transaction")
-    def api_transaction_create(stmt_id: int, payload: dict = Body(...)):
-        """Add a new transaction to an existing statement. Required
-        body fields: booking_date, amount. Optional: value_date,
+    @app.post("/api/account/{account_id}/transaction")
+    def api_transaction_create(account_id: int, payload: dict = Body(...)):
+        """Add a manual transaction to an account. Required body
+        fields: booking_date, amount. Optional: value_date,
         counterparty, counterparty_iban, purpose, tx_type, category.
 
-        Used when the OCR / parser missed a row and the user wants
-        to type it in. The new tx joins the statement's account, so
-        cross-statement dedup keeps working."""
+        Used when a CSV import missed a booking and the user wants
+        to enter it by hand."""
         from ..finance.categories import TX_CATEGORIES, TX_TYPES
-        from ..finance.extractor import _normalise_date
+        from ..finance.dates import normalise_date as _normalise_date
         from hashlib import sha256
         if not isinstance(payload, dict):
             raise HTTPException(400, "payload must be an object")
         with db._lock:
-            stmt = db._conn.execute(
-                "SELECT s.*, a.iban_hash AS account_iban_hash "
-                "FROM statements s "
-                "LEFT JOIN accounts a ON a.id = s.account_id "
-                "WHERE s.id = ?",
-                (stmt_id,),
+            account = db._conn.execute(
+                "SELECT * FROM accounts WHERE id = ?", (account_id,),
             ).fetchone()
-        if stmt is None:
-            raise HTTPException(404, f"statement {stmt_id} not found")
+        if account is None:
+            raise HTTPException(404, f"account {account_id} not found")
 
         try:
             amount = round(float(payload.get("amount")), 2)
@@ -2469,7 +1335,7 @@ def create_app(
         if category and category not in TX_CATEGORIES:
             raise HTTPException(400, f"category must be one of {list(TX_CATEGORIES)}")
 
-        h_iban = stmt["account_iban_hash"] or "no-iban"
+        h_iban = account["iban_hash"] or "no-iban"
         key = f"{h_iban}|{booking_date}|{amount:.2f}|{purpose}"
         tx_hash = sha256(key.encode("utf-8")).hexdigest()
 
@@ -2480,9 +1346,9 @@ def create_app(
                     " booking_date, value_date, amount, currency, "
                     " counterparty, counterparty_iban, purpose, tx_type, "
                     " category, tx_hash) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (stmt_id, stmt["account_id"], booking_date, value_date,
-                     amount, stmt["currency"] or "EUR", counterparty,
+                    "VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?)",
+                    (account_id, booking_date, value_date,
+                     amount, account["currency"] or "EUR", counterparty,
                      counterparty_iban, purpose, tx_type or "sonstiges",
                      category or "sonstiges", tx_hash),
                 )
@@ -2490,6 +1356,79 @@ def create_app(
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(500, f"insert failed: {exc}") from exc
         return {"ok": True, "tx_id": cur.lastrowid, "tx_hash": tx_hash}
+
+    @app.post("/api/finance/import-csv")
+    async def api_finance_import_csv(request: Request):
+        """Import a Sparkasse-CSV export.
+
+        Accepts either:
+        - `multipart/form-data` with one or more files in the `files`
+          field — typical from a `<input type=file multiple>` upload
+        - raw CSV body (`text/csv` or `text/plain`) — the simplest
+          curl-friendly form
+
+        Each file produces an `ImportReport` with `rows_inserted`,
+        `rows_duplicate`, `rows_invalid`, `accounts_touched`. Dedup
+        is automatic (UNIQUE constraint on `transactions.tx_hash`)
+        so re-importing an overlapping CSV is a safe no-op.
+        """
+        from ..finance.csv_import import import_csv
+        ct = (request.headers.get("content-type") or "").lower()
+        reports: list[dict] = []
+        if ct.startswith("multipart/"):
+            form = await request.form()
+            files = form.getlist("files")
+            if not files:
+                # Some browsers post a single "file" field name.
+                files = form.getlist("file")
+            if not files:
+                raise HTTPException(400, "no files in upload")
+            for f in files:
+                if not hasattr(f, "filename"):
+                    continue
+                data = await f.read()
+                try:
+                    rep = import_csv(db, data, file_label=f.filename or "")
+                except Exception as exc:  # noqa: BLE001
+                    raise HTTPException(500, f"import {f.filename!r}: {exc}") from exc
+                reports.append(_report_to_dict(rep))
+        else:
+            body = await request.body()
+            if not body:
+                raise HTTPException(400, "request body is empty")
+            try:
+                rep = import_csv(db, body, file_label="(uploaded)")
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(500, f"import failed: {exc}") from exc
+            reports.append(_report_to_dict(rep))
+
+        total_inserted = sum(r["rows_inserted"] for r in reports)
+        total_dup = sum(r["rows_duplicate"] for r in reports)
+        return {
+            "files":           reports,
+            "total_inserted":  total_inserted,
+            "total_duplicate": total_dup,
+        }
+
+    @app.post("/api/finance/reset")
+    def api_finance_reset(payload: dict = Body(default={})):
+        """Wipe transactions / statements / accounts so the user can
+        re-import their CSV exports from a clean slate. Requires
+        explicit confirmation: pass `{"confirm": true}`. Pass
+        `{"dry_run": true}` for a preview."""
+        from ..finance.reset import reset_finance_data
+        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
+        confirmed = bool(payload.get("confirm") or False) if isinstance(payload, dict) else False
+        if not dry and not confirmed:
+            raise HTTPException(
+                400,
+                "Pass {\"confirm\": true} to actually wipe, or "
+                "{\"dry_run\": true} to preview.",
+            )
+        try:
+            return reset_finance_data(db, dry_run=dry)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"reset failed: {type(exc).__name__}: {exc}") from exc
 
     @app.post("/api/transactions/categorize")
     def api_transactions_categorize(payload: dict):
@@ -2565,312 +1504,6 @@ def create_app(
             "review_before_send": review_before_send,
         }
 
-    @app.get("/api/document/{doc_id}/statement/preview")
-    def api_statement_preview(doc_id: int):
-        """Show the user EXACTLY what would leave the box for this
-        document if they triggered statement extraction right now.
-
-        Returns the pseudonymised OCR text (the bytes that hit the LLM),
-        plus the reverse map and counts of each token kind. Cheap: no
-        LLM call, just runs the local pseudonymiser on stored OCR text.
-
-        The reverse map values are the user's REAL data, so this
-        endpoint stays local-only by design — the values are never
-        included in any API call to a third party."""
-        from ..finance import Pseudonymizer
-        doc = db.get(doc_id)
-        if not doc:
-            raise HTTPException(404, "document not found")
-        text = doc.get("extracted_text") or ""
-        if not text:
-            raise HTTPException(400, "no OCR text stored — re-classify first")
-
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        will_pseudonymize = settings.finance.pseudonymize and not is_local
-        will_skip = settings.finance.local_only and not is_local
-
-        if will_pseudonymize:
-            pseudo = Pseudonymizer()
-            if settings.finance.holder_names:
-                pseudo.seed_household_names(settings.finance.holder_names)
-            pseudo_text = pseudo.pseudonymize(text)
-            counts: dict[str, int] = {}
-            for tok in pseudo.reverse_map:
-                kind = tok.split("_")[0]
-                counts[kind] = counts.get(kind, 0) + 1
-            return {
-                "privacy_mode": "pseudonymize",
-                "provider": settings.ai.provider,
-                "model": settings.ai.model,
-                "will_skip": will_skip,
-                "char_count_original":      len(text),
-                "char_count_to_be_sent":    len(pseudo_text),
-                "text_to_be_sent":          pseudo_text,
-                "reverse_map":              pseudo.reverse_map,
-                "token_counts":             counts,
-                "ibans_detected":           pseudo.ibans,
-            }
-        # Either local-only or pseudonymisation disabled — be honest
-        # about what travels.
-        return {
-            "privacy_mode": "local" if is_local else "plain",
-            "provider": settings.ai.provider,
-            "model": settings.ai.model,
-            "will_skip": will_skip,
-            "char_count_original":   len(text),
-            "char_count_to_be_sent": len(text),
-            "text_to_be_sent":       text,
-            "reverse_map":           {},
-            "token_counts":          {},
-            "ibans_detected":        [],
-        }
-
-    @app.post("/api/document/{doc_id}/statement/extract")
-    def api_extract_statement(doc_id: int):
-        """Manually re-trigger statement extraction for a Kontoauszug
-        document — useful after a config change or when the first run
-        failed."""
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        doc = db.get(doc_id)
-        if not doc:
-            raise HTTPException(404, "document not found")
-        # Block duplicate clicks: if an extraction is already running for
-        # this doc, surface a 409 instead of letting two LLM calls race.
-        if not _doc_job_start(doc_id, "statement"):
-            raise HTTPException(
-                409,
-                "extraction already running for this document — wait for the "
-                "current run to finish before retrying",
-            )
-        try:
-            return _run_statement_extract(doc_id, doc)
-        finally:
-            _doc_job_end(doc_id)
-
-    def _run_statement_extract(doc_id: int, doc: dict) -> dict:
-        text = doc.get("extracted_text") or ""
-        if not text:
-            # Old imports never persisted the OCR text. Recover it from
-            # the on-disk file so the user doesn't have to first run a
-            # full re-classification just to populate the column.
-            src = Path(doc.get("library_path") or doc.get("processed_path") or "")
-            if not src.exists():
-                raise HTTPException(
-                    400,
-                    "no OCR text stored and the source file is missing — "
-                    "cannot recover automatically",
-                )
-            from ..ocr import extract_text as _ocr
-            try:
-                ocr_res = _ocr(src, settings.ocr)
-            except Exception as exc:
-                logger.exception("Fallback OCR failed for %d", doc_id)
-                raise HTTPException(500, f"OCR failed: {exc}")
-            text = (ocr_res.text or "").strip()
-            if not text:
-                raise HTTPException(
-                    400,
-                    "OCR returned no text — the file may be empty or unreadable",
-                )
-            with db._lock:
-                db._conn.execute(
-                    "UPDATE documents SET extracted_text = ? WHERE id = ?",
-                    (text[: max(settings.ai.max_text_chars, 200_000)], doc_id),
-                )
-                db._conn.commit()
-            logger.info("doc %d: filled missing extracted_text via fallback OCR (%d chars)",
-                        doc_id, len(text))
-        from ..finance import StatementExtractor
-        from hashlib import sha256
-        is_local = settings.ai.provider in ("openai_compat", "bridge")
-        if settings.finance.local_only and not is_local:
-            raise HTTPException(
-                403,
-                "finance.local_only is enabled but the active provider is not local. "
-                "Switch to a local provider in /setup or turn off local-only.",
-            )
-        do_pseudo = settings.finance.pseudonymize and not is_local
-        extractor = StatementExtractor(
-            classifier.provider, settings.ai.model,
-            max_text_chars=max(settings.ai.max_text_chars, 32000),
-            holder_names=settings.finance.holder_names,
-        )
-        # Resolve the on-disk PDF so per-page extraction can fire — the
-        # extractor only switches modes when pdf_path AND ocr_settings
-        # are both provided. Without them every long statement falls
-        # back to single-pass and gets truncated at the model's output
-        # budget (e.g. a 9-page Kontoauszug stops mid-transaction).
-        pdf_path = None
-        lib = doc.get("library_path") or doc.get("processed_path") or ""
-        if lib:
-            p = Path(lib)
-            if p.exists() and p.suffix.lower() == ".pdf":
-                pdf_path = p
-        def _on_page(cur: int, tot: int) -> None:
-            _doc_job_progress(doc_id, current_page=cur, total_pages=tot)
-        try:
-            stmt = extractor.extract(
-                text, pseudonymize=do_pseudo,
-                pdf_path=pdf_path, ocr_settings=settings.ocr,
-                on_page_progress=_on_page,
-            )
-        except Exception as exc:
-            logger.exception("Statement extract failed for %d", doc_id)
-            raise HTTPException(500, f"extract failed: {exc}")
-        account_id = None
-        if stmt.iban_hash:
-            account_id = db.upsert_account(
-                bank_name=stmt.bank_name or "Unbekannt",
-                iban=stmt.iban, iban_last4=stmt.iban_last4,
-                iban_hash=stmt.iban_hash, account_holder=stmt.account_holder,
-                currency=stmt.currency,
-            )
-        tx_payload = []
-        for tx in stmt.transactions:
-            key = (
-                (stmt.iban_hash or "no-iban") + "|" + tx.booking_date + "|"
-                + f"{tx.amount:.2f}" + "|" + tx.purpose
-            )
-            d = tx.as_dict()
-            d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
-            tx_payload.append(d)
-        db.upsert_statement(
-            doc_id, account_id=account_id,
-            period_start=stmt.period_start, period_end=stmt.period_end,
-            statement_no=stmt.statement_no,
-            opening_balance=stmt.opening_balance,
-            closing_balance=stmt.closing_balance,
-            currency=stmt.currency, file_hash="",
-            privacy_mode=stmt.privacy_mode,
-            transactions=tx_payload, extra_json=stmt.raw_response,
-            extraction_warning=stmt.extraction_warning,
-        )
-        # If this doc was waiting in the review queue, promote it to
-        # 'filed' now that the user has approved + extraction succeeded.
-        if (doc.get("status") or "") == "pending_review":
-            with db._lock:
-                db._conn.execute(
-                    "UPDATE documents SET status = 'filed' WHERE id = ?",
-                    (doc_id,),
-                )
-        return {
-            "ok": True, "transactions": len(stmt.transactions),
-            "bank": stmt.bank_name,
-            "period": [stmt.period_start, stmt.period_end],
-            "privacy_mode": stmt.privacy_mode,
-        }
-
-    @app.post("/api/document/{doc_id}/statement/skip")
-    def api_skip_statement(doc_id: int):
-        """User opened the review preview, decided NOT to send this
-        statement to the AI, and wants it out of the queue. The doc
-        keeps its category but transitions to 'filed' so the pending
-        banner stops flagging it. No LLM call is made."""
-        doc = db.get(doc_id)
-        if not doc:
-            raise HTTPException(404, "document not found")
-        with db._lock:
-            db._conn.execute(
-                "UPDATE documents SET status = 'filed' WHERE id = ?",
-                (doc_id,),
-            )
-        return {"ok": True, "doc_id": doc_id, "status": "filed"}
-
-    @app.get("/api/finance/pending-review")
-    def api_pending_review():
-        """Lightweight polling endpoint: list of Kontoauszug docs that
-        are paused waiting for the user's approval. Powers the
-        self-refreshing banner on /finance."""
-        with db._lock:
-            rows = db._conn.execute(
-                """SELECT id AS doc_id, COALESCE(subject, filename) AS subject,
-                          doc_date, sender
-                   FROM documents
-                   WHERE status = 'pending_review'
-                     AND category = 'Kontoauszug'
-                     AND deleted_at IS NULL
-                   ORDER BY doc_date DESC, id DESC"""
-            ).fetchall()
-        return {"items": [dict(r) for r in rows]}
-
-    @app.post("/api/finance/approve-all-pending")
-    def api_approve_all_pending():
-        """Bulk-release every Kontoauszug currently in the review queue.
-        Returns immediately with a job descriptor; the actual extraction
-        runs in a background thread. Poll /api/finance/approve-progress
-        to follow along."""
-        if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
-        from .. import activity
-        existing = activity.get_job("approve-pending")
-        if existing.running:
-            return {
-                "started": False, "reason": "already running",
-                **existing.as_dict(),
-            }
-        with db._lock:
-            rows = db._conn.execute(
-                """SELECT id, COALESCE(subject, filename) AS subject FROM documents
-                   WHERE status = 'pending_review' AND deleted_at IS NULL
-                     AND category = 'Kontoauszug'
-                   ORDER BY created_at ASC"""
-            ).fetchall()
-        if not rows:
-            return {"started": False, "reason": "queue empty",
-                    "total": 0, "approved": [], "failed": []}
-
-        doc_ids = [(int(r["id"]), r["subject"] or f"doc {r['id']}") for r in rows]
-        activity.start_job("approve-pending", total=len(doc_ids))
-
-        def worker():
-            import time as _time
-            for idx, (doc_id, subject) in enumerate(doc_ids):
-                # Re-read the latest state in case the user navigated
-                # away and triggered a stop, or the doc got deleted.
-                if idx > 0:
-                    _time.sleep(1.5)   # rate-limit pacing
-                activity.update_job(
-                    "approve-pending",
-                    current=str(subject)[:120], current_doc_id=doc_id,
-                )
-                try:
-                    api_extract_statement(doc_id)
-                    job = activity.get_job("approve-pending")
-                    job.approved.append(doc_id)
-                    activity.update_job("approve-pending", done=idx + 1)
-                except HTTPException as exc:
-                    job = activity.get_job("approve-pending")
-                    job.failed.append({"doc_id": doc_id, "error": str(exc.detail)})
-                    activity.update_job(
-                        "approve-pending", done=idx + 1,
-                        last_error=str(exc.detail),
-                    )
-                    # Stop on hard errors (rate limit, spending cap) so
-                    # we don't burn through more docs against the same wall.
-                    if exc.status_code in (429, 503, 403):
-                        break
-                except Exception as exc:
-                    job = activity.get_job("approve-pending")
-                    job.failed.append({"doc_id": doc_id, "error": str(exc)})
-                    activity.update_job(
-                        "approve-pending", done=idx + 1, last_error=str(exc),
-                    )
-            activity.finish_job("approve-pending", current="")
-
-        threading.Thread(target=worker, name="approve-pending",
-                         daemon=True).start()
-        snapshot = activity.get_job("approve-pending").as_dict()
-        return {"started": True, **snapshot}
-
-    @app.get("/api/finance/approve-progress")
-    def api_approve_progress():
-        """Live progress of the currently-running (or last completed)
-        approve-pending job — drives the live progress bar in the UI."""
-        from .. import activity
-        return activity.get_job("approve-pending").as_dict()
-
-    # ----------------------------------------------------------- Duplicates
     @app.get("/duplicates", response_class=HTMLResponse)
     def duplicates_page(request: Request):
         groups = _duplicate_groups()

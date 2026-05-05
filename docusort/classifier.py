@@ -394,119 +394,11 @@ def _parse_response(raw: str) -> dict[str, Any]:
 _LOCAL_PROVIDERS = ("openai_compat", "bridge")
 
 
-# Subjects that mark a "Bank" doc as actually a bank statement, in
-# which case we promote category=Bank → category=Kontoauszug. The
-# finance pipeline keys off "Kontoauszug" specifically — leaving a
-# statement at "Bank/Konto" hides it from /finance and from the
-# bulk re-analyze worker until a manual recategorisation.
-_KONTOAUSZUG_SUBJECT_HINTS = (
-    "kontoauszug", "girokonto", "tagesgeld", "kreditkart",
-    "paypal-auszug", "paypal auszug", "depotauszug",
-)
-_KONTOAUSZUG_SUBCATS = {"konto", "karte"}
-
-# Categories that we treat as "could be anything"  — when the OCR text
-# clearly shows a bank-statement layout (IBAN + period + booking lines)
-# we override the LLM's guess and route the doc through the finance
-# pipeline. Without this an LLM that hits its token cap or returns
-# low confidence will dump statements into Sonstiges, where /finance
-# never sees them.
-_PROMOTABLE_CATEGORIES = {
-    "Bank", "Sonstiges", "Rechnungen", "Vertraege", "Steuer",
-}
-
-_IBAN_RE = re.compile(r"\bDE\s?\d{2}[\s\d]{18,28}\b", re.IGNORECASE)
-_BALANCE_RE = re.compile(
-    r"\b(anfangssaldo|endsaldo|alter\s+saldo|neuer\s+saldo|"
-    r"alter\s+kontostand|neuer\s+kontostand|saldo\s+vortrag|"
-    r"übertrag|kontostand|saldo\s+alt|saldo\s+neu)\b",
-    re.IGNORECASE,
-)
-_BOOKING_KEYWORDS_RE = re.compile(
-    r"\b(sepa[-\s]?lastschrift|sepa[-\s]?überweisung|dauerauftrag|"
-    r"kartenzahlung|gutschrift|lastschrifteinzug|bargeldauszahlung|"
-    r"habenzinsen|sollzinsen|kontoführungsentgelt|auszug[-\s]?nr|"
-    r"buchungstag|valuta|wertstellung|verwendungszweck)\b",
-    re.IGNORECASE,
-)
-_BANK_NAME_RE = re.compile(
-    r"\b(sparkasse|volksbank|raiffeisenbank|postbank|commerzbank|"
-    r"deutsche\s+bank|hypovereinsbank|targobank|comdirect|consorsbank|"
-    r"dkb|ing[-\s]?diba|ing\s+bank|n26|santander|paypal[-\s]?kontoauszug|"
-    r"kreditkartenabrechnung)\b",
-    re.IGNORECASE,
-)
-
-
-def text_looks_like_kontoauszug(text: str) -> bool:
-    """Heuristic: does the OCR text look like a bank statement?
-
-    True when the document has the structural shape of a Kontoauszug —
-    IBAN plus either a balance label or several booking-row keywords,
-    or a known bank name plus booking keywords. Designed to be
-    conservative: a single hit isn't enough, we want corroboration so
-    a contract that happens to mention "IBAN" doesn't get promoted.
-    """
-    if not text:
-        return False
-    sample = text[:20000]
-    has_iban = bool(_IBAN_RE.search(sample))
-    has_balance = bool(_BALANCE_RE.search(sample))
-    bookings = len(_BOOKING_KEYWORDS_RE.findall(sample))
-    has_bank = bool(_BANK_NAME_RE.search(sample))
-    if has_iban and (has_balance or bookings >= 3):
-        return True
-    if has_bank and has_balance and bookings >= 2:
-        return True
-    if has_balance and bookings >= 4:
-        return True
-    return False
-
-
-def maybe_promote_to_kontoauszug(
-    cls: "Classification", text: str | None = None,
-) -> "Classification":
-    """Mutate a Classification to category=Kontoauszug when it looks
-    like a bank statement.
-
-    Three promotion paths:
-    1. category=Bank with a kontoauszug-shaped subcategory or subject
-       (the original v0.27.11 behaviour).
-    2. Any promotable category (Sonstiges, Rechnungen, Vertraege, Steuer,
-       Bank) when the OCR text shows the structural Kontoauszug shape.
-    3. Subject hints alone when the doc is in a promotable category —
-       catches cases where the LLM dumped to Sonstiges with confidence
-       0.4 but still wrote "Kontoauszug 03/2024" into the subject.
-
-    Mutates and returns the same instance for caller convenience."""
-    cat = (cls.category or "").strip()
-    sub = (cls.subcategory or "").strip().lower()
-    subj_lower = (cls.subject or "").lower()
-    tags_lower = " ".join((cls.tags or [])).lower()
-
-    if cat == "Bank":
-        looks_like_statement = (
-            sub in _KONTOAUSZUG_SUBCATS
-            or any(h in subj_lower for h in _KONTOAUSZUG_SUBJECT_HINTS)
-            or any(h in tags_lower for h in _KONTOAUSZUG_SUBJECT_HINTS)
-        )
-        if looks_like_statement:
-            cls.category = "Kontoauszug"
-            cls.subcategory = ""
-            return cls
-
-    if cat in _PROMOTABLE_CATEGORIES and cat != "Kontoauszug":
-        if text and text_looks_like_kontoauszug(text):
-            cls.category = "Kontoauszug"
-            cls.subcategory = ""
-            return cls
-        if any(h in subj_lower for h in _KONTOAUSZUG_SUBJECT_HINTS) or \
-           any(h in tags_lower for h in _KONTOAUSZUG_SUBJECT_HINTS):
-            cls.category = "Kontoauszug"
-            cls.subcategory = ""
-            return cls
-
-    return cls
+# v0.33.0 removed the Kontoauszug-promotion heuristics that used to
+# live here. Bank statements no longer feed an extraction pipeline —
+# they're just classified documents like everything else, and the
+# user uploads CSV exports separately for transaction data. Whatever
+# the LLM picks for category stands.
 
 
 class Classifier:
@@ -532,18 +424,14 @@ class Classifier:
         self.pseudonymize = pseudonymize
 
     def classify(self, text: str) -> Classification:
-        # Pseudonymise OCR text before it leaves the box, the same way
-        # the bank-statement extractor does. Names from
-        # `finance.holder_names`, plus structurally-detected addresses
-        # / IBANs / emails, get replaced with stable tokens. The
-        # response fields are restored locally before storage.
-        is_local = self.provider.name in _LOCAL_PROVIDERS
-        do_pseudo = self.pseudonymize and not is_local
+        # v0.33.0 removed the LLM-pseudonymisation path along with
+        # the rest of the statement-extraction module. The
+        # classifier prompt itself is generic ("what kind of
+        # document is this?") and isn't tied to any specific PII
+        # the way the bank-statement extractor was. If you later
+        # want pre-cloud masking back, hook it here.
         body = text
         pseudo = None
-        if do_pseudo:
-            from .finance.pseudonymizer import pseudonymize_for_cloud
-            body, pseudo = pseudonymize_for_cloud(text, self.holder_names)
 
         user = _build_user_message(body, self.settings.max_text_chars)
         logger.debug("Calling %s model=%s, text_len=%d, pseudo=%s",

@@ -2,6 +2,87 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.33.0] – 2026-05-05
+
+### Removed — All Kontoauszug-extraction code
+
+The two-month effort to extract transactions from PDF/OCR was the
+wrong shape — the LLM hallucinated, the regex parser rejected most
+real exports, and the dedup tools couldn't keep up with reality.
+v0.33.0 strips it ALL:
+
+- `docusort/finance/parser/` (every per-bank layout) — gone
+- `docusort/finance/extractor.py` (StatementExtractor, page-by-page
+  LLM extraction, single-pass fallback) — gone
+- `docusort/finance/ask.py` (LLM Q&A over transactions) — gone
+- `docusort/finance/salvage.py` (audit, dedupe, rescale-amounts,
+  align-dates, parse-all, uncategorize-non-statements) — gone
+- `docusort/finance/pseudonymizer.py` — gone
+- `docusort/web/bulk_reanalyze.py` (bulk-reanalyze worker, paused/
+  resumable jobs) — gone
+- 31 obsolete `/api/finance/*` and `/api/document/*/statement/*`
+  endpoints — removed (≈1300 lines)
+- The Statement-Card on `/document/{id}` (preview, extract,
+  re-extract, deterministic-parse, manual editor) — removed
+- The Audit / Komma-Skalierung / Frag-deine-Buchungen blocks on
+  `/finance` — removed
+
+`maybe_promote_to_kontoauszug` and `text_looks_like_kontoauszug`
+also dropped — bank statements are now just regular classified
+documents with no special second-pass handling.
+
+### Added — CSV-driven transaction import
+
+- `docusort/finance/csv_import.py` parses Sparkasse Online-Banking
+  CSV exports (Giro AND Tagesgeld share the same shape:
+  `Auftragskonto;Buchungstag;Valutadatum;Buchungstext;Verwendungszweck;
+  Glaeubiger ID;Mandatsreferenz;Kundenreferenz;Sammlerreferenz;…;
+  Betrag;Waehrung;Info`). UTF-8 / CP1252 / ISO-8859-1 auto-detect.
+  Headers normalised so "Glaeubiger ID" / "Glaeubiger-ID" /
+  "GlaeubigerID" all map.
+- Dedup: tx_hash = SHA256(iban_hash + booking_date + amount +
+  purpose + sammlerreferenz). UNIQUE constraint on
+  `transactions.tx_hash` makes re-importing a CSV that overlaps a
+  previous one a safe no-op for the overlap rows.
+- `POST /api/finance/import-csv` accepts multipart/form-data
+  uploads (multiple files at once via `<input multiple>`) OR a raw
+  CSV body. Returns per-file `ImportReport` with rows_inserted /
+  rows_duplicate / rows_invalid / accounts_touched / period.
+- `/finance` UI: drop-zone-style "CSV importieren"-Card at the
+  top, always visible. After upload the report appears inline:
+  "X neu, Y schon vorhanden, Z ungültig" per file.
+- Light tx_type / category heuristics from the CSV
+  `Buchungstext` + `Verwendungszweck` (no LLM): SEPA-Lastschrift,
+  Kartenzahlung, Lohn/Gehalt, Sparkasse-typical Wertpapier rows,
+  plus merchant-name → category buckets (Lidl/Aldi → lebensmittel,
+  Stadtwerke/EnBW → nebenkosten, MediaMarkt → elektronik, …).
+
+### Added — Hard-reset for finance data
+
+- One-shot migration runs once per DB on the v0.33.0 service
+  start: drops every `transactions` / `statements` / `accounts`
+  row so the user can rebuild from CSV imports without legacy LLM
+  bookings polluting the totals.
+- `POST /api/finance/reset` for explicit re-wipes (requires
+  `{"confirm": true}` in the body).
+- "Wartung — alles auf null setzen" toggle on `/finance` exposes
+  the same to the user.
+
+### Changed — `/finance` empty state
+
+Until the user has imported at least one CSV, `/finance` shows a
+single empty-state card pointing at the importer. No charts, no
+fake stats. Stat tiles, cashflow chart, accounts list and recent
+transactions appear only after data exists.
+
+### Changed — Manual transaction add endpoint
+
+`POST /api/statement/{stmt_id}/transaction` is now
+`POST /api/account/{account_id}/transaction`. Statements are no
+longer the entry point.
+
+UI strings translated into all 5 languages.
+
 ## [0.32.3] – 2026-05-05
 
 ### Added — Detect + revert misclassified Kontoauszug documents

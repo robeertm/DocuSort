@@ -139,42 +139,11 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                 )
             except Exception as exc:
                 log.exception("Classification failed for %s: %s", path.name, exc)
-                # Even when the LLM gave up, the OCR text often makes the
-                # doc type obvious. Check the Kontoauszug heuristic so a
-                # bank statement at least lands in the right bucket and
-                # the bulk re-analyze worker can pick it up later — way
-                # better than burying it in Sonstiges/review forever.
-                from .classifier import text_looks_like_kontoauszug
-                if ocr_res.text and text_looks_like_kontoauszug(ocr_res.text):
-                    log.info(
-                        "Heuristic salvage: %s looks like a Kontoauszug — "
-                        "routing to review under Kontoauszug instead of "
-                        "Sonstiges.",
-                        path.name,
-                    )
-                    cls = Classification(
-                        category="Kontoauszug", date="", sender="Unbekannt",
-                        subject="Kontoauszug (LLM-Klassifizierung fehlgeschlagen)",
-                        confidence=0.3,
-                        reasoning=f"LLM error, salvaged by heuristic: {exc}",
-                    )
-                else:
-                    cls = Classification(
-                        category="Sonstiges", date="", sender="Unbekannt",
-                        subject="Klassifizierung-fehlgeschlagen", confidence=0.0,
-                        reasoning=str(exc),
-                    )
-
-        # Mutate Bank-shaped Kontoauszüge into category=Kontoauszug
-        # *before* organize() builds the destination filename, so the
-        # file lands as 2024-06-30_Kontoauszug_*.pdf instead of being
-        # filed under Bank where /finance can't see it.
-        from .classifier import maybe_promote_to_kontoauszug
-        before_cat = cls.category
-        maybe_promote_to_kontoauszug(cls, text=ocr_res.text)
-        if cls.category != before_cat:
-            log.info("Promoted %s: %s → %s (subject=%r)",
-                     path.name, before_cat, cls.category, cls.subject[:60])
+                cls = Classification(
+                    category="Sonstiges", date="", sender="Unbekannt",
+                    subject="Klassifizierung-fehlgeschlagen", confidence=0.0,
+                    reasoning=str(exc),
+                )
 
         target = organize(path, ocr_res.path, cls, settings)
 
@@ -297,156 +266,10 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             except Exception as exc:
                 log.warning("Receipt extraction failed for %d: %s", doc_id, exc)
 
-        # Bank statements get the same second-pass treatment, with the
-        # privacy twist: by default we pseudonymise IBANs / addresses /
-        # holder names before sending text to a cloud provider. Users
-        # who flipped finance.local_only get statement extraction skipped
-        # if the active provider isn't local.
-        #
-        # Also catch the case where the classifier picked the legacy
-        # `Bank` category for what is clearly a statement (the subject
-        # mentions Kontoauszug / Girokonto / Tagesgeld / Kreditkarte,
-        # or the subcategory says Konto / Karte). Without this branch
-        # those docs sit unprocessed in /finance — same path as the
-        # heuristic in `backfill_statements`. After successful
-        # extraction we promote the doc to category=Kontoauszug so
-        # /finance picks it up everywhere else, mirroring the backfill.
-        is_bank_statement_lookalike = False
-        if cls.category == "Bank" and ocr_res.text:
-            subj_l = (cls.subject or "").lower()
-            sub_l  = (cls.subcategory or "").lower()
-            if (sub_l in ("konto", "karte")
-                    or "kontoauszug" in subj_l
-                    or "girokonto"   in subj_l
-                    or "tagesgeld"   in subj_l
-                    or "kreditkart"  in subj_l):
-                is_bank_statement_lookalike = True
-
-        if (cls.category == "Kontoauszug" or is_bank_statement_lookalike) and ocr_res.text:
-            local_providers = ("openai_compat", "bridge")
-            is_local = settings.ai.provider in local_providers
-            if settings.finance.local_only and not is_local:
-                log.warning(
-                    "Skipping statement extraction for %s: finance.local_only=true "
-                    "but active provider %s is not local",
-                    target.name, settings.ai.provider,
-                )
-            elif settings.finance.review_before_send and not is_local:
-                # User opted in to manually approve every Kontoauszug before
-                # the second-pass LLM call. Mark the doc as pending so it
-                # appears in the /finance review queue; extraction runs
-                # later when the user clicks "send" on the preview page.
-                with db._lock:
-                    db._conn.execute(
-                        "UPDATE documents SET status = 'pending_review' WHERE id = ?",
-                        (doc_id,),
-                    )
-                log.info(
-                    "Statement extraction paused for %s — waiting for user "
-                    "approval on /finance",
-                    target.name,
-                )
-            else:
-                try:
-                    from .finance import StatementExtractor
-                    from hashlib import sha256
-                    extractor = StatementExtractor(
-                        classifier.provider, settings.ai.model,
-                        max_text_chars=max(settings.ai.max_text_chars, 32000),
-                        holder_names=settings.finance.holder_names,
-                    )
-                    # Pseudonymise unless we're already on a local provider
-                    # (no leak risk) OR the user explicitly turned it off.
-                    do_pseudo = settings.finance.pseudonymize and not is_local
-                    stmt = extractor.extract(ocr_res.text, pseudonymize=do_pseudo)
-
-                    account_id: int | None = None
-                    if stmt.iban_hash:
-                        account_id = db.upsert_account(
-                            bank_name=stmt.bank_name or "Unbekannt",
-                            iban=stmt.iban,
-                            iban_last4=stmt.iban_last4,
-                            iban_hash=stmt.iban_hash,
-                            account_holder=stmt.account_holder,
-                            currency=stmt.currency,
-                        )
-
-                    # Per-tx hash for dedup against overlapping statements.
-                    tx_payload: list[dict] = []
-                    for tx in stmt.transactions:
-                        key = (
-                            (stmt.iban_hash or "no-iban") + "|" +
-                            tx.booking_date + "|" +
-                            f"{tx.amount:.2f}" + "|" +
-                            tx.purpose
-                        )
-                        tx_hash_val = sha256(key.encode("utf-8")).hexdigest()
-                        d = tx.as_dict()
-                        d["tx_hash"] = tx_hash_val
-                        tx_payload.append(d)
-
-                    # File-level dedup: if a statement with the same PDF
-                    # bytes already exists, the document layer already
-                    # rejected it; we only see new docs here. We still
-                    # record the file hash so /finance can show "this
-                    # statement is the original of these other docs".
-                    file_hash = ""
-                    try:
-                        with open(target, "rb") as fh:
-                            file_hash = sha256(fh.read()).hexdigest()
-                    except OSError:
-                        pass
-
-                    db.upsert_statement(
-                        doc_id,
-                        account_id=account_id,
-                        period_start=stmt.period_start,
-                        period_end=stmt.period_end,
-                        statement_no=stmt.statement_no,
-                        opening_balance=stmt.opening_balance,
-                        closing_balance=stmt.closing_balance,
-                        currency=stmt.currency,
-                        file_hash=file_hash,
-                        privacy_mode=stmt.privacy_mode,
-                        transactions=tx_payload,
-                        extra_json=stmt.raw_response,
-                        extraction_warning=stmt.extraction_warning,
-                    )
-                    # If the doc was filed under the legacy `Bank`
-                    # category but the extractor actually pulled
-                    # transactions, promote it to `Kontoauszug` so
-                    # /finance and the diagnostics banner pick it up
-                    # alongside everything else.
-                    if is_bank_statement_lookalike and stmt.transactions:
-                        with db._lock:
-                            db._conn.execute(
-                                "UPDATE documents SET category = 'Kontoauszug', "
-                                "subcategory = '' WHERE id = ?",
-                                (doc_id,),
-                            )
-                    # Align the document's doc_date with the statement
-                    # period. The classifier often picks the print /
-                    # generation date from the letterhead (e.g.
-                    # 2026-04-30) while the actual booking period is
-                    # months earlier (10/2025). Once the statement
-                    # extractor has period_end, that's the better truth
-                    # for "when does this statement belong" in the
-                    # year/month filter on /library.
-                    if stmt.period_end:
-                        with db._lock:
-                            db._conn.execute(
-                                "UPDATE documents SET doc_date = ? "
-                                "WHERE id = ? AND COALESCE(doc_date,'') != ?",
-                                (stmt.period_end, doc_id, stmt.period_end),
-                            )
-                    log.info(
-                        "Statement extracted for %s: bank=%s period=%s..%s tx=%d privacy=%s",
-                        target.name, stmt.bank_name, stmt.period_start,
-                        stmt.period_end, len(stmt.transactions),
-                        stmt.privacy_mode,
-                    )
-                except Exception as exc:
-                    log.warning("Statement extraction failed for %d: %s", doc_id, exc)
+        # v0.33.0 removed the second-pass Kontoauszug extraction.
+        # Bank statements are stored as documents like everything
+        # else; transaction data comes from CSV exports the user
+        # uploads on /finance, not from OCR.
 
     return process
 
@@ -462,36 +285,6 @@ def _ensure_dirs(settings: AppSettings) -> None:
         p.mkdir(parents=True, exist_ok=True)
 
 
-def _maybe_trigger_post_upgrade_reanalysis(
-    settings: AppSettings, db: Database, classifier: Classifier | None, log,
-) -> None:
-    """If the running version differs from the one stored in the DB
-    meta table, kick off a full re-extraction of every Kontoauszug
-    document in the background. Manual category overrides are
-    preserved by the transaction_category_overrides table, so the
-    user's `Sonstige`/`Lebensmittel` corrections survive.
-
-    Skips on first install (no statements yet) and on every subsequent
-    boot of the same version, so the heavy job runs at most once per
-    upgrade.
-    """
-    # Auto-reanalyse on version bump used to live here. Pulled in
-    # v0.27.7 — the user wanted full control over when extraction
-    # runs ("eine re-analyse will ich anschieben, niemand anders").
-    # Only thing we still do is baseline the meta key so a later
-    # toggle could rebuild the trigger if needed.
-    try:
-        if (db.meta_get("last_reanalyzed_version") or "") != __version__:
-            db.meta_set("last_reanalyzed_version", __version__)
-            log.info(
-                "Version bump to %s — auto-reanalyse intentionally disabled. "
-                "Trigger from /finance when you want to re-extract.",
-                __version__,
-            )
-    except Exception:
-        log.exception("post-upgrade reanalysis baseline failed — continuing startup")
-
-
 def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> None:
     """Run the FastAPI app with uvicorn in the current thread.
 
@@ -505,71 +298,21 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
     log = logging.getLogger("docusort.main")
     app = create_app(settings, db, classifier)
 
-    # Idempotent data migration: convert any non-ISO booking_date /
-    # value_date rows that older extractor versions stored verbatim
-    # from the LLM response. Safe to run on every boot — the SQL
-    # filter only matches rows that aren't already YYYY-MM-DD.
+    # v0.33.0 hard reset: the old LLM-extracted statement data was
+    # never trustworthy. Run once per DB to start with a clean slate
+    # before the user re-imports their CSV exports. Subsequent
+    # restarts find the meta flag set and skip the wipe.
     try:
-        from .finance.salvage import (
-            normalise_existing_dates,
-            delete_absurd_amounts,
-            promote_bank_to_kontoauszug,
-            align_doc_dates_to_statement_period,
-            compute_missing_opening_balances,
-        )
-        date_report = normalise_existing_dates(db, dry_run=False)
-        if date_report.get("fixed"):
-            log.info(
-                "Date migration: normalised %d non-ISO booking_date / "
-                "value_date row(s) to ISO YYYY-MM-DD.",
-                date_report["fixed"],
-            )
-        # Promote any legacy Bank/Konto docs to Kontoauszug so they
-        # show up on /finance without a manual recategorisation. The
-        # ingest-time hook handles new uploads; this catches the rest.
-        promo_report = promote_bank_to_kontoauszug(db, dry_run=False)
-        if promo_report.get("promoted"):
-            log.info(
-                "Category migration: promoted %d Bank doc(s) to Kontoauszug.",
-                promo_report["promoted"],
-            )
-        # Same idea for amounts: drop rows where the LLM clearly
-        # misparsed a date / balance / row-count into the amount
-        # field. Real personal accounts don't see single bookings
-        # past ten million euros.
-        amt_report = delete_absurd_amounts(db, dry_run=False)
-        if amt_report.get("deleted"):
-            log.info(
-                "Amount migration: deleted %d row(s) with |amount| > 10M €. "
-                "Sample: %s",
-                amt_report["deleted"],
-                amt_report["items"][0] if amt_report["items"] else None,
-            )
-        # Realign doc_date for Kontoauszüge whose classifier date came
-        # from the letterhead (e.g. 2026-04-30) but whose actual
-        # booking period is months earlier — uses statements.period_end
-        # as the truer answer for the /library year+month filter.
-        align_report = align_doc_dates_to_statement_period(db, dry_run=False)
-        if align_report.get("updated"):
-            log.info(
-                "Date alignment: updated doc_date for %d Kontoauszug(e) "
-                "to match the statement period_end.",
-                align_report["updated"],
-            )
-        # Back-fill missing opening / closing balances by arithmetic
-        # (opening = closing − Σtx). Local 7B models miss the
-        # Anfangssaldo line on the cover page surprisingly often.
-        bal_report = compute_missing_opening_balances(db, dry_run=False)
-        if bal_report.get("updated"):
-            log.info(
-                "Balance backfill: filled %d missing opening/closing "
-                "value(s) via arithmetic.",
-                bal_report["updated"],
+        from .finance.reset import maybe_run_one_time_reset
+        report = maybe_run_one_time_reset(db)
+        if report:
+            log.warning(
+                "v0.33.0 finance hard-reset: dropped %d transactions, "
+                "%d statements, %d accounts. Re-import CSVs on /finance.",
+                report["transactions"], report["statements"], report["accounts"],
             )
     except Exception:
-        log.exception("Data migration failed — continuing startup")
-
-    _maybe_trigger_post_upgrade_reanalysis(settings, db, classifier, log)
+        log.exception("Finance reset failed — continuing startup")
 
     ssl_kwargs: dict = {}
     cert, key = settings.web.ssl_cert, settings.web.ssl_key
@@ -687,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
                     "watcher will skip classification until /setup is completed.")
 
     if (args.backfill_tags or args.backfill_dry_run
-            or args.backfill_receipts or args.backfill_statements) and classifier is None:
+            or args.backfill_receipts) and classifier is None:
         log.error("Cannot run backfill: AI provider not configured. "
                   "Open the web UI and finish /setup first.")
         return 2
@@ -709,58 +452,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.reocr_statements:
-        # No LLM call here — pure local re-OCR. Walks every Kontoauszug
-        # / Bank document, re-reads the PDF, and overwrites the stored
-        # OCR text with the full content. Earlier installs truncated at
-        # ~12k chars, which cut off the booking table in multi-page
-        # statements; refreshing the text unblocks --backfill-statements
-        # and the /finance "re-extract empty" button.
-        from .ocr import extract_text as _extract_text
-        rows = db._conn.execute(
-            """SELECT id, library_path, length(extracted_text) AS old_len
-               FROM documents
-               WHERE deleted_at IS NULL
-                 AND category IN ('Kontoauszug', 'Bank')
-                 AND library_path IS NOT NULL"""
-        ).fetchall()
-        processed: list[dict] = []
-        failed: list[dict] = []
-        for r in rows:
-            doc_id = int(r["id"])
-            path = Path(r["library_path"])
-            if not path.exists():
-                failed.append({"doc_id": doc_id, "error": f"file missing: {path}"})
-                continue
-            try:
-                ocr_res = _extract_text(path, settings.ocr)
-            except Exception as exc:
-                failed.append({"doc_id": doc_id, "error": str(exc)})
-                continue
-            new_text = ocr_res.text[:200_000]
-            db._conn.execute(
-                "UPDATE documents SET extracted_text = ?, ocr_used = ? WHERE id = ?",
-                (new_text, 1 if ocr_res.ocr_used else 0, doc_id),
-            )
-            processed.append({
-                "doc_id": doc_id,
-                "old_len": int(r["old_len"] or 0),
-                "new_len": len(new_text),
-                "ocr_used": ocr_res.ocr_used,
-            })
-        result = {"processed": processed, "failed": failed, "found": len(rows)}
-        log.info("Re-OCR done: %s", result)
-        print(json.dumps(result, indent=2, default=str))
-        return 0
+        log.warning(
+            "--reocr-statements was removed in v0.33.0. Bank-statement "
+            "OCR text is no longer fed into a second-pass extractor; "
+            "import CSV exports on /finance for transaction data."
+        )
+        return 2
 
     if args.backfill_statements:
-        from .finance.extractor import backfill_statements
-        local_only = settings.finance.local_only and settings.ai.provider in ("openai_compat", "bridge")
-        result = backfill_statements(
-            settings, db, classifier, dry_run=False, local_only=local_only,
+        log.warning(
+            "--backfill-statements was removed in v0.33.0. "
+            "Bank statements are no longer extracted from PDF; "
+            "import CSV exports on /finance instead."
         )
-        log.info("Statement backfill done: %s", result)
-        print(json.dumps(result, indent=2, default=str))
-        return 0
+        return 2
 
     pipeline = _build_pipeline(settings, classifier, db)
 

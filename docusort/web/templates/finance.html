@@ -8,744 +8,77 @@
       <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('finance.title') }}</h1>
       <p class="text-ink-400 mt-1 text-sm">{{ t('finance.subtitle') }}</p>
     </div>
-    {% if summary.statement_count > 0 %}
-    <div class="text-xs text-ink-500 leading-relaxed text-right">
-      <div>
-        <span class="inline-flex items-center gap-1">
-          {% if privacy_mode == 'local' %}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5 text-emerald-300">
-              <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-            <span class="text-emerald-300">{{ t('finance.privacy.local') }}</span>
-          {% elif privacy_mode == 'pseudonymize' %}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5 text-emerald-300">
-              <circle cx="12" cy="8" r="4"/><path d="M3 22a9 9 0 0 1 18 0"/>
-            </svg>
-            <span class="text-emerald-300">{{ t('finance.privacy.pseudonymized') }}</span>
-          {% else %}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5 text-amber-300">
-              <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
-            </svg>
-            <span class="text-amber-300">{{ t('finance.privacy.plain') }}</span>
-          {% endif %}
-        </span>
-      </div>
-      <a href="/settings#finance" class="hover:text-ink-300 underline">{{ t('finance.privacy.configure') }}</a>
-    </div>
-    {% endif %}
   </div>
 
-  <!-- Bulk-analyse banner — Kontoauszug docs that don't yet have a
-       populated statement row, plus statements with an empty result.
-       This is the entry point the user reaches for after switching
-       to the local bridge: re-run extraction on every statement that
-       was skipped or came back blank. -->
-  <div class="card p-4 mb-6 border-cyan-500/30 bg-cyan-500/5"
-       x-data="analyzeAll()" x-init="init()"
-       x-show="visible" x-cloak>
-    <div class="flex items-start gap-3">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-cyan-300 shrink-0 mt-0.5">
-        <path d="M3 12h4l3-9 4 18 3-9h4"/>
-      </svg>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium" x-show="!job.running"
-             x-text="(counts.missing + counts.empty) > 0
-                       ? (`${counts.missing + counts.empty} Kontoauszug${(counts.missing + counts.empty) === 1 ? '' : 'e'} noch nicht (sauber) ausgewertet` +
-                          (counts.empty ? ` (${counts.empty} mit leerem oder verdächtigem Ergebnis)` : ''))
-                       : `Alle ${counts.total} Kontoauszüge ausgewertet`"></div>
-        <div class="text-sm font-medium flex items-center gap-2" x-show="job.running" x-cloak>
-          <svg class="h-4 w-4 animate-spin text-cyan-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
-          </svg>
-          <span x-text="`Analysiere Auszug ${job.done + 1} von ${job.total}`"></span>
-          <template x-if="job.total_pages > 0">
-            <span class="text-cyan-200/70" x-text="`· Seite ${job.current_page || 0}/${job.total_pages}`"></span>
-          </template>
-        </div>
-        <p class="text-xs text-ink-400 mt-1" x-show="!job.running"
-           x-text="(counts.missing + counts.empty) > 0
-                     ? 'Ein Klick startet die Auswertung aller noch unverarbeiteten Auszüge. Läuft im Hintergrund — Seite kann offen bleiben oder geschlossen werden.'
-                     : 'Verdacht auf fehlende Buchungen? Über ↺ alle Auszüge nochmal komplett neu analysieren — manuell gesetzte Kategorien bleiben erhalten.'"></p>
-        <p class="text-xs text-cyan-200/80 mt-1 truncate" x-show="job.running && job.current" x-cloak
-           x-text="job.current"></p>
-        <div x-show="job.running" x-cloak class="mt-2">
-          <div class="h-1.5 rounded bg-ink-800 overflow-hidden">
-            <div class="h-full bg-cyan-400/80 transition-all"
-                 :style="`width: ${job.total ? (100 * job.done / job.total) : 0}%`"></div>
+  {# CSV import card — always visible at the top so the user can re-upload
+     anytime. Drop-zone OR file picker, multi-file, shows per-file
+     report. #}
+  <div class="card p-5 mb-6 border-emerald-500/30 bg-emerald-500/5"
+       x-data="csvImporter()">
+    <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-2">
+      {{ t('finance.csv.title') }}
+    </h2>
+    <p class="text-xs text-ink-400 mb-3">{{ t('finance.csv.hint') }}</p>
+    <div class="flex flex-wrap items-center gap-3">
+      <label class="btn-primary cursor-pointer">
+        <input type="file" multiple accept=".csv,.CSV,text/csv"
+               class="hidden"
+               @change="handleFiles($event.target.files)"/>
+        {{ t('finance.csv.pick') }}
+      </label>
+      <span x-show="busy" x-cloak class="text-xs text-ink-400"
+            x-text="(T['finance.csv.uploading'] || 'Importiere…')"></span>
+      <span x-show="lastTotalInserted > 0 && !busy" x-cloak
+            class="text-xs text-emerald-300"
+            x-text="(T['finance.csv.toast'] || '{ins} neu, {dup} schon vorhanden').replace('{ins}', lastTotalInserted).replace('{dup}', lastTotalDuplicate)"></span>
+    </div>
+    <div x-show="files.length" x-cloak class="mt-4 space-y-2">
+      <template x-for="r in files" :key="r.file_label + r._id">
+        <div class="rounded border border-ink-700 bg-ink-900/60 px-3 py-2 text-xs">
+          <div class="flex flex-wrap items-baseline gap-2">
+            <span class="font-mono text-ink-300" x-text="r.file_label"></span>
+            <span class="text-emerald-300" x-text="r.rows_inserted + ' neu'"></span>
+            <span class="text-ink-500" x-text="'· ' + r.rows_duplicate + ' Duplikat'"></span>
+            <span class="text-amber-300" x-show="r.rows_invalid > 0" x-cloak
+                  x-text="'· ' + r.rows_invalid + ' ungültig'"></span>
+            <span class="text-rose-300" x-show="r.errors && r.errors.length" x-cloak
+                  x-text="'· ' + r.errors.length + ' Fehler'"></span>
           </div>
-          <div class="flex items-center justify-between mt-1 text-[11px] text-ink-400">
-            <span x-text="`${job.done} / ${job.total}`"></span>
-            <span x-show="job.last_error" x-cloak class="text-rose-300/90 truncate ml-2"
-                  x-text="`zuletzt: ${job.last_error}`"></span>
+          <div x-show="r.period_start" x-cloak class="text-ink-500 mt-0.5"
+               x-text="(r.period_start || '?') + ' .. ' + (r.period_end || '?') + ' · ' + (r.accounts_touched || []).join(', ')"></div>
+          <div x-show="r.errors && r.errors.length" x-cloak
+               class="mt-1 text-rose-300 font-mono">
+            <template x-for="e in r.errors" :key="e">
+              <div x-text="e"></div>
+            </template>
           </div>
-        </div>
-        <div x-show="!job.running && job.done > 0 && finishedRecently" x-cloak
-             class="mt-2 text-xs text-ink-300">
-          Fertig · <span x-text="(job.approved && job.approved.length) || 0"></span> ausgewertet,
-          <span x-text="(job.failed && job.failed.length) || 0"></span> Fehler.
-          <button type="button" @click="window.location.reload()" class="underline hover:text-ink-100 ml-1">aktualisieren</button>
-        </div>
-      </div>
-      <div class="flex flex-col items-end gap-1 shrink-0">
-        <button type="button" @click="run()"
-                x-show="!job.running && !job.paused" x-cloak
-                :disabled="(counts.missing + counts.empty) === 0"
-                class="btn-primary text-xs"
-                :class="((counts.missing + counts.empty) === 0) ? 'opacity-50 cursor-not-allowed' : ''">
-          Alle auswerten
-        </button>
-        <button type="button" @click="pause()"
-                x-show="job.running" x-cloak
-                :disabled="job.pause_requested"
-                class="text-xs rounded-lg px-2.5 py-1.5 border"
-                style="border-color: rgba(251, 191, 36, 0.5); color: rgb(253, 224, 71); background-color: rgba(251, 191, 36, 0.1);"
-                :class="job.pause_requested ? 'opacity-50 cursor-not-allowed' : ''">
-          <span x-show="!job.pause_requested">⏸ Pause</span>
-          <span x-show="job.pause_requested" x-cloak>pausiere …</span>
-        </button>
-        <button type="button" @click="resume()"
-                x-show="(job.paused || resumable) && !job.running" x-cloak
-                class="text-xs rounded-lg px-2.5 py-1.5 border"
-                style="border-color: rgba(34, 211, 238, 0.5); color: rgb(165, 243, 252); background-color: rgba(34, 211, 238, 0.1);">
-          ▶ Fortsetzen
-        </button>
-        <button type="button" @click="forceAll()" :disabled="job.running"
-                class="text-[11px] underline disabled:opacity-50 disabled:no-underline"
-                style="color: rgba(103, 232, 249, 0.8);"
-                title="Auch Auszüge mit bereits vorhandenen Buchungen werden komplett neu analysiert. Manuell gesetzte Kategorien bleiben erhalten.">
-          ↺ Auch bereits verarbeitete neu auswerten
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Ask box — natural-language Q&A over the transactions table.
-       Sends the question to the configured LLM with a small set of
-       read-only tools that wrap transactions_list / _aggregate. The
-       reply contains a German answer plus the rows the LLM looked at,
-       which we render as a compact table below. -->
-  {% if summary.statement_count > 0 %}
-  <div class="card p-4 mb-6 border-violet-500/30 bg-violet-500/5"
-       x-data="financeAsk()" x-cloak>
-    <div class="flex items-start gap-3">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-violet-300 shrink-0 mt-0.5">
-        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-      </svg>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium mb-1">Frag deine Buchungen</div>
-        <p class="text-xs text-ink-400 mb-2">
-          Frei formulierte Frage in natürlicher Sprache — die LLM sucht in allen ausgewerteten Kontoauszügen.
-          Beispiele: <span class="text-ink-300">„zeige mir alle Ausgaben bei MediaMarkt 2025"</span>,
-          <span class="text-ink-300">„wieviel hab ich 2024 für Versicherungen ausgegeben?"</span>,
-          <span class="text-ink-300">„welche Einnahmen über 1000 € gab es im August?"</span>
-        </p>
-        <form @submit.prevent="ask()" class="flex gap-2 flex-wrap">
-          <input type="text" x-model="question"
-                 :disabled="loading"
-                 placeholder="Stelle eine Frage zu deinen Transaktionen…"
-                 class="flex-1 min-w-[280px] rounded border border-ink-700 bg-ink-900 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none"
-                 maxlength="500" />
-          <button type="submit"
-                  :disabled="loading || !question.trim()"
-                  class="rounded px-4 py-2 text-sm font-medium"
-                  style="background:#7c3aed; color:#fff;"
-                  :style="(loading || !question.trim()) ? 'background:#3f3f46; color:#a1a1aa; cursor:not-allowed;' : 'background:#7c3aed; color:#fff;'">
-            <span x-show="!loading">Fragen</span>
-            <span x-show="loading" x-cloak>Suche…</span>
-          </button>
-        </form>
-
-        <div x-show="error" x-cloak class="mt-3 text-sm text-rose-300" x-text="error"></div>
-
-        <div x-show="result" x-cloak class="mt-4 space-y-3">
-          <template x-if="result?.warnings?.length">
-            <div class="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
-              <div class="flex items-start gap-2">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 mt-0.5 shrink-0">
-                  <path d="M12 9v4M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                </svg>
-                <div class="flex-1">
-                  <template x-for="w in result.warnings" :key="w">
-                    <div x-text="w"></div>
-                  </template>
-                </div>
-              </div>
-            </div>
-          </template>
-          <div class="rounded bg-ink-900/60 border border-violet-500/20 p-3 text-sm leading-relaxed whitespace-pre-wrap"
-               x-text="result?.answer"></div>
-
-          <template x-if="result?.rows?.length">
-            <div>
-              <div class="text-xs text-ink-500 mb-1">
-                <span x-text="result.rows.length"></span> Treffer · Modell:
-                <span x-text="result.model"></span> ·
-                <span x-text="result.steps + ' Schritt' + (result.steps === 1 ? '' : 'e')"></span>
-                <template x-if="result.cost_usd > 0">
-                  <span> · ca. $<span x-text="result.cost_usd.toFixed(4)"></span></span>
-                </template>
-              </div>
-              <div class="overflow-x-auto rounded border border-ink-800">
-                <table class="w-full text-xs">
-                  <thead class="bg-ink-900 text-ink-400">
-                    <tr>
-                      <th class="px-2 py-1.5 text-left">Datum</th>
-                      <th class="px-2 py-1.5 text-left">Empfänger / Absender</th>
-                      <th class="px-2 py-1.5 text-left">Verwendungszweck</th>
-                      <th class="px-2 py-1.5 text-left">Kategorie</th>
-                      <th class="px-2 py-1.5 text-right">Betrag</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <template x-for="r in result.rows" :key="r.id">
-                      <tr class="border-t border-ink-800/60">
-                        <td class="px-2 py-1.5 whitespace-nowrap text-ink-300" x-text="r.booking_date || ''"></td>
-                        <td class="px-2 py-1.5" x-text="r.counterparty || '—'"></td>
-                        <td class="px-2 py-1.5 text-ink-400" x-text="(r.purpose || '').slice(0, 80)"></td>
-                        <td class="px-2 py-1.5 text-ink-400" x-text="r.category || ''"></td>
-                        <td class="px-2 py-1.5 text-right whitespace-nowrap font-mono"
-                            :class="r.amount < 0 ? 'text-rose-300' : 'text-emerald-300'"
-                            x-text="formatEur(r.amount)"></td>
-                      </tr>
-                    </template>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </template>
-
-          <details x-show="result?.tools_used?.length" x-cloak class="text-xs text-ink-500">
-            <summary class="cursor-pointer hover:text-ink-300">Tool-Aufrufe anzeigen</summary>
-            <pre class="mt-2 overflow-x-auto rounded bg-ink-900/60 p-2 text-[11px]"
-                 x-text="JSON.stringify(result.tools_used, null, 2)"></pre>
-          </details>
-        </div>
-      </div>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Pending review banner — Kontoauszug docs paused before the
-       second-pass LLM call when finance.review_before_send is on.
-       Stays visible while an approve-all run is in progress so the
-       user has live feedback on which statement is being processed. -->
-  <div class="card p-4 mb-6 border-sky-500/30 bg-sky-500/5"
-       x-data='financePending({{ pending_review | tojson }})'
-       x-show="items.length > 0 || progress.running"
-       x-cloak>
-    <div class="flex items-start gap-3">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-sky-300 shrink-0 mt-0.5">
-        <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-      </svg>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium" x-show="!progress.running"
-             x-text="(T['finance.pending.title'] || '{n} Kontoauszug awaiting your approval before AI extraction')
-                       .replace('{n}', items.length)"></div>
-        <div class="text-sm font-medium flex items-center gap-2" x-show="progress.running" x-cloak>
-          <svg class="h-4 w-4 animate-spin text-sky-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
-          </svg>
-          <span x-text="(T['finance.pending.progress'] || 'Sending statement {done} of {total}')
-                          .replace('{done}', progress.done + 1)
-                          .replace('{total}', progress.total)"></span>
-        </div>
-        <p class="text-xs text-ink-400 mt-1" x-show="!progress.running">{{ t('finance.pending.hint') }}</p>
-        <p class="text-xs text-sky-200/80 mt-1 truncate" x-show="progress.running && progress.current" x-cloak
-           x-text="progress.current"></p>
-
-        <!-- Progress bar while the bulk run is alive -->
-        <div class="mt-2 h-1.5 rounded-full bg-sky-500/10 overflow-hidden" x-show="progress.running" x-cloak>
-          <div class="h-full bg-sky-400 transition-all"
-               :style="`width: ${progress.total ? (progress.done / progress.total * 100) : 0}%`"></div>
-        </div>
-
-        <ul class="mt-2 space-y-0.5 text-xs" x-show="!progress.running">
-          <template x-for="d in items" :key="d.doc_id">
-            <li class="flex items-baseline gap-2">
-              <span class="text-ink-500 tabular-nums" x-text="d.doc_date || '—'"></span>
-              <a :href="'/document/' + d.doc_id"
-                 class="text-ink-200 hover:text-sky-300 truncate"
-                 x-text="d.subject || ('doc ' + d.doc_id)"></a>
-              <span class="text-ink-500" x-show="d.sender" x-text="'· ' + d.sender"></span>
-            </li>
-          </template>
-        </ul>
-
-        <!-- Failed list once a run finishes — surfaces partial successes -->
-        <div x-show="!progress.running && (progress.failed || []).length > 0" x-cloak
-             class="mt-3 text-xs">
-          <div class="font-medium text-rose-200 mb-1"
-               x-text="(T['finance.pending.failed_heading'] || '{n} statement(s) failed')
-                         .replace('{n}', (progress.failed || []).length)"></div>
-          <ul class="space-y-0.5 text-rose-200/80">
-            <template x-for="f in (progress.failed || []).slice(0, 5)" :key="f.doc_id">
-              <li class="truncate">
-                <a :href="'/document/' + f.doc_id" class="underline hover:text-rose-100"
-                   x-text="'doc ' + f.doc_id"></a>
-                <span class="text-rose-300/70" x-text="' — ' + (f.error || '')"></span>
-              </li>
-            </template>
-          </ul>
-        </div>
-      </div>
-      <button type="button" @click="approveAll()" :disabled="busy || !items.length"
-              class="btn-primary text-xs shrink-0"
-              :class="(busy || !items.length) ? 'opacity-50 cursor-not-allowed' : ''"
-              x-text="busy ? T['finance.pending.running'] : T['finance.pending.approve_all']"></button>
-    </div>
-    <div x-show="result && !progress.running" x-cloak class="mt-3 text-xs rounded px-3 py-2"
-         :class="resultOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
-         x-text="result"></div>
-  </div>
-
-  <!-- Coverage / diagnostics banner — empty statements get called out.
-       Always present in the DOM so the Alpine component can show/hide
-       it as the underlying state changes (re-extract, manual fix-up,
-       background polling). -->
-  <div class="card p-4 mb-6 border-amber-500/30 bg-amber-500/5"
-       x-data='financeDiag({{ empty_statements | tojson }}, {{ kontoauszug_total | tojson }})'
-       x-show="items.length > 0"
-       x-cloak>
-    <div class="flex items-start gap-3">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-amber-300 shrink-0 mt-0.5">
-        <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
-      </svg>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium"
-             x-text="(T['finance.diag.title'] || 'Some statements need review')
-                       .replace('{empty}', items.length)
-                       .replace('{total}', total)"></div>
-        <p class="text-xs text-ink-400 mt-1">{{ t('finance.diag.hint') }}</p>
-        <details class="mt-2">
-          <summary class="cursor-pointer text-xs text-ink-300 hover:text-ink-100 select-none">
-            {{ t('finance.diag.show_list') }}
-          </summary>
-          <ul class="mt-2 space-y-1 text-xs">
-            <template x-for="s in items" :key="s.doc_id">
-              <li class="flex items-baseline gap-2">
-                <span class="text-ink-500 tabular-nums" x-text="s.doc_date || '—'"></span>
-                <a :href="'/document/' + s.doc_id"
-                   class="text-ink-200 hover:text-emerald-300 truncate flex-1 min-w-0"
-                   x-text="s.subject || ('doc ' + s.doc_id)"></a>
-                <button type="button"
-                        @click="reanalyzeOne(s.doc_id)"
-                        :disabled="busyDoc === s.doc_id"
-                        class="text-[10px] text-amber-300 hover:text-amber-200 underline shrink-0"
-                        title="Diesen Auszug einzeln neu durch den LLM jagen — auch bei abgeschnittenem extra_json">
-                  <span x-show="busyDoc !== s.doc_id">neu auswerten</span>
-                  <span x-show="busyDoc === s.doc_id" x-cloak>läuft…</span>
-                </button>
-                <button type="button"
-                        @click="dismiss(s.doc_id)"
-                        class="text-[10px] text-ink-500 hover:text-rose-300 underline shrink-0"
-                        title="Mark as 'no transactions to extract' so the banner stops nagging">
-                  ignorieren
-                </button>
-              </li>
-            </template>
-          </ul>
-        </details>
-      </div>
-      <div class="flex flex-col gap-1.5 shrink-0">
-        <button type="button" @click="salvage()" :disabled="busy"
-                class="btn-secondary text-xs"
-                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
-                title="Versucht Buchungen aus dem gespeicherten LLM-Output zurückzuholen (kein neuer LLM-Aufruf, kostenlos)">
-          <span x-show="!salvaging">Aus extra_json retten</span>
-          <span x-show="salvaging" x-cloak>retten…</span>
-        </button>
-        <button type="button" @click="reextract()" :disabled="busy"
-                class="btn-secondary text-xs"
-                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
-                x-text="busy ? T['finance.diag.running'] : T['finance.diag.button']"></button>
-      </div>
-    </div>
-    <div x-show="result" x-cloak class="mt-3 text-xs rounded px-3 py-2"
-         :class="resultOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
-         x-text="result"></div>
-  </div>
-
-  <!-- Statement-Audit: zeigt jedem Auszug seinen Gesundheitszustand
-       (Saldo-Konsistenz, Buchungen außerhalb der Periode, Duplikate
-       zwischen Auszügen, fehlende Salden/Perioden). Klar, lesbar,
-       mit direkten Links ins Dokument zum Reanalysieren. -->
-  {% if summary.statement_count > 0 %}
-  <div class="card p-4 mb-6 border-rose-500/30 bg-rose-500/5"
-       x-data="financeAudit()" x-init="load()">
-    <div class="flex items-start gap-3">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-rose-300 shrink-0 mt-0.5">
-        <circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>
-      </svg>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium">{{ t('finance.audit.title') }}</div>
-        <p class="text-xs text-ink-400 mt-1">{{ t('finance.audit.hint') }}</p>
-        <div x-show="data" x-cloak class="mt-2 flex flex-wrap gap-3 text-xs">
-          <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300">
-            <span x-text="data?.counts?.ok || 0"></span> {{ t('finance.audit.label_ok') }}
-          </span>
-          <span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300">
-            <span x-text="data?.counts?.medium || 0"></span> {{ t('finance.audit.label_medium') }}
-          </span>
-          <span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-300">
-            <span x-text="data?.counts?.high || 0"></span> {{ t('finance.audit.label_high') }}
-          </span>
-        </div>
-      </div>
-      <div class="flex flex-col gap-1.5 shrink-0">
-        <button type="button" @click="load()" :disabled="busy"
-                class="btn-secondary text-xs"
-                :class="busy ? 'opacity-50 cursor-not-allowed' : ''">
-          <span x-show="!busy">{{ t('finance.audit.refresh') }}</span>
-          <span x-show="busy" x-cloak>{{ t('finance.audit.running') }}</span>
-        </button>
-        <button type="button" @click="parseAll()" :disabled="busy"
-                class="btn-primary text-xs"
-                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
-                :title="T['finance.audit.parse_all_hint'] || ''">
-          <span x-show="!parseAllBusy">{{ t('finance.audit.parse_all_button') }}</span>
-          <span x-show="parseAllBusy" x-cloak x-text="parseAllPhase"></span>
-        </button>
-        <button type="button" @click="dedupe()" :disabled="busy"
-                class="btn-secondary text-xs"
-                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
-                :title="T['finance.audit.dedupe_hint'] || ''">
-          {{ t('finance.audit.dedupe_button') }}
-        </button>
-      </div>
-    </div>
-
-    <!-- Result banner from parseAll / dedupe so the user actually
-         sees what happened. Shows applied / skipped counts plus a
-         link to refresh the page (so /finance totals reflect the
-         new statements). -->
-    <div x-show="parseAllResult" x-cloak class="mt-3 rounded border p-3 text-xs"
-         :class="(parseAllResult && parseAllResult.applied > 0)
-                  ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200'
-                  : 'border-ink-700 bg-ink-900/40 text-ink-300'">
-      <div class="font-medium mb-1" x-text="parseAllResult ? parseAllResultTitle : ''"></div>
-      <div class="font-mono tabular-nums">
-        <template x-if="parseAllResult">
-          <span>
-            <span class="text-emerald-300" x-text="parseAllResult.applied"></span>
-            {{ t('finance.audit.parse_all_applied') }}
-            ·
-            <span class="text-amber-300" x-text="parseAllResult.skipped_lowconf"></span>
-            {{ t('finance.audit.parse_all_skipped_lowconf') }}
-            ·
-            <span class="text-ink-400" x-text="parseAllResult.skipped_existing"></span>
-            {{ t('finance.audit.parse_all_skipped_existing') }}
-            ·
-            <span class="text-ink-400" x-text="parseAllResult.skipped_no_ocr"></span>
-            {{ t('finance.audit.parse_all_skipped_noocr') }}
-            <template x-if="parseAllResult.errors > 0">
-              <span> ·
-                <span class="text-rose-300" x-text="parseAllResult.errors"></span>
-                {{ t('finance.audit.parse_all_errors') }}
-              </span>
-            </template>
-          </span>
-        </template>
-      </div>
-      <button type="button" @click="location.reload()"
-              x-show="parseAllResult && parseAllResult.applied > 0"
-              x-cloak
-              class="mt-2 underline hover:text-emerald-100">
-        {{ t('finance.audit.parse_all_reload') }}
-      </button>
-
-      <!-- Recovery: when "not_a_statement" is the dominant reason
-           the user wants ONE click to revert all those docs out of
-           Kontoauszug. Only show the button when the diagnostic
-           detected at least one non-statement. -->
-      <template x-if="parseAllResult && (parseAllResult.reason_breakdown || {}).not_a_statement > 0">
-        <div class="mt-3 pt-3 border-t border-ink-700/50 flex flex-wrap items-center gap-2">
-          <span class="text-amber-200 text-xs">
-            <span x-text="(parseAllResult.reason_breakdown || {}).not_a_statement"></span>
-            {{ t('finance.audit.uncat_hint') }}
-          </span>
-          <button type="button" @click="uncategorizeNonStmts()"
-                  :disabled="uncatBusy"
-                  class="btn-primary text-xs"
-                  :class="uncatBusy ? 'opacity-50 cursor-not-allowed' : ''">
-            <span x-show="!uncatBusy">{{ t('finance.audit.uncat_button') }}</span>
-            <span x-show="uncatBusy" x-cloak>{{ t('finance.audit.uncat_running') }}</span>
-          </button>
-          <span x-show="uncatResult" x-cloak class="text-xs"
-                :class="uncatResult && uncatResult.reverted > 0 ? 'text-emerald-300' : 'text-ink-400'"
-                x-text="uncatMessage"></span>
         </div>
       </template>
-
-      <!-- Diagnostic breakdown — only shows when something actually
-           went wrong, so a clean run isn't cluttered. -->
-      <template x-if="parseAllResult && parseAllResult.skipped_lowconf > 0">
-        <div class="mt-3 pt-3 border-t border-ink-700/50">
-          <div class="text-amber-200 font-medium mb-1.5">
-            {{ t('finance.audit.parse_all_why_skipped') }}
-          </div>
-          <div class="space-y-1 mb-2 font-mono">
-            <template x-for="(n, reason) in (parseAllResult.reason_breakdown || {})" :key="reason">
-              <div class="flex gap-2">
-                <span class="text-amber-300 w-10 text-right tabular-nums" x-text="n"></span>
-                <span class="text-ink-300"
-                      x-text="T['finance.audit.reason.' + reason] || reason"></span>
-              </div>
-            </template>
-          </div>
-          <div x-show="parseAllResult.layout_breakdown && Object.keys(parseAllResult.layout_breakdown).length > 0"
-               class="text-ink-500 mb-2">
-            {{ t('finance.audit.parse_all_layouts') }}:
-            <template x-for="(n, layout) in (parseAllResult.layout_breakdown || {})" :key="layout">
-              <span class="ml-1.5"><span x-text="layout"></span>=<span x-text="n"></span></span>
-            </template>
-          </div>
-          <details x-show="parseAllResult.lowconf_examples && parseAllResult.lowconf_examples.length"
-                   x-cloak>
-            <summary class="cursor-pointer text-ink-300 hover:text-ink-100">
-              {{ t('finance.audit.parse_all_examples') }}
-            </summary>
-            <div class="mt-2 space-y-2 font-mono text-[11px]">
-              <template x-for="ex in (parseAllResult.lowconf_examples || [])" :key="ex.doc_id">
-                <div class="rounded bg-ink-900/60 px-2 py-1.5 border border-ink-800">
-                  <div class="flex flex-wrap items-baseline gap-2">
-                    <a :href="'/document/' + ex.doc_id"
-                       class="text-cyan-300 hover:text-cyan-200"
-                       x-text="'doc #' + ex.doc_id"></a>
-                    <span class="text-ink-500" x-text="'layout=' + ex.layout"></span>
-                    <span class="text-ink-500" x-text="'conf=' + ex.confidence.toFixed(2)"></span>
-                    <span class="text-amber-300"
-                          x-text="T['finance.audit.reason.' + ex.reason] || ex.reason"></span>
-                  </div>
-                  <div class="mt-0.5 text-ink-400 tabular-nums">
-                    opening=<span x-text="ex.opening !== null ? ex.opening.toFixed(2) : '—'"></span>
-                    closing=<span x-text="ex.closing !== null ? ex.closing.toFixed(2) : '—'"></span>
-                    Δsaldo=<span x-text="ex.delta_saldo !== null ? ex.delta_saldo.toFixed(2) : '—'"></span>
-                    Σtx=<span x-text="ex.tx_sum.toFixed(2)"></span>
-                    (<span x-text="ex.tx_count"></span>)
-                  </div>
-                  <div x-show="ex.warnings && ex.warnings.length" x-cloak
-                       class="mt-0.5 text-rose-300"
-                       x-text="ex.warnings.join(' · ')"></div>
-                  <a :href="'/api/finance/parse-debug/' + ex.doc_id"
-                     target="_blank"
-                     class="text-[10px] underline text-cyan-400 hover:text-cyan-200">
-                    {{ t('finance.audit.parse_all_debug_json') }}
-                  </a>
-                </div>
-              </template>
-            </div>
-          </details>
-        </div>
-      </template>
-    </div>
-
-    <div x-show="data && data.items && data.items.length" x-cloak
-         class="mt-3 overflow-x-auto -mx-2 px-2">
-      <table class="w-full text-xs">
-        <thead class="text-ink-500 text-left">
-          <tr>
-            <th class="py-1 pr-2 font-normal">{{ t('finance.audit.col_period') }}</th>
-            <th class="py-1 pr-2 font-normal">{{ t('finance.audit.col_doc') }}</th>
-            <th class="py-1 pr-2 font-normal text-right">{{ t('finance.audit.col_tx') }}</th>
-            <th class="py-1 pr-2 font-normal text-right">{{ t('finance.audit.col_saldo') }}</th>
-            <th class="py-1 pr-2 font-normal">{{ t('finance.audit.col_issues') }}</th>
-            <th class="py-1 pr-2 font-normal text-center">{{ t('finance.audit.col_action') }}</th>
-          </tr>
-        </thead>
-        <tbody class="font-mono tabular-nums">
-          <template x-for="it in (data ? data.items : [])" :key="it.stmt_id">
-            <tr class="border-t border-ink-800/50"
-                :class="it.severity === 'high' ? 'bg-rose-500/5' : (it.severity === 'medium' ? 'bg-amber-500/5' : '')">
-              <td class="py-1.5 pr-2 text-ink-300 whitespace-nowrap">
-                <span x-show="it.period_start" x-text="it.period_start + ' .. ' + it.period_end"></span>
-                <span x-show="!it.period_start" class="italic text-rose-300">{{ t('finance.audit.no_period') }}</span>
-              </td>
-              <td class="py-1.5 pr-2">
-                <a :href="'/document/' + it.doc_id"
-                   class="text-cyan-300 hover:text-cyan-200"
-                   :title="it.subject"
-                   x-text="(it.bank_name || '—') + ' #' + it.stmt_id"></a>
-              </td>
-              <td class="py-1.5 pr-2 text-right text-ink-300" x-text="it.tx_count"></td>
-              <td class="py-1.5 pr-2 text-right text-ink-300">
-                <span x-show="it.opening !== null && it.closing !== null"
-                      x-text="it.opening.toFixed(2) + ' / ' + it.closing.toFixed(2)"></span>
-                <span x-show="it.opening === null && it.closing === null"
-                      class="italic text-rose-300">—</span>
-                <span x-show="(it.opening !== null && it.closing === null) || (it.opening === null && it.closing !== null)"
-                      class="italic text-amber-300">{{ t('finance.audit.partial_saldo') }}</span>
-              </td>
-              <td class="py-1.5 pr-2">
-                <div class="flex flex-wrap gap-1">
-                  <template x-for="iss in it.issues" :key="iss">
-                    <span class="px-1.5 py-0.5 rounded text-[10px]"
-                          :class="['saldo_mismatch','out_of_period','duplicate_in_other_stmt'].includes(iss)
-                                  ? 'bg-rose-500/15 text-rose-300'
-                                  : 'bg-amber-500/15 text-amber-300'"
-                          x-text="T['finance.audit.issue.' + iss] || iss"></span>
-                  </template>
-                </div>
-              </td>
-              <td class="py-1.5 pr-2 text-center">
-                <button type="button"
-                        @click="reanalyze(it.doc_id)"
-                        :disabled="busyDoc === it.doc_id"
-                        class="text-[11px] text-amber-300 hover:text-amber-200 underline">
-                  <span x-show="busyDoc !== it.doc_id">{{ t('finance.audit.reanalyze') }}</span>
-                  <span x-show="busyDoc === it.doc_id" x-cloak>…</span>
-                </button>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-      <p x-show="data && data.total_flagged > data.items.length" x-cloak
-         class="mt-2 text-xs text-ink-500"
-         x-text="(T['finance.audit.truncated'] || 'Es gibt {n} weitere Treffer — die ersten {shown} sind hier.')
-                  .replace('{n}', data ? data.total_flagged - data.items.length : 0)
-                  .replace('{shown}', data ? data.items.length : 0)"></p>
-    </div>
-    <div x-show="data && data.items && data.items.length === 0" x-cloak
-         class="mt-3 text-xs text-emerald-300">{{ t('finance.audit.all_clean') }}</div>
-    <div x-show="error" x-cloak class="mt-3 text-xs text-rose-300" x-text="error"></div>
-  </div>
-  {% endif %}
-
-  <!-- Daten-Wartung: einmal-pro-Statement Skalen-Korrektur, läuft ohne
-       LLM. Sichtbar sobald es überhaupt Statements gibt. Der Button
-       holt erst einen Dry-Run (zeigt Anzahl + Beispiele), danach kann
-       der User mit einer zweiten Bestätigung den echten Lauf starten. -->
-  {% if summary.statement_count > 0 %}
-  <div class="card p-4 mb-6 border-cyan-500/30 bg-cyan-500/5"
-       x-data="financeRescale()">
-    <div class="flex items-start gap-3">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-cyan-300 shrink-0 mt-0.5">
-        <path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/>
-      </svg>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium">{{ t('finance.rescale.title') }}</div>
-        <p class="text-xs text-ink-400 mt-1">{{ t('finance.rescale.hint') }}</p>
-      </div>
-      <div class="flex flex-col gap-1.5 shrink-0">
-        <button type="button" @click="check()" :disabled="busy"
-                class="btn-secondary text-xs"
-                :class="busy ? 'opacity-50 cursor-not-allowed' : ''">
-          <span x-show="!busy && !preview">{{ t('finance.rescale.button_check') }}</span>
-          <span x-show="busy" x-cloak>{{ t('finance.rescale.running') }}</span>
-          <span x-show="preview && !busy" x-cloak>{{ t('finance.rescale.button_recheck') }}</span>
-        </button>
-        <button type="button" @click="apply()"
-                x-show="preview && preview.candidates > 0 && !done"
-                x-cloak
-                :disabled="busy"
-                class="btn-primary text-xs"
-                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
-                x-text="busy ? T['finance.rescale.running'] : T['finance.rescale.button_apply']"></button>
-      </div>
-    </div>
-    <div x-show="result" x-cloak class="mt-3 text-xs rounded px-3 py-2"
-         :class="resultOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
-         x-text="result"></div>
-    <details x-show="preview && preview.samples && preview.samples.length"
-             x-cloak class="mt-2">
-      <summary class="cursor-pointer text-xs text-ink-300 hover:text-ink-100 select-none">
-        {{ t('finance.rescale.show_samples') }}
-      </summary>
-      <ul class="mt-2 space-y-1 text-xs font-mono tabular-nums">
-        <template x-for="s in (preview ? preview.samples : [])" :key="s.stmt_id">
-          <li class="flex items-baseline gap-3">
-            <span class="text-ink-500" x-text="'#' + s.stmt_id"></span>
-            <span class="text-ink-400" x-text="s.tx_count + ' Buch.'"></span>
-            <span class="text-rose-300" x-text="s.tx_sum_before.toFixed(2) + ' →'"></span>
-            <span class="text-emerald-300" x-text="s.tx_sum_after.toFixed(2) + ' €'"></span>
-            <span class="text-ink-500" x-text="'(Δ ' + s.delta_target.toFixed(2) + ')'"></span>
-          </li>
-        </template>
-      </ul>
-    </details>
-
-    <!-- Manual fallback list: statements that LOOK suspicious but the
-         strict heuristic couldn't auto-correct (saldo also corrupted
-         or missing). Each row gets a /100 button so the user can
-         decide per-statement. Loaded on demand. -->
-    <div class="mt-4 pt-3 border-t border-ink-700">
-      <button type="button" @click="loadSuspicious()" :disabled="busy"
-              class="text-xs text-ink-300 hover:text-ink-100 underline">
-        <span x-show="!suspicious">{{ t('finance.rescale.scan_button') }}</span>
-        <span x-show="loadingSuspicious" x-cloak>{{ t('finance.rescale.scanning') }}</span>
-        <span x-show="suspicious && !loadingSuspicious" x-cloak>{{ t('finance.rescale.scan_again') }}</span>
+      <button type="button" @click="reload()" x-show="lastTotalInserted > 0"
+              x-cloak class="btn-secondary text-xs">
+        {{ t('finance.csv.reload') }}
       </button>
-      <p x-show="suspicious && !suspicious.items.length" x-cloak
-         class="mt-2 text-xs text-emerald-300">{{ t('finance.rescale.scan_none') }}</p>
-      <div x-show="suspicious && suspicious.items.length" x-cloak class="mt-2 overflow-x-auto -mx-2 px-2">
-        <p class="text-xs text-amber-300 mb-2"
-           x-text="(T['finance.rescale.scan_found'] || '{n} verdächtige Auszüge gefunden — bei jedem manuell entscheiden:').replace('{n}', suspicious ? suspicious.total_found : 0)"></p>
-        <table class="w-full text-xs">
-          <thead class="text-ink-500 text-left">
-            <tr>
-              <th class="py-1 pr-2 font-normal">{{ t('finance.rescale.col_period') }}</th>
-              <th class="py-1 pr-2 font-normal">{{ t('finance.rescale.col_bank') }}</th>
-              <th class="py-1 pr-2 font-normal text-right">{{ t('finance.rescale.col_max') }}</th>
-              <th class="py-1 pr-2 font-normal text-right">{{ t('finance.rescale.col_sum') }}</th>
-              <th class="py-1 pr-2 font-normal text-right">{{ t('finance.rescale.col_saldo') }}</th>
-              <th class="py-1 pr-2 font-normal text-center">{{ t('finance.rescale.col_actions') }}</th>
-            </tr>
-          </thead>
-          <tbody class="font-mono tabular-nums">
-            <template x-for="it in (suspicious ? suspicious.items : [])" :key="it.stmt_id">
-              <tr class="border-t border-ink-800/50"
-                  :class="it.severity === 'high' ? 'bg-rose-500/5' : (it.severity === 'medium' ? 'bg-amber-500/5' : '')">
-                <td class="py-1.5 pr-2 text-ink-300"
-                    x-text="(it.period_start || '?') + '..' + (it.period_end || '?')"></td>
-                <td class="py-1.5 pr-2">
-                  <a :href="'/document/' + it.doc_id"
-                     class="text-cyan-300 hover:text-cyan-200 truncate"
-                     :title="it.subject"
-                     x-text="(it.bank_name || '—') + ' #' + it.stmt_id"></a>
-                </td>
-                <td class="py-1.5 pr-2 text-right text-rose-300"
-                    x-text="it.max_abs.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'"></td>
-                <td class="py-1.5 pr-2 text-right text-rose-300"
-                    x-text="it.sum_abs.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'"></td>
-                <td class="py-1.5 pr-2 text-right text-ink-400">
-                  <span x-show="it.opening !== null && it.closing !== null"
-                        x-text="(it.opening !== null ? it.opening.toFixed(0) : '—') + ' / ' + (it.closing !== null ? it.closing.toFixed(0) : '—')"></span>
-                  <span x-show="it.opening === null || it.closing === null"
-                        class="italic text-ink-500">{{ t('finance.rescale.no_saldo') }}</span>
-                </td>
-                <td class="py-1.5 pr-2 text-center">
-                  <button type="button"
-                          @click="rescaleOne(it.stmt_id)"
-                          :disabled="busyStmt === it.stmt_id"
-                          class="text-[11px] text-amber-300 hover:text-amber-200 underline">
-                    <span x-show="busyStmt !== it.stmt_id">{{ t('finance.rescale.div100') }}</span>
-                    <span x-show="busyStmt === it.stmt_id" x-cloak>…</span>
-                  </button>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
     </div>
   </div>
-  {% endif %}
 
-  {% if summary.statement_count == 0 %}
+  {% if not has_data %}
+    {# No accounts yet → big call-to-action. The CSV importer above is
+       the only path forward. Stat cards / charts stay hidden until the
+       user has uploaded at least one CSV. #}
     <div class="card p-10 text-center">
       <div class="inline-flex h-14 w-14 items-center justify-center rounded-full bg-ink-700/40 text-ink-400 mb-4">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-7 w-7">
-          <rect x="3" y="6" width="18" height="13" rx="2"/>
-          <path d="M3 10h18M7 14h2M7 17h6"/>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
         </svg>
       </div>
       <h2 class="text-lg font-semibold mb-2">{{ t('finance.empty_title') }}</h2>
-      <p class="text-sm text-ink-400 mb-6 max-w-md mx-auto">{{ t('finance.empty_hint') }}</p>
-      <a href="/upload" class="btn-primary">{{ t('finance.empty_cta') }}</a>
+      <p class="text-sm text-ink-400 max-w-md mx-auto">{{ t('finance.empty_hint') }}</p>
     </div>
   {% else %}
 
-  <!-- Top stat cards -->
+  {# Stat tiles — only when there's data to show #}
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
     <div class="card p-4">
       <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.income') }}</div>
@@ -769,25 +102,16 @@
       <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.transactions') }}</div>
       <div class="mt-2 text-2xl sm:text-3xl font-semibold tabular-nums">{{ summary.tx_count }}</div>
       <div class="text-xs text-ink-500 mt-1">
-        {{ summary.statement_count }} {{ t('finance.statements') }} · {{ summary.account_count }} {{ t('finance.accounts') }}
+        {{ summary.account_count }} {{ t('finance.accounts') }}
       </div>
-      {% if summary.transfer_count %}
-        <div class="text-[11px] text-ink-500 mt-1.5 italic" title="{{ t('finance.transfer_excluded_hint') }}">
-          + {{ summary.transfer_count }} {{ t('finance.transfer_internal') }}
-        </div>
-      {% endif %}
     </div>
   </div>
 
-  <!-- Monthly cashflow chart — three-series area+line plot (income,
-       expense, net). Bars-on-bars before this got squashed by the one
-       big month, lines stay readable across orders of magnitude. -->
+  {# Monthly cashflow chart — full timeline with gap-fill #}
   <div class="card p-5 mb-6">
     <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.monthly_timeline') }}</h2>
     {% if monthly %}
       {% set n = monthly | length %}
-      {# Thin out month labels when the timeline is long, otherwise the
-         x-axis becomes an unreadable smudge. #}
       {% set label_step = 1 if n <= 18 else (3 if n <= 36 else 6) %}
       {% set max_in  = (monthly | map(attribute='income')  | max) or 0 %}
       {% set max_out = -((monthly | map(attribute='expense') | min) or 0) %}
@@ -795,45 +119,32 @@
       {% set W = 1000 %}
       {% set H = 220 %}
       {% set step = (W - 60) / ([n - 1, 1] | max) %}
-      {% set ns = namespace(in_pts=[], out_pts=[], net_pts=[]) %}
+      {% set ns = namespace(in_pts=[], out_pts=[]) %}
       {% for m in monthly %}
         {% set x = 50 + loop.index0 * step %}
         {% set y_in  = (H - 20) - (m.income / vmax) * (H - 40) %}
         {% set y_out = (H - 20) - (-m.expense / vmax) * (H - 40) %}
-        {% set net = m.income + m.expense %}
-        {% set y_net = (H - 20) - ((net + vmax) / (2 * vmax)) * (H - 40) %}
         {% set ns.in_pts  = ns.in_pts  + [(x, y_in)] %}
         {% set ns.out_pts = ns.out_pts + [(x, y_out)] %}
-        {% set ns.net_pts = ns.net_pts + [(x, y_net)] %}
       {% endfor %}
       <div class="overflow-x-auto -mx-2 px-2">
         <svg viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none"
              class="w-full h-64 sm:h-80" style="min-width: 600px;">
-          <!-- y-axis grid lines -->
           {% for frac in [0.0, 0.25, 0.5, 0.75, 1.0] %}
             {% set y = 20 + frac * (H - 40) %}
             <line x1="50" y1="{{ y }}" x2="{{ W - 10 }}" y2="{{ y }}"
                   stroke="currentColor" class="text-ink-700" stroke-width="0.5" stroke-dasharray="2 4"/>
           {% endfor %}
-          <!-- y-axis labels: vmax at top, 0 at bottom -->
           <text x="44" y="24" text-anchor="end" class="fill-ink-500" font-size="10">{{ "%.0f"|format(vmax) }}</text>
           <text x="44" y="{{ H - 18 }}" text-anchor="end" class="fill-ink-500" font-size="10">0</text>
-
-          <!-- income area -->
           <path fill="rgb(16 185 129 / 0.15)" stroke="none"
                 d="M{{ ns.in_pts[0][0] }},{{ H - 20 }} {% for x,y in ns.in_pts %}L{{ x }},{{ y }} {% endfor %} L{{ ns.in_pts[-1][0] }},{{ H - 20 }} Z"/>
-          <!-- expense area -->
           <path fill="rgb(244 63 94 / 0.12)" stroke="none"
                 d="M{{ ns.out_pts[0][0] }},{{ H - 20 }} {% for x,y in ns.out_pts %}L{{ x }},{{ y }} {% endfor %} L{{ ns.out_pts[-1][0] }},{{ H - 20 }} Z"/>
-
-          <!-- income line -->
           <path fill="none" stroke="rgb(16 185 129)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
                 d="M{% for x,y in ns.in_pts %}{% if loop.first %}{{ x }},{{ y }}{% else %} L{{ x }},{{ y }}{% endif %}{% endfor %}"/>
-          <!-- expense line -->
           <path fill="none" stroke="rgb(244 63 94)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
                 d="M{% for x,y in ns.out_pts %}{% if loop.first %}{{ x }},{{ y }}{% else %} L{{ x }},{{ y }}{% endif %}{% endfor %}"/>
-
-          <!-- per-point dots with native tooltips -->
           {% for m in monthly %}
             {% set x = 50 + loop.index0 * step %}
             {% set y_in  = (H - 20) - (m.income / vmax) * (H - 40) %}
@@ -855,726 +166,92 @@
     {% endif %}
   </div>
 
-  <!-- KPI strip: four single-figure cards under the cashflow chart -->
-  {% if kpis %}
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-    <div class="card p-4">
-      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.kpi.avg_daily') }}</div>
-      <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums">
-        {{ "%.0f"|format(kpis.avg_daily_spend) }} €
-      </div>
-      <div class="text-[11px] text-ink-500 mt-1">{{ t('finance.kpi.avg_daily_hint') }}</div>
-    </div>
-    <div class="card p-4">
-      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.kpi.peak_daily') }}</div>
-      <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums text-rose-300">
-        {{ "%.0f"|format(kpis.peak_daily_spend) }} €
-      </div>
-    </div>
-    <div class="card p-4">
-      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.kpi.biggest_tx') }}</div>
-      <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums {% if kpis.biggest_amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
-        {% if kpis.biggest_amount > 0 %}+{% endif %}{{ "%.0f"|format(kpis.biggest_amount) }} €
-      </div>
-      <div class="text-[11px] text-ink-500 mt-1 truncate" title="{{ kpis.biggest_counterparty }}">{{ kpis.biggest_counterparty or '—' }}</div>
-    </div>
-    <div class="card p-4">
-      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('finance.kpi.busiest_month') }}</div>
-      <div class="mt-2 text-xl sm:text-2xl font-semibold tabular-nums">{{ kpis.busiest_month or '—' }}</div>
-      <div class="text-[11px] text-ink-500 mt-1">{{ kpis.busiest_month_n }} {{ t('finance.transactions') }}</div>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Calendar heatmap: weeks × weekdays grid coloured by daily spend.
-       Supports a full year (Jan 1 → Dec 31) or a single month, picked
-       via the dropdown selectors. Palette runs cool-green → yellow →
-       red so heavy-spending days really pop. -->
-  {% if heatmap_grid.weeks or heatmap_periods.years %}
-  <div class="card p-5 mb-6">
-    <div class="flex items-baseline justify-between mb-4 gap-3 flex-wrap">
-      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.heatmap.title') }}</h2>
-      <form method="get" action="/finance" class="flex items-center gap-2 text-xs">
-        <label class="flex items-center gap-1.5">
-          <span class="text-ink-500">{{ t('finance.heatmap.year_label') }}</span>
-          <select name="heatmap_year"
-                  onchange="this.form.heatmap_month.value=''; this.form.submit()"
-                  class="bg-ink-900/60 border border-ink-700 rounded px-2 py-1 text-xs">
-            {% for y in heatmap_periods.years %}
-              <option value="{{ y }}" {% if y == heatmap_grid.year and not heatmap_grid.month %}selected{% endif %}>{{ y }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="flex items-center gap-1.5">
-          <span class="text-ink-500">{{ t('finance.heatmap.month_label') }}</span>
-          <select name="heatmap_month"
-                  onchange="this.form.submit()"
-                  class="bg-ink-900/60 border border-ink-700 rounded px-2 py-1 text-xs">
-            <option value="">{{ t('finance.heatmap.full_year') }}</option>
-            {% for m in heatmap_periods.months %}
-              <option value="{{ m }}" {% if m == heatmap_grid.month %}selected{% endif %}>{{ m }}</option>
-            {% endfor %}
-          </select>
-        </label>
-      </form>
-    </div>
-    {% if heatmap_grid.weeks %}
-    <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.heatmap.hint') }}</p>
-    {# Pure SVG heatmap. Tailwind colour classes are pre-compiled and the
-       site CSS does not include the bin palette, so we inline hex fills
-       directly into <rect> elements — guaranteed to render. #}
-    {% set hm_cell  = 14 %}{# px per cell incl. gap #}
-    {% set hm_rect  = 12 %}
-    {% set hm_lpad  = 32 %}{# left padding for weekday labels #}
-    {% set hm_tpad  = 16 %}{# top padding for month labels #}
-    {% set hm_w     = hm_lpad + heatmap_grid.weeks|length * hm_cell %}
-    {% set hm_h     = hm_tpad + 7 * hm_cell %}
-    <div class="overflow-x-auto -mx-2 px-2">
-      <svg viewBox="0 0 {{ hm_w }} {{ hm_h }}"
-           width="100%" preserveAspectRatio="xMinYMin meet"
-           style="min-width: {{ hm_w }}px; height: {{ hm_h }}px;"
-           class="block">
-        <!-- month labels along the top -->
-        {% for w in heatmap_grid.weeks %}
-          {% if loop.index0 % 4 == 0 and w.month_label %}
-            <text x="{{ hm_lpad + loop.index0 * hm_cell + hm_rect / 2 }}" y="11"
-                  fill="#9ca3af" font-size="10" text-anchor="middle">{{ w.month_label }}</text>
-          {% endif %}
-        {% endfor %}
-        <!-- weekday labels on the left (Mo, Mi, Fr, So) -->
-        {% for dow_label in ['Mo','Di','Mi','Do','Fr','Sa','So'] %}
-          {% set d = loop.index0 %}
-          {% if d % 2 == 0 %}
-            <text x="{{ hm_lpad - 4 }}" y="{{ hm_tpad + d * hm_cell + hm_rect - 2 }}"
-                  fill="#9ca3af" font-size="10" text-anchor="end">{{ dow_label }}</text>
-          {% endif %}
-        {% endfor %}
-        <!-- one rect per (week, day) cell -->
-        {% for w in heatmap_grid.weeks %}
-          {% set wi = loop.index0 %}
-          {% for d in range(7) %}
-            {% set cell = w.cells[d] %}
-            {% if cell and cell.spend is not none %}
-              {% if cell.spend == 0 %}
-                {% set fill = '#1f2937' %}
-              {% else %}
-                {% set ratio = (cell.spend / heatmap_grid.max_spend) if heatmap_grid.max_spend > 0 else 0 %}
-                {% if ratio > 1 %}{% set ratio = 1 %}{% endif %}
-                {% if   ratio < 0.15 %}{% set fill = '#22d3ee' %}
-                {% elif ratio < 0.40 %}{% set fill = '#34d399' %}
-                {% elif ratio < 0.65 %}{% set fill = '#facc15' %}
-                {% elif ratio < 0.90 %}{% set fill = '#f97316' %}
-                {% else                %}{% set fill = '#f43f5e' %}
-                {% endif %}
-              {% endif %}
-              <rect x="{{ hm_lpad + wi * hm_cell }}"
-                    y="{{ hm_tpad + d * hm_cell }}"
-                    width="{{ hm_rect }}" height="{{ hm_rect }}" rx="2" ry="2"
-                    fill="{{ fill }}">
-                <title>{{ cell.date }} · {{ '%.0f'|format(cell.spend) }} €</title>
-              </rect>
-            {% endif %}
-          {% endfor %}
-        {% endfor %}
-      </svg>
-    </div>
-    <div class="flex items-center gap-2 text-[11px] text-ink-500 mt-3 justify-end">
-      <span>{{ t('finance.heatmap.less') }}</span>
-      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#1f2937"/></svg>
-      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#22d3ee"/></svg>
-      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#34d399"/></svg>
-      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#facc15"/></svg>
-      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#f97316"/></svg>
-      <svg width="14" height="14"><rect width="14" height="14" rx="2" fill="#f43f5e"/></svg>
-      <span>{{ t('finance.heatmap.more') }}</span>
-    </div>
-    {% else %}
-      <p class="text-xs text-ink-500">{{ t('finance.heatmap.empty') }}</p>
-    {% endif %}
-  </div>
-  {% endif %}
-
-  <!-- Category trends: stacked bar per month, top 6 categories + Other.
-       Default covers the full booking history; the user can narrow
-       the range with the start/end month selectors. -->
-  {% if cat_monthly.matrix or heatmap_periods.months %}
-  <div class="card p-5 mb-6">
-    <div class="flex items-baseline justify-between gap-3 mb-4 flex-wrap">
-      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.catrend.title') }}</h2>
-      <form method="get" action="/finance" class="flex items-center gap-2 text-xs">
-        <input type="hidden" name="heatmap_year"  value="{{ heatmap_grid.year if not heatmap_grid.month else '' }}">
-        <input type="hidden" name="heatmap_month" value="{{ heatmap_grid.month or '' }}">
-        <span class="text-ink-500">{{ t('finance.catrend.range_label') }}</span>
-        <select name="cat_start" onchange="this.form.submit()"
-                class="bg-ink-900/60 border border-ink-700 rounded px-2 py-1 text-xs">
-          <option value="">{{ t('finance.catrend.range_all') }}</option>
-          {% for m in heatmap_periods.months %}
-            <option value="{{ m }}" {% if cat_range.start == m %}selected{% endif %}>{{ m }}</option>
-          {% endfor %}
-        </select>
-        <span class="text-ink-500">…</span>
-        <select name="cat_end" onchange="this.form.submit()"
-                class="bg-ink-900/60 border border-ink-700 rounded px-2 py-1 text-xs">
-          <option value="">{{ t('finance.catrend.range_all') }}</option>
-          {% for m in heatmap_periods.months %}
-            <option value="{{ m }}" {% if cat_range.end == m %}selected{% endif %}>{{ m }}</option>
-          {% endfor %}
-        </select>
-      </form>
-    </div>
-    {% if cat_monthly.matrix %}
-    {% set all_cats = cat_monthly.categories %}
-    {% set top_cats = all_cats[:6] %}
-    {# Hex palette mirrors the legend below so the chart can't go out of
-       sync with the CSS (Tailwind classes are pre-compiled and many of
-       these utility colours are not in the bundle). #}
-    {% set hex_palette = ['#10b981','#0ea5e9','#f59e0b','#f43f5e','#a855f7','#14b8a6','#6b7280'] %}
-    {% set bar_count = cat_monthly.matrix | length %}
-    <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.catrend.normalised_hint') }}</p>
-    {# Pure SVG stacked-bar. Total + month label rendered as <text> so we
-       don't depend on flex height resolution at all. #}
-    {% set ct_w_per_col = 56 %}
-    {% set ct_chart_w   = bar_count * ct_w_per_col %}
-    {% set ct_chart_h   = 320 %}
-    {% set ct_top_pad   = 18 %}{# total label #}
-    {% set ct_bot_pad   = 22 %}{# month label #}
-    {% set ct_bar_h     = ct_chart_h - ct_top_pad - ct_bot_pad %}
-    {% set ct_bar_w     = 38 %}
-    <div class="overflow-x-auto -mx-1 px-1">
-      <svg viewBox="0 0 {{ ct_chart_w }} {{ ct_chart_h }}"
-           width="100%" preserveAspectRatio="xMinYMin meet"
-           style="min-width: {{ ct_chart_w }}px; height: {{ ct_chart_h }}px;"
-           class="block">
-        {% for row in cat_monthly.matrix %}
-          {% set month_total = row['values'] | sum %}
-          {% set col_x = loop.index0 * ct_w_per_col %}
-          {% set bar_x = col_x + (ct_w_per_col - ct_bar_w) / 2 %}
-          <!-- empty bar background so a 0-€ month is still visible -->
-          <rect x="{{ bar_x }}" y="{{ ct_top_pad }}"
-                width="{{ ct_bar_w }}" height="{{ ct_bar_h }}"
-                rx="3" ry="3" fill="#1f2937" fill-opacity="0.4"></rect>
-          <!-- total above bar -->
-          <text x="{{ col_x + ct_w_per_col / 2 }}" y="{{ ct_top_pad - 6 }}"
-                fill="#9ca3af" font-size="10" text-anchor="middle">{{ "%.0f"|format(month_total) }}</text>
-          {% if month_total > 0 %}
-            {# stack from bottom up; track running y offset #}
-            {% set ns = namespace(y=ct_top_pad + ct_bar_h) %}
-            {% for c_idx in range(top_cats|length) %}
-              {% set v = row['values'][c_idx] %}
-              {% if v > 0 %}
-                {% set seg_h = v / month_total * ct_bar_h %}
-                {% set ns.y = ns.y - seg_h %}
-                <rect x="{{ bar_x }}" y="{{ ns.y }}"
-                      width="{{ ct_bar_w }}" height="{{ seg_h }}"
-                      fill="{{ hex_palette[c_idx] }}" fill-opacity="0.85">
-                  <title>{{ top_cats[c_idx] }} · {{ '%.0f'|format(v) }} € · {{ '%.0f'|format(v / month_total * 100) }}%</title>
-                </rect>
-              {% endif %}
-            {% endfor %}
-            {% set other = (row['values'][6:] | sum) %}
-            {% if other > 0 %}
-              {% set seg_h = other / month_total * ct_bar_h %}
-              {% set ns.y = ns.y - seg_h %}
-              <rect x="{{ bar_x }}" y="{{ ns.y }}"
-                    width="{{ ct_bar_w }}" height="{{ seg_h }}"
-                    fill="{{ hex_palette[6] }}" fill-opacity="0.85">
-                <title>Andere · {{ '%.0f'|format(other) }} €</title>
-              </rect>
-            {% endif %}
-          {% endif %}
-          <!-- month label below bar -->
-          <text x="{{ col_x + ct_w_per_col / 2 }}" y="{{ ct_chart_h - 6 }}"
-                fill="#9ca3af" font-size="10" text-anchor="middle">{{ row.month[5:] }}/{{ row.month[2:4] }}</text>
-        {% endfor %}
-      </svg>
-    </div>
-    <!-- Legend (hex swatches inline so the legend can't go missing either) -->
-    <div class="flex flex-wrap gap-3 mt-4 text-[11px] text-ink-400">
-      {% for c in top_cats %}
-        <span class="inline-flex items-center gap-1.5">
-          <svg width="12" height="12"><rect width="12" height="12" rx="2" fill="{{ hex_palette[loop.index0] }}" fill-opacity="0.85"/></svg>
-          {{ t('finance.cat.' + c) }}
-        </span>
-      {% endfor %}
-      {% if all_cats|length > 6 %}
-        <span class="inline-flex items-center gap-1.5 italic">
-          <svg width="12" height="12"><rect width="12" height="12" rx="2" fill="{{ hex_palette[6] }}" fill-opacity="0.85"/></svg>
-          {{ t('finance.catrend.other') }} ({{ all_cats|length - 6 }})
-        </span>
-      {% endif %}
-    </div>
-    {% else %}
-      <p class="text-xs text-ink-500">{{ t('finance.heatmap.empty') }}</p>
-    {% endif %}
-  </div>
-  {% endif %}
-
-  <!-- Donut charts: category split for spend + income over the same range -->
-  {% if cat_pie_spend or cat_pie_income %}
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-    {% set pie_palette = ['#10b981','#0ea5e9','#f59e0b','#f43f5e','#a855f7','#14b8a6','#fb923c','#ec4899','#8b5cf6','#22d3ee','#84cc16','#64748b'] %}
-    {% for pie in [{"title": t('finance.pie.spend_title'), "data": cat_pie_spend},
-                   {"title": t('finance.pie.income_title'), "data": cat_pie_income}] %}
-      {% if pie.data %}
-      <div class="card p-5">
-        <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ pie.title }}</h2>
-        {% set total = pie.data | map(attribute='total') | sum %}
-        <div class="flex flex-col sm:flex-row items-center sm:items-start gap-5">
-          {# SVG donut. The whole canvas stays upright; we rotate ONLY the
-             slice circles via an SVG <g transform="rotate(-90 21 21)"> so
-             segments start at 12 o'clock. The center text stays readable. #}
-          <svg viewBox="0 0 42 42" class="w-44 h-44 sm:w-52 sm:h-52 shrink-0">
-            <g transform="rotate(-90 21 21)">
-              <circle cx="21" cy="21" r="15.915" fill="none" stroke="#1f2937" stroke-width="6"></circle>
-              {% set ns = namespace(offset=0) %}
-              {% for r in pie.data %}
-                {% set pct = (r.total / total * 100) if total > 0 else 0 %}
-                {% if pct > 0 %}
-                <circle cx="21" cy="21" r="15.915" fill="none"
-                        stroke="{{ pie_palette[loop.index0 % (pie_palette|length)] }}"
-                        stroke-width="6"
-                        stroke-dasharray="{{ '%.3f'|format(pct) }} {{ '%.3f'|format(100 - pct) }}"
-                        stroke-dashoffset="{{ '%.3f'|format(-ns.offset) }}">
-                  <title>{{ t('finance.cat.' + r.category) }} · {{ '%.0f'|format(r.total) }} € · {{ '%.1f'|format(pct) }}%</title>
-                </circle>
-                {% set ns.offset = ns.offset + pct %}
-                {% endif %}
-              {% endfor %}
-            </g>
-            <text x="21" y="20" text-anchor="middle" dominant-baseline="middle"
-                  fill="currentColor" font-size="4.5" font-weight="600">{{ "%.0f"|format(total) }}</text>
-            <text x="21" y="26" text-anchor="middle" dominant-baseline="middle"
-                  fill="#9ca3af" font-size="2.5">€</text>
-          </svg>
-          <ul class="flex-1 min-w-0 w-full space-y-1.5 text-xs">
-            {% for r in pie.data %}
-              <li class="flex items-center gap-2">
-                <span class="inline-block h-3 w-3 rounded-sm shrink-0"
-                      style="background-color: {{ pie_palette[loop.index0 % (pie_palette|length)] }}"></span>
-                <span class="truncate min-w-0 flex-1">{{ t('finance.cat.' + r.category) }}</span>
-                <span class="tabular-nums text-ink-300 shrink-0">{{ "%.0f"|format(r.total) }} €</span>
-                {% if total > 0 %}
-                  <span class="text-[10px] tabular-nums text-ink-500 w-10 text-right shrink-0">{{ "%.1f"|format(r.total / total * 100) }}%</span>
-                {% endif %}
-              </li>
-            {% endfor %}
-          </ul>
-        </div>
-      </div>
-      {% endif %}
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  <!-- Side-by-side: weekday + day-of-month -->
-  {% if by_weekday or by_day_of_month %}
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-
-    <div class="card p-5">
-      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.weekday.title') }}</h2>
-      {% set wd_max = (by_weekday | map(attribute='spend') | max) or 1 %}
-      {% set wd_labels = ['Mo','Di','Mi','Do','Fr','Sa','So'] %}
-      <div class="space-y-2">
-        {% for r in by_weekday %}
-          <div class="flex items-center gap-3 text-sm">
-            <div class="w-8 text-ink-500 text-xs uppercase tracking-wider">{{ wd_labels[r.dow] }}</div>
-            <div class="flex-1 h-6 bg-ink-900/40 rounded overflow-hidden relative">
-              <div class="h-full bg-emerald-500/60 rounded"
-                   style="width: {{ (r.spend / wd_max * 100) if wd_max > 0 else 0 }}%;"></div>
-              <span class="absolute inset-0 flex items-center px-2 text-xs tabular-nums text-ink-200">
-                {{ "%.0f"|format(r.spend) }} €
-              </span>
-            </div>
-            <div class="w-10 text-right text-xs tabular-nums text-ink-500">{{ r.n }}</div>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div class="card p-5">
-      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.dom.title') }}</h2>
-      <p class="text-[11px] text-ink-500 mb-3">{{ t('finance.dom.hint') }}</p>
-      {% set dom_max = (by_day_of_month | map(attribute='spend') | max) or 1 %}
-      <div class="grid grid-cols-31 gap-[2px] items-end h-48 sm:h-56" style="grid-template-columns: repeat(31, minmax(0, 1fr));">
-        {% for r in by_day_of_month %}
-          <div class="flex flex-col items-center justify-end h-full group">
-            <div class="w-full bg-amber-500/40 hover:bg-amber-500/80 rounded-t transition"
-                 style="height: {{ (r.spend / dom_max * 100) if dom_max > 0 else 0 }}%; min-height: 1px;"
-                 title="{{ r.dom }}. · {{ '%.0f'|format(r.spend) }} € · {{ r.n }}×"></div>
-          </div>
-        {% endfor %}
-      </div>
-      <div class="grid mt-1 text-[9px] text-ink-500 tabular-nums" style="grid-template-columns: repeat(31, minmax(0, 1fr));">
-        {% for d in range(1, 32) %}
-          <div class="text-center {% if d not in [1, 5, 10, 15, 20, 25, 30] %}invisible{% endif %}">{{ d }}</div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Side-by-side: tx type + counterparty tile heap -->
-  {% if by_tx_type or cp_treemap %}
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-
-    <div class="card p-5">
-      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.txtype.title') }}</h2>
-      {% if by_tx_type %}
-        {% set tt_total = by_tx_type | map(attribute='spend') | sum %}
-        {% set tt_palette = ['bg-emerald-500/70','bg-sky-500/70','bg-amber-500/70','bg-rose-500/70','bg-violet-500/70','bg-teal-500/70','bg-fuchsia-500/70','bg-ink-600/70'] %}
-        <!-- Stacked horizontal bar -->
-        <div class="h-6 rounded overflow-hidden flex bg-ink-900/40 mb-3">
-          {% for r in by_tx_type %}
-            {% set pct = (r.spend / tt_total * 100) if tt_total > 0 else 0 %}
-            {% if pct > 0 %}
-              <div class="{{ tt_palette[loop.index0 % 8] }} h-full"
-                   style="width: {{ pct }}%;"
-                   title="{{ t('finance.type.' + r.tx_type) }} · {{ '%.0f'|format(r.spend) }} € ({{ '%.0f'|format(pct) }}%)"></div>
-            {% endif %}
-          {% endfor %}
-        </div>
-        <table class="w-full text-sm">
-          <tbody>
-            {% for r in by_tx_type %}
-              <tr class="border-t border-ink-800/40 first:border-t-0">
-                <td class="py-1.5 flex items-center gap-2">
-                  <span class="inline-block h-3 w-3 rounded-sm {{ tt_palette[loop.index0 % 8] }}"></span>
-                  {{ t('finance.type.' + r.tx_type) }}
-                </td>
-                <td class="py-1.5 text-right tabular-nums">{{ "%.0f"|format(r.spend) }} €</td>
-                <td class="py-1.5 text-right tabular-nums text-ink-500 text-xs w-12">{{ r.n }}×</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}<p class="text-sm text-ink-500">—</p>{% endif %}
-    </div>
-
-    <div class="card p-5">
-      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.treemap.title') }}</h2>
-      {% if cp_treemap %}
-        {% set tm_total = cp_treemap | map(attribute='spend') | sum %}
-        <div class="flex flex-wrap gap-1">
-          {% for r in cp_treemap %}
-            {% set pct = (r.spend / tm_total * 100) if tm_total > 0 else 0 %}
-            {% set sz_class = 'flex-[3]' if pct >= 15 else ('flex-[2]' if pct >= 7 else ('flex-[1.3]' if pct >= 3 else 'flex-1')) %}
-            <a href="/finance?q={{ r.counterparty | urlencode }}"
-               class="{{ sz_class }} min-w-[80px] rounded-lg p-2 bg-emerald-500/15 hover:bg-emerald-500/25 ring-1 ring-emerald-500/20 transition text-xs leading-tight"
-               title="{{ r.counterparty }} · {{ '%.0f'|format(r.spend) }} € · {{ r.times }}×">
-              <div class="font-medium truncate">{{ r.counterparty }}</div>
-              <div class="text-[10px] text-emerald-300 tabular-nums mt-1">{{ "%.0f"|format(r.spend) }} €</div>
-            </a>
-          {% endfor %}
-        </div>
-      {% else %}<p class="text-sm text-ink-500">—</p>{% endif %}
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Balance trajectory line chart per account -->
-  {% if balance_history %}
-  <div class="card p-5 mb-6">
-    <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-4">{{ t('finance.balance.title') }}</h2>
-    {% set bh_min = (balance_history | map(attribute='balance') | min) %}
-    {% set bh_max = (balance_history | map(attribute='balance') | max) %}
-    {% set bh_range = (bh_max - bh_min) if bh_max != bh_min else 1 %}
-    {% set acct_palette = ['#34d399','#60a5fa','#fbbf24','#f87171','#a78bfa'] %}
-    {% set acct_ids = balance_history | map(attribute='account_id') | unique | list %}
-    <svg viewBox="0 0 1000 200" class="w-full h-64 sm:h-80" preserveAspectRatio="none">
-      <!-- zero line if range crosses zero -->
-      {% if bh_min < 0 < bh_max %}
-        {% set zero_y = 200 - ((0 - bh_min) / bh_range * 180) - 10 %}
-        <line x1="0" y1="{{ zero_y }}" x2="1000" y2="{{ zero_y }}" stroke="#64748b" stroke-width="0.5" stroke-dasharray="4 4"/>
-      {% endif %}
-      {% for acct_id in acct_ids %}
-        {% set acct_points = balance_history | selectattr("account_id", "equalto", acct_id) | list %}
-        {% if acct_points|length > 1 %}
-          {% set color = acct_palette[loop.index0 % 5] %}
-          {% set step = 1000 / (acct_points|length - 1) if acct_points|length > 1 else 0 %}
-          <polyline fill="none" stroke="{{ color }}" stroke-width="1.5" stroke-linejoin="round"
-            points="{% for p in acct_points %}{{ '%.1f'|format(loop.index0 * step) }},{{ '%.1f'|format(200 - ((p.balance - bh_min) / bh_range * 180) - 10) }} {% endfor %}"/>
-        {% endif %}
-      {% endfor %}
-    </svg>
-    <div class="flex flex-wrap items-baseline justify-between gap-3 mt-2 text-[11px] text-ink-500">
-      <div class="flex flex-wrap gap-3">
-        {% for acct_id in acct_ids %}
-          {% set color = acct_palette[loop.index0 % 5] %}
-          {% set acct = (accounts | selectattr("id", "equalto", acct_id) | list | first) %}
-          {% if acct %}
-            <span class="inline-flex items-center gap-1.5">
-              <span class="inline-block w-4 h-0.5" style="background: {{ color }};"></span>
-              {{ acct.bank_name }}{% if acct.iban_last4 %} …{{ acct.iban_last4 }}{% endif %}
-            </span>
-          {% endif %}
-        {% endfor %}
-      </div>
-      <div class="tabular-nums">{{ "%.0f"|format(bh_min) }} € … {{ "%.0f"|format(bh_max) }} €</div>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Largest single transactions -->
-  {% if largest_tx %}
-  <div class="card p-5 mb-6">
-    <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400 mb-3">{{ t('finance.largest.title') }}</h2>
-    <div class="overflow-x-auto -mx-5">
-      <table class="w-full text-sm">
-        <thead class="text-xs uppercase tracking-wider text-ink-500">
-          <tr>
-            <th class="text-left  px-5 py-2 font-medium">{{ t('document.date') }}</th>
-            <th class="text-left  px-2 py-2 font-medium">{{ t('finance.counterparty') }}</th>
-            <th class="text-left  px-2 py-2 font-medium">{{ t('finance.category') }}</th>
-            <th class="text-right px-5 py-2 font-medium">{{ t('finance.amount') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for tx in largest_tx %}
-            <tr class="border-t border-ink-800/50 hover:bg-ink-800/30">
-              <td class="px-5 py-2 tabular-nums text-ink-300">{{ tx.booking_date or '—' }}</td>
-              <td class="px-2 py-2 font-medium">
-                <a href="/document/{{ tx.doc_id }}" class="hover:text-emerald-300">{{ tx.counterparty or '—' }}</a>
-                {% if tx.purpose %}
-                  <span class="block text-[11px] text-ink-500 truncate max-w-[260px]">{{ tx.purpose }}</span>
-                {% endif %}
-              </td>
-              <td class="px-2 py-2">
-                {% if tx.category %}
-                  <span class="chip bg-ink-700/60 text-ink-200 text-[11px]">{{ t('finance.cat.' + tx.category) }}</span>
-                {% endif %}
-              </td>
-              <td class="px-5 py-2 text-right tabular-nums {% if tx.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
-                {% if tx.amount > 0 %}+{% endif %}{{ "%.2f"|format(tx.amount) }} €
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Two-column grid: accounts / categories -->
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-
-    <!-- Accounts -->
-    <div class="card p-5" x-data="accountList()">
-      <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.accounts_heading') }}</h2>
-      {% if accounts %}
-        <div class="space-y-2">
-          {% for a in accounts %}
-            <div class="flex items-stretch gap-2 group">
-              <a href="/finance?account_id={{ a.id }}" class="block flex-1 min-w-0 rounded-lg p-2 -mx-2 hover:bg-ink-800/40">
-                <div class="flex justify-between items-baseline gap-3">
-                  <div class="min-w-0">
-                    <div class="font-medium group-hover:text-emerald-300 truncate">{{ a.bank_name }}{% if a.iban_last4 %} · …{{ a.iban_last4 }}{% endif %}</div>
-                    {% if a.account_holder %}
-                      <div class="text-xs text-ink-500 truncate">{{ a.account_holder }}</div>
-                    {% endif %}
-                  </div>
-                  <div class="text-xs text-ink-500 tabular-nums shrink-0">
-                    {{ a.tx_count }} {{ t('finance.tx_short') }} · {{ a.statement_count }} {{ t('finance.stmt_short') }}
-                  </div>
-                </div>
-              </a>
-              <button type="button" @click="del({{ a.id }}, '{{ a.bank_name }}{% if a.iban_last4 %} …{{ a.iban_last4 }}{% endif %}')"
-                      :disabled="deleting === {{ a.id }}"
-                      class="opacity-0 group-hover:opacity-100 transition btn-ghost text-rose-300 hover:bg-rose-500/10 !px-2"
-                      :title="T['finance.account_delete']">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
-                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
-                </svg>
-              </button>
-            </div>
-          {% endfor %}
-        </div>
-      {% else %}
-        <p class="text-sm text-ink-500">—</p>
-      {% endif %}
-    </div>
-
-    <!-- By category -->
-    <div class="card p-5">
-      <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.by_category') }}</h2>
-      {% if summary.by_category %}
-        {% set cat_max = 0 %}
-        {% for c in summary.by_category %}
-          {% set cat_max = [cat_max, (c.income or 0), -(c.expense or 0)] | max %}
-        {% endfor %}
-        <div class="space-y-2">
-          {% for c in summary.by_category %}
-            {% set total = (c.income or 0) + (c.expense or 0) %}
-            <a href="/finance?category={{ c.category }}" class="block group">
-              <div class="flex justify-between text-sm mb-1">
-                <span class="font-medium group-hover:text-emerald-300">{{ t('finance.cat.' + c.category) }}</span>
-                <span class="tabular-nums {% if total >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
-                  {{ "%.2f"|format(total) }} €
-                  <span class="text-ink-500 text-xs ml-1">· {{ c.n }}</span>
-                </span>
-              </div>
-              <div class="h-2 bg-ink-800 rounded overflow-hidden flex">
-                {% if c.income > 0 %}
-                  <div class="h-full bg-emerald-500/60"
-                       style="width: {{ (c.income / cat_max * 50) if cat_max > 0 else 0 }}%;"></div>
-                {% endif %}
-                {% if c.expense < 0 %}
-                  <div class="h-full bg-rose-500/60"
-                       style="width: {{ (-c.expense / cat_max * 50) if cat_max > 0 else 0 }}%;"></div>
-                {% endif %}
-              </div>
-            </a>
-          {% endfor %}
-        </div>
-      {% else %}
-        <p class="text-sm text-ink-500">—</p>
-      {% endif %}
-    </div>
-  </div>
-
-  <!-- Top counterparties: outgoing + incoming side-by-side -->
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-    <div class="card p-5">
-      <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.top_outgoing') }}</h2>
-      {% if top_outgoing %}
-      <table class="w-full text-sm">
-        <tbody>
-          {% for t in top_outgoing %}
-          <tr class="border-t border-ink-800/50">
-            <td class="py-2"><span class="font-medium">{{ t.counterparty }}</span><span class="text-xs text-ink-500 ml-2">· {{ t.times }}×</span></td>
-            <td class="py-2 text-right tabular-nums text-rose-300">{{ "%.2f"|format(t.total) }} €</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}<p class="text-sm text-ink-500">—</p>{% endif %}
-    </div>
-    <div class="card p-5">
-      <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.top_incoming') }}</h2>
-      {% if top_incoming %}
-      <table class="w-full text-sm">
-        <tbody>
-          {% for t in top_incoming %}
-          <tr class="border-t border-ink-800/50">
-            <td class="py-2"><span class="font-medium">{{ t.counterparty }}</span><span class="text-xs text-ink-500 ml-2">· {{ t.times }}×</span></td>
-            <td class="py-2 text-right tabular-nums text-emerald-300">+{{ "%.2f"|format(t.total) }} €</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}<p class="text-sm text-ink-500">—</p>{% endif %}
-    </div>
-  </div>
-
-  <!-- Recurring (subscriptions) -->
-  {% if recurring %}
-  <div class="card p-5 mb-6">
-    <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.recurring_heading') }}</h2>
-    <p class="text-xs text-ink-500 mb-4">{{ t('finance.recurring_hint') }}</p>
-    <div class="overflow-x-auto -mx-5">
-      <table class="w-full text-sm">
-        <thead class="text-xs uppercase tracking-wider text-ink-500">
-          <tr>
-            <th class="text-left  px-5 py-2 font-medium">{{ t('finance.counterparty') }}</th>
-            <th class="text-right px-2 py-2 font-medium">{{ t('finance.months') }}</th>
-            <th class="text-right px-2 py-2 font-medium">{{ t('finance.avg_amount') }}</th>
-            <th class="text-right px-5 py-2 font-medium">{{ t('finance.estimated_yearly') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in recurring %}
-          <tr class="border-t border-ink-800/50">
-            <td class="px-5 py-2 font-medium">{{ r.counterparty }}</td>
-            <td class="px-2 py-2 text-right tabular-nums">{{ r.months }}</td>
-            <td class="px-2 py-2 text-right tabular-nums {% if r.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
-              {{ "%.2f"|format(r.amount) }} €
-            </td>
-            <td class="px-5 py-2 text-right tabular-nums {% if r.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
-              {{ "%.2f"|format(r.amount * 12) }} €
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Transactions: filter + paged list -->
-  <div class="card p-5">
-    <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
-      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.transactions_heading') }}</h2>
-      <a href="/transactions"
-         class="inline-flex items-center gap-1.5 text-xs rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 px-2.5 py-1.5 hover:bg-emerald-500/20">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
-          <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
-        </svg>
-        Alle Buchungen durchsuchen, vergleichen &amp; umkategorisieren
-      </a>
-    </div>
-    <form
-      class="grid gap-3 md:grid-cols-[1fr_auto_auto_auto_auto] mb-4"
-      hx-get="/finance"
-      hx-trigger="change, keyup delay:400ms from:input[name=q]"
-      hx-target="body"
-      hx-push-url="true"
-      hx-include="this"
-    >
-      <input type="search" name="q" value="{{ filter.q or '' }}"
-             placeholder="{{ t('finance.search_placeholder') }}"
-             class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
-      <select name="account_id" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
-        <option value="">{{ t('finance.all_accounts') }}</option>
+  {# Accounts list #}
+  <div class="card p-5 mb-6" x-data="accountList()">
+    <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.accounts_heading') }}</h2>
+    {% if accounts %}
+      <ul class="space-y-1.5 text-sm">
         {% for a in accounts %}
-          <option value="{{ a.id }}" {% if filter.account_id == a.id %}selected{% endif %}>
-            {{ a.bank_name }}{% if a.iban_last4 %} · …{{ a.iban_last4 }}{% endif %}
-          </option>
+          <li class="flex items-baseline gap-3 border-b border-ink-800/40 pb-1.5 last:border-0">
+            <span class="font-medium">{{ a.bank_name or '—' }}</span>
+            <span class="font-mono text-xs text-ink-500">…{{ a.iban_last4 or '' }}</span>
+            <span class="text-xs text-ink-500" x-show="!busy">{{ a.tx_count or 0 }} {{ t('finance.transactions') }}</span>
+            <span class="ml-auto tabular-nums {% if a.net and a.net >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
+              {{ "%.2f"|format(a.net or 0) }} €
+            </span>
+            <button type="button" @click="del({{ a.id }}, '{{ a.bank_name }} {{ a.iban_last4 }}')"
+                    :disabled="deleting === {{ a.id }}"
+                    class="text-[11px] text-ink-500 hover:text-rose-300 underline">×</button>
+          </li>
         {% endfor %}
-      </select>
-      <select name="category" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
-        <option value="">{{ t('finance.all_categories') }}</option>
-        {% for c in tx_categories %}
-          <option value="{{ c }}" {% if filter.category == c %}selected{% endif %}>{{ t('finance.cat.' + c) }}</option>
-        {% endfor %}
-      </select>
-      <select name="direction" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
-        <option value="">{{ t('finance.both_directions') }}</option>
-        <option value="income"  {% if filter.direction == 'income'  %}selected{% endif %}>{{ t('finance.income') }}</option>
-        <option value="expense" {% if filter.direction == 'expense' %}selected{% endif %}>{{ t('finance.expense') }}</option>
-      </select>
-      <input type="date" name="start" value="{{ filter.start or '' }}"
-             class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
-    </form>
+      </ul>
+    {% else %}
+      <p class="text-xs text-ink-500">{{ t('finance.no_accounts') }}</p>
+    {% endif %}
+  </div>
 
-    {% if transactions %}
-    <div class="overflow-x-auto -mx-5">
-      <table class="w-full text-sm">
-        <thead class="text-xs uppercase tracking-wider text-ink-500">
+  {# Top counterparties #}
+  <div class="grid md:grid-cols-2 gap-4 mb-6">
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.top_outgoing') }}</h2>
+      {% if top_outgoing %}
+        <ul class="space-y-1 text-xs">
+          {% for r in top_outgoing %}
+            <li class="flex items-baseline gap-2">
+              <span class="truncate flex-1">{{ r.counterparty or '—' }}</span>
+              <span class="text-ink-500 tabular-nums">{{ r.times }}×</span>
+              <span class="text-rose-300 tabular-nums">{{ "%.2f"|format(r.total) }} €</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-xs text-ink-500">—</p>
+      {% endif %}
+    </div>
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.top_incoming') }}</h2>
+      {% if top_incoming %}
+        <ul class="space-y-1 text-xs">
+          {% for r in top_incoming %}
+            <li class="flex items-baseline gap-2">
+              <span class="truncate flex-1">{{ r.counterparty or '—' }}</span>
+              <span class="text-ink-500 tabular-nums">{{ r.times }}×</span>
+              <span class="text-emerald-300 tabular-nums">+{{ "%.2f"|format(r.total) }} €</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-xs text-ink-500">—</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Recent transactions table — read-only here; full editor on /transactions #}
+  {% if transactions %}
+  <div class="card p-5 mb-6">
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.transactions_heading') }}</h2>
+      <a href="/transactions" class="text-xs text-emerald-300 hover:text-emerald-200">{{ t('finance.see_all') }} →</a>
+    </div>
+    <div class="overflow-x-auto -mx-5 max-h-[60vh] overflow-y-auto">
+      <table class="w-full text-xs">
+        <thead class="text-[10px] uppercase tracking-wider text-ink-500 sticky top-0 bg-ink-900/95 backdrop-blur">
           <tr>
-            <th class="text-left  px-5 py-2 font-medium">{{ t('document.date') }}</th>
-            <th class="text-left  px-2 py-2 font-medium">{{ t('finance.counterparty') }}</th>
-            <th class="text-left  px-2 py-2 font-medium">{{ t('finance.purpose') }}</th>
-            <th class="text-left  px-2 py-2 font-medium">{{ t('finance.account_short') }}</th>
-            <th class="text-left  px-2 py-2 font-medium">{{ t('finance.category') }}</th>
-            <th class="text-right px-5 py-2 font-medium">{{ t('finance.amount') }}</th>
+            <th class="text-left px-5 py-1.5 font-medium">{{ t('document.date') }}</th>
+            <th class="text-left px-2 py-1.5 font-medium">{{ t('finance.counterparty') }}</th>
+            <th class="text-left px-2 py-1.5 font-medium">{{ t('finance.purpose') }}</th>
+            <th class="text-left px-2 py-1.5 font-medium">{{ t('finance.category') }}</th>
+            <th class="text-right px-5 py-1.5 font-medium">{{ t('finance.amount') }}</th>
           </tr>
         </thead>
         <tbody>
-          {% for tx in transactions %}
-          <tr class="border-t border-ink-800/50 hover:bg-ink-800/30">
-            <td class="px-5 py-2 tabular-nums text-ink-300">{{ tx.booking_date or '—' }}</td>
-            <td class="px-2 py-2 font-medium">
-              <a href="/document/{{ tx.doc_id }}" class="hover:text-emerald-300">{{ tx.counterparty or '—' }}</a>
-            </td>
-            <td class="px-2 py-2 text-ink-400 truncate max-w-[280px]" title="{{ tx.purpose }}">{{ tx.purpose }}</td>
-            <td class="px-2 py-2 text-ink-400 text-xs">
-              {% if tx.bank_name %}{{ tx.bank_name }}{% if tx.iban_last4 %} · …{{ tx.iban_last4 }}{% endif %}{% else %}—{% endif %}
-            </td>
-            <td class="px-2 py-2">
-              {% if tx.category %}
-                <span class="chip bg-ink-700/60 text-ink-200 text-[11px]">{{ t('finance.cat.' + tx.category) }}</span>
-              {% else %}—{% endif %}
-            </td>
-            <td class="px-5 py-2 text-right tabular-nums {% if tx.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
+          {% for tx in transactions[:50] %}
+          <tr class="border-t border-ink-800/30">
+            <td class="px-5 py-1 tabular-nums text-ink-300 whitespace-nowrap">{{ tx.booking_date }}</td>
+            <td class="px-2 py-1 truncate max-w-[200px]" title="{{ tx.purpose }}">{{ tx.counterparty }}</td>
+            <td class="px-2 py-1 truncate max-w-[300px] text-ink-400">{{ tx.purpose[:80] }}</td>
+            <td class="px-2 py-1 text-ink-400">{% if tx.category %}{{ t('finance.cat.' + tx.category) }}{% endif %}</td>
+            <td class="px-5 py-1 text-right tabular-nums {% if tx.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
               {% if tx.amount > 0 %}+{% endif %}{{ "%.2f"|format(tx.amount) }} €
             </td>
           </tr>
@@ -1582,10 +259,25 @@
         </tbody>
       </table>
     </div>
-    {% else %}
-      <p class="text-sm text-ink-500">{{ t('finance.no_tx_found') }}</p>
-    {% endif %}
   </div>
+  {% endif %}
+
+  {# Maintenance: hard-reset all finance data #}
+  <details class="text-xs text-ink-500 mb-12">
+    <summary class="cursor-pointer hover:text-ink-300 select-none">{{ t('finance.maintenance.title') }}</summary>
+    <div class="mt-3 rounded border border-rose-500/30 bg-rose-500/5 p-3"
+         x-data="financeReset()">
+      <p class="mb-2">{{ t('finance.maintenance.hint') }}</p>
+      <button type="button" @click="reset()" :disabled="busy"
+              class="text-rose-300 hover:text-rose-200 underline">
+        <span x-show="!busy">{{ t('finance.maintenance.button') }}</span>
+        <span x-show="busy" x-cloak>{{ t('finance.maintenance.running') }}</span>
+      </button>
+      <span x-show="message" x-cloak class="ml-3"
+            :class="messageOk ? 'text-emerald-300' : 'text-rose-300'"
+            x-text="message"></span>
+    </div>
+  </details>
 
   {% endif %}
 </div>
@@ -1593,573 +285,64 @@
 <script>
 function financePage() { return {}; }
 
-function financeAsk() {
-  return {
-    question: '',
-    loading: false,
-    error: '',
-    result: null,
-    formatEur(amount) {
-      const n = Number(amount || 0);
-      const sign = n < 0 ? '−' : '';
-      return sign + Math.abs(n).toLocaleString('de-DE', {
-        minimumFractionDigits: 2, maximumFractionDigits: 2,
-      }) + ' €';
-    },
-    async ask() {
-      const q = this.question.trim();
-      if (!q || this.loading) return;
-      this.loading = true;
-      this.error = '';
-      this.result = null;
-      try {
-        const res = await fetch('/api/finance/ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: q }),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `HTTP ${res.status}`);
-        }
-        this.result = await res.json();
-      } catch (e) {
-        this.error = (e && e.message) ? e.message : String(e);
-      } finally {
-        this.loading = false;
-      }
-    },
-  };
-}
-
-function analyzeAll() {
-  return {
-    counts: { missing: 0, empty: 0, total: 0 },
-    job: { running: false, total: 0, done: 0, current: '',
-           current_page: 0, total_pages: 0,
-           approved: [], failed: [], last_error: '',
-           pause_requested: false, paused: false },
-    resumable: false,
-    visible: false,
-    finishedRecently: false,
-    _t: null,
-    init() {
-      this.refresh();
-      this._t = setInterval(() => this.refresh(), 2500);
-    },
-    async refresh() {
-      try {
-        const [a, b, c] = await Promise.all([
-          fetch('/api/finance/analyze-progress').then(r => r.json()),
-          fetch('/api/finance/unanalyzed-count').then(r => r.json()),
-          fetch('/api/finance/resumable').then(r => r.json()),
-        ]);
-        const wasRunning = this.job.running;
-        this.job       = a;
-        this.counts    = b;
-        this.resumable = !!c.resumable;
-        if (wasRunning && !this.job.running && !this.job.paused) {
-          this.finishedRecently = true;
-          setTimeout(() => this.finishedRecently = false, 60000);
-        }
-        this.visible = this.job.running || this.job.paused || this.resumable ||
-                       (this.counts.missing + this.counts.empty) > 0 ||
-                       (this.counts.total || 0) > 0 ||
-                       this.finishedRecently;
-      } catch (e) {}
-    },
-    async pause() {
-      try {
-        await fetch('/api/finance/analyze-pause', { method: 'POST' });
-        this.refresh();
-      } catch (e) { alert(e.message || String(e)); }
-    },
-    async resume() {
-      try {
-        const r = await fetch('/api/finance/analyze-resume', { method: 'POST' });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.refresh();
-      } catch (e) { alert(e.message || String(e)); }
-    },
-    async run() {
-      if (this.job.running) return;
-      const total = this.counts.missing + this.counts.empty;
-      if (!total) return;
-      if (!confirm(`Alle ${total} unverarbeiteten Kontoauszüge jetzt auswerten? Lokale Inferenz ist langsamer als Cloud — pro Auszug ~30–90s. Läuft im Hintergrund.`)) return;
-      try {
-        const r = await fetch('/api/finance/analyze-all', { method: 'POST' });
-        const d = await r.json();
-        if (d.started === false && d.reason !== 'nothing to analyse') {
-          alert('Bereits am Laufen.');
-        }
-        this.refresh();
-      } catch (e) { alert(e.message || String(e)); }
-    },
-    async forceAll() {
-      if (this.job.running) return;
-      if (!confirm(
-            'ALLE Kontoauszüge nochmal komplett neu auswerten — auch die mit bereits ' +
-            'vorhandenen Buchungen?\n\n' +
-            'Vorhandene Buchungen werden ersetzt. Manuell gesetzte Kategorien ' +
-            '(via /transactions) werden NICHT überschrieben — die werden nach der ' +
-            'Re-Analyse automatisch wiederhergestellt.\n\n' +
-            'Lokale Inferenz: pro Auszug ~30–90s. Läuft im Hintergrund.')) return;
-      try {
-        const r = await fetch('/api/finance/reanalyze-all', { method: 'POST' });
-        const d = await r.json();
-        if (d.started === false && d.reason !== 'no Kontoauszug documents found') {
-          alert(d.reason || 'Konnte nicht starten.');
-        }
-        this.refresh();
-      } catch (e) { alert(e.message || String(e)); }
-    },
-  };
-}
-
-function financePending(initialItems) {
-  return {
-    items: initialItems || [],
-    progress: { running: false, total: 0, done: 0, current: '',
-                approved: [], failed: [], last_error: '' },
-    pollHandle: null, progressHandle: null,
-    result: '', resultOk: false,
-    init() {
-      this.pollHandle = setInterval(() => this.refresh(), 30000);
-      // Pick up an in-flight job from a previous tab/page-load.
-      this.refreshProgress(true);
-    },
-    get busy() { return this.progress.running; },
-    async refresh() {
-      try {
-        const r = await fetch('/api/finance/pending-review');
-        if (!r.ok) return;
-        const d = await r.json();
-        this.items = d.items || [];
-      } catch (e) { /* swallow — next poll retries */ }
-    },
-    async refreshProgress(silent) {
-      try {
-        const r = await fetch('/api/finance/approve-progress');
-        if (!r.ok) return;
-        const d = await r.json();
-        this.progress = d;
-        if (d.running && !this.progressHandle) {
-          // Start tight polling while a run is active.
-          this.progressHandle = setInterval(() => this.refreshProgress(true), 1500);
-        } else if (!d.running && this.progressHandle) {
-          clearInterval(this.progressHandle);
-          this.progressHandle = null;
-          // Pull a fresh queue once the run completes.
-          await this.refresh();
-          if (!silent) {
-            const ok = (d.failed || []).length === 0;
-            this.resultOk = ok;
-            this.result = (T['finance.pending.done'] || 'Released {ok} of {found}.')
-              .replace('{ok}',    (d.approved || []).length)
-              .replace('{found}', d.total || 0);
-          }
-        }
-      } catch (e) { /* poll retries */ }
-    },
-    async approveAll() {
-      if (!this.items.length) return;
-      const msg = (T['finance.pending.confirm'] || 'Send {n} statements to the AI?')
-        .replace('{n}', this.items.length);
-      if (!confirm(msg)) return;
-      this.result = '';
-      try {
-        const r = await fetch('/api/finance/approve-all-pending', { method: 'POST' });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        // Background job started — just poll progress.
-        await this.refreshProgress(false);
-      } catch (e) {
-        this.resultOk = false;
-        this.result = e.message || String(e);
-      }
-    },
-  };
-}
-
-function financeDiag(initialItems, initialTotal) {
-  return {
-    items: initialItems || [],
-    total: initialTotal || 0,
-    busy: false, salvaging: false, busyDoc: null,
-    result: '', resultOk: false,
-    pollHandle: null,
-    init() {
-      // Light background polling so the banner reflects state changes
-      // from other tabs / the watcher / a re-classification done on
-      // the document detail page — without forcing the user to reload.
-      this.pollHandle = setInterval(() => this.refresh(), 30000);
-    },
-    async refresh() {
-      try {
-        const r = await fetch('/api/finance/diagnostics');
-        if (!r.ok) return;
-        const d = await r.json();
-        this.items = d.without_transactions || [];
-        this.total = d.kontoauszug_docs || 0;
-      } catch (e) { /* ignore — next poll will retry */ }
-    },
-    async reextract() {
-      this.busy = true; this.result = '';
-      try {
-        const r = await fetch('/api/finance/reextract-empty', { method: 'POST' });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.resultOk = true;
-        this.result = (T['finance.diag.done'] || 'Recovered {recovered} of {found} statements.')
-          .replace('{recovered}', d.recovered.length)
-          .replace('{found}', d.found)
-          .replace('{still}', d.still_empty.length);
-        await this.refresh();
-      } catch (e) {
-        this.resultOk = false;
-        this.result = e.message || String(e);
-      } finally { this.busy = false; }
-    },
-    async dismiss(docId) {
-      // Optimistic: drop from list immediately so the banner shrinks.
-      // If the call fails, refresh() restores it on the next poll.
-      this.items = this.items.filter(s => s.doc_id !== docId);
-      try {
-        await fetch(`/api/document/${docId}/statement/dismiss-empty`,
-                    { method: 'POST' });
-      } catch (e) { this.refresh(); }
-    },
-    async salvage() {
-      this.salvaging = true; this.busy = true; this.result = '';
-      try {
-        const r = await fetch('/api/finance/salvage', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        const rec = d.recovered_count || 0;
-        const dup = d.duplicate_count || 0;
-        const rem = d.unrecoverable_count || 0;
-        this.resultOk = (rec + dup) > 0;
-        const parts = [];
-        if (rec) parts.push(`${rec} aus extra_json zurückgeholt`);
-        if (dup) parts.push(`${dup} als Duplikat erkannt + ignoriert`);
-        if (rem) parts.push(`${rem} brauchen einen neuen LLM-Lauf (extra_json leer / abgeschnitten)`);
-        this.result = parts.length ? parts.join(', ') + '.' : 'Nichts zu retten — alle Auszüge sind sauber.';
-        await this.refresh();
-      } catch (e) {
-        this.resultOk = false;
-        this.result = e.message || String(e);
-      } finally {
-        this.salvaging = false; this.busy = false;
-      }
-    },
-    async reanalyzeOne(docId) {
-      this.busyDoc = docId; this.result = '';
-      try {
-        const r = await fetch('/api/finance/reanalyze-doc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ doc_id: docId }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.resultOk = (d.transactions || 0) > 0;
-        this.result = `Doc ${docId}: ${d.transactions || 0} Buchungen extrahiert ` +
-          `(Periode ${d.period_start || '?'}..${d.period_end || '?'}).` +
-          (d.warning ? ` Warnung: ${d.warning}` : '');
-        await this.refresh();
-      } catch (e) {
-        this.resultOk = false;
-        this.result = `Doc ${docId}: ${e.message || String(e)}`;
-      } finally { this.busyDoc = null; }
-    },
-  };
-}
-
-function financeAudit() {
+function csvImporter() {
   return {
     busy: false,
-    busyDoc: null,
-    data: null,
+    files: [],
+    lastTotalInserted: 0,
+    lastTotalDuplicate: 0,
     error: '',
-    parseAllBusy: false,
-    parseAllPhase: '',
-    parseAllResult: null,
-    uncatBusy: false,
-    uncatResult: null,
-    uncatMessage: '',
-    get parseAllResultTitle() {
-      if (!this.parseAllResult) return '';
-      const r = this.parseAllResult;
-      if (r.applied > 0) {
-        return (T['finance.audit.parse_all_done'] ||
-                'Fertig: {n} Auszüge mit Parser erfasst.')
-                  .replace('{n}', r.applied);
-      }
-      return (T['finance.audit.parse_all_nothing'] ||
-              'Parser hat nichts angewendet (alle Auszüge schon ok oder zu unsicher).');
-    },
-    async load() {
-      this.busy = true; this.error = '';
-      try {
-        const r = await fetch('/api/finance/audit?limit=100');
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.data = d;
-      } catch (e) {
-        this.error = e.message || String(e);
-      } finally { this.busy = false; }
-    },
-    async reanalyze(docId) {
-      this.busyDoc = docId; this.error = '';
-      try {
-        const r = await fetch('/api/finance/reanalyze-doc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ doc_id: docId }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        await this.load();
-      } catch (e) {
-        this.error = `Doc ${docId}: ${e.message || String(e)}`;
-      } finally { this.busyDoc = null; }
-    },
-    async uncategorizeNonStmts() {
-      this.uncatBusy = true;
-      this.uncatResult = null;
-      this.uncatMessage = '';
-      try {
-        const dry = await fetch('/api/finance/uncategorize-non-statements', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dry_run: true }),
-        }).then(r => r.json());
-        if (!dry.candidates) {
-          this.uncatMessage = T['finance.audit.uncat_none'] || 'Nichts mehr zum Umstufen.';
-          return;
-        }
-        const msg = (T['finance.audit.uncat_confirm'] ||
-          '{n} Dokumente werden aus Kategorie Kontoauszug auf Sonstiges/review zurückgestuft. Fortfahren?')
-          .replace('{n}', dry.candidates);
-        if (!confirm(msg)) return;
-        const r = await fetch('/api/finance/uncategorize-non-statements', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.uncatResult = d;
-        this.uncatMessage = (T['finance.audit.uncat_done'] ||
-          '{n} Dokumente zurückgestuft.').replace('{n}', d.reverted);
-        await this.load();
-      } catch (e) {
-        this.uncatMessage = e.message || String(e);
-      } finally {
-        this.uncatBusy = false;
-      }
-    },
-    async parseAll() {
+    async handleFiles(fileList) {
+      if (!fileList || !fileList.length) return;
       this.busy = true;
-      this.parseAllBusy = true;
-      this.parseAllResult = null;
-      this.error = '';
+      this.lastTotalInserted = 0;
+      this.lastTotalDuplicate = 0;
+      const fd = new FormData();
+      for (const f of fileList) fd.append('files', f, f.name);
       try {
-        // Phase 1: dry-run preview so we can quote concrete numbers
-        // in the confirm dialog. Show "Prüfe..." in the button while
-        // it runs (the audit endpoint can take seconds on big DBs).
-        this.parseAllPhase = T['finance.audit.parse_all_phase_check'] || 'Prüfe…';
-        const dry = await fetch('/api/finance/parse-all', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dry_run: true }),
-        }).then(r => r.json());
-        if (!dry || dry.found === undefined) {
-          throw new Error(dry && dry.detail ? dry.detail : 'invalid response');
-        }
-        const msg = (T['finance.audit.parse_all_confirm'] ||
-          'Deterministischer Parser über {n} Auszüge laufen lassen — schätzt {applied} würden übernommen.')
-          .replace('{n}', dry.found || 0)
-          .replace('{applied}', dry.applied || 0);
-        if (!confirm(msg)) {
-          // User said no — show the dry numbers as the result so the
-          // click wasn't completely silent.
-          this.parseAllResult = {...dry, applied: 0};
-          return;
-        }
-        // Phase 2: actually run.
-        this.parseAllPhase = T['finance.audit.parse_all_phase_run'] || 'Parse läuft…';
-        const r = await fetch('/api/finance/parse-all', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+        const r = await fetch('/api/finance/import-csv', {
+          method: 'POST', body: fd,
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.parseAllResult = d;
-        await this.load();
+        // Add an _id so x-for keys are unique even if a user re-uploads
+        // the same filename twice in a row.
+        const ts = Date.now();
+        for (const f of (d.files || [])) {
+          f._id = ts + '-' + Math.random();
+          this.files.unshift(f);
+        }
+        this.lastTotalInserted = d.total_inserted || 0;
+        this.lastTotalDuplicate = d.total_duplicate || 0;
       } catch (e) {
         this.error = e.message || String(e);
-        this.parseAllResult = null;
-      } finally {
-        this.busy = false;
-        this.parseAllBusy = false;
-        this.parseAllPhase = '';
-      }
-    },
-    async dedupe() {
-      this.busy = true; this.error = '';
-      try {
-        const dry = await fetch('/api/finance/dedupe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dry_run: true }),
-        }).then(r => r.json());
-        if (!dry.would_delete) {
-          this.error = T['finance.audit.dedupe_none'] || 'Keine Duplikate gefunden.';
-          return;
-        }
-        const msg = (T['finance.audit.dedupe_confirm'] ||
-          '{n} doppelte Buchungen werden gelöscht. Fortfahren?')
-          .replace('{n}', dry.would_delete);
-        if (!confirm(msg)) return;
-        const r = await fetch('/api/finance/dedupe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+        // Synthesise a result row so the user sees the error.
+        this.files.unshift({
+          file_label: '(error)', _id: Date.now(),
+          rows_inserted: 0, rows_duplicate: 0, rows_invalid: 0,
+          errors: [this.error],
+          accounts_touched: [], period_start: '', period_end: '',
         });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        await this.load();
-      } catch (e) {
-        this.error = e.message || String(e);
       } finally { this.busy = false; }
     },
-  };
-}
-
-function financeRescale() {
-  return {
-    busy: false,
-    preview: null,
-    done: false,
-    result: '',
-    resultOk: false,
-    suspicious: null,
-    loadingSuspicious: false,
-    busyStmt: null,
-    async loadSuspicious() {
-      this.loadingSuspicious = true;
-      try {
-        const r = await fetch('/api/finance/scan-suspicious?limit=100');
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.suspicious = d;
-      } catch (e) {
-        this.resultOk = false;
-        this.result = e.message || String(e);
-      } finally {
-        this.loadingSuspicious = false;
-      }
-    },
-    async rescaleOne(stmtId) {
-      const msg = (T['finance.rescale.confirm_one'] ||
-        'Alle Buchungen UND den Saldo dieses Auszugs durch 100 teilen?');
-      if (!confirm(msg)) return;
-      this.busyStmt = stmtId;
-      try {
-        const r = await fetch('/api/finance/rescale-statement', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stmt_id: stmtId, factor: 0.01, also_saldo: true }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.resultOk = true;
-        this.result = (T['finance.rescale.one_done'] ||
-          'Auszug #{id}: {rows} Buchungen + Saldo durch 100 geteilt.')
-          .replace('{id}', stmtId).replace('{rows}', d.updated_rows);
-        // Re-pull the list so the corrected statement falls off (or
-        // the next-worst one moves up) without a full page reload.
-        await this.loadSuspicious();
-      } catch (e) {
-        this.resultOk = false;
-        this.result = `Auszug #${stmtId}: ${e.message || String(e)}`;
-      } finally {
-        this.busyStmt = null;
-      }
-    },
-    async check() {
-      this.busy = true; this.result = ''; this.done = false;
-      try {
-        const r = await fetch('/api/finance/rescale-amounts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dry_run: true }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.preview = d;
-        if ((d.candidates || 0) === 0) {
-          this.resultOk = true;
-          this.result = T['finance.rescale.none'] || 'Nichts zu reparieren — alle Auszüge sind sauber.';
-        } else {
-          this.resultOk = true;
-          this.result = (T['finance.rescale.preview'] ||
-            '{n} Auszüge mit OCR-Komma-Schaden gefunden ({rows} Buchungen). Druck „Reparieren" zum Anwenden.')
-            .replace('{n}', d.candidates).replace('{rows}', d.would_update_rows);
-        }
-      } catch (e) {
-        this.resultOk = false;
-        this.result = e.message || String(e);
-      } finally { this.busy = false; }
-    },
-    async apply() {
-      const msg = (T['finance.rescale.confirm'] ||
-        '{rows} Buchungen werden durch 100 geteilt. Fortfahren?')
-        .replace('{rows}', this.preview ? this.preview.would_update_rows : '?');
-      if (!confirm(msg)) return;
-      this.busy = true; this.result = '';
-      try {
-        const r = await fetch('/api/finance/rescale-amounts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.resultOk = true;
-        this.done = true;
-        this.preview = null;
-        this.result = (T['finance.rescale.done'] ||
-          '{rows} Buchungen in {n} Auszügen korrigiert. Lade Seite neu für aktuelle Zahlen.')
-          .replace('{rows}', d.updated_rows).replace('{n}', d.updated_statements);
-        // Refresh after a beat so the user sees the success message first.
-        setTimeout(() => location.reload(), 1500);
-      } catch (e) {
-        this.resultOk = false;
-        this.result = e.message || String(e);
-      } finally { this.busy = false; }
-    },
+    reload() { location.reload(); },
   };
 }
 
 function accountList() {
   return {
     deleting: null,
+    busy: false,
     async del(id, label) {
-      if (!confirm((T['finance.account_delete_confirm'] || 'Delete account {label}?').replace('{label}', label))) return;
+      const msg = (T['finance.account_delete_confirm'] || 'Delete account {label}?')
+        .replace('{label}', label);
+      if (!confirm(msg)) return;
       this.deleting = id;
       try {
         const r = await fetch('/api/finance/account/' + id, { method: 'DELETE' });
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));
-          throw new Error(d.detail || 'HTTP ' + r.status);
+          throw new Error(d.detail || ('HTTP ' + r.status));
         }
         location.reload();
       } catch (e) {
@@ -2168,6 +351,35 @@ function accountList() {
     },
   };
 }
-</script>
 
+function financeReset() {
+  return {
+    busy: false,
+    message: '',
+    messageOk: false,
+    async reset() {
+      const msg = T['finance.maintenance.confirm']
+        || 'Wirklich ALLE Buchungen, Konten und Auszüge löschen? Nicht rückgängig machbar.';
+      if (!confirm(msg)) return;
+      this.busy = true; this.message = '';
+      try {
+        const r = await fetch('/api/finance/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.messageOk = true;
+        this.message = (T['finance.maintenance.done']
+          || '{n} Zeilen gelöscht. Lade neu.').replace('{n}', d.deleted || 0);
+        setTimeout(() => location.reload(), 800);
+      } catch (e) {
+        this.messageOk = false;
+        this.message = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+  };
+}
+</script>
 {% endblock %}
