@@ -2,6 +2,19 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.33.1] – 2026-05-05
+
+### Fixed — CSV upload appeared to do nothing
+
+User uploaded both CSVs successfully (server log: 473 + 12 rows
+inserted) but the page stayed in empty-state because the JS only
+showed a "X neu" toast and waited for the user to manually click
+"Seite neu laden". Most users assumed the click had been swallowed.
+
+The importer now auto-reloads the page 1.2s after a successful
+upload (gives the toast time to appear), so the stat tiles, charts
+and account list show up automatically.
+
 ## [0.33.0] – 2026-05-05
 
 ### Removed — All Kontoauszug-extraction code

@@ -305,8 +305,6 @@ function csvImporter() {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        // Add an _id so x-for keys are unique even if a user re-uploads
-        // the same filename twice in a row.
         const ts = Date.now();
         for (const f of (d.files || [])) {
           f._id = ts + '-' + Math.random();
@@ -314,9 +312,15 @@ function csvImporter() {
         }
         this.lastTotalInserted = d.total_inserted || 0;
         this.lastTotalDuplicate = d.total_duplicate || 0;
+        // Auto-reload when at least one row landed — without this
+        // the user sees the empty-state still and assumes nothing
+        // happened, while /finance hasn't re-queried the DB. Short
+        // delay so the success toast is visible first.
+        if (this.lastTotalInserted > 0) {
+          setTimeout(() => location.reload(), 1200);
+        }
       } catch (e) {
         this.error = e.message || String(e);
-        // Synthesise a result row so the user sees the error.
         this.files.unshift({
           file_label: '(error)', _id: Date.now(),
           rows_inserted: 0, rows_duplicate: 0, rows_invalid: 0,
