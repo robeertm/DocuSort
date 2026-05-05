@@ -453,6 +453,29 @@
         {{ t('finance.audit.parse_all_reload') }}
       </button>
 
+      <!-- Recovery: when "not_a_statement" is the dominant reason
+           the user wants ONE click to revert all those docs out of
+           Kontoauszug. Only show the button when the diagnostic
+           detected at least one non-statement. -->
+      <template x-if="parseAllResult && (parseAllResult.reason_breakdown || {}).not_a_statement > 0">
+        <div class="mt-3 pt-3 border-t border-ink-700/50 flex flex-wrap items-center gap-2">
+          <span class="text-amber-200 text-xs">
+            <span x-text="(parseAllResult.reason_breakdown || {}).not_a_statement"></span>
+            {{ t('finance.audit.uncat_hint') }}
+          </span>
+          <button type="button" @click="uncategorizeNonStmts()"
+                  :disabled="uncatBusy"
+                  class="btn-primary text-xs"
+                  :class="uncatBusy ? 'opacity-50 cursor-not-allowed' : ''">
+            <span x-show="!uncatBusy">{{ t('finance.audit.uncat_button') }}</span>
+            <span x-show="uncatBusy" x-cloak>{{ t('finance.audit.uncat_running') }}</span>
+          </button>
+          <span x-show="uncatResult" x-cloak class="text-xs"
+                :class="uncatResult && uncatResult.reverted > 0 ? 'text-emerald-300' : 'text-ink-400'"
+                x-text="uncatMessage"></span>
+        </div>
+      </template>
+
       <!-- Diagnostic breakdown — only shows when something actually
            went wrong, so a clean run isn't cluttered. -->
       <template x-if="parseAllResult && parseAllResult.skipped_lowconf > 0">
@@ -1866,6 +1889,9 @@ function financeAudit() {
     parseAllBusy: false,
     parseAllPhase: '',
     parseAllResult: null,
+    uncatBusy: false,
+    uncatResult: null,
+    uncatMessage: '',
     get parseAllResultTitle() {
       if (!this.parseAllResult) return '';
       const r = this.parseAllResult;
@@ -1902,6 +1928,41 @@ function financeAudit() {
       } catch (e) {
         this.error = `Doc ${docId}: ${e.message || String(e)}`;
       } finally { this.busyDoc = null; }
+    },
+    async uncategorizeNonStmts() {
+      this.uncatBusy = true;
+      this.uncatResult = null;
+      this.uncatMessage = '';
+      try {
+        const dry = await fetch('/api/finance/uncategorize-non-statements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dry_run: true }),
+        }).then(r => r.json());
+        if (!dry.candidates) {
+          this.uncatMessage = T['finance.audit.uncat_none'] || 'Nichts mehr zum Umstufen.';
+          return;
+        }
+        const msg = (T['finance.audit.uncat_confirm'] ||
+          '{n} Dokumente werden aus Kategorie Kontoauszug auf Sonstiges/review zurückgestuft. Fortfahren?')
+          .replace('{n}', dry.candidates);
+        if (!confirm(msg)) return;
+        const r = await fetch('/api/finance/uncategorize-non-statements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.uncatResult = d;
+        this.uncatMessage = (T['finance.audit.uncat_done'] ||
+          '{n} Dokumente zurückgestuft.').replace('{n}', d.reverted);
+        await this.load();
+      } catch (e) {
+        this.uncatMessage = e.message || String(e);
+      } finally {
+        this.uncatBusy = false;
+      }
     },
     async parseAll() {
       this.busy = true;

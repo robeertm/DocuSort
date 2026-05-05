@@ -2,6 +2,38 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.32.3] – 2026-05-05
+
+### Added — Detect + revert misclassified Kontoauszug documents
+
+User's debug output revealed why "245 zu unsicher" — most of those
+weren't bank statements at all. Doc 91 was a `Sparkassen-Privatkredit
+Darlehensvertrag` (loan contract) that the LLM had labelled
+Kontoauszug because the sender was the Sparkasse. Same pattern
+likely applies to dozens of other docs (Bescheide, Schreiben,
+Verträge from banks).
+
+Two new mechanisms:
+
+- **New parser reason `not_a_statement`** — triggered when a doc
+  in the `Kontoauszug` category has NONE of the structural
+  fingerprints (no period, no opening/closing balance, no booking
+  rows, no booking-table keywords). Almost always a contract or
+  letter that share a bank as sender.
+- **`POST /api/finance/uncategorize-non-statements`** — bulk
+  recategoriser. Walks every doc in `Kontoauszug`, checks the
+  parser's verdict, and reverts the false positives to
+  `Sonstiges/review`. Conservatively skips docs whose statement
+  table already has bookings (manual edit is the safer path
+  there). Drops the empty statement shells along the way.
+
+UI hook: when the bulk parse-all result shows ≥ 1 `not_a_statement`,
+a one-click "Aus Kategorie Kontoauszug entfernen"-button appears
+above the diagnostic breakdown. Dry-run preview, confirm dialog,
+audit reload after success.
+
+UI strings in all 5 supported languages.
+
 ## [0.32.2] – 2026-05-05
 
 ### Added — Diagnostic breakdown when bulk-parse skips everything

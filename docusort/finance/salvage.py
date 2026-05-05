@@ -153,6 +153,99 @@ def delete_absurd_amounts(db, *, threshold: float = 10_000_000.0,
             "items": items, "dry_run": False}
 
 
+def uncategorize_non_statements(db, *, dry_run: bool = False) -> dict[str, Any]:
+    """For every doc currently filed under `Kontoauszug`, check if
+    the OCR text actually has the structural shape of a bank
+    statement (period header / opening/closing balance / booking
+    rows). When NONE of those structural markers are present, the
+    doc is almost certainly a contract / letter / Bescheid that the
+    LLM misclassified — recategorise it to `Sonstiges` with status
+    `review` so the user can manually decide what it really is.
+
+    Detached statements (with their data already in the
+    `statements` table) are conservatively LEFT ALONE — touching
+    them would orphan transaction rows. Only docs whose statement
+    is empty / missing get reverted.
+    """
+    from .parser import parse as _parse_det
+    with db._lock:
+        rows = db._conn.execute(
+            """SELECT d.id          AS doc_id,
+                      d.subject     AS subject,
+                      d.extracted_text,
+                      s.id          AS stmt_id,
+                      (SELECT COUNT(*) FROM transactions t WHERE t.statement_id = s.id) AS tx_count
+               FROM documents d
+               LEFT JOIN statements s ON s.doc_id = d.id
+               WHERE d.deleted_at IS NULL
+                 AND d.category = 'Kontoauszug'"""
+        ).fetchall()
+    candidates: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        if not d["extracted_text"]:
+            continue
+        if (d["tx_count"] or 0) > 0:
+            # Statement already has bookings — leave it alone, even
+            # if the parser thinks the layout is weak. Manual edit
+            # is the safer path for those.
+            continue
+        try:
+            result = _parse_det(d["extracted_text"])
+        except Exception:
+            continue
+        s = result.statement
+        looks_like_a_statement = (
+            bool(s.period_start or s.period_end)
+            or s.opening_balance is not None
+            or s.closing_balance is not None
+            or len(s.transactions) > 0
+        )
+        if looks_like_a_statement:
+            continue
+        candidates.append({
+            "doc_id":  int(d["doc_id"]),
+            "subject": d["subject"] or "",
+            "stmt_id": int(d["stmt_id"]) if d["stmt_id"] else None,
+            "layout":  result.layout,
+            "confidence": round(result.confidence, 2),
+        })
+    if dry_run or not candidates:
+        return {
+            "candidates": len(candidates),
+            "reverted":   0,
+            "samples":    candidates[:20],
+            "dry_run":    dry_run,
+        }
+    with db._lock:
+        ids = [c["doc_id"] for c in candidates]
+        db._conn.executemany(
+            "UPDATE documents SET category = 'Sonstiges', "
+            "  subcategory = '', status = 'review' "
+            "WHERE id = ?",
+            [(i,) for i in ids],
+        )
+        # Drop the empty statement shells too — they only existed
+        # because the doc was wrongly tagged Kontoauszug.
+        stmt_ids = [c["stmt_id"] for c in candidates if c["stmt_id"]]
+        if stmt_ids:
+            db._conn.executemany(
+                "DELETE FROM statements WHERE id = ?",
+                [(i,) for i in stmt_ids],
+            )
+        db._conn.commit()
+    logger.warning(
+        "Reverted %d misclassified Kontoauszug docs to Sonstiges/review.",
+        len(candidates),
+    )
+    return {
+        "candidates": len(candidates),
+        "reverted":   len(candidates),
+        "samples":    candidates[:20],
+        "dry_run":    False,
+    }
+
+
 def bulk_deterministic_parse(
     db, *, dry_run: bool = False,
     only_low_confidence: bool = True,
@@ -226,14 +319,23 @@ def bulk_deterministic_parse(
             counts["skipped_lowconf"] += 1
             layout_hist[result.layout] = layout_hist.get(result.layout, 0) + 1
             # Concrete reason taxonomy. Pick the most-informative one
-            # so the histogram doesn't overcount edge cases:
-            #   1) layout not recognised (generic w/ low conf)
-            #   2) low confidence even though layout was specific
-            #   3) saldo missing (no opening / no closing)
-            #   4) saldo mismatch (numbers found but math doesn't add up)
-            #   5) no transactions parsed
+            # so the histogram doesn't overcount edge cases.
             s_ = result.statement
-            if result.layout == "generic" and result.confidence < 0.4:
+            # `not_a_statement`: the doc is in category=Kontoauszug
+            # but has none of the structural fingerprints — no
+            # period, no balances, no transactions, no
+            # booking-table keywords. Almost certainly a contract
+            # / letter / Bescheid that the LLM misclassified as
+            # Kontoauszug because the sender was a bank.
+            looks_like_a_statement = (
+                bool(s_.period_start or s_.period_end)
+                or s_.opening_balance is not None
+                or s_.closing_balance is not None
+                or len(s_.transactions) > 0
+            )
+            if not looks_like_a_statement:
+                reason = "not_a_statement"
+            elif result.layout == "generic" and result.confidence < 0.4:
                 reason = "layout_unknown"
             elif s_.opening_balance is None and s_.closing_balance is None:
                 reason = "no_balance"

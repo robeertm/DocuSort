@@ -1212,6 +1212,22 @@ def create_app(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(500, f"dedupe failed: {type(exc).__name__}: {exc}") from exc
 
+    @app.post("/api/finance/uncategorize-non-statements")
+    def api_finance_uncategorize_non_statements(payload: dict = Body(default={})):
+        """Recategorise docs filed as Kontoauszug that DON'T look
+        like bank statements (no period, no balances, no booking
+        rows in OCR) back to Sonstiges/review. Catches the typical
+        LLM-misclassification of contracts / Bescheide / letters
+        that share a bank as the sender.
+
+        Body: `{"dry_run": true}` for a preview."""
+        from ..finance.salvage import uncategorize_non_statements
+        dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
+        try:
+            return uncategorize_non_statements(db, dry_run=dry)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"uncategorize failed: {type(exc).__name__}: {exc}") from exc
+
     @app.get("/api/finance/parse-debug/{doc_id}")
     def api_finance_parse_debug(doc_id: int):
         """Diagnostic: run the parser on ONE doc and return the full
