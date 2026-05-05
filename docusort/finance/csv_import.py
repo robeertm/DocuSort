@@ -315,9 +315,12 @@ def _ensure_csv_container_statement(db, account_id: int) -> int:
     if existing and existing["doc_id"]:
         doc_id = int(existing["doc_id"])
     else:
-        # Synthesise a placeholder document. The library doesn't show
-        # docs whose `library_path` doesn't actually exist on disk,
-        # but we set deleted_at so /library hides it cleanly anyway.
+        # Synthesise a placeholder document. It must NOT be marked
+        # deleted, because every finance query joins
+        # `documents d` with `WHERE d.deleted_at IS NULL` — a
+        # deleted stub would silently filter out every CSV-imported
+        # transaction. Instead we tag it with the sentinel category
+        # `_csv_container` and the library queries skip that.
         from datetime import datetime as _dt
         now = _dt.now().isoformat(timespec="seconds")
         with db._lock:
@@ -327,15 +330,15 @@ def _ensure_csv_container_statement(db, account_id: int) -> int:
                 "   doc_date, sender, subject, confidence, library_path, "
                 "   processed_path, file_size, page_count, ocr_used, model, "
                 "   input_tokens, output_tokens, cost_usd, status, "
-                "   content_hash, created_at, deleted_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "   content_hash, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (f".csv-container-account-{account_id}",
                  f".csv-container-account-{account_id}",
-                 "Kontoauszug", "", "[]",
+                 "_csv_container", "", "[]",
                  "", "CSV-Import",
                  f"CSV-Container Konto {account_id}",
-                 0.0, "", "", 0, 0, 0, "", 0, 0, 0.0, "filed",
-                 f"csv-stub-{account_id}", now, now),
+                 0.0, "", "", 0, 0, 0, "", 0, 0, 0.0, "csv_container",
+                 f"csv-stub-{account_id}", now),
             )
             db._conn.commit()
             doc_id = int(cur.lastrowid)

@@ -351,6 +351,27 @@ class Database:
                )"""
         )
 
+        # 0.33.2: revive CSV-container stub documents that 0.33.x
+        # incorrectly created with `deleted_at = now`. With deleted_at
+        # set, every `JOIN documents d WHERE d.deleted_at IS NULL`
+        # finance query silently filtered out the imported
+        # transactions, so /finance kept showing the empty-state even
+        # after a successful CSV import. We tag the stubs with the
+        # sentinel category `_csv_container` so the library list
+        # queries can skip them without touching deleted_at.
+        try:
+            self._conn.execute(
+                "UPDATE documents "
+                "SET deleted_at = NULL, "
+                "    category   = '_csv_container', "
+                "    status     = 'csv_container' "
+                "WHERE original_name LIKE '.csv-container-account-%' "
+                "  AND (category != '_csv_container' "
+                "       OR deleted_at IS NOT NULL)"
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("DB migration: revive csv-container stubs failed")
+
         # NOTE: 0.15.1 shipped a startup cleanup that deleted every
         # `statements` row whose document didn't have category =
         # 'Kontoauszug'. That was destructive — pre-0.13 installs
@@ -632,7 +653,14 @@ class Database:
     ) -> list[dict[str, Any]]:
         where: list[str] = []
         params: list[Any] = []
-        trash_clause = "d.deleted_at IS NOT NULL" if trash else "d.deleted_at IS NULL"
+        # `_csv_container` is the sentinel category used by CSV-import
+        # stub documents — they're never user-visible and must not
+        # show up in the library or trash.
+        trash_clause = (
+            "(d.deleted_at IS NOT NULL AND d.category != '_csv_container')"
+            if trash else
+            "(d.deleted_at IS NULL AND d.category != '_csv_container')"
+        )
         trash_clause_plain = trash_clause.replace("d.", "")
         # Tag match: tags are JSON arrays of strings; LIKE on the JSON is fine
         # for the cardinalities we deal with (low thousands).
@@ -701,7 +729,11 @@ class Database:
     def all_tags(self, trash: bool = False) -> list[tuple[str, int]]:
         """Return distinct tags with their occurrence count (excl. trash)."""
         import json as _json
-        trash_clause = "deleted_at IS NOT NULL" if trash else "deleted_at IS NULL"
+        trash_clause = (
+            "(deleted_at IS NOT NULL AND category != '_csv_container')"
+            if trash else
+            "(deleted_at IS NULL AND category != '_csv_container')"
+        )
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT tags FROM documents WHERE {trash_clause} AND tags IS NOT NULL AND tags != '[]'"
@@ -720,7 +752,11 @@ class Database:
         self, *, category: str | None = None, status: str | None = None,
         trash: bool = False,
     ) -> int:
-        where = ["deleted_at IS NOT NULL" if trash else "deleted_at IS NULL"]
+        where = [
+            "(deleted_at IS NOT NULL AND category != '_csv_container')"
+            if trash else
+            "(deleted_at IS NULL AND category != '_csv_container')"
+        ]
         params: list[Any] = []
         if category:
             where.append("category = ?")
@@ -766,26 +802,28 @@ class Database:
                        COALESCE(SUM(cache_read_tokens), 0)       AS cache_read_tokens,
                        COALESCE(SUM(cost_usd), 0)                AS cost_usd,
                        SUM(CASE WHEN status='duplicate' THEN 1 ELSE 0 END) AS duplicates
-                FROM documents WHERE deleted_at IS NULL
+                FROM documents WHERE deleted_at IS NULL AND category != '_csv_container'
             """).fetchone()
             by_cat = self._conn.execute("""
                 SELECT category, COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost_usd
-                FROM documents WHERE deleted_at IS NULL
+                FROM documents WHERE deleted_at IS NULL AND category != '_csv_container'
                 GROUP BY category ORDER BY n DESC
             """).fetchall()
             by_status = self._conn.execute("""
                 SELECT status, COUNT(*) AS n FROM documents
-                WHERE deleted_at IS NULL GROUP BY status
+                WHERE deleted_at IS NULL AND category != '_csv_container'
+                GROUP BY status
             """).fetchall()
             by_month = self._conn.execute("""
                 SELECT substr(created_at,1,7) AS month,
                        COUNT(*) AS n,
                        COALESCE(SUM(cost_usd),0) AS cost_usd
-                FROM documents WHERE deleted_at IS NULL
+                FROM documents WHERE deleted_at IS NULL AND category != '_csv_container'
                 GROUP BY month ORDER BY month DESC LIMIT 12
             """).fetchall()
             trash_count = self._conn.execute(
-                "SELECT COUNT(*) FROM documents WHERE deleted_at IS NOT NULL"
+                "SELECT COUNT(*) FROM documents "
+                "WHERE deleted_at IS NOT NULL AND category != '_csv_container'"
             ).fetchone()[0]
         return {
             "totals": dict(totals) if totals else {},
@@ -800,7 +838,8 @@ class Database:
             rows = self._conn.execute(
                 "SELECT DISTINCT substr(doc_date,1,4) AS y FROM documents "
                 "WHERE doc_date IS NOT NULL AND doc_date != '' "
-                "AND deleted_at IS NULL ORDER BY y DESC"
+                "AND deleted_at IS NULL AND category != '_csv_container' "
+                "ORDER BY y DESC"
             ).fetchall()
         return [r["y"] for r in rows if r["y"]]
 
@@ -815,24 +854,26 @@ class Database:
         with self._lock:
             total_row = self._conn.execute(
                 "SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost_usd "
-                "FROM documents WHERE deleted_at IS NULL"
+                "FROM documents WHERE deleted_at IS NULL AND category != '_csv_container'"
             ).fetchone()
             rows = self._conn.execute("""
                 SELECT COALESCE(NULLIF(substr(doc_date,1,4), ''), '—') AS year,
                        category,
                        COUNT(*) AS n,
                        COALESCE(SUM(cost_usd), 0) AS cost_usd
-                FROM documents WHERE deleted_at IS NULL
+                FROM documents WHERE deleted_at IS NULL AND category != '_csv_container'
                 GROUP BY year, category
                 ORDER BY year DESC, n DESC
             """).fetchall()
             status_rows = self._conn.execute("""
                 SELECT status, COUNT(*) AS n FROM documents
-                WHERE deleted_at IS NULL AND status IN ('review', 'failed')
+                WHERE deleted_at IS NULL AND category != '_csv_container'
+                  AND status IN ('review', 'failed')
                 GROUP BY status
             """).fetchall()
             trash_row = self._conn.execute(
-                "SELECT COUNT(*) AS n FROM documents WHERE deleted_at IS NOT NULL"
+                "SELECT COUNT(*) AS n FROM documents "
+                "WHERE deleted_at IS NOT NULL AND category != '_csv_container'"
             ).fetchone()
 
         by_year: dict[str, dict[str, Any]] = {}

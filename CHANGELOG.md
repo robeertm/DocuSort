@@ -2,6 +2,28 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.33.2] – 2026-05-05
+
+### Fixed — empty-state on /finance after a successful CSV import
+
+After a 0.33.0 / 0.33.1 import the user saw "0 neu, N Duplikat" on
+re-upload but /finance still showed the empty-state instead of the
+imported transactions.
+
+Root cause: every finance query joins
+`documents d ON d.id = s.doc_id WHERE d.deleted_at IS NULL`. The
+internal CSV-container stub document we create per account to satisfy
+the legacy `transactions.statement_id NOT NULL` schema was wrongly
+marked `deleted_at = now` (so it would be hidden from the library) —
+which silently filtered every CSV-imported transaction out of the
+finance summary, monthly chart, account list and KPI cards.
+
+Fix: the stub document keeps `deleted_at = NULL` and is tagged with
+the sentinel `category = '_csv_container'` instead. Library list /
+count / stats / tag / tree queries skip that category. A startup
+migration revives any stubs created by 0.33.0 / 0.33.1 in place — no
+re-import needed.
+
 ## [0.33.1] – 2026-05-05
 
 ### Fixed — CSV upload appeared to do nothing
