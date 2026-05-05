@@ -1212,6 +1212,68 @@ def create_app(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(500, f"dedupe failed: {type(exc).__name__}: {exc}") from exc
 
+    @app.get("/api/finance/parse-debug/{doc_id}")
+    def api_finance_parse_debug(doc_id: int):
+        """Diagnostic: run the parser on ONE doc and return the full
+        report (layout, confidence, opening/closing, all parsed
+        transactions, warnings, saldo math, plus the first 4kB of
+        the raw OCR text). Used to figure out why the parser bounces
+        every statement off as "too uncertain"."""
+        with db._lock:
+            doc = db._conn.execute(
+                "SELECT id, extracted_text, category, sender, subject "
+                "FROM documents WHERE id = ? AND deleted_at IS NULL",
+                (doc_id,),
+            ).fetchone()
+        if doc is None:
+            raise HTTPException(404, f"doc {doc_id} not found")
+        ocr = doc["extracted_text"] or ""
+        if not ocr:
+            return {"doc_id": doc_id, "ocr_present": False,
+                    "result": None, "ocr_preview": ""}
+        from ..finance.parser import parse as _parse_det
+        try:
+            result = _parse_det(ocr)
+        except Exception as exc:  # noqa: BLE001
+            return {"doc_id": doc_id, "ocr_present": True,
+                    "ocr_preview": ocr[:4000],
+                    "ocr_total_chars": len(ocr),
+                    "error": f"{type(exc).__name__}: {exc}"}
+        s = result.statement
+        delta = None
+        if s.opening_balance is not None and s.closing_balance is not None:
+            delta = round(s.closing_balance - s.opening_balance, 2)
+        tx_sum = round(sum(t.amount for t in s.transactions), 2)
+        return {
+            "doc_id": doc_id,
+            "category": doc["category"],
+            "sender": doc["sender"],
+            "subject": doc["subject"],
+            "ocr_present": True,
+            "ocr_preview": ocr[:4000],
+            "ocr_total_chars": len(ocr),
+            "result": {
+                "layout": result.layout,
+                "confidence": round(result.confidence, 3),
+                "saldo_consistent": result.saldo_consistent,
+                "warnings": result.warnings,
+                "statement": {
+                    "bank_name": s.bank_name,
+                    "iban": s.iban,
+                    "period_start": s.period_start,
+                    "period_end": s.period_end,
+                    "opening_balance": s.opening_balance,
+                    "closing_balance": s.closing_balance,
+                    "delta_saldo": delta,
+                    "tx_count": len(s.transactions),
+                    "tx_sum": tx_sum,
+                    "tx_sum_minus_delta": (round(tx_sum - delta, 2)
+                                           if delta is not None else None),
+                },
+                "transactions": [t.as_dict() for t in s.transactions],
+            },
+        }
+
     @app.post("/api/finance/parse-all")
     def api_finance_parse_all(payload: dict = Body(default={})):
         """Run the deterministic regex parser over every Kontoauszug

@@ -2,6 +2,35 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.32.2] – 2026-05-05
+
+### Added — Diagnostic breakdown when bulk-parse skips everything
+
+The user ran "Alle deterministisch neu parsen" against 245
+statements and got "0 übernommen · 245 zu unsicher" with no
+visibility into WHY. New diagnostic layer:
+
+- `bulk_deterministic_parse` now returns `reason_breakdown` (counts
+  per failure reason: `layout_unknown`, `no_balance`, `no_opening`,
+  `no_closing`, `no_transactions`, `saldo_mismatch`,
+  `low_confidence`) and `layout_breakdown` (counts per detected
+  layout) plus `lowconf_examples` — up to 5 representative
+  statements with their opening/closing/Δsaldo/Σtx numbers and
+  parser warnings.
+- The result banner under the audit header expands when anything
+  was skipped: shows a histogram of reasons in plain German, the
+  layout distribution ("generic=245, sparkasse=0, …" makes it
+  obvious when no specific layout matched), and an expandable
+  list of example statements with deep-link to the document and
+  to the new debug endpoint.
+- `GET /api/finance/parse-debug/{doc_id}` returns the full parser
+  report for one document — layout, confidence, opening/closing,
+  every parsed transaction, warnings, and the first 4 kB of the
+  raw OCR text. Lets the user (or me) see exactly what the parser
+  saw and figure out which regex needs adjusting.
+
+UI strings in all 5 supported languages.
+
 ## [0.32.1] – 2026-05-05
 
 ### Fixed — "Alle deterministisch neu parsen" gave no visible feedback

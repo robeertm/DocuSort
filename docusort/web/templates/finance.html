@@ -452,6 +452,68 @@
               class="mt-2 underline hover:text-emerald-100">
         {{ t('finance.audit.parse_all_reload') }}
       </button>
+
+      <!-- Diagnostic breakdown — only shows when something actually
+           went wrong, so a clean run isn't cluttered. -->
+      <template x-if="parseAllResult && parseAllResult.skipped_lowconf > 0">
+        <div class="mt-3 pt-3 border-t border-ink-700/50">
+          <div class="text-amber-200 font-medium mb-1.5">
+            {{ t('finance.audit.parse_all_why_skipped') }}
+          </div>
+          <div class="space-y-1 mb-2 font-mono">
+            <template x-for="(n, reason) in (parseAllResult.reason_breakdown || {})" :key="reason">
+              <div class="flex gap-2">
+                <span class="text-amber-300 w-10 text-right tabular-nums" x-text="n"></span>
+                <span class="text-ink-300"
+                      x-text="T['finance.audit.reason.' + reason] || reason"></span>
+              </div>
+            </template>
+          </div>
+          <div x-show="parseAllResult.layout_breakdown && Object.keys(parseAllResult.layout_breakdown).length > 0"
+               class="text-ink-500 mb-2">
+            {{ t('finance.audit.parse_all_layouts') }}:
+            <template x-for="(n, layout) in (parseAllResult.layout_breakdown || {})" :key="layout">
+              <span class="ml-1.5"><span x-text="layout"></span>=<span x-text="n"></span></span>
+            </template>
+          </div>
+          <details x-show="parseAllResult.lowconf_examples && parseAllResult.lowconf_examples.length"
+                   x-cloak>
+            <summary class="cursor-pointer text-ink-300 hover:text-ink-100">
+              {{ t('finance.audit.parse_all_examples') }}
+            </summary>
+            <div class="mt-2 space-y-2 font-mono text-[11px]">
+              <template x-for="ex in (parseAllResult.lowconf_examples || [])" :key="ex.doc_id">
+                <div class="rounded bg-ink-900/60 px-2 py-1.5 border border-ink-800">
+                  <div class="flex flex-wrap items-baseline gap-2">
+                    <a :href="'/document/' + ex.doc_id"
+                       class="text-cyan-300 hover:text-cyan-200"
+                       x-text="'doc #' + ex.doc_id"></a>
+                    <span class="text-ink-500" x-text="'layout=' + ex.layout"></span>
+                    <span class="text-ink-500" x-text="'conf=' + ex.confidence.toFixed(2)"></span>
+                    <span class="text-amber-300"
+                          x-text="T['finance.audit.reason.' + ex.reason] || ex.reason"></span>
+                  </div>
+                  <div class="mt-0.5 text-ink-400 tabular-nums">
+                    opening=<span x-text="ex.opening !== null ? ex.opening.toFixed(2) : '—'"></span>
+                    closing=<span x-text="ex.closing !== null ? ex.closing.toFixed(2) : '—'"></span>
+                    Δsaldo=<span x-text="ex.delta_saldo !== null ? ex.delta_saldo.toFixed(2) : '—'"></span>
+                    Σtx=<span x-text="ex.tx_sum.toFixed(2)"></span>
+                    (<span x-text="ex.tx_count"></span>)
+                  </div>
+                  <div x-show="ex.warnings && ex.warnings.length" x-cloak
+                       class="mt-0.5 text-rose-300"
+                       x-text="ex.warnings.join(' · ')"></div>
+                  <a :href="'/api/finance/parse-debug/' + ex.doc_id"
+                     target="_blank"
+                     class="text-[10px] underline text-cyan-400 hover:text-cyan-200">
+                    {{ t('finance.audit.parse_all_debug_json') }}
+                  </a>
+                </div>
+              </template>
+            </div>
+          </details>
+        </div>
+      </template>
     </div>
 
     <div x-show="data && data.items && data.items.length" x-cloak

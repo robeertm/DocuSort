@@ -200,6 +200,12 @@ def bulk_deterministic_parse(
         "errors": 0,
     }
     samples: list[dict[str, Any]] = []
+    # Per-layout + per-failure-reason histograms so the user can see
+    # WHY 200+ statements all came back "too uncertain" instead of
+    # being told only the bottom-line count.
+    layout_hist: dict[str, int] = {}
+    reason_hist: dict[str, int] = {}
+    lowconf_examples: list[dict[str, Any]] = []
     for r in rows:
         d = dict(r)
         doc_id = int(d["doc_id"])
@@ -218,6 +224,30 @@ def bulk_deterministic_parse(
         ok = result.confidence >= min_confidence and result.saldo_consistent
         if not ok:
             counts["skipped_lowconf"] += 1
+            layout_hist[result.layout] = layout_hist.get(result.layout, 0) + 1
+            # Concrete reason taxonomy. Pick the most-informative one
+            # so the histogram doesn't overcount edge cases:
+            #   1) layout not recognised (generic w/ low conf)
+            #   2) low confidence even though layout was specific
+            #   3) saldo missing (no opening / no closing)
+            #   4) saldo mismatch (numbers found but math doesn't add up)
+            #   5) no transactions parsed
+            s_ = result.statement
+            if result.layout == "generic" and result.confidence < 0.4:
+                reason = "layout_unknown"
+            elif s_.opening_balance is None and s_.closing_balance is None:
+                reason = "no_balance"
+            elif s_.opening_balance is None:
+                reason = "no_opening"
+            elif s_.closing_balance is None:
+                reason = "no_closing"
+            elif not s_.transactions:
+                reason = "no_transactions"
+            elif not result.saldo_consistent:
+                reason = "saldo_mismatch"
+            else:
+                reason = "low_confidence"
+            reason_hist[reason] = reason_hist.get(reason, 0) + 1
             if len(samples) < 20:
                 samples.append({
                     "doc_id": doc_id,
@@ -226,6 +256,26 @@ def bulk_deterministic_parse(
                     "confidence": round(result.confidence, 2),
                     "saldo_consistent": result.saldo_consistent,
                     "tx_count": len(result.statement.transactions),
+                    "reason": reason,
+                })
+            if len(lowconf_examples) < 5:
+                # Compute Δsaldo if both sides are present so the user
+                # can eyeball the mismatch.
+                delta = None
+                if s_.opening_balance is not None and s_.closing_balance is not None:
+                    delta = round(s_.closing_balance - s_.opening_balance, 2)
+                tx_sum = round(sum(t.amount for t in s_.transactions), 2)
+                lowconf_examples.append({
+                    "doc_id": doc_id,
+                    "layout": result.layout,
+                    "confidence": round(result.confidence, 2),
+                    "reason": reason,
+                    "opening": s_.opening_balance,
+                    "closing": s_.closing_balance,
+                    "delta_saldo": delta,
+                    "tx_count": len(s_.transactions),
+                    "tx_sum": tx_sum,
+                    "warnings": result.warnings[:3],
                 })
             continue
         if dry_run:
@@ -301,7 +351,14 @@ def bulk_deterministic_parse(
         counts["skipped_existing"], counts["skipped_no_ocr"],
         counts["errors"], counts["found"],
     )
-    return {**counts, "dry_run": dry_run, "samples": samples}
+    return {
+        **counts,
+        "dry_run": dry_run,
+        "samples": samples,
+        "layout_breakdown": layout_hist,
+        "reason_breakdown": reason_hist,
+        "lowconf_examples": lowconf_examples,
+    }
 
 
 def scan_suspicious_amounts(db, *, limit: int = 50) -> dict[str, Any]:
