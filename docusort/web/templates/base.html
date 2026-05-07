@@ -26,6 +26,20 @@
   html[data-theme="light"] { background: #f1f5f9; }
   [x-cloak] { display: none !important; }
 
+  /* iPhone safety net: keep the viewport from ever scrolling
+     horizontally. Inner regions that legitimately scroll (wide
+     tables, the cashflow chart, the mobile tab bar) use
+     `overflow-x-auto` themselves — this rule only stops *runaway*
+     overflow from pushing the page past 100vw. */
+  html, body { max-width: 100%; overflow-x: clip; }
+
+  /* Negative margins on scroll wrappers (`-mx-5` etc.) inside
+     cards can push their content past the card edge on narrow
+     screens. Clip horizontally at the card so it never leaks into
+     the page; vertical overflow stays visible so dropdowns / popups
+     aren't cut off. */
+  .card { overflow-x: clip; }
+
   /* ============================================================
      Light-theme palette overrides.
      The dark theme is the precompiled Tailwind output (ink-* maps

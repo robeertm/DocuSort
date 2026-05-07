@@ -26,23 +26,23 @@
 
   <!-- Top stat cards -->
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-    <div class="card p-4">
-      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('analytics.total_spent') }}</div>
-      <div class="mt-2 text-2xl sm:text-3xl font-semibold tabular-nums text-emerald-300">
+    <div class="card p-3 sm:p-4 min-w-0">
+      <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('analytics.total_spent') }}</div>
+      <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums text-emerald-300 break-all">
         {{ "%.2f"|format(summary.total_spent) }} €
       </div>
     </div>
-    <div class="card p-4">
-      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('analytics.receipts') }}</div>
-      <div class="mt-2 text-2xl sm:text-3xl font-semibold tabular-nums">{{ summary.receipt_count }}</div>
+    <div class="card p-3 sm:p-4 min-w-0">
+      <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('analytics.receipts') }}</div>
+      <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums">{{ summary.receipt_count }}</div>
     </div>
-    <div class="card p-4">
-      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('analytics.line_items') }}</div>
-      <div class="mt-2 text-2xl sm:text-3xl font-semibold tabular-nums">{{ summary.item_count }}</div>
+    <div class="card p-3 sm:p-4 min-w-0">
+      <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('analytics.line_items') }}</div>
+      <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums">{{ summary.item_count }}</div>
     </div>
-    <div class="card p-4">
-      <div class="text-xs uppercase tracking-wider text-ink-400">{{ t('analytics.avg_per_receipt') }}</div>
-      <div class="mt-2 text-2xl sm:text-3xl font-semibold tabular-nums">
+    <div class="card p-3 sm:p-4 min-w-0">
+      <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('analytics.avg_per_receipt') }}</div>
+      <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums break-all">
         {% if summary.receipt_count > 0 %}{{ "%.2f"|format(summary.total_spent / summary.receipt_count) }} €{% else %}–{% endif %}
       </div>
     </div>

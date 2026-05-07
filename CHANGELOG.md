@@ -2,6 +2,30 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.33.3] – 2026-05-07
+
+### Fixed — iPhone-sized viewports had clipped text and a horizontal scrollbar
+
+On 375–414 px screens the page was wider than the viewport, so iOS
+showed a horizontal scrollbar and content got cut off at the right
+edge.
+
+- Global safety net: `html, body { overflow-x: clip }` so runaway
+  inner overflow can never make the whole page scroll sideways.
+  `.card { overflow-x: clip }` keeps `-mx-5` scroll wrappers inside
+  their card.
+- /finance stat tiles: shrunk base font from `text-2xl` to `text-lg`
+  (scaling up at `sm:` / `md:` breakpoints) so multi-thousand-Euro
+  numbers no longer overflow the 2-column mobile grid. Added
+  `min-w-0` + `break-all` + `truncate` so the tile content always
+  fits its column.
+- /finance accounts list: switched from a single non-wrapping flex
+  row to a wrap-friendly layout. Bank name + balance stay on the
+  first line; IBAN suffix and transaction count fall to a second
+  line on narrow screens instead of pushing past the card edge.
+- /analytics stat tiles: same shrink + truncate treatment as
+  /finance.
+
 ## [0.33.2] – 2026-05-05
 
 ### Fixed — empty-state on /finance after a successful CSV import
