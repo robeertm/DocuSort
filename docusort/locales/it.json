@@ -81,6 +81,8 @@
   "document.total_cost": "Costo",
   "document.sha256": "SHA256",
   "document.reasoning": "Ragionamento di Claude",
+  "document.diagnostics_heading": "Diagnostica",
+  "document.diagnostics_run": "Verifica stato",
   "document.change_category": "Cambia categoria",
   "document.edit_heading": "Modifica documento",
   "document.field_category": "Categoria",

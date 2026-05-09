@@ -746,6 +746,49 @@ def create_app(
         candidates = scan_misclassified(db, limit=limit)
         return {"candidates": candidates, "count": len(candidates)}
 
+    @app.get("/api/document/{doc_id}/diagnostics")
+    def api_document_diagnostics(doc_id: int):
+        """Diagnostic dump for one doc — used to figure out why a bon
+        wasn't picked up by the salvage banner or why receipt extraction
+        produced 0 items. No mutations, no LLM calls."""
+        from ..receipts_salvage import (
+            text_looks_like_kassenzettel,
+            _RECEIPT_SIGNALS,
+            _INVOICE_BLOCKERS,
+            _PROMOTABLE_CATEGORIES,
+        )
+        doc = db.get(doc_id)
+        if not doc:
+            raise HTTPException(404, "document not found")
+        text = doc.get("extracted_text") or ""
+        is_receipt, signals = text_looks_like_kassenzettel(text)
+        blockers_hit = [
+            i for i, rx in enumerate(_INVOICE_BLOCKERS) if rx.search(text or "")
+        ]
+        receipt = db.get_receipt(doc_id)
+        items = receipt.get("items", []) if receipt else []
+        return {
+            "doc_id":            doc_id,
+            "category":          doc.get("category"),
+            "subcategory":       doc.get("subcategory") or "",
+            "status":            doc.get("status"),
+            "filename":          doc.get("filename"),
+            "library_path":      doc.get("library_path"),
+            "deleted_at":        doc.get("deleted_at"),
+            "ocr_chars":         len(text),
+            "ocr_preview":       text[:1500] if text else "",
+            "matched_signals":   signals,
+            "signal_count":      len(signals),
+            "invoice_blockers_hit": len(blockers_hit),
+            "salvage_eligible":  is_receipt and doc.get("category") in _PROMOTABLE_CATEGORIES,
+            "salvage_would_promote": is_receipt,
+            "salvage_promotable_categories": list(_PROMOTABLE_CATEGORIES),
+            "receipt_exists":    receipt is not None,
+            "receipt_items":     len(items),
+            "receipt_total":     receipt.get("total_amount") if receipt else None,
+            "receipt_shop":      receipt.get("shop_name") if receipt else None,
+        }
+
     @app.post("/api/receipts/salvage/promote")
     def api_receipts_salvage_promote(payload: dict = Body(...)):
         """Accept a list of doc IDs the user reviewed and confirmed,

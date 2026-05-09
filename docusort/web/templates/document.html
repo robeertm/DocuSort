@@ -185,6 +185,66 @@
     </div>
     {% endif %}
 
+    <div class="card p-5" x-data='diagnosticsPanel({{ doc.id }})'>
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.diagnostics_heading') }}</h2>
+        <button type="button" @click="run()" :disabled="busy"
+                class="rounded-lg bg-ink-800 hover:bg-ink-700 disabled:opacity-50 px-3 py-1.5 text-xs">
+          <span x-show="!busy">{{ t('document.diagnostics_run') }}</span>
+          <span x-show="busy" x-cloak>…</span>
+        </button>
+      </div>
+      <div x-show="result" x-cloak class="space-y-2 text-xs">
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+          <div class="text-ink-400">DB-Kategorie</div>
+          <div class="font-mono"
+               :class="result?.category === 'Kassenzettel' ? 'text-emerald-300' : 'text-amber-300'"
+               x-text="(result?.category || '—') + (result?.subcategory ? '/' + result.subcategory : '')"></div>
+
+          <div class="text-ink-400">Status</div>
+          <div class="font-mono" x-text="result?.status || '—'"></div>
+
+          <div class="text-ink-400">OCR-Text</div>
+          <div class="font-mono tabular-nums" x-text="(result?.ocr_chars ?? 0) + ' chars'"></div>
+
+          <div class="text-ink-400">Receipt-Row</div>
+          <div class="font-mono"
+               :class="result?.receipt_exists ? (result.receipt_items > 0 ? 'text-emerald-300' : 'text-amber-300') : 'text-ink-500'"
+               x-text="result?.receipt_exists ? (result.receipt_items + ' Items, ' + (result.receipt_total ?? '—') + ' € · ' + (result.receipt_shop || '—')) : '—'"></div>
+
+          <div class="text-ink-400">Salvage-Signale</div>
+          <div class="font-mono"
+               :class="result?.signal_count >= 2 ? 'text-emerald-300' : 'text-rose-300'"
+               x-text="(result?.signal_count ?? 0) + ' / 2 nötig'"></div>
+
+          <div class="text-ink-400">Invoice-Blocker</div>
+          <div class="font-mono"
+               :class="result?.invoice_blockers_hit >= 2 ? 'text-rose-300' : 'text-ink-300'"
+               x-text="(result?.invoice_blockers_hit ?? 0) + ' / 2 blockt'"></div>
+
+          <div class="text-ink-400">Salvage-fähig</div>
+          <div class="font-mono"
+               :class="result?.salvage_eligible ? 'text-emerald-300' : 'text-ink-500'"
+               x-text="result?.salvage_eligible ? 'JA — würde im /analytics-Banner auftauchen' : (result?.salvage_would_promote ? 'OCR matcht, aber Kategorie nicht in promotable list' : 'OCR matcht nicht (zu wenige Signale)')"></div>
+        </div>
+
+        <div x-show="result?.matched_signals?.length > 0" x-cloak>
+          <div class="text-ink-400 mb-1">Erkannte Signale:</div>
+          <div class="flex flex-wrap gap-1">
+            <template x-for="s in (result?.matched_signals || [])" :key="s">
+              <span class="rounded bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5 text-[10px]" x-text="s"></span>
+            </template>
+          </div>
+        </div>
+
+        <details class="mt-2">
+          <summary class="text-ink-400 cursor-pointer hover:text-ink-200">OCR-Preview (erste 1500 Zeichen)</summary>
+          <pre class="mt-2 text-[10px] text-ink-300 bg-ink-900/60 p-2 rounded overflow-x-auto whitespace-pre-wrap break-all" x-text="result?.ocr_preview || '(leer)'"></pre>
+        </details>
+      </div>
+      <div x-show="error" x-cloak class="text-xs text-rose-300" x-text="error"></div>
+    </div>
+
     {% if receipt %}
     <div class="card p-5" x-data='receiptEditor({{ doc.id }}, {{ {
             "shop_name": receipt.shop_name or "",
@@ -474,6 +534,24 @@
 </div>
 
 <script>
+function diagnosticsPanel(docId) {
+  return {
+    busy: false, result: null, error: '',
+    async run() {
+      this.busy = true; this.error = ''; this.result = null;
+      try {
+        const r = await fetch('/api/document/' + docId + '/diagnostics');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        this.result = await r.json();
+      } catch (e) {
+        this.error = e.message || String(e);
+      } finally {
+        this.busy = false;
+      }
+    },
+  };
+}
+
 function editForm({ category, subcategory, subMap, subLabels }) {
   return {
     category, subcategory, subMap, subLabels,

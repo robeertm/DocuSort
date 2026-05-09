@@ -81,6 +81,8 @@
   "document.total_cost": "Total cost",
   "document.sha256": "SHA256",
   "document.reasoning": "Claude's reasoning",
+  "document.diagnostics_heading": "Diagnostics",
+  "document.diagnostics_run": "Check status",
   "document.change_category": "Change category",
   "document.edit_heading": "Edit document",
   "document.field_category": "Category",

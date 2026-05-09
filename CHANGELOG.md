@@ -2,6 +2,29 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.3] – 2026-05-09
+
+### Added — Diagnostics panel on the document detail page
+
+The salvage banner showed 0 candidates even when the user clearly had
+misclassified bons, with no way to tell why. Each document detail page
+now has a **Diagnose** card that calls
+`GET /api/document/{id}/diagnostics` and dumps:
+
+- DB category + subcategory + status (so the dropdown's "Rechnungen"
+  display can be verified against the actual stored value)
+- OCR text length and a 1500-char preview (collapsed `<details>` to
+  keep the card compact)
+- Receipt-row state: exists yes/no, item count, total, shop
+- Salvage signals matched (named list — `bon_nr`, `terminal_id`,
+  `kontaktlos girocard`, …) and the count
+- Invoice blockers hit (Rechnungsnummer + Fälligkeit)
+- Salvage eligibility verdict in plain text: would the doc appear in
+  the /analytics salvage banner, and if not, why
+
+This lets you isolate exactly which step is failing on a specific bon
+without touching the SQLite DB by hand.
+
 ## [0.34.2] – 2026-05-09
 
 ### Changed — Classifier prompt: Kassenzettel vs. Rechnungen disambiguation
