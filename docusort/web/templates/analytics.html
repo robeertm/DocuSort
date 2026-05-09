@@ -24,6 +24,78 @@
     {% endif %}
   </div>
 
+  <div x-show="salvage.visible" x-cloak class="card p-4 mb-4 border border-amber-500/30 bg-amber-500/5">
+    <div class="flex items-start justify-between gap-3 mb-3">
+      <div class="min-w-0">
+        <h2 class="font-semibold text-sm text-amber-200">
+          {{ t('analytics.salvage_heading') }}
+          <span class="ml-1 text-amber-300/70">— <span x-text="salvage.count"></span></span>
+        </h2>
+        <p class="text-xs text-ink-400 mt-1">{{ t('analytics.salvage_hint') }}</p>
+      </div>
+      <button type="button" @click="salvage.visible = false"
+              class="text-ink-500 hover:text-ink-200 p-1" :title="T['analytics.salvage_dismiss']">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="max-h-64 overflow-y-auto -mx-1 mb-3">
+      <table class="w-full text-xs">
+        <thead class="text-[10px] uppercase tracking-wider text-ink-500">
+          <tr>
+            <th class="text-left px-2 py-1 w-6"></th>
+            <th class="text-left px-2 py-1 font-medium">{{ t('analytics.salvage_col_doc') }}</th>
+            <th class="text-left px-2 py-1 font-medium">{{ t('analytics.salvage_col_category') }}</th>
+            <th class="text-left px-2 py-1 font-medium">{{ t('analytics.salvage_col_signals') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="c in salvage.candidates" :key="c.id">
+            <tr class="border-t border-ink-800/50">
+              <td class="px-2 py-1">
+                <input type="checkbox" :value="c.id" x-model="salvage.selected"
+                       class="rounded border-ink-700 bg-ink-900 text-emerald-500 focus:ring-emerald-500/40">
+              </td>
+              <td class="px-2 py-1">
+                <a :href="'/document/' + c.id" target="_blank"
+                   class="hover:text-emerald-300" x-text="(c.sender || c.subject || c.filename) + ' · ' + (c.doc_date || '—')"></a>
+              </td>
+              <td class="px-2 py-1 text-ink-400" x-text="c.category + (c.subcategory ? '/' + c.subcategory : '')"></td>
+              <td class="px-2 py-1 text-ink-500" x-text="c.signals.join(', ')"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" @click="salvageSelectAll()"
+              class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1.5 text-xs">
+        {{ t('analytics.salvage_select_all') }}
+      </button>
+      <button type="button" @click="salvageSelectNone()"
+              class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1.5 text-xs">
+        {{ t('analytics.salvage_select_none') }}
+      </button>
+      <div class="flex-1"></div>
+      <span class="text-xs text-ink-400">
+        <span x-text="salvage.selected.length"></span> / <span x-text="salvage.candidates.length"></span>
+      </span>
+      <button type="button" @click="salvagePromote()"
+              :disabled="salvage.selected.length === 0 || salvage.busy"
+              class="rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-3 py-1.5 text-xs text-white">
+        <span x-show="!salvage.busy">{{ t('analytics.salvage_promote') }}</span>
+        <span x-show="salvage.busy" x-cloak>{{ t('analytics.salvage_promoting') }}</span>
+      </button>
+    </div>
+    <div x-show="salvage.message" x-cloak
+         class="mt-2 text-xs"
+         :class="salvage.error ? 'text-rose-300' : 'text-emerald-300'"
+         x-text="salvage.message"></div>
+  </div>
+
   <div x-show="reextract.visible" x-cloak class="card p-4 mb-6">
     <div class="flex items-center justify-between gap-3 mb-2 text-sm">
       <span x-show="reextract.running">
@@ -317,11 +389,65 @@ function analyticsPage() {
       current: 0, total: 0, ok: 0, failed: 0,
       last_shop: null, last_error: null,
     },
+    salvage: {
+      visible: false, busy: false,
+      candidates: [], selected: [], count: 0,
+      message: '', error: false,
+    },
     _pollTimer: null,
     init() {
-      // Pick up an in-flight job that started before this page was loaded
-      // (e.g. user navigated away mid-run).
       this._refreshStatus();
+      this._scanSalvage();
+    },
+    async _scanSalvage() {
+      try {
+        const r = await fetch('/api/receipts/salvage/scan');
+        if (!r.ok) return;
+        const d = await r.json();
+        this.salvage.candidates = d.candidates || [];
+        this.salvage.count = d.count || 0;
+        this.salvage.selected = (d.candidates || []).map(c => c.id);
+        this.salvage.visible = (d.count || 0) > 0;
+      } catch (e) { /* silently ignore — banner stays hidden */ }
+    },
+    salvageSelectAll() {
+      this.salvage.selected = this.salvage.candidates.map(c => c.id);
+    },
+    salvageSelectNone() {
+      this.salvage.selected = [];
+    },
+    async salvagePromote() {
+      if (this.salvage.selected.length === 0) return;
+      const confirmMsg = (T['analytics.salvage_confirm'] || 'Ausgewählte Docs nach Kassenzettel verschieben?')
+        .replace('{n}', this.salvage.selected.length);
+      if (!confirm(confirmMsg)) return;
+      this.salvage.busy = true;
+      this.salvage.message = '';
+      this.salvage.error = false;
+      try {
+        const r = await fetch('/api/receipts/salvage/promote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doc_ids: this.salvage.selected }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.salvage.message = (T['analytics.salvage_done'] || '{n} Docs verschoben.')
+          .replace('{n}', d.updated || 0);
+        // Drop the just-promoted rows from the candidate list
+        const promoted = new Set(this.salvage.selected);
+        this.salvage.candidates = this.salvage.candidates.filter(c => !promoted.has(c.id));
+        this.salvage.selected = [];
+        this.salvage.count = this.salvage.candidates.length;
+        if (this.salvage.candidates.length === 0) {
+          setTimeout(() => { this.salvage.visible = false; }, 2000);
+        }
+      } catch (e) {
+        this.salvage.error = true;
+        this.salvage.message = e.message || String(e);
+      } finally {
+        this.salvage.busy = false;
+      }
     },
     async reextractAll() {
       const msg = T['analytics.reextract_confirm']

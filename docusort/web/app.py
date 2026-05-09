@@ -736,6 +736,35 @@ def create_app(
                 return {"running": False, "started": False}
             return dict(_receipt_reextract)
 
+    @app.get("/api/receipts/salvage/scan")
+    def api_receipts_salvage_scan(limit: int = Query(200)):
+        """Scan misclassified docs (Rechnungen, Sonstiges, …) for ones
+        that look like Kassenzettel based on OCR signals — Bon-Nr.,
+        Terminal-ID, ZU ZAHLEN, etc. No LLM call. The frontend shows
+        the list and asks the user to confirm a bulk promotion."""
+        from ..receipts_salvage import scan_misclassified
+        candidates = scan_misclassified(db, limit=limit)
+        return {"candidates": candidates, "count": len(candidates)}
+
+    @app.post("/api/receipts/salvage/promote")
+    def api_receipts_salvage_promote(payload: dict = Body(...)):
+        """Accept a list of doc IDs the user reviewed and confirmed,
+        bulk-update their category to Kassenzettel with status='review'
+        so the user double-checks each one. Receipt extraction is NOT
+        kicked off automatically — that's a separate user action so the
+        token cost is explicit."""
+        from ..receipts_salvage import promote_to_kassenzettel
+        raw_ids = payload.get("doc_ids") or []
+        doc_ids: list[int] = []
+        for v in raw_ids:
+            try:
+                doc_ids.append(int(v))
+            except (TypeError, ValueError):
+                continue
+        if not doc_ids:
+            raise HTTPException(400, "doc_ids must be a non-empty list of integers")
+        return promote_to_kassenzettel(db, doc_ids)
+
     @app.post("/api/document/{doc_id}/receipt/extract")
     def api_extract_receipt(doc_id: int):
         if classifier is None:

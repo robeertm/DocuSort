@@ -71,7 +71,8 @@ Each category lists typical senders, signals, AND its allowed subcategories. Pic
 
 ## Rechnungen  (no subcategories)
 Invoices of any kind — utility bills (Strom, Wasser, Gas, Fernwärme), telecom (Mobilfunk, Festnetz, Internet), streaming, handwerker, online shops, Werkstatt-Rechnungen for non-vehicle work.
-Signals: "Rechnung", "Rechnungsnummer", "Gesamtbetrag", "Fälligkeit", IBAN/BIC.
+Required signals (need at least TWO): "Rechnung" or "Rechnungsnummer", a **Rechnungsnummer / Beleg-Nr** with a numeric/alphanumeric ID, a **Fälligkeit / Zahlungsziel / IBAN für Überweisung**, an addressee block ("An: …"), or "Leistungszeitraum"/"Abrechnungszeitraum".
+DO NOT pick Rechnungen merely because the document has prices and a SUMME — that fits Kassenzettel just as well. A printed-on-thermal-paper Bon with a Bon-Nr./TA-Nr/Terminal-ID + multiple item lines + "Kartenzahlung kontaktlos girocard" is a Kassenzettel, NOT a Rechnung, even when the company name happens to include "GmbH" / "SE" / "AG" or a USt-IdNr is printed.
 NOTE: Invoices about a vehicle go to **Auto/KFZ** (or Fahrrad/Motorrad). Insurance-premium invoices with a Versicherungsnummer go to **Versicherung/<Sparte>**.
 
 ## Vertraege  (no subcategories)
@@ -140,18 +141,36 @@ NOTE: Reiseversicherung → Versicherung/Reise.
 Vereins-Mitgliedschaften, Trainings-Rechnungen, Hobby-Abos, Sammlerkäufe, Musik- und Konzerttickets (sofern nicht als Reise klassifiziert).
 
 ## Kassenzettel  →  Supermarkt | Drogerie | Baumarkt | Restaurant | Cafe | Tankstelle | Apotheke | Bekleidung | Elektronik | Buecher | Moebel | Versand | Sonstiges
-Klassische Kassenbons / Quittungen — typisch ein schmaler Zettel mit Shop-Header, mehreren Artikelzeilen mit Einzelpreisen und einer Summe am Ende. Subcategory richtet sich nach dem Shop-Typ:
-- Supermarkt: REWE, EDEKA, Aldi, Lidl, Kaufland, Penny, Netto, dm-Markt mit Lebensmitteln
+Klassische Kassenbons / Thermozettel — Shop-Header oben, mehrere Artikelzeilen mit Einzelpreisen, eine SUMME / ZU ZAHLEN am Ende, dazu Kartenzahlungs-Footer. Diese kategorie ist die default-Wahl für Belege, die im Laden ausgegeben werden — auch wenn USt-IdNr / GmbH-Name / MwSt-Tabelle gedruckt sind. Subcategory richtet sich nach dem Shop-Typ:
+- Supermarkt: REWE, EDEKA (auch "Lebensmittel … GmbH"), Aldi, Lidl, Kaufland, Penny, Netto, Real, Norma, Tegut, "ALDI SE & Co. KG"
 - Drogerie: dm, Rossmann, Müller (wenn überwiegend Körperpflege/Drogerie), Budni
 - Baumarkt: Obi, Bauhaus, Hornbach, Hagebau, Toom
-- Restaurant / Cafe: Bewirtungsbeleg, Restaurantrechnung, Kaffeebon
-- Tankstelle: Tankquittung mit Liter/Preis-pro-Liter, Aral, Shell, Total, Esso
+- Restaurant / Cafe: Bewirtungsbeleg, Restaurantrechnung, Kaffeebon, Kino-/Stadion-Imbiss (Cineplex Snack-Bon, Bowling-Bistro)
+- Tankstelle: Tankquittung mit Liter/Preis-pro-Liter, Aral, Shell, Total, Esso, BP, Jet
 - Apotheke: Apothekenkassenbon mit OTC-Medikamenten (Rezeptbelege gehören NICHT hierher → Gesundheit/Apotheke)
-- Bekleidung / Elektronik / Buecher / Moebel: Einzelhandel
+- Bekleidung: Schuh-/Mode-Läden (Deichmann, H&M, C&A, Zara, Tom Tailor) — auch wenn das Logo nur ein "D" oben steht und der Beleg fast nur aus Artikelnummern + Preis besteht
+- Elektronik / Buecher / Moebel: Einzelhandel
 - Versand: Online-Shop-Versandbeleg ohne explizites "Rechnung" (Amazon-Lieferschein, Zalando-Retoure)
 - Sonstiges: alles andere
-NOTE: Wenn auf dem Beleg explizit "Rechnung" steht und es eine Rechnungsnummer gibt → eher Rechnungen. Wenn ein offener "Bewirtungsbeleg" für Geschäftsessen → Kassenzettel/Restaurant. Apothekenrechnungen mit Rezept gehen nach Gesundheit/Apotheke.
-Signals: "Bon-Nr.", "Kasse 03", "Kassierer", "BAR", "EC-Karte", "girocard", "MwSt.", einzelne Artikelzeilen mit Preis, Trennstrich gefolgt von SUMME.
+
+Strong Kassenzettel signals (one is enough — the more, the surer):
+- "Bon-Nr.", "Beleg-Nr.", "TA-Nr", "BNr", "Bon: 148"
+- "Kasse 02", "Kassierer", "VkSt", "Bed:031627"
+- "Terminal-ID", "Terminalnummer 61769984"
+- "Kartenzahlung", "girocard Contactless", "kontaktlos girocard", "EC-Cash", "Telecash Kasse", "EMV-AID"
+- "MwSt 0=19,00%", "Steuer % Brutto Netto Steuer", "MwSt A 7%, B 19%"
+- "Posten: 5", "ZU ZAHLEN", "SUMME EUR", "Gegeben girocard"
+- Multiple item lines with single-line per item and trailing tax-class digit ("1,29 € 1" / "0,30 B")
+- Item lines with article numbers ("1 5331020 1 |36 |01|01 24,99")
+- Pfand patterns ("PFAND 0,25", "PFANDWERT 1,50", "LEERGUTRÜCKNAHME -2,00")
+- TSE block ("TSE-Signatur:", "TSE-Seriennummer:", "Signaturzähler")
+- "K-U-N-D-E-N-B-E-L-E-G" line
+
+NOTE: A Kartenzahlungsbeleg standalone (only "Betrag X,XX EUR" + "Zahlung erfolgt" + Terminal-ID, no items) is still Kassenzettel/Sonstiges-or-shop-type — the receipt extractor handles the no-items case downstream. Don't downgrade it to Rechnungen.
+
+NOTE: Wenn der Beleg explizit eine **Rechnungsnummer** trägt UND einen Briefkopf/Adressblock UND keine Bon-Nr / Terminal-ID / Kassen-Footer hat → eher Rechnungen. Im Zweifel Kassenzettel.
+
+NOTE: Bewirtungsbeleg für Geschäftsessen → Kassenzettel/Restaurant. Apothekenrechnungen mit Rezept gehen nach Gesundheit/Apotheke.
 
 ## Sonstiges  (no subcategories)
 Fallback for anything that genuinely doesn't match the other buckets — newsletters, club newsletters ohne Mitgliedschaft, sonstige private Korrespondenz. Also the safe choice when confidence is low.
@@ -285,6 +304,38 @@ Input (excerpt):
 
 Output:
 {"category":"Kassenzettel","subcategory":"Tankstelle","tags":["sprit"],"date":"2026-03-18","sender":"Aral","subject":"Tanken Aral 73,93 EUR","confidence":0.96,"reasoning":"Tankquittung mit Liter-Angabe und Preis pro Liter."}
+
+## Example 15c — ALDI Großeinkauf (looks invoice-y but IS a Kassenzettel)
+
+Input (excerpt):
+"ALDI · An der Ziegelei 02, 01454 Radeberg · -8 x 0,25 € LEERGUTRÜCKNAHME 19% -2,00 € 2 · SPITZPAPRIKA MIX 2,19 € 1 · OATLY BARISTA HAFERDRI 5,10 € 2 · TK PIZZA GIGANTE 3,49 € 1 · PFANDWERT 1,50 1,50 € 2 · 0,463 kg x 11,99 €/kg SCHWEINEFILET-QS 5,55 € 1 · ZU ZAHLEN 149,11 € · -K-U-N-D-E-N-B-E-L-E-G- · Terminal-ID 54409562 · TA-Nr 478192 · BNr 6648 · Kartenzahlung kontaktlos girocard · EUR 149,11 · ALDI SE & Co. KG, Sitz: Wilsdruff · USt. ID: DE127135625"
+
+Output:
+{"category":"Kassenzettel","subcategory":"Supermarkt","tags":["lebensmittel","einkauf"],"date":"2026-04-29","sender":"ALDI","subject":"Einkauf ALDI Radeberg 149,11 EUR","confidence":0.96,"reasoning":"Lange Artikelliste, ZU ZAHLEN, Pfand-Zeilen, Terminal-ID + TA-Nr + K-U-N-D-E-N-B-E-L-E-G — eindeutig Supermarkt-Kassenbon trotz GmbH-Footer und USt-IdNr."}
+
+## Example 15d — Deichmann Schuh-Bon (article numbers + Kartenzahlungsbeleg)
+
+Input (excerpt):
+"DEICHMANN · Deichmann SE · Dohnaer Str. 246, 01239 Dresden · USt-IdNr. DE119663402 · 1 5331020 1 |36 |01|01 24,99 Graceland · 2 9920886 1 |33-36 |01|01 6,99 Fila · 8 900001 1 |unbekan|01|01 0,10 Tragetasche · SUMME EUR 32,08 · girocard EUR 32,08 · Rückgeld EUR 0,00 · MwSt 0=19,00% 26,96 5,12 · Datum 28.04.2026 · Bon: 148"
+
+Output:
+{"category":"Kassenzettel","subcategory":"Bekleidung","tags":["schuhe"],"date":"2026-04-28","sender":"Deichmann","subject":"Schuhkauf Deichmann Dresden 32,08 EUR","confidence":0.95,"reasoning":"Schuh-/Schuhzubehör-Kassenbon mit Artikelnummern, SUMME EUR, girocard-Zahlung, Bon-Nr."}
+
+## Example 15e — Cineplex Snackbon (Kino-Imbiss → Restaurant/Cafe)
+
+Input (excerpt):
+"Cineplex Kristallpalast · 01069 Dresden · Menü 2 Nacho 10,00 EUR · 1 * 10,00 EUR · 1 * Coca-Cola 0,75l · 1 * Nachos Klein · 1 * Salsa-Dip hot · Summe : 10,00 EUR · Telecash Kasse 10,00 EUR · MwSt. 19,00 % (4,13 EUR): 0,78 EUR · Datum: 03.05.26 · Uhrzeit: 16:37"
+
+Output:
+{"category":"Kassenzettel","subcategory":"Cafe","tags":["kino","snack"],"date":"2026-05-03","sender":"Cineplex","subject":"Kino-Snack Cineplex Dresden 10,00 EUR","confidence":0.93,"reasoning":"Kino-Snackbar-Bon mit Menü-Combo, Telecash-Kasse, MwSt-Tabelle."}
+
+## Example 15f — Standalone Kartenzahlungsbeleg (no items, but still Kassenzettel)
+
+Input (excerpt):
+"DEICHMANN · Deichmann SE · Dohnaer Str. 246, 01239 Dresden · USt-IdNr. DE119663402 · Kartenzahlung girocard Contactless · Terminalnummer 61769984 · Datum 28.04.2026 · Uhrzeit 17:46:24 · POS/TrxNummer 1/91 · Transakt.-Nr. 00072371 · Kartennummer XXXXXXXXXXXXXXXX6210 · VU-Nummer 130945 · Autorisierungsnr. 545954 · Betrag 32,08 EUR · 00 Zahlung erfolgt"
+
+Output:
+{"category":"Kassenzettel","subcategory":"Bekleidung","tags":["zahlungsbeleg"],"date":"2026-04-28","sender":"Deichmann","subject":"Zahlungsbeleg Deichmann 32,08 EUR","confidence":0.85,"reasoning":"Standalone Kartenzahlungsbeleg ohne Item-Liste — Terminalnummer + Betrag + Zahlung erfolgt. Gehört zum Einkauf, bleibt Kassenzettel."}
 
 ## Example 15 — Erbauseinandersetzungsvertrag
 

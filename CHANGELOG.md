@@ -2,6 +2,48 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.2] – 2026-05-09
+
+### Changed — Classifier prompt: Kassenzettel vs. Rechnungen disambiguation
+
+The main classifier was too quick to label receipts as "Rechnungen"
+when the OCR happened to contain "GmbH", "USt-IdNr" and a SUMME —
+even when the document was clearly a thermal-paper Bon. Updated rules:
+
+- **Rechnungen** now requires at least TWO concrete invoice signals
+  (explicit "Rechnungsnummer / Beleg-Nr ID", "Fälligkeit / Zahlungsziel
+  / IBAN für Überweisung", an addressee block, or a Leistungs-/
+  Abrechnungszeitraum). Prices + SUMME alone don't qualify.
+- **Kassenzettel** description now lists strong receipt-only signals
+  (Bon-Nr., TA-Nr, BNr, Terminal-ID, Kasse N, kontaktlos girocard,
+  EC-Cash, Telecash, K-U-N-D-E-N-B-E-L-E-G, MwSt 0=19,00%,
+  TSE-Signatur, ZU ZAHLEN, PAYBACK, EMV-AID, Pfand/Leergut, plus
+  ALDI-/Deichmann-/Cineplex-style article patterns).
+- Four new few-shot examples cover real-world misclassification
+  cases: ALDI long bon, Deichmann clothing receipt, Cineplex cinema
+  snack bar, and a standalone Kartenzahlungsbeleg with no items.
+
+### Added — "Misclassified receipts" salvage banner on /analytics
+
+A heuristic-only scanner (no LLM call) walks every doc currently
+filed under Rechnungen / Sonstiges / Bank / Vertraege / Versand and
+matches the OCR against 21 distinct receipt signals (Bon-Nr.,
+Terminal-ID, kontaktlos girocard, ZU ZAHLEN, K-U-N-D-E-N-B-E-L-E-G,
+TSE-Signatur, …). Any doc with at least 2 distinct signal hits AND
+no clear invoice-only blocker (Rechnungsnummer + Fälligkeit / IBAN
+für Überweisung) appears in an amber banner at the top of /analytics
+with a checkbox table. The user reviews the matched signals per
+candidate, deselects false positives, and bulk-promotes the rest to
+Kassenzettel. Status is set to 'review' so each promoted doc still
+flows through the verification queue.
+
+- `GET /api/receipts/salvage/scan` returns the candidate list.
+- `POST /api/receipts/salvage/promote` accepts `{doc_ids: [...]}` and
+  switches them to Kassenzettel.
+
+After promoting, the existing /analytics → "Re-analyse receipts"
+button extracts the line items from those docs.
+
 ## [0.34.1] – 2026-05-09
 
 ### Added — "Re-analyse receipts" button on /analytics
