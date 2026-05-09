@@ -2,6 +2,43 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.0] – 2026-05-09
+
+### Changed — Pfand semantics on receipts: charge vs. refund cleanly separated
+
+Receipts mixed two very different things under one `pfand` bucket:
+the deposit you PAY when buying a bottled drink (positive
+`PFAND 0,25` line) and the deposit you GET BACK at the
+Leergutautomat (negative `LEERGUT -1,50` line). The analytics
+view summed both, so "Pfand" looked like a refund category but
+actually contained the deposits you paid.
+
+- The `pfand` item category is now reserved for negative
+  Pfand-Rückgabe / Leergut-Rücknahme lines only.
+- Positive Pfand-Aufschlag lines are folded into the related
+  drink purchase as `getraenke`, where they belong.
+- Translation labels follow the new meaning:
+  - DE: "Pfand" → "Pfand-Rückgabe"
+  - EN: "Deposit" → "Deposit refund"
+  - ES / FR / IT updated accordingly.
+- Receipt prompt has explicit Pfand handling rules and a new
+  Leergutautomat few-shot example so the model learns both
+  cases.
+
+### Added — `--reextract-receipts` CLI flag
+
+`--backfill-receipts` only processed Kassenzettel docs that
+didn't have an extraction yet. After a prompt update that fixes
+systematic mis-classifications, you need to overwrite existing
+data — the new `--reextract-receipts` flag does exactly that.
+Costs LLM tokens proportional to receipt count.
+
+### Changed — Receipt extractor `max_output_tokens` 2000 → 4000
+
+Long supermarket bons (50+ items) hit the 2000-token output cap
+and got truncated mid-stream, leaving items missing or with
+broken JSON. 4000 gives enough headroom for the longest receipts.
+
 ## [0.33.3] – 2026-05-07
 
 ### Fixed — iPhone-sized viewports had clipped text and a horizontal scrollbar

@@ -391,7 +391,7 @@
   "receipt.cat.transport": "Transporte",
   "receipt.cat.baumarkt": "Ferretería",
   "receipt.cat.tabak": "Tabaco",
-  "receipt.cat.pfand": "Depósito",
+  "receipt.cat.pfand": "Devolución depósito",
   "receipt.cat.rabatt": "Descuento",
   "receipt.cat.sonstiges": "Otro",
   "receipt.payment.bar": "Efectivo",

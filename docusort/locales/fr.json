@@ -391,7 +391,7 @@
   "receipt.cat.transport": "Transport",
   "receipt.cat.baumarkt": "Brico",
   "receipt.cat.tabak": "Tabac",
-  "receipt.cat.pfand": "Consigne",
+  "receipt.cat.pfand": "Retour consigne",
   "receipt.cat.rabatt": "Remise",
   "receipt.cat.sonstiges": "Autre",
   "receipt.payment.bar": "Espèces",

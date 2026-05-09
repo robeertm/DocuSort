@@ -359,6 +359,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Same as --backfill-tags but only prints what would change")
     parser.add_argument("--backfill-receipts", action="store_true",
                         help="Extract line items from existing Kassenzettel docs that don't have them yet")
+    parser.add_argument("--reextract-receipts", action="store_true",
+                        help="Re-extract line items for ALL Kassenzettel docs, overwriting existing data. "
+                             "Use after a prompt update that fixes systematic mis-classifications. "
+                             "Costs LLM tokens proportional to receipt count.")
     parser.add_argument("--backfill-statements", action="store_true",
                         help="Extract transactions from existing Kontoauszug docs that don't have them yet")
     parser.add_argument("--reocr-statements", action="store_true",
@@ -430,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
                     "watcher will skip classification until /setup is completed.")
 
     if (args.backfill_tags or args.backfill_dry_run
-            or args.backfill_receipts) and classifier is None:
+            or args.backfill_receipts or args.reextract_receipts) and classifier is None:
         log.error("Cannot run backfill: AI provider not configured. "
                   "Open the web UI and finish /setup first.")
         return 2
@@ -448,6 +452,13 @@ def main(argv: list[str] | None = None) -> int:
         from .receipts import backfill_receipts
         result = backfill_receipts(settings, db, classifier, dry_run=False)
         log.info("Receipt backfill done: %s", result)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+
+    if args.reextract_receipts:
+        from .receipts import backfill_receipts
+        result = backfill_receipts(settings, db, classifier, dry_run=False, force=True)
+        log.info("Receipt re-extract done: %s", result)
         print(json.dumps(result, indent=2, default=str))
         return 0
 

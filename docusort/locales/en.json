@@ -391,7 +391,7 @@
   "receipt.cat.transport": "Transport",
   "receipt.cat.baumarkt": "Hardware",
   "receipt.cat.tabak": "Tobacco",
-  "receipt.cat.pfand": "Deposit",
+  "receipt.cat.pfand": "Deposit refund",
   "receipt.cat.rabatt": "Discount",
   "receipt.cat.sonstiges": "Other",
   "receipt.payment.bar": "Cash",

@@ -391,7 +391,7 @@
   "receipt.cat.transport": "Transport",
   "receipt.cat.baumarkt": "Baumarkt",
   "receipt.cat.tabak": "Tabak",
-  "receipt.cat.pfand": "Pfand",
+  "receipt.cat.pfand": "Pfand-Rückgabe",
   "receipt.cat.rabatt": "Rabatt",
   "receipt.cat.sonstiges": "Sonstiges",
   "receipt.payment.bar": "Bar",

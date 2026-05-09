@@ -106,7 +106,7 @@ Schema:
       "name": string,             // human-readable line description ("Bio Vollmilch 1L")
       "quantity": number | null,  // 1 if not printed; for "2 x" lines use 2
       "unit_price": number | null,// per unit before discount (null when only total is printed)
-      "total_price": number | null,// signed line total — POSITIVE for purchases, NEGATIVE for discounts/Rabatt/Pfand-Retoure
+      "total_price": number | null,// signed line total — POSITIVE for purchases, NEGATIVE for discounts/Rabatt/Pfand-Rückgabe
       "item_category": string     // EXACTLY one of: {", ".join(ITEM_CATEGORIES)}
     }},
     ...
@@ -120,7 +120,6 @@ Schema:
   Adresszeilen, "Vielen Dank", Bon-Nr., Kassierer-Nr.
 - KEEP discount lines as separate items with NEGATIVE total_price (e.g.
   "RABATT -1,50" → {{name: "Rabatt", total_price: -1.50}}).
-- KEEP Pfand lines (Pfand-Aufschlag positive, Pfand-Rückgabe negative).
 - If a line has "2 x 1,29 = 2,58", set quantity=2, unit_price=1.29, total_price=2.58.
 - If only one number is printed for a line, set total_price to that number.
 - shop_type maps to common chains:
@@ -136,23 +135,53 @@ Schema:
   - Amazon Lieferschein, Zalando, Otto Versand → versand
   - sit-down places → restaurant; takeaway / coffee → cafe
   - everything else → sonstiges
-- item_category guidance:
+
+# Pfand handling — read carefully
+
+Pfand on a German receipt comes in two flavours and they map to DIFFERENT
+item_categories. This is critical for the analytics breakdown — get it
+right.
+
+1. **Pfand-Aufschlag** (deposit charge added when you BUY a drink in a
+   returnable bottle/can): line shows POSITIVE amount, e.g.
+   "PFAND 0,25 A", "EINWEG 0,25 A", "MEHRWEG 0,15".
+   This is part of the drink purchase. Set:
+     - total_price = positive value
+     - item_category = "getraenke"
+     - name = "Pfand" (or "Einwegpfand" / "Mehrwegpfand" as printed)
+
+2. **Pfand-Rückgabe / Leergut-Rücknahme** (deposit refunded when you
+   RETURN empty bottles, often via a Leergutautomat): line shows
+   NEGATIVE amount, e.g. "LEERGUT -1,50", "PFAND-RÜCKGABE -3,00",
+   "FLASCHENRÜCKNAHME -0,75".
+   This is money back. Set:
+     - total_price = negative value
+     - item_category = "pfand"
+     - name = "Pfand-Rückgabe" (or "Leergut" as printed)
+
+NEVER use item_category="pfand" for ordinary product lines. The "pfand"
+category is RESERVED for negative Pfand-Rückgabe / Leergut entries. If a
+line is positive and not clearly a deposit, it is NOT pfand — pick the
+matching product category instead.
+
+# item_category guidance (non-Pfand)
+
   - food / fresh produce / pasta / bread / dairy → lebensmittel
-  - sodas / juice / beer / wine / spirits → getraenke
+  - sodas / juice / beer / wine / spirits / mineral water → getraenke
   - cleaning supplies / toilet paper / kitchen rolls → haushalt
   - shampoo / lotion / cosmetics / toothpaste → koerperpflege
-  - cigarettes → tabak
-  - PFAND lines → pfand
-  - discount/Rabatt → rabatt
+  - cigarettes / tobacco → tabak
+  - discount / Rabatt / Coupon (negative) → rabatt
   - fuel → transport
   - in restaurants/cafes, all consumed food/drink → essen-trinken-aussehaus
   - everything else → sonstiges (don't guess if unclear)
+
 - Be defensive about OCR noise: "1.D0" might mean "1.00", "1 .29" → 1.29, "I,29" → 1.29.
 - Never invent items not in the text. If the receipt has 5 visible items and the rest is unreadable, return 5 items.
 
 # Few-shot examples
 
-## Example A — REWE supermarket
+## Example A — REWE supermarket (with Pfand-Aufschlag, NOT a refund)
 
 OCR text:
 "REWE Markt GmbH · Königsbrücker Str. 78 · 01099 Dresden
@@ -162,13 +191,33 @@ Vollkornbrot             2,49 A
 Tomaten 500g             1,79 A
 2 x Joghurt Erdbeer
    à 0,89                1,78 A
+Mineralwasser 1,5L       0,79 A
 PFAND 0,25                0,25 A
 RABATT Coupon           -0,50 A
 SUMME EUR              23,87
 Gegeben girocard       23,87"
 
+Note the PFAND line is POSITIVE — it's the deposit charged for the
+mineral-water bottle. That is part of the drink purchase, so
+item_category="getraenke" (NOT "pfand").
+
 Output:
-{{"shop_name":"REWE","shop_type":"supermarkt","payment_method":"girocard","total_amount":23.87,"currency":"EUR","receipt_date":"2026-04-12","items":[{{"name":"Bio Vollmilch 1L","quantity":1,"unit_price":1.29,"total_price":1.29,"item_category":"lebensmittel"}},{{"name":"Vollkornbrot","quantity":1,"unit_price":2.49,"total_price":2.49,"item_category":"lebensmittel"}},{{"name":"Tomaten 500g","quantity":1,"unit_price":1.79,"total_price":1.79,"item_category":"lebensmittel"}},{{"name":"Joghurt Erdbeer","quantity":2,"unit_price":0.89,"total_price":1.78,"item_category":"lebensmittel"}},{{"name":"Pfand","quantity":1,"unit_price":0.25,"total_price":0.25,"item_category":"pfand"}},{{"name":"Coupon-Rabatt","quantity":1,"unit_price":-0.50,"total_price":-0.50,"item_category":"rabatt"}}]}}
+{{"shop_name":"REWE","shop_type":"supermarkt","payment_method":"girocard","total_amount":23.87,"currency":"EUR","receipt_date":"2026-04-12","items":[{{"name":"Bio Vollmilch 1L","quantity":1,"unit_price":1.29,"total_price":1.29,"item_category":"lebensmittel"}},{{"name":"Vollkornbrot","quantity":1,"unit_price":2.49,"total_price":2.49,"item_category":"lebensmittel"}},{{"name":"Tomaten 500g","quantity":1,"unit_price":1.79,"total_price":1.79,"item_category":"lebensmittel"}},{{"name":"Joghurt Erdbeer","quantity":2,"unit_price":0.89,"total_price":1.78,"item_category":"lebensmittel"}},{{"name":"Mineralwasser 1,5L","quantity":1,"unit_price":0.79,"total_price":0.79,"item_category":"getraenke"}},{{"name":"Pfand","quantity":1,"unit_price":0.25,"total_price":0.25,"item_category":"getraenke"}},{{"name":"Coupon-Rabatt","quantity":1,"unit_price":-0.50,"total_price":-0.50,"item_category":"rabatt"}}]}}
+
+## Example A2 — Leergutautomat / Pfand-Rückgabe (negative, IS the refund)
+
+OCR text:
+"EDEKA Müller · Hauptstr. 5
+Leergut-Rücknahme  18.04.2026
+LEERGUT             -1,50
+PFAND-Rückgabe      -0,75
+SUMME              -2,25"
+
+Both lines are NEGATIVE — the customer is getting deposit back. THIS is
+what item_category="pfand" is for.
+
+Output:
+{{"shop_name":"EDEKA","shop_type":"supermarkt","payment_method":"","total_amount":-2.25,"currency":"EUR","receipt_date":"2026-04-18","items":[{{"name":"Leergut","quantity":1,"unit_price":-1.50,"total_price":-1.50,"item_category":"pfand"}},{{"name":"Pfand-Rückgabe","quantity":1,"unit_price":-0.75,"total_price":-0.75,"item_category":"pfand"}}]}}
 
 ## Example B — Tankquittung Aral
 
@@ -255,9 +304,15 @@ def _normalise_item(d: dict[str, Any]) -> ReceiptItem | None:
     )
 
 
-def backfill_receipts(settings, db, classifier, *, dry_run: bool = False) -> dict:
-    """Re-extract receipts for every Kassenzettel doc that doesn't have one
-    yet. Useful after upgrading from a version that didn't auto-extract.
+def backfill_receipts(settings, db, classifier, *, dry_run: bool = False,
+                      force: bool = False) -> dict:
+    """Extract / re-extract receipts for Kassenzettel docs.
+
+    By default only handles docs that don't have a receipt row yet (useful
+    after upgrading from a version that didn't auto-extract). Pass
+    `force=True` to re-run on EVERY Kassenzettel doc — this overwrites
+    existing extractions and costs LLM tokens, but is what you want after
+    a prompt update that fixes systematic mis-classifications.
 
     Reads the stored OCR text from `documents.extracted_text`, so no new
     OCR cost is incurred. The LLM call is what's billed.
@@ -268,12 +323,20 @@ def backfill_receipts(settings, db, classifier, *, dry_run: bool = False) -> dic
         holder_names=settings.finance.holder_names,
         pseudonymize=settings.finance.pseudonymize,
     )
-    rows = db._conn.execute(
-        """SELECT id, extracted_text, doc_date FROM documents
-           WHERE category = 'Kassenzettel' AND deleted_at IS NULL
-             AND id NOT IN (SELECT doc_id FROM receipts)
-             AND extracted_text IS NOT NULL AND extracted_text != ''"""
-    ).fetchall()
+    if force:
+        sql = (
+            "SELECT id, extracted_text, doc_date FROM documents "
+            "WHERE category = 'Kassenzettel' AND deleted_at IS NULL "
+            "  AND extracted_text IS NOT NULL AND extracted_text != ''"
+        )
+    else:
+        sql = (
+            "SELECT id, extracted_text, doc_date FROM documents "
+            "WHERE category = 'Kassenzettel' AND deleted_at IS NULL "
+            "  AND id NOT IN (SELECT doc_id FROM receipts) "
+            "  AND extracted_text IS NOT NULL AND extracted_text != ''"
+        )
+    rows = db._conn.execute(sql).fetchall()
     processed: list[int] = []
     failed: list[dict] = []
     for r in rows:
@@ -339,7 +402,7 @@ class ReceiptExtractor:
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=_USER_TEMPLATE.format(text=body),
                 model=self.model,
-                max_output_tokens=2000,
+                max_output_tokens=4000,
             )
         except ProviderError as exc:
             logger.error("Receipt extractor: provider call failed: %s", exc)
