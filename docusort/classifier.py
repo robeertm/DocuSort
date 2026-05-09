@@ -484,7 +484,12 @@ class Classifier:
         body = text
         pseudo = None
 
-        user = _build_user_message(body, self.settings.max_text_chars)
+        # User runs locally on Ollama — no per-token cost concern. We
+        # floor the text limit at 200k so that the configured value
+        # (default 12k) is treated as a minimum, never a hard cap.
+        # 200k is generous enough for any realistic single document
+        # while still bounding pathological OCR output.
+        user = _build_user_message(body, max(self.settings.max_text_chars, 200_000))
         logger.debug("Calling %s model=%s, text_len=%d, pseudo=%s",
                      self.provider.name, self.settings.model, len(text),
                      bool(pseudo))
@@ -504,7 +509,13 @@ class Classifier:
                     system_prompt=self._system_prompt,
                     user_prompt=user,
                     model=self.settings.model,
-                    max_output_tokens=600,
+                    # No artificial cap — let the model emit as many
+                    # tokens as needed. The user's setup is local
+                    # (Ollama), so token spend is not a concern.
+                    # Cloud-provider users on a tight budget can
+                    # configure this in a future settings field if
+                    # needed.
+                    max_output_tokens=100_000,
                 )
             except ProviderError as exc:
                 last_exc = exc

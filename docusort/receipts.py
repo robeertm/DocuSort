@@ -479,6 +479,18 @@ def backfill_receipts(settings, db, classifier, *, dry_run: bool = False,
 _LOCAL_PROVIDERS = ("openai_compat", "bridge")
 
 
+# Receipts can be very long (5-metre ALDI Großeinkauf with 80+ items).
+# We deliberately set effectively-unlimited budgets for receipt
+# extraction so no item is ever dropped due to truncation. Bons run
+# one at a time and the user is on a local LLM (Ollama), so token
+# cost is not a concern — only the model's actual context window is.
+# If the local model's context can't fit a particular bon, that's a
+# server-side `num_ctx` configuration question, not something we cap
+# from here.
+_RECEIPT_MAX_TEXT_CHARS = 200_000
+_RECEIPT_MAX_OUTPUT_TOKENS = 100_000
+
+
 class ReceiptExtractor:
     """Wraps a Provider to extract structured receipts from OCR text."""
 
@@ -488,7 +500,10 @@ class ReceiptExtractor:
                  pseudonymize: bool = True):
         self.provider = provider
         self.model = model
-        self.max_text_chars = max_text_chars
+        # Floor at _RECEIPT_MAX_TEXT_CHARS — global setting may be lower
+        # for the classifier (cache-friendliness) but receipts need the
+        # full input every time.
+        self.max_text_chars = max(max_text_chars, _RECEIPT_MAX_TEXT_CHARS)
         self.holder_names = list(holder_names or [])
         self.pseudonymize = pseudonymize
 
@@ -496,6 +511,13 @@ class ReceiptExtractor:
         if not ocr_text:
             raise ValueError("no OCR text provided")
         body = ocr_text[: self.max_text_chars]
+        if len(ocr_text) > self.max_text_chars:
+            logger.warning(
+                "Receipt OCR text %d chars exceeds limit %d — items past "
+                "the cutoff will be missing. Consider raising "
+                "_RECEIPT_MAX_TEXT_CHARS in receipts.py.",
+                len(ocr_text), self.max_text_chars,
+            )
 
         is_local = self.provider.name in _LOCAL_PROVIDERS
         do_pseudo = self.pseudonymize and not is_local
@@ -509,7 +531,7 @@ class ReceiptExtractor:
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=_USER_TEMPLATE.format(text=body),
                 model=self.model,
-                max_output_tokens=4000,
+                max_output_tokens=_RECEIPT_MAX_OUTPUT_TOKENS,
             )
         except ProviderError as exc:
             logger.error("Receipt extractor: provider call failed: %s", exc)

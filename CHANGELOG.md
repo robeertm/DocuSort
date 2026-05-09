@@ -2,6 +2,42 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.7] – 2026-05-09
+
+### Changed — Tesseract `--psm 4` for narrow / thermal-paper receipts
+
+ALDI / EDEKA / Kaufland Bons are tall and narrow (h/w ≥ 2). With
+Tesseract's default page-segmentation mode 3 ("auto, with OSD") the
+narrow column is auto-segmented as if it were multi-column — adjacent
+receipt rows fuse into one OCR line ("LEERGUTRUECKNAHME 19% -3FANTA/
+SPRITE/MEZZOMIX 1"), which then makes the LLM extractor drop or
+mis-attribute items.
+
+Now the OCR module checks the aspect ratio of the first page (PDF) or
+the image, and when it's at least 2:1 (height:width) — which fits all
+common Thermo-Bons but not A4 letters — passes
+`--tesseract-pagesegmode 4` ("Single column of variable-sized text")
+to ocrmypdf, or `--psm 4` to pytesseract for image scans. Letters and
+multi-column docs go through the default psm unchanged.
+
+### Changed — No more artificial token caps for any LLM call
+
+The receipt extractor used to cap input at 12 000 chars and output at
+4 000 tokens (tightened to 16 k in v0.34.1). Long ALDI Großeinkäufe
+with 80+ items would silently lose the items past the cutoff. Lifted:
+
+- Receipt extractor: 200 000 input chars, 100 000 output tokens.
+- Main classifier: 200 000 input chars, 100 000 output tokens.
+
+The user runs locally on Ollama, so per-token cost is not a concern;
+the only real bound is the local model's own `num_ctx`. If a doc is
+too big for that, it's a server-side configuration question, not
+something we'll truncate from the application side.
+
+The bridge connectivity smoke-test endpoint
+(`/api/bridge/echo-test`) keeps its tiny 80-token cap because it
+expects a 6-character JSON echo back.
+
 ## [0.34.6] – 2026-05-09
 
 ### Fixed — orphaned 180-line JS block on document.html crashed every Alpine component on the page

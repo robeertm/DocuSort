@@ -58,7 +58,52 @@ def _needs_ocr(text: str) -> bool:
     return len(text.strip()) < 100
 
 
-def _run_ocrmypdf(src: Path, dst: Path, settings: OCRSettings) -> None:
+# Aspect ratio threshold above which we treat a doc as a thermal-paper
+# Kassenzettel (single narrow column of text). Tesseract's default
+# pagesegmode=3 auto-segments such docs as if they had multiple
+# columns — fusing adjacent rows, e.g. "LEERGUTRUECKNAHME -2,00" and
+# the next "FANTA/SPRITE 1,49" end up on one OCR line. With
+# pagesegmode=4 ("Assume a single column of text of variable sizes")
+# Tesseract treats the whole page as one column, which is exactly
+# what a receipt is.
+_RECEIPT_ASPECT_RATIO = 2.0
+
+
+def _doc_aspect_is_narrow(pdf_path: Path) -> bool:
+    """Return True iff the first page of `pdf_path` is much taller
+    than wide — i.e. plausibly a thermal-paper receipt rather than an
+    A4 letter / multi-column document. Errors and absent pages return
+    False (treat as normal doc)."""
+    try:
+        reader = PdfReader(str(pdf_path))
+        if not reader.pages:
+            return False
+        page = reader.pages[0]
+        # mediabox values are in PDF user units; we only care about ratio
+        w = float(page.mediabox.width or 0)
+        h = float(page.mediabox.height or 0)
+        if w <= 0 or h <= 0:
+            return False
+        return (h / w) >= _RECEIPT_ASPECT_RATIO
+    except Exception:
+        return False
+
+
+def _image_is_narrow(image_path: Path) -> bool:
+    """Same heuristic for raw image files (JPG/PNG scans)."""
+    try:
+        from PIL import Image
+        with Image.open(image_path) as img:
+            w, h = img.size
+        if w <= 0 or h <= 0:
+            return False
+        return (h / w) >= _RECEIPT_ASPECT_RATIO
+    except Exception:
+        return False
+
+
+def _run_ocrmypdf(src: Path, dst: Path, settings: OCRSettings,
+                  *, narrow_doc: bool = False) -> None:
     cmd = [
         "ocrmypdf",
         "--language", settings.languages,
@@ -67,6 +112,10 @@ def _run_ocrmypdf(src: Path, dst: Path, settings: OCRSettings) -> None:
     ]
     if settings.deskew:
         cmd.append("--deskew")
+    if narrow_doc:
+        # Single-column-of-variable-sizes — stops Tesseract from
+        # collapsing adjacent receipt rows into one line.
+        cmd += ["--tesseract-pagesegmode", "4"]
     cmd += [str(src), str(dst)]
 
     logger.info("Running OCR: %s", " ".join(cmd))
@@ -91,10 +140,14 @@ def extract_text(file_path: Path, settings: OCRSettings) -> OcrResult:
             logger.warning("ocrmypdf not on PATH – skipping OCR for %s", file_path.name)
             return OcrResult(text=text, path=file_path, ocr_used=False, page_count=pages)
 
+        narrow = _doc_aspect_is_narrow(file_path)
+        if narrow:
+            logger.info("OCR: %s looks like a narrow Kassenzettel (h/w >= %.1f), using --psm 4",
+                        file_path.name, _RECEIPT_ASPECT_RATIO)
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
-            _run_ocrmypdf(file_path, tmp_path, settings)
+            _run_ocrmypdf(file_path, tmp_path, settings, narrow_doc=narrow)
             ocred_text, ocred_pages = _extract_pdf(tmp_path)
             return OcrResult(
                 text=ocred_text, path=tmp_path, ocr_used=True,
@@ -112,8 +165,13 @@ def extract_text(file_path: Path, settings: OCRSettings) -> OcrResult:
             import pytesseract  # local import – only needed for images
             from PIL import Image
 
+            narrow = _image_is_narrow(file_path)
+            tess_config = "--psm 4" if narrow else ""
+            if narrow:
+                logger.info("OCR: %s looks like a narrow Kassenzettel image, using --psm 4",
+                            file_path.name)
             text = pytesseract.image_to_string(
-                Image.open(file_path), lang=settings.languages
+                Image.open(file_path), lang=settings.languages, config=tess_config,
             )
             return OcrResult(text=text.strip(), path=file_path, ocr_used=True, page_count=1)
         except Exception as exc:
@@ -142,10 +200,11 @@ def extract_pages(file_path: Path, settings: OCRSettings) -> list[str]:
             return pages
         if not shutil.which("ocrmypdf"):
             return pages
+        narrow = _doc_aspect_is_narrow(file_path)
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
-            _run_ocrmypdf(file_path, tmp_path, settings)
+            _run_ocrmypdf(file_path, tmp_path, settings, narrow_doc=narrow)
             return _extract_pdf_pages(tmp_path)
         except subprocess.CalledProcessError as exc:
             logger.error("OCR failed for %s: %s",
