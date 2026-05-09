@@ -195,6 +195,14 @@ def _doc_job_status(doc_id: int) -> dict | None:
         }
 
 
+# Global single-instance receipt re-extraction job. Started from the
+# /analytics page or via the API; the watcher thread iterates all
+# Kassenzettel docs and updates the shared status dict so the UI can
+# poll progress.
+_receipt_reextract_lock = threading.Lock()
+_receipt_reextract: dict | None = None
+
+
 def _doc_job_progress(doc_id: int, *, current_page: int, total_pages: int) -> None:
     """Update the per-doc job entry with per-page progress. Called by
     the extractor's `on_page_progress` callback so the doc-detail page
@@ -657,6 +665,76 @@ def create_app(
             query=q, item_category=item_category, shop_type=shop_type,
             start=start, end=end, limit=limit,
         )}
+
+    @app.post("/api/receipts/reextract")
+    def api_reextract_receipts(force: bool = Query(True)):
+        """Start a background job that re-runs the receipt extractor on
+        every Kassenzettel doc (force=True) or only on those without a
+        receipt row yet (force=False). Single-instance: returns 409 if a
+        run is already in flight. Poll /api/receipts/reextract/status."""
+        if classifier is None:
+            raise HTTPException(503, "classifier not available — finish /setup first")
+        global _receipt_reextract
+        with _receipt_reextract_lock:
+            if _receipt_reextract is not None and _receipt_reextract.get("running"):
+                raise HTTPException(409, "a receipt re-extract is already running")
+            _receipt_reextract = {
+                "running": True,
+                "force": bool(force),
+                "started_at": time.time(),
+                "current": 0,
+                "total": 0,
+                "ok": 0,
+                "failed": 0,
+                "last_doc_id": None,
+                "last_shop": None,
+                "last_error": None,
+                "finished_at": None,
+            }
+
+        def _progress(idx: int, total: int, doc_id: int, receipt, error):
+            with _receipt_reextract_lock:
+                if _receipt_reextract is None:
+                    return
+                _receipt_reextract["current"] = idx
+                _receipt_reextract["total"] = total
+                _receipt_reextract["last_doc_id"] = doc_id
+                if error is not None:
+                    _receipt_reextract["failed"] += 1
+                    _receipt_reextract["last_error"] = error[:200]
+                else:
+                    _receipt_reextract["ok"] += 1
+                    if receipt is not None:
+                        _receipt_reextract["last_shop"] = receipt.shop_name
+
+        def _run():
+            global _receipt_reextract
+            try:
+                from ..receipts import backfill_receipts
+                backfill_receipts(
+                    settings, db, classifier,
+                    dry_run=False, force=force, progress_cb=_progress,
+                )
+            except Exception as exc:
+                logger.exception("Receipt re-extract job crashed")
+                with _receipt_reextract_lock:
+                    if _receipt_reextract is not None:
+                        _receipt_reextract["last_error"] = str(exc)[:200]
+            finally:
+                with _receipt_reextract_lock:
+                    if _receipt_reextract is not None:
+                        _receipt_reextract["running"] = False
+                        _receipt_reextract["finished_at"] = time.time()
+
+        threading.Thread(target=_run, name="receipt-reextract", daemon=True).start()
+        return {"started": True, "force": bool(force)}
+
+    @app.get("/api/receipts/reextract/status")
+    def api_reextract_receipts_status():
+        with _receipt_reextract_lock:
+            if _receipt_reextract is None:
+                return {"running": False, "started": False}
+            return dict(_receipt_reextract)
 
     @app.post("/api/document/{doc_id}/receipt/extract")
     def api_extract_receipt(doc_id: int):

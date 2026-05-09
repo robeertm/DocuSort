@@ -117,11 +117,26 @@ Schema:
 
 - Numbers use a dot as decimal separator: "1,29" → 1.29.
 - Drop pure layout noise: SUMME, ZWISCHENSUMME, MwSt-Tabellen, Kassenstammdaten,
-  Adresszeilen, "Vielen Dank", Bon-Nr., Kassierer-Nr.
+  Adresszeilen, "Vielen Dank", Bon-Nr., Kassierer-Nr., Terminal-/TA-/TSE-data,
+  PAYBACK lines, EMV-Daten, K-U-N-D-E-N-B-E-L-E-G separators.
 - KEEP discount lines as separate items with NEGATIVE total_price (e.g.
   "RABATT -1,50" → {{name: "Rabatt", total_price: -1.50}}).
 - If a line has "2 x 1,29 = 2,58", set quantity=2, unit_price=1.29, total_price=2.58.
 - If only one number is printed for a line, set total_price to that number.
+- ALDI / some others print quantity on a SEPARATE LINE ABOVE the item name
+  ("2 x 1,19 €" then "SKYR 2,38 € 1", or "0,463 kg x 11,99 €/kg" then
+  "SCHWEINEFILET-QS 5,55 € 1"). Read the line above to set quantity and
+  unit_price; the item line itself gives name + total_price.
+- A trailing single digit "1" or "2" after the price is the tax-class
+  marker (1=7% VAT, 2=19% VAT). IGNORE it — never include it in any
+  numeric field.
+- Combo menus (Kino, Fast Food) print sub-items with "1 *" prefix that
+  describe what the menu contains — these sub-lines have NO separate
+  prices. Emit ONE item for the whole combo with the menu price; fold
+  the sub-item names into the item name.
+- If the OCR text is just a Kartenzahlungsbeleg / Zahlungsbeleg without
+  any product lines (only "Betrag X,XX EUR" + "Zahlung erfolgt"),
+  return items=[] and set total_amount from the Betrag line.
 - shop_type maps to common chains:
   - REWE, EDEKA, Aldi, Lidl, Kaufland, Penny, Netto, Real, Norma, Tegut → supermarkt
   - dm, Rossmann, Müller (drogerie context), Budni, Douglas → drogerie
@@ -231,6 +246,78 @@ EC-Karte               73,93"
 Output:
 {{"shop_name":"Aral","shop_type":"tankstelle","payment_method":"girocard","total_amount":73.93,"currency":"EUR","receipt_date":"2026-03-18","items":[{{"name":"Super E10","quantity":41.32,"unit_price":1.789,"total_price":73.93,"item_category":"transport"}}]}}
 
+## Example D — ALDI two-line layout (qty/multiplier above the item)
+
+ALDI prints the multiplier or weight on a SEPARATE LINE ABOVE the item
+name. The price column may have a trailing tax-class digit ("1" for 7%
+VAT, "2" for 19% VAT) — IGNORE that digit. Negative LEERGUTRÜCKNAHME
+("-N x 0,25 €") is a Pfand-Rückgabe; positive PFANDWERT is a Pfand-
+Aufschlag (drink purchase) and goes to "getraenke".
+
+OCR text:
+"ALDI · An der Ziegelei 02, 01454 Radeberg
+-8 x 0,25 €
+LEERGUTRÜCKNAHME 19%      -2,00 € 2
+SPITZPAPRIKA MIX           2,19 € 1
+PFANDWERT 1,50             1,50 € 2
+2 x 1,19 €
+SKYR                       2,38 € 1
+0,463 kg x 11,99 €/kg
+SCHWEINEFILET-QS, GANZ     5,55 € 1
+KARTOFFELN FK KLEIN        1,79 € 1
+ZU ZAHLEN                 13,41 €"
+
+Note: the line "-8 x 0,25 €" is the multiplier for LEERGUTRÜCKNAHME →
+quantity=8 (positive count of bottles), unit_price=-0.25 (negative
+because deposit is refunded), total_price=-2.00, category="pfand".
+"PFANDWERT 1,50" is positive → Pfand-Aufschlag → "getraenke".
+"SKYR" with "2 x 1,19 €" above → quantity=2, unit_price=1.19,
+total_price=2.38. "SCHWEINEFILET-QS, GANZ" with "0,463 kg x 11,99
+€/kg" above → quantity=0.463, unit_price=11.99, total_price=5.55.
+
+Output:
+{{"shop_name":"ALDI","shop_type":"supermarkt","payment_method":"","total_amount":13.41,"currency":"EUR","receipt_date":"","items":[{{"name":"Leergutrücknahme","quantity":8,"unit_price":-0.25,"total_price":-2.00,"item_category":"pfand"}},{{"name":"Spitzpaprika Mix","quantity":1,"unit_price":2.19,"total_price":2.19,"item_category":"lebensmittel"}},{{"name":"Pfandwert","quantity":1,"unit_price":1.50,"total_price":1.50,"item_category":"getraenke"}},{{"name":"Skyr","quantity":2,"unit_price":1.19,"total_price":2.38,"item_category":"lebensmittel"}},{{"name":"Schweinefilet-QS, Ganz","quantity":0.463,"unit_price":11.99,"total_price":5.55,"item_category":"lebensmittel"}},{{"name":"Kartoffeln FK klein","quantity":1,"unit_price":1.79,"total_price":1.79,"item_category":"lebensmittel"}}]}}
+
+## Example E — Cineplex (Kinomenü with informational sub-items)
+
+Combo menus print the menu PRICE on the header line, and sub-items
+with "1 *" prefix that DESCRIBE the menu contents — they have NO
+separate prices. Treat the whole combo as ONE item, ignore the
+"1 * Coca-Cola 0,75l" / "1 * Nachos Klein" / "1 * Salsa-Dip hot"
+sub-lines.
+
+OCR text:
+"Cineplex Kristallpalast · 01069 Dresden
+Datum: 03.05.26  Uhrzeit: 16:37
+Menü 2 Nacho                10,00 EUR
+  1 * 10,00 EUR
+  1 * Coca-Cola 0,75l
+  1 * Nachos Klein
+  1 * Salsa-Dip hot
+Summe :                     10,00 EUR
+Telecash Kasse              10,00 EUR"
+
+Output:
+{{"shop_name":"Cineplex Kristallpalast","shop_type":"sonstiges","payment_method":"","total_amount":10.00,"currency":"EUR","receipt_date":"2026-05-03","items":[{{"name":"Menü 2 Nacho (Coca-Cola 0,75l, Nachos klein, Salsa-Dip)","quantity":1,"unit_price":10.00,"total_price":10.00,"item_category":"essen-trinken-aussehaus"}}]}}
+
+## Example F — Card-payment slip (no items)
+
+Some receipts are JUST the card-payment confirmation (Kartenzahlung-
+beleg / Zahlungsbeleg) and contain no item list — only the total. In
+that case return items=[] and set total_amount from the "Betrag" line.
+Don't invent items.
+
+OCR text:
+"DEICHMANN
+Deichmann SE · Dohnaer Str. 246, 01239 Dresden
+Kartenzahlung   girocard Contactless
+Datum  28.04.2026
+Betrag      32,08 EUR
+00 Zahlung erfolgt"
+
+Output:
+{{"shop_name":"Deichmann","shop_type":"bekleidung","payment_method":"girocard","total_amount":32.08,"currency":"EUR","receipt_date":"2026-04-28","items":[]}}
+
 ## Example C — Restaurantrechnung
 
 OCR text:
@@ -305,7 +392,8 @@ def _normalise_item(d: dict[str, Any]) -> ReceiptItem | None:
 
 
 def backfill_receipts(settings, db, classifier, *, dry_run: bool = False,
-                      force: bool = False) -> dict:
+                      force: bool = False,
+                      progress_cb=None) -> dict:
     """Extract / re-extract receipts for Kassenzettel docs.
 
     By default only handles docs that don't have a receipt row yet (useful
@@ -337,19 +425,28 @@ def backfill_receipts(settings, db, classifier, *, dry_run: bool = False,
             "  AND extracted_text IS NOT NULL AND extracted_text != ''"
         )
     rows = db._conn.execute(sql).fetchall()
+    total = len(rows)
     processed: list[int] = []
     failed: list[dict] = []
-    for r in rows:
+    mode = "re-extract" if force else "backfill"
+    logger.info("Receipt %s: %d Kassenzettel doc(s) to process", mode, total)
+    for idx, r in enumerate(rows, 1):
         doc_id = int(r["id"])
         try:
             receipt = extractor.extract(r["extracted_text"])
         except Exception as exc:
             failed.append({"doc_id": doc_id, "error": str(exc)})
-            logger.warning("Backfill: doc %d failed: %s", doc_id, exc)
+            logger.warning("Receipt %s [%d/%d] doc %d FAILED: %s",
+                           mode, idx, total, doc_id, exc)
+            if progress_cb is not None:
+                try:
+                    progress_cb(idx, total, doc_id, None, str(exc))
+                except Exception:
+                    pass
             continue
         if dry_run:
-            logger.info("Backfill (dry-run): doc %d -> shop=%s items=%d",
-                        doc_id, receipt.shop_name, len(receipt.items))
+            logger.info("Receipt %s (dry-run) [%d/%d] doc %d -> shop=%s items=%d",
+                        mode, idx, total, doc_id, receipt.shop_name, len(receipt.items))
         else:
             db.upsert_receipt(
                 doc_id,
@@ -360,9 +457,19 @@ def backfill_receipts(settings, db, classifier, *, dry_run: bool = False,
                 items=[i.as_dict() for i in receipt.items],
                 extra_json=receipt.raw_response,
             )
+            logger.info("Receipt %s [%d/%d] doc %d OK shop=%r items=%d total=%s",
+                        mode, idx, total, doc_id, receipt.shop_name,
+                        len(receipt.items), receipt.total_amount)
         processed.append(doc_id)
+        if progress_cb is not None:
+            try:
+                progress_cb(idx, total, doc_id, receipt, None)
+            except Exception:
+                pass
+    logger.info("Receipt %s done: %d processed, %d failed",
+                mode, len(processed), len(failed))
     return {
-        "found": len(rows),
+        "found": total,
         "processed": processed,
         "failed": failed,
         "dry_run": dry_run,

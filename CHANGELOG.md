@@ -2,6 +2,50 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.1] – 2026-05-09
+
+### Added — "Re-analyse receipts" button on /analytics
+
+`--reextract-receipts` from the CLI worked but printed nothing until
+finished, so it looked stuck. There is now a button on /analytics that
+kicks off the same job in a background thread and shows live progress
+(current/total + last shop). Single-instance: the button is disabled
+while a run is in flight; if the user navigates away and back, the
+page picks up the running job.
+
+- `POST /api/receipts/reextract?force=true` starts the job.
+- `GET  /api/receipts/reextract/status` returns running/current/total/
+  ok/failed/last_shop/last_error for polling.
+
+### Added — Live progress logging during receipt backfill
+
+`backfill_receipts()` now logs one line per processed receipt
+("[12/87] doc 4231 OK shop='ALDI' items=53 total=149.11") and accepts
+an optional `progress_cb` so the web UI can mirror the same data.
+
+### Changed — Receipt prompt: more few-shot examples for tricky layouts
+
+Three new few-shot examples cover real-world receipts that previously
+extracted poorly:
+
+- **ALDI two-line layout** — quantity / weight on a separate line
+  ABOVE the item name (`2 x 1,19 €` then `SKYR 2,38 € 1`,
+  `0,463 kg x 11,99 €/kg` then `SCHWEINEFILET 5,55 € 1`). The
+  trailing `1` / `2` is the tax-class marker — explicitly told
+  to ignore it. Same example shows `LEERGUTRÜCKNAHME` (negative,
+  `pfand`) and `PFANDWERT 1,50` (positive, `getraenke`) in one bon.
+- **Cineplex / cinema combo menu** — sub-items prefixed with `1 *`
+  describe the menu contents and have NO separate prices. Folded
+  into one item with the menu price.
+- **Card-payment slip with no items** — the standalone Kartenzahlung-
+  beleg some shops print alongside the actual receipt. Returns
+  items=[] with total_amount from the Betrag line instead of
+  hallucinating items.
+
+Plus tightened layout-noise rules: PAYBACK lines, EMV-Daten,
+TSE-/Terminal-data, and `K-U-N-D-E-N-B-E-L-E-G` separators are now
+explicitly listed as droppable.
+
 ## [0.34.0] – 2026-05-09
 
 ### Changed — Pfand semantics on receipts: charge vs. refund cleanly separated

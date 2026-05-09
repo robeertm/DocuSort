@@ -8,6 +8,46 @@
       <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('analytics.title') }}</h1>
       <p class="text-ink-400 mt-1 text-sm">{{ t('analytics.subtitle') }}</p>
     </div>
+    {% if summary.receipt_count > 0 %}
+    <div>
+      <button type="button"
+              @click="reextractAll()"
+              :disabled="reextract.running"
+              class="rounded-xl bg-ink-800 hover:bg-ink-700 disabled:opacity-50 px-3 py-2 text-sm">
+        <span x-show="!reextract.running">{{ t('analytics.reextract_all') }}</span>
+        <span x-show="reextract.running" x-cloak>
+          <span x-text="reextract.current"></span> / <span x-text="reextract.total"></span>
+          {{ t('analytics.reextract_running_suffix') }}
+        </span>
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+  <div x-show="reextract.visible" x-cloak class="card p-4 mb-6">
+    <div class="flex items-center justify-between gap-3 mb-2 text-sm">
+      <span x-show="reextract.running">
+        {{ t('analytics.reextract_progress') }}
+        <span x-text="reextract.current"></span>/<span x-text="reextract.total"></span>
+        <span class="text-ink-500" x-show="reextract.last_shop">
+          · <span x-text="reextract.last_shop"></span>
+        </span>
+      </span>
+      <span x-show="!reextract.running" class="text-emerald-300">
+        {{ t('analytics.reextract_done') }}
+        — <span x-text="reextract.ok"></span> OK<template x-if="reextract.failed > 0">,
+        <span class="text-rose-300"><span x-text="reextract.failed"></span> {{ t('analytics.reextract_failed') }}</span></template>
+      </span>
+      <button type="button" x-show="!reextract.running" @click="location.reload()"
+              class="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs text-white">
+        {{ t('analytics.reextract_reload') }}
+      </button>
+    </div>
+    <div class="h-2 bg-ink-800 rounded overflow-hidden">
+      <div class="h-full bg-emerald-500/60 transition-all"
+           :style="`width: ${reextract.total > 0 ? (reextract.current / reextract.total * 100) : 0}%;`"></div>
+    </div>
+    <div x-show="reextract.last_error" x-cloak class="mt-2 text-xs text-rose-300" x-text="reextract.last_error"></div>
   </div>
 
   {% if summary.receipt_count == 0 %}
@@ -269,7 +309,69 @@
 </div>
 
 <script>
-function analyticsPage() { return {}; }
+function analyticsPage() {
+  const T = window.T || {};
+  return {
+    reextract: {
+      visible: false, running: false,
+      current: 0, total: 0, ok: 0, failed: 0,
+      last_shop: null, last_error: null,
+    },
+    _pollTimer: null,
+    init() {
+      // Pick up an in-flight job that started before this page was loaded
+      // (e.g. user navigated away mid-run).
+      this._refreshStatus();
+    },
+    async reextractAll() {
+      const msg = T['analytics.reextract_confirm']
+        || 'Alle Bons neu analysieren? Das verbraucht LLM-Tokens und kann ein paar Minuten dauern.';
+      if (!confirm(msg)) return;
+      try {
+        const r = await fetch('/api/receipts/reextract?force=true', { method: 'POST' });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          alert(d.detail || ('HTTP ' + r.status));
+          return;
+        }
+      } catch (e) {
+        alert(e.message || String(e));
+        return;
+      }
+      this.reextract.visible = true;
+      this.reextract.running = true;
+      this._startPolling();
+    },
+    _startPolling() {
+      if (this._pollTimer) return;
+      this._pollTimer = setInterval(() => this._refreshStatus(), 1000);
+    },
+    _stopPolling() {
+      if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+    },
+    async _refreshStatus() {
+      try {
+        const r = await fetch('/api/receipts/reextract/status');
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!d.started && !d.running) return;
+        this.reextract.visible = true;
+        this.reextract.running = !!d.running;
+        this.reextract.current = d.current || 0;
+        this.reextract.total = d.total || 0;
+        this.reextract.ok = d.ok || 0;
+        this.reextract.failed = d.failed || 0;
+        this.reextract.last_shop = d.last_shop || null;
+        this.reextract.last_error = d.last_error || null;
+        if (d.running) {
+          this._startPolling();
+        } else {
+          this._stopPolling();
+        }
+      } catch (e) { /* keep polling on transient errors */ }
+    },
+  };
+}
 </script>
 
 {% endblock %}
