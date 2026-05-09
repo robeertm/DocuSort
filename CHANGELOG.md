@@ -2,6 +2,32 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.4] – 2026-05-09
+
+### Fixed — Diagnose button rendered empty (no clickable text)
+
+The v0.34.3 button used two nested `<span x-show>` for the
+busy/idle states. When the inner Alpine component initialised slightly
+later than the surrounding ones (or hit any binding error), both spans
+ended up hidden — the user saw an empty pill they couldn't click.
+
+Replaced with a plain text button + `x-text` override and an
+emerald-600 background so the control is unmissable. Plain text inside
+the tag is the fallback that always renders, even if Alpine never
+binds.
+
+### Fixed — Category dropdown defaulted to "Rechnungen" on Kassenzettel docs
+
+When Alpine's `x-model` failed to apply the initial value (e.g. another
+component on the page errored before this one's init ran), the browser
+fell back to the FIRST `<option>` — which is "Rechnungen" in the
+default categories.yaml. Result: a Kassenzettel doc visually showed
+"Rechnungen" in the edit form even though the DB row was correct.
+
+Added `selected` attribute on the option whose value matches
+`doc.category`, so the browser picks the right one even before Alpine
+takes over. Alpine's `x-model` still drives subsequent updates.
+
 ## [0.34.3] – 2026-05-09
 
 ### Added — Diagnostics panel on the document detail page

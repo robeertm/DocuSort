@@ -189,10 +189,9 @@
       <div class="flex items-center justify-between gap-3 mb-3">
         <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.diagnostics_heading') }}</h2>
         <button type="button" @click="run()" :disabled="busy"
-                class="rounded-lg bg-ink-800 hover:bg-ink-700 disabled:opacity-50 px-3 py-1.5 text-xs">
-          <span x-show="!busy">{{ t('document.diagnostics_run') }}</span>
-          <span x-show="busy" x-cloak>…</span>
-        </button>
+                class="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-1.5 text-xs text-white"
+                x-text="busy ? '…' : tr('document.diagnostics_run')"
+                >{{ t('document.diagnostics_run') }}</button>
       </div>
       <div x-show="result" x-cloak class="space-y-2 text-xs">
         <div class="grid grid-cols-2 gap-x-4 gap-y-1">
@@ -448,7 +447,7 @@
         <select name="category" x-model="category" @change="onCategoryChange()"
                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
           {% for c in categories %}
-            <option value="{{ c }}">{{ cat(c) }}</option>
+            <option value="{{ c }}"{% if c == doc.category %} selected{% endif %}>{{ cat(c) }}</option>
           {% endfor %}
         </select>
       </label>
