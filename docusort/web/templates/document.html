@@ -189,7 +189,7 @@
       <div class="flex items-center justify-between gap-3 mb-3">
         <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.diagnostics_heading') }}</h2>
         <button type="button" @click="run()" :disabled="busy"
-                class="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-1.5 text-xs text-white"
+                class="rounded-lg bg-emerald-500 hover:bg-emerald-300 disabled:opacity-50 px-3 py-1.5 text-xs text-ink-950 font-medium"
                 x-text="busy ? '…' : tr('document.diagnostics_run')"
                 >{{ t('document.diagnostics_run') }}</button>
       </div>

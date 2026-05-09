@@ -85,7 +85,7 @@
       </span>
       <button type="button" @click="salvagePromote()"
               :disabled="salvage.selected.length === 0 || salvage.busy"
-              class="rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-3 py-1.5 text-xs text-white">
+              class="rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 px-3 py-1.5 text-xs text-ink-950 font-medium">
         <span x-show="!salvage.busy">{{ t('analytics.salvage_promote') }}</span>
         <span x-show="salvage.busy" x-cloak>{{ t('analytics.salvage_promoting') }}</span>
       </button>
@@ -111,7 +111,7 @@
         <span class="text-rose-300"><span x-text="reextract.failed"></span> {{ t('analytics.reextract_failed') }}</span></template>
       </span>
       <button type="button" x-show="!reextract.running" @click="location.reload()"
-              class="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs text-white">
+              class="rounded-xl bg-emerald-500 hover:bg-emerald-300 px-3 py-1.5 text-xs text-ink-950 font-medium">
         {{ t('analytics.reextract_reload') }}
       </button>
     </div>

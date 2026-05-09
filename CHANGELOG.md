@@ -2,6 +2,33 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.5] – 2026-05-09
+
+### Fixed — three buttons rendered invisible (dead Tailwind classes)
+
+The Tailwind build is precompiled with the file watcher scanning the
+templates folder, so a class only ends up in the served stylesheet
+when it appears in HTML at build time. The buttons added in v0.34.1–
+v0.34.3 used `bg-emerald-600`, `bg-amber-600`, and `text-white` — none
+of which existed in the built CSS. Result: the buttons rendered with
+no background, default-inherited text colour matching the dark
+surface, so users saw an empty pill with no clickable text.
+
+Three buttons fixed: the /analytics "Re-analyse receipts" reload
+button, the salvage banner "Move to Kassenzettel" button, and the
+document detail "Diagnose · Status prüfen" button.
+
+Replaced with `bg-emerald-500` / `bg-amber-500` (already in CSS) plus
+`text-ink-950` for readable dark text on the bright fill, and ran
+`scripts/build/build-css.sh` so the freshly-introduced
+`hover:bg-emerald-300` / `hover:bg-amber-400` / `disabled:opacity-50`
+variants are now compiled into `docusort/web/static/tailwind.css`.
+
+This was a Tailwind-precompile gotcha I should have caught when
+introducing the buttons. The diagnostic endpoint and salvage scanner
+themselves were always working — only the UI hooks into them were
+invisible.
+
 ## [0.34.4] – 2026-05-09
 
 ### Fixed — Diagnose button rendered empty (no clickable text)
