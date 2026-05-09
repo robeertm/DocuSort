@@ -328,14 +328,17 @@
                 </td>
                 <td class="px-1 py-1">
                   <input type="number" step="any" x-model.number="it.quantity"
+                         @input="recalcItemTotal(it)"
                          class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0">
                 </td>
                 <td class="px-1 py-1">
                   <input type="number" step="0.01" x-model.number="it.unit_price"
+                         @input="recalcItemTotal(it)"
                          class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0">
                 </td>
                 <td class="px-1 py-1">
                   <input type="number" step="0.01" x-model.number="it.total_price"
+                         @input="recalcHeaderTotal()"
                          class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0"
                          :class="(it.total_price !== null && it.total_price < 0) ? 'text-rose-300' : ''">
                 </td>
@@ -617,9 +620,35 @@ function receiptEditor(docId, initial, shopTypes, itemCategories, paymentMethods
     },
     addItem() {
       this.items.push({ name: '', quantity: null, unit_price: null, total_price: null, item_category: '' });
+      this.recalcHeaderTotal();
     },
     removeItem(idx) {
       this.items.splice(idx, 1);
+      this.recalcHeaderTotal();
+    },
+    // When the user edits quantity or unit_price on a row, refresh
+    // that row's total_price (= qty × unit_price) and propagate the
+    // change up to the header total. Skipped when either field isn't
+    // a usable number — that way the user can still type a quantity
+    // first and a unit_price after without the row briefly going
+    // through a NaN total in between.
+    recalcItemTotal(it) {
+      const q = it.quantity, u = it.unit_price;
+      if (typeof q === 'number' && !isNaN(q)
+          && typeof u === 'number' && !isNaN(u)) {
+        it.total_price = Math.round(q * u * 100) / 100;
+      }
+      this.recalcHeaderTotal();
+    },
+    // Sync the header total to the sum of line totals. Triggered on
+    // any item edit and on add/remove. The user can still type a
+    // different value into the header field manually afterwards —
+    // we just don't try to keep it locked to that override across
+    // subsequent item edits, on the assumption that the cleaner
+    // workflow is "fix items first, then verify the total".
+    recalcHeaderTotal() {
+      const sum = this.computedSum;
+      if (sum !== null) this.header.total_amount = sum;
     },
     async save() {
       this.saving = true; this.message = ''; this.ok = false;

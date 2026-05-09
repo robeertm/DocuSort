@@ -2,6 +2,29 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.8] – 2026-05-09
+
+### Changed — Receipt editor auto-recalculates line total and grand total
+
+Editing an item's quantity or unit price in the Kassenzettel-Inhalt
+table now updates that row's total (`= qty × unit_price`) live, and
+the grand total at the bottom follows the sum of line totals so the
+"Summe weicht ab" warning resolves itself in the typical "I just
+fixed an item" workflow.
+
+- Quantity or unit-price input → row total recomputed
+- Any item edit (incl. add/remove) → header total = sum of line
+  totals
+- Manually editing a row's total still works — it just propagates
+  to the header instead of the qty×unit calculation
+- The header total field is still editable; if the user types over
+  it after fixing items, that override is what gets saved (next
+  item edit would re-sync, so do header overrides last)
+
+Verified end-to-end with headless Chromium: changing a Joghurt
+quantity from 2 to 5 with unit-price 1.29 € flips its line total
+2.58 → 6.45 and the header total tracks the new sum.
+
 ## [0.34.7] – 2026-05-09
 
 ### Changed — Tesseract `--psm 4` for narrow / thermal-paper receipts
