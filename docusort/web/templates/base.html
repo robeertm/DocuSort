@@ -209,7 +209,7 @@
           <div x-show="approveJob && approveJob.running" x-cloak>
             <span class="text-ink-500">{{ t('nav.ai_bulk_job') }}:</span>
             <span class="tabular-nums"
-                  x-text="(approveJob.done || 0) + ' / ' + (approveJob.total || 0)"></span>
+                  x-text="(approveJob?.done || 0) + ' / ' + (approveJob?.total || 0)"></span>
           </div>
           <div x-show="snap.last_call_at" x-cloak>
             <span class="text-ink-500">{{ t('nav.ai_last_call') }}:</span>

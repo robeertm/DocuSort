@@ -2,6 +2,45 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.34.6] – 2026-05-09
+
+### Fixed — orphaned 180-line JS block on document.html crashed every Alpine component on the page
+
+The v0.33.0 Kontoauszug-PDF refactor removed the surrounding
+`function statementWidget()` and `function transactionEditor()`
+declarations from the document detail template, but left their
+method bodies behind as a free-standing `}, _scheduleTick() { ... },
+loadPreview() { ... }, extract() { ... }` chain. JavaScript parsed
+the resulting `<script>` block and threw `Unexpected token '}'` on
+the first stray brace, which meant **every helper in that block was
+undefined** at runtime: `diagnosticsPanel`, `editForm`,
+`receiptEditor`, `retryWidget`, `trashWidget`. Visible symptoms:
+
+- Diagnose button was an empty unclickable green pill
+- Receipt-Editor save / add-item / re-extract did nothing
+- Trash button did nothing
+- Edit-form Save did nothing
+- Retry button did nothing
+- Category dropdown defaulted to "Rechnungen" (Alpine x-model never
+  applied because `editForm` wasn't defined)
+
+Deleted the 180 dead lines (658-837 in v0.34.5). Verified end-to-end
+with a real headless Chromium: zero page errors, zero console
+warnings, Diagnose panel populates with all 19 fields after click,
+category dropdown correctly shows "Kassenzettel" for the test ALDI
+doc.
+
+The "category showed Rechnungen" complaint and "no items extracted"
+complaint from v0.34.0–v0.34.5 were both downstream of this single
+broken script block.
+
+### Fixed — minor `approveJob.done` console warning on the topbar
+
+`x-text` on the bulk-approve progress counter dereferenced
+`approveJob` without optional chaining, throwing a benign warning
+when no bulk job was running. Added `?.` so the expression is silent
+when `approveJob` is undefined.
+
 ## [0.34.5] – 2026-05-09
 
 ### Fixed — three buttons rendered invisible (dead Tailwind classes)
