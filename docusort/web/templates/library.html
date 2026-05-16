@@ -67,33 +67,113 @@
 
 <!-- Filter bar -->
 <form
-  class="card p-4 mb-6 grid gap-3 sm:grid-cols-[1fr_auto_auto]"
+  class="card p-4 mb-6 space-y-3"
   hx-get="/library?partial=1{% if trash %}&trash=1{% endif %}"
   hx-trigger="change, keyup delay:400ms from:input[name=q]"
   hx-target="#grid"
   hx-push-url="true"
   hx-include="this"
 >
-  <label class="relative block">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-         class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400">
-      <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
-    </svg>
-    <input type="search" name="q" value="{{ filter.q or '' }}"
-           placeholder="{{ t('library.search_placeholder') }}"
-           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 pl-10 pr-3 py-2.5 text-sm placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
-  </label>
-  <input type="hidden" name="category" value="{{ filter.category or '' }}">
-  <input type="hidden" name="year"     value="{{ filter.year or '' }}">
-  <select name="status" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
-    <option value="">{{ t('library.all_statuses') }}</option>
-    <option value="filed"     {% if filter.status == 'filed' %}selected{% endif %}>{{ t('library.status_filed') }}</option>
-    <option value="review"    {% if filter.status == 'review' %}selected{% endif %}>{{ t('library.status_review') }}</option>
-    <option value="failed"    {% if filter.status == 'failed' %}selected{% endif %}>{{ t('library.status_failed') }}</option>
-    <option value="duplicate" {% if filter.status == 'duplicate' %}selected{% endif %}>{{ t('library.status_duplicate') }}</option>
-  </select>
-  <a href="/library" class="btn-secondary">{{ t('library.reset') }}</a>
+  <!-- Row 1: search + status + reset -->
+  <div class="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+    <label class="relative block">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400">
+        <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input type="search" name="q" value="{{ filter.q or '' }}"
+             placeholder="{{ t('library.search_placeholder') }}"
+             class="w-full rounded-xl bg-ink-900/60 border border-ink-700 pl-10 pr-3 py-2.5 text-sm placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+    </label>
+    <input type="hidden" name="category" value="{{ filter.category or '' }}">
+    <input type="hidden" name="year"     value="{{ filter.year or '' }}">
+    <select name="status" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+      <option value="">{{ t('library.all_statuses') }}</option>
+      <option value="filed"     {% if filter.status == 'filed' %}selected{% endif %}>{{ t('library.status_filed') }}</option>
+      <option value="review"    {% if filter.status == 'review' %}selected{% endif %}>{{ t('library.status_review') }}</option>
+      <option value="failed"    {% if filter.status == 'failed' %}selected{% endif %}>{{ t('library.status_failed') }}</option>
+      <option value="duplicate" {% if filter.status == 'duplicate' %}selected{% endif %}>{{ t('library.status_duplicate') }}</option>
+    </select>
+    <a href="/library" class="btn-secondary">{{ t('library.reset') }}</a>
+  </div>
+
+  <!-- Row 2: sort + direction + date ranges + quick filters -->
+  <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4 items-end border-t border-ink-700/50 pt-3">
+    <label class="block">
+      <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.sort_by') }}</span>
+      <select name="sort" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+        <option value="doc_date"   {% if filter.sort == 'doc_date' %}selected{% endif %}>{{ t('library.sort_doc_date') }}</option>
+        <option value="created_at" {% if filter.sort == 'created_at' %}selected{% endif %}>{{ t('library.sort_created_at') }}</option>
+        <option value="sender"     {% if filter.sort == 'sender' %}selected{% endif %}>{{ t('library.sort_sender') }}</option>
+        <option value="subject"    {% if filter.sort == 'subject' %}selected{% endif %}>{{ t('library.sort_subject') }}</option>
+        <option value="category"   {% if filter.sort == 'category' %}selected{% endif %}>{{ t('library.sort_category') }}</option>
+        <option value="file_size"  {% if filter.sort == 'file_size' %}selected{% endif %}>{{ t('library.sort_file_size') }}</option>
+        <option value="page_count" {% if filter.sort == 'page_count' %}selected{% endif %}>{{ t('library.sort_page_count') }}</option>
+        <option value="confidence" {% if filter.sort == 'confidence' %}selected{% endif %}>{{ t('library.sort_confidence') }}</option>
+        {% if filter.q %}<option value="relevance" {% if filter.sort == 'relevance' %}selected{% endif %}>{{ t('library.sort_relevance') }}</option>{% endif %}
+      </select>
+    </label>
+    <label class="block">
+      <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.sort_dir') }}</span>
+      <select name="dir" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+        <option value="desc" {% if filter.dir != 'asc' %}selected{% endif %}>{{ t('library.sort_desc') }}</option>
+        <option value="asc"  {% if filter.dir == 'asc' %}selected{% endif %}>{{ t('library.sort_asc') }}</option>
+      </select>
+    </label>
+    <label class="block">
+      <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.doc_date_range') }}</span>
+      <div class="flex items-center gap-1">
+        <input type="date" name="doc_from" value="{{ filter.doc_from or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2 text-xs tabular-nums">
+        <span class="text-ink-500 text-xs">–</span>
+        <input type="date" name="doc_to" value="{{ filter.doc_to or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2 text-xs tabular-nums">
+      </div>
+    </label>
+    <label class="block">
+      <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.scan_date_range') }}</span>
+      <div class="flex items-center gap-1">
+        <input type="date" name="scan_from" value="{{ filter.scan_from or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2 text-xs tabular-nums">
+        <span class="text-ink-500 text-xs">–</span>
+        <input type="date" name="scan_to" value="{{ filter.scan_to or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2 text-xs tabular-nums">
+      </div>
+    </label>
+  </div>
+
+  <!-- Quick scan-date filters -->
+  <div class="flex flex-wrap items-center gap-2 text-xs">
+    <span class="text-ink-500 uppercase tracking-wider text-[11px]">{{ t('library.quick_scan') }}</span>
+    <button type="button" onclick="libQuickScan(this,7)"
+            class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1">{{ t('library.quick_7') }}</button>
+    <button type="button" onclick="libQuickScan(this,30)"
+            class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1">{{ t('library.quick_30') }}</button>
+    <button type="button" onclick="libQuickScan(this,365)"
+            class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1">{{ t('library.quick_365') }}</button>
+    <button type="button" onclick="libClearDates(this)"
+            class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1 text-ink-400">{{ t('library.quick_clear') }}</button>
+  </div>
 </form>
+<script>
+function libQuickScan(btn, days) {
+  const form = btn.closest('form');
+  const pad = n => String(n).padStart(2, '0');
+  const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const to = new Date();
+  const from = new Date(); from.setDate(from.getDate() - days);
+  form.querySelector('[name=scan_from]').value = iso(from);
+  form.querySelector('[name=scan_to]').value = iso(to);
+  form.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function libClearDates(btn) {
+  const form = btn.closest('form');
+  ['doc_from','doc_to','scan_from','scan_to'].forEach(n => {
+    const el = form.querySelector('[name=' + n + ']'); if (el) el.value = '';
+  });
+  form.dispatchEvent(new Event('change', { bubbles: true }));
+}
+</script>
 
 <!-- Active-filter breadcrumb -->
 {% if filter.year or filter.category or filter.status or filter.q %}
@@ -120,10 +200,10 @@
 <div x-data="library({ trash: {{ trash | tojson }} })" class="lg:grid lg:grid-cols-[260px_1fr] lg:gap-6">
 
   <aside class="card p-3 mb-4 lg:mb-0 lg:sticky lg:top-24 lg:self-start lg:max-h-[calc(100vh-7rem)] lg:overflow-auto"
-         x-data="{
-           currentYear: {{ (filter.year or '') | tojson }},
-           currentCategory: {{ (filter.category or '') | tojson }}
-         }">
+         x-data='{
+           currentYear: {{ (filter.year or "") | tojson }},
+           currentCategory: {{ (filter.category or "") | tojson }}
+         }'>
 
     <a href="/library" class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm font-medium hover:bg-ink-700/40"
        :class="(!currentYear && !currentCategory) ? 'bg-emerald-500/15 text-emerald-200' : ''">

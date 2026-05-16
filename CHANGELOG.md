@@ -2,6 +2,52 @@
 
 All notable changes to DocuSort will be documented in this file.
 
+## [0.35.0] – 2026-05-09
+
+### Added — Library sorting, date-range filters, and a robust search
+
+The library view gained a full sort + filter row beneath the search
+box:
+
+- **Sort by** any of: document date, scanned date, sender, subject,
+  category, file size, page count, confidence, and (when a search is
+  active) relevance — each with an ascending/descending direction
+  selector. The sort key is whitelisted server-side; an injection
+  attempt in the `sort` param falls back to document-date and the
+  table is untouched.
+- **Document-date range** and **scanned-date range** pickers (from /
+  to), independent of each other. Plus one-click quick filters for
+  the last 7 / 30 / 365 days of scan date, and a "clear dates"
+  button.
+- All controls auto-submit via the existing htmx live-update, push
+  URL state, and survive reload.
+
+### Changed — Full-text search is now prefix-matching and crash-proof
+
+The FTS query is rebuilt from user input: each word becomes a quoted
+prefix term (`"rechn"*`), so typing "rechn" now matches "Rechnung",
+"Stromrechnung", etc. Special characters (`. - + : " ( )`) and the
+FTS5 keywords AND/OR/NOT no longer throw `fts5: syntax error` — they
+are neutralised by the quoting. A query that reduces to nothing falls
+back to the normal unfiltered list instead of erroring.
+
+### Fixed — Library sidebar Alpine component was dead (HTML-quote clash)
+
+The year/category sidebar used `x-data="{ currentYear: {{ ...|tojson
+}} }"` with double quotes. `tojson` of a string emits `"…"`, whose
+double quotes closed the HTML attribute early — the browser saw
+`x-data="{ currentYear: "` and Alpine threw `Unexpected token '}'`,
+killing the whole sidebar component (every `currentYear`/`currentCategory`
+binding errored). Switched the attribute to single quotes, matching
+the convention used everywhere else in the codebase. This was
+pre-existing, unrelated to the new filters — found via the headless
+browser test while verifying this feature.
+
+Verified end-to-end with headless Chromium: sort by sender/file-size
+orders correctly, date-range filters narrow the set, prefix search
+finds stemmed matches, special-character queries return HTTP 200, and
+the page loads with zero JS errors.
+
 ## [0.34.8] – 2026-05-09
 
 ### Changed — Receipt editor auto-recalculates line total and grand total

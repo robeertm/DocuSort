@@ -332,6 +332,13 @@ def create_app(
         )
 
     # ---------- Library ----------
+    # Public sort keys the /library UI may request. Anything else falls
+    # back to doc_date in db.list_documents (whitelist enforced there).
+    _LIBRARY_SORTS = {
+        "doc_date", "created_at", "sender", "subject",
+        "category", "file_size", "confidence", "page_count", "relevance",
+    }
+
     @app.get("/library", response_class=HTMLResponse)
     def library(
         request: Request,
@@ -341,13 +348,31 @@ def create_app(
         status: str | None = Query(None),
         year: str | None = Query(None),
         q: str | None = Query(None),
+        sort: str | None = Query(None),
+        dir: str | None = Query(None),
+        doc_from: str | None = Query(None),
+        doc_to: str | None = Query(None),
+        scan_from: str | None = Query(None),
+        scan_to: str | None = Query(None),
         trash: bool = Query(False),
         partial: bool = Query(False),
     ):
+        # Sanitise sort + direction here so the template can echo the
+        # exact effective values back into its controls.
+        sort_key = sort if sort in _LIBRARY_SORTS else "doc_date"
+        # Relevance only makes sense with an active query.
+        if sort_key == "relevance" and not (q or "").strip():
+            sort_key = "doc_date"
+        sort_dir = "asc" if (dir or "").lower() == "asc" else "desc"
+
         docs = db.list_documents(
             category=category or None, subcategory=subcategory or None,
             tag=tag or None, status=status or None,
-            year=year or None, query=q or None, trash=trash, limit=500,
+            year=year or None, query=q or None, trash=trash,
+            order_by=sort_key, sort_dir=sort_dir,
+            doc_from=doc_from or None, doc_to=doc_to or None,
+            scan_from=scan_from or None, scan_to=scan_to or None,
+            limit=500,
         )
         for d in docs:
             _decode_tags(d)
@@ -360,7 +385,10 @@ def create_app(
             {**base_ctx(request), "docs": docs, "years": years, "tree": tree,
              "tags": tags, "trash": trash,
              "filter": {"category": category, "subcategory": subcategory,
-                        "tag": tag, "status": status, "year": year, "q": q}},
+                        "tag": tag, "status": status, "year": year, "q": q,
+                        "sort": sort_key, "dir": sort_dir,
+                        "doc_from": doc_from, "doc_to": doc_to,
+                        "scan_from": scan_from, "scan_to": scan_to}},
         )
 
     def _decode_tags(doc: dict) -> dict:

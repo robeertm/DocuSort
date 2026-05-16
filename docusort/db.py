@@ -637,6 +637,64 @@ class Database:
             "prev_id":  prev_id, "next_id": next_id,
         }
 
+    # Whitelisted sort columns. Keys are the public sort names accepted
+    # from the URL; values are the SQL expressions (NEVER interpolate raw
+    # user input into ORDER BY). `relevance` is only meaningful on the
+    # FTS path — it falls back to doc_date elsewhere.
+    _SORT_EXPR = {
+        "doc_date":   "COALESCE(NULLIF({p}doc_date, ''), {p}created_at)",
+        "created_at": "{p}created_at",
+        "sender":     "{p}sender COLLATE NOCASE",
+        "subject":    "{p}subject COLLATE NOCASE",
+        "category":   "{p}category COLLATE NOCASE",
+        "file_size":  "{p}file_size",
+        "confidence": "{p}confidence",
+        "page_count": "{p}page_count",
+        "relevance":  "rank",
+    }
+
+    @staticmethod
+    def _fts_match_query(raw: str) -> str | None:
+        """Turn free user input into a safe FTS5 MATCH expression.
+
+        FTS5 treats `" * ( ) : . - + ^ AND OR NOT` as syntax — a raw
+        user string like "e.on-2024" or an unbalanced quote throws
+        `fts5: syntax error`. We extract alphanumeric runs (incl.
+        German umlauts / Latin-1 accents), append `*` to each for
+        prefix matching ("rechn" → matches "Rechnung"), and AND them
+        together implicitly. Bareword prefix tokens can't contain
+        special chars, so this can never produce invalid FTS5.
+        Returns None when nothing searchable remains.
+        """
+        import re as _re
+        if not raw:
+            return None
+        parts = _re.findall(r"[0-9A-Za-zÀ-ÿ_]+", raw)
+        if not parts:
+            return None
+        # Quote each token then append '*'. A bare `AND*` / `OR*` /
+        # `NOT*` is parsed as an FTS5 operator and throws "syntax
+        # error near AND"; the quoted form `"and"*` is treated as a
+        # literal prefix term and is operator-safe (verified against
+        # sqlite fts5). Tokens are already special-char-free from the
+        # regex above, so there are no embedded quotes to escape.
+        return " ".join(f'"{p}"*' for p in parts)
+
+    def _order_clause(self, order_by: str, sort_dir: str, *, fts: bool) -> str:
+        expr_tmpl = self._SORT_EXPR.get(order_by)
+        if expr_tmpl is None or (order_by == "relevance" and not fts):
+            # Default: newest document date first.
+            expr_tmpl = self._SORT_EXPR["doc_date"]
+        prefix = "d." if fts and order_by != "relevance" else ""
+        expr = expr_tmpl.format(p=prefix)
+        direction = "ASC" if str(sort_dir).lower() == "asc" else "DESC"
+        if order_by == "relevance":
+            # FTS5 `rank` is most-relevant-first when ascending.
+            direction = "ASC" if direction == "DESC" else "DESC"
+        # Stable tie-breaker so pagination is deterministic.
+        tie = "d.id" if fts else "id"
+        return f"ORDER BY {expr} {direction}, {tie} DESC"
+
     def list_documents(
         self,
         *,
@@ -647,11 +705,15 @@ class Database:
         year: str | None = None,
         query: str | None = None,
         trash: bool = False,
-        order_by: str = "doc_date",  # 'doc_date' | 'created_at'
+        order_by: str = "doc_date",
+        sort_dir: str = "desc",
+        doc_from: str | None = None,   # ISO date, filter doc_date >=
+        doc_to: str | None = None,     # ISO date, filter doc_date <=
+        scan_from: str | None = None,  # ISO date, filter created_at day >=
+        scan_to: str | None = None,    # ISO date, filter created_at day <=
         limit: int = 200,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        where: list[str] = []
         params: list[Any] = []
         # `_csv_container` is the sentinel category used by CSV-import
         # stub documents — they're never user-visible and must not
@@ -662,60 +724,59 @@ class Database:
             "(d.deleted_at IS NULL AND d.category != '_csv_container')"
         )
         trash_clause_plain = trash_clause.replace("d.", "")
-        # Tag match: tags are JSON arrays of strings; LIKE on the JSON is fine
-        # for the cardinalities we deal with (low thousands).
         tag_like = f'%"{tag}"%' if tag else None
+        match_query = self._fts_match_query(query) if query else None
 
-        if query:
+        def _common_filters(prefix: str) -> tuple[list[str], list[Any]]:
+            """Filter clauses shared by the FTS and non-FTS paths.
+            `prefix` is 'd.' on the FTS join, '' otherwise."""
+            cl: list[str] = []
+            pr: list[Any] = []
+            if category:
+                cl.append(f"{prefix}category = ?"); pr.append(category)
+            if subcategory:
+                cl.append(f"{prefix}subcategory = ?"); pr.append(subcategory)
+            if tag_like:
+                cl.append(f"{prefix}tags LIKE ?"); pr.append(tag_like)
+            if status:
+                cl.append(f"{prefix}status = ?"); pr.append(status)
+            if year == "unknown":
+                cl.append(f"({prefix}doc_date IS NULL OR {prefix}doc_date = '')")
+            elif year:
+                cl.append(f"substr({prefix}doc_date, 1, 4) = ?"); pr.append(year)
+            if doc_from:
+                cl.append(f"{prefix}doc_date >= ?"); pr.append(doc_from)
+            if doc_to:
+                cl.append(f"{prefix}doc_date <= ?"); pr.append(doc_to)
+            if scan_from:
+                cl.append(f"substr({prefix}created_at, 1, 10) >= ?")
+                pr.append(scan_from)
+            if scan_to:
+                cl.append(f"substr({prefix}created_at, 1, 10) <= ?")
+                pr.append(scan_to)
+            return cl, pr
+
+        if match_query:
             sql = (
                 "SELECT d.* FROM documents d "
                 "JOIN documents_fts f ON f.rowid = d.id "
                 f"WHERE documents_fts MATCH ? AND {trash_clause}"
             )
-            params.append(query)
-            if category:
-                sql += " AND d.category = ?"
-                params.append(category)
-            if subcategory:
-                sql += " AND d.subcategory = ?"
-                params.append(subcategory)
-            if tag_like:
-                sql += " AND d.tags LIKE ?"
-                params.append(tag_like)
-            if status:
-                sql += " AND d.status = ?"
-                params.append(status)
-            if year == "unknown":
-                sql += " AND (d.doc_date IS NULL OR d.doc_date = '')"
-            elif year:
-                sql += " AND substr(d.doc_date, 1, 4) = ?"
-                params.append(year)
-            sql += " ORDER BY rank LIMIT ? OFFSET ?"
+            params.append(match_query)
+            extra, extra_p = _common_filters("d.")
+            for c in extra:
+                sql += f" AND {c}"
+            params += extra_p
+            sql += " " + self._order_clause(order_by, sort_dir, fts=True)
+            sql += " LIMIT ? OFFSET ?"
             params += [limit, offset]
         else:
-            where.append(trash_clause_plain)
-            if category:
-                where.append("category = ?")
-                params.append(category)
-            if subcategory:
-                where.append("subcategory = ?")
-                params.append(subcategory)
-            if tag_like:
-                where.append("tags LIKE ?")
-                params.append(tag_like)
-            if status:
-                where.append("status = ?")
-                params.append(status)
-            if year == "unknown":
-                where.append("(doc_date IS NULL OR doc_date = '')")
-            elif year:
-                where.append("substr(doc_date, 1, 4) = ?")
-                params.append(year)
+            where = [trash_clause_plain]
+            extra, extra_p = _common_filters("")
+            where += extra
+            params += extra_p
             where_sql = " WHERE " + " AND ".join(where)
-            order_sql = (
-                "ORDER BY created_at DESC" if order_by == "created_at"
-                else "ORDER BY COALESCE(doc_date, created_at) DESC"
-            )
+            order_sql = self._order_clause(order_by, sort_dir, fts=False)
             sql = (
                 "SELECT * FROM documents" + where_sql
                 + f" {order_sql} LIMIT ? OFFSET ?"
