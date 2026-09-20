@@ -297,7 +297,7 @@
                   <button type="button" @click="appendToken(m.name)" class="block text-left hover:text-emerald-300 max-w-full break-words leading-snug"
                           :title="m.name + (m.iban ? ' · ' + m.iban : '')" x-text="m.name"></button>
                   <span class="text-[10px] text-ink-500" x-show="m.iban" x-text="'IBAN …' + m.iban.slice(-4)"></span>
-                  <span class="block text-[10px] text-ink-500 sm:hidden" x-text="m.count + '× · zuletzt ' + m.last_date + (m.sum_in ? ' · +' + fmtEur(m.sum_in) : '')"></span>
+                  <span class="block text-[10px] text-ink-500 sm:hidden" x-text="m.count + '× · {{ t('tx.last_seen') | replace("'", "\\'")  }} ' + m.last_date + (m.sum_in ? ' · +' + fmtEur(m.sum_in) : '')"></span>
                 </td>
                 <td class="px-3 py-2 text-ink-500 text-xs max-w-[260px] break-words leading-snug hidden md:table-cell" :title="m.sample" x-text="(m.sample || '—').slice(0, 90)"></td>
                 <td class="px-3 py-2 text-right tabular-nums text-ink-300 hidden sm:table-cell" x-text="m.count"></td>
@@ -633,13 +633,13 @@ function txExplorer() {
     _reqToken: 0,
 
     periodPresets: [
-      { label: 'Heute',            fn: 'today'     },
-      { label: 'Gestern',          fn: 'yesterday' },
-      { label: 'Aktueller Monat',  fn: 'thisMonth', salary: 'Aktueller Gehaltsmonat' },
-      { label: 'Letzter Monat',    fn: 'lastMonth', salary: 'Letzter Gehaltsmonat' },
-      { label: 'Letzte 12 Monate', fn: 'last12m'   },
-      { label: 'Dieses Jahr',      fn: 'thisYear'  },
-      { label: 'Alle',             fn: 'all'       },
+      { label: '{{ t('tx.today') | replace("'", "\\'")  }}', fn: 'today'     },
+      { label: '{{ t('tx.yesterday') | replace("'", "\\'")  }}', fn: 'yesterday' },
+      { label: '{{ t('tx.current_month') | replace("'", "\\'")  }}', fn: 'thisMonth', salary: '{{ t('tx.current_salary_month') | replace("'", "\\'")  }}' },
+      { label: '{{ t('tx.last_month') | replace("'", "\\'")  }}', fn: 'lastMonth', salary: '{{ t('tx.last_salary_month') | replace("'", "\\'")  }}' },
+      { label: '{{ t('tx.last12m') | replace("'", "\\'")  }}', fn: 'last12m'   },
+      { label: '{{ t('tx.this_year') | replace("'", "\\'")  }}', fn: 'thisYear'  },
+      { label: '{{ t('tx.all_range') | replace("'", "\\'")  }}', fn: 'all'       },
     ],
 
     // True iff the filter is currently scoped to a single day —
@@ -704,10 +704,10 @@ function txExplorer() {
       apply(v);
     },
     newCategory(then) {
-      const label = window.prompt('Name der neuen Kategorie:');
+      const label = window.prompt('{{ t('tx.new_category_prompt') | replace("'", "\\'")  }}');
       if (!label || !label.trim()) return;
       const fixed = window.confirm('{{ t('tx.counts_q') }}' + label.trim() + '{{ t('tx.fixed_q') }}');
-      const saving = window.confirm('Ist „' + label.trim() + '“ Sparen/Anlage (Geld nicht weg, nur woanders)? (OK = ja, Abbrechen = nein)');
+      const saving = window.confirm('{{ t('tx.counts_saving') | replace("'", "\\'")  }}' + label.trim() + '{{ t('tx.saving_q') | replace("'", "\\'")  }}');
       this.createCategory(label.trim(), fixed, saving).then((c) => { if (c) then(c.key); });
     },
     async createCategory(label, isFixed, isSaving) {

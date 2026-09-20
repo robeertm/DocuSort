@@ -63,13 +63,51 @@ choose to send to an AI model — and you can point that at a local model too.
   to the next, which is how a household actually budgets.
 - **Invoices are matched to the bookings that paid them** (amount to the cent,
   payee tokens, date window, assigned one-to-one closest-first).
+- **Pick the accounts that count.** On the spending and the fixed-costs page
+  a tick per account decides which ones every figure covers — one account on
+  its own, or all but one. A line then names what is included, so a filtered
+  total never reads as the full one.
+
+![Fixed costs with the account picker open](docs/screenshots/19-fixed-costs-accounts.png)
+
+### The day view
+The spending page draws **every day of the salary month** from its first
+day: a bar per day with its amount on top, days without spending as what
+they are, the days still to come as faint dots. One outlier runs off the
+top instead of flattening everything else, a dashed line marks the average
+and a second one how much a day may still cost.
+
+![Spending per day](docs/screenshots/14-daily-chart.png)
+
+Point at a day and it says what it was; a day with no booking yet says so
+rather than pretending you spent nothing.
+
+![A day under the pointer](docs/screenshots/15-daily-hover.png)
+
+In the light theme:
+
+![Daily chart, light theme](docs/screenshots/18-daily-light.png)
 
 ### The saving game
-A gentle bit of gamification on the spending page: every day scores points —
-a day without spending scores most, a day below your own benchmark scores
-some — plus a bonus when the month ends in the black. Streaks, badges, ranks,
-and a leaderboard across all months so you can see which one actually went
-best.
+A gentle bit of gamification right below the chart: every day scores
+points — a day without spending scores most, a day below your own
+benchmark scores some — plus a bonus of up to 20 % when the period ends in
+the black. Streaks, badges, five ranks, and a leaderboard across all
+months so you can see which one actually went best.
+
+![Saving game](docs/screenshots/16-saving-game.png)
+
+![Leaderboard of all months](docs/screenshots/17-leaderboard.png)
+
+It works on a phone, where the chart scrolls and starts at the most recent
+day that has actually happened:
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/20-mobile-daily.png"><img src="docs/screenshots/20-mobile-daily.png" alt="Daily chart on a phone" /></a></td>
+    <td width="50%"><a href="docs/screenshots/21-mobile-game.png"><img src="docs/screenshots/21-mobile-game.png" alt="Saving game on a phone" /></a></td>
+  </tr>
+</table>
 
 <table>
   <tr>

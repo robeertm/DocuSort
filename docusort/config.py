@@ -139,7 +139,7 @@ class FinanceSettings:
     salary_match: str = ""
 
     # Day-of-month the salary period starts on when no salary booking is
-    # detected for a month (fallback + gap-filler). 23 matches Robert's
+    # detected for a month (fallback + gap-filler). 23 matches the owner's
     # statements; clamped to a valid day per month.
     period_anchor_day: int = 23
 

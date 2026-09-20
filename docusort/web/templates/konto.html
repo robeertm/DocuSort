@@ -90,7 +90,7 @@ function accountPage() {
           setTimeout(() => { window.location.href = '/'; }, 1200);
         } else {
           this.ok = false;
-          this.msg = d.detail || 'Fehler';
+          this.msg = d.detail || T['common.error'] || 'Error';
         }
       } catch (e) {
         this.ok = false; this.msg = String(e);

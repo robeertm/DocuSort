@@ -542,7 +542,7 @@ function analyticsPage() {
     },
     async reextractAll() {
       const msg = T['analytics.reextract_confirm']
-        || 'Alle Bons neu analysieren? Das verbraucht LLM-Tokens und kann ein paar Minuten dauern.';
+        || 'Re-analyse every receipt? This uses LLM tokens and may take a few minutes.';
       if (!confirm(msg)) return;
       try {
         const r = await fetch('/api/receipts/reextract?force=true', { method: 'POST' });

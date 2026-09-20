@@ -302,7 +302,7 @@ def _day_series(range_start: str, range_end: str,
 
     Zwei Dinge, die `per_day` nicht kann:
     * Ein Tag ohne Buchung fehlte dort ganz — dabei ist „nichts ausgegeben"
-      eine Aussage und gehört angezeigt (Robert: „es soll auch tage
+      eine Aussage und gehört angezeigt (Wunsch: „es soll auch tage
       anzeigen wo man nichts ausgegeben hat").
     * Tage, die noch kommen, gehören ebenfalls ins Bild — am ersten Tag
       eines Gehaltsmonats soll der ganze Monat zu sehen sein. Sie werden
@@ -440,7 +440,7 @@ class Database:
 
     def _finance_drop_income_pins_on_debits(self) -> None:
         """v0.45.3: hand-pins that put a debit into an income category are
-        void (Robert: „Ausgaben sind nie Erstattungen") — dropped so the
+        void (Wunsch: „Ausgaben sind nie Erstattungen") — dropped so the
         reclassify can decide afresh."""
         from .finance.categories import INCOME_CATEGORIES
         marks = ",".join("?" * len(INCOME_CATEGORIES))
@@ -594,7 +594,7 @@ class Database:
 
         # v0.43: every booking carries WHY it has its category
         # (`category_source` = manual|transfer|rule|ai|keyword|bank|import|none,
-        # `category_reason` = one human sentence) — Robert: „jede einzelne
+        # `category_reason` = one human sentence) — Wunsch: „jede einzelne
         # Buchung muss nachvollziehbar sein".
         tx_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(transactions)")}
         if "category_source" not in tx_cols:
@@ -1169,7 +1169,7 @@ class Database:
         hi = (today + _td(days=within_days)).isoformat()
         with self._lock:
             rows = self._conn.execute(
-                # Paid rows stay in the list on purpose: Robert asked to
+                # Paid rows stay in the list on purpose: the owner asked to
                 # SEE that a bill is settled, not for it to quietly vanish.
                 # Only a hand-tick ("erledigt") removes a row.
                 "SELECT id, filename, category, subcategory, sender, subject, "
@@ -1231,7 +1231,7 @@ class Database:
     #
     # A bill on the dashboard and the booking that settles it were two
     # unrelated worlds until now. Linking them has one hard rule: a wrong
-    # "paid" mark is worse than no mark at all, because Robert would stop
+    # "paid" mark is worse than no mark at all, because the owner would stop
     # looking at a bill that is still open. So a match needs THREE things
     # to agree — the amount to the cent, the payee's name, and a
     # plausible date. Real data proved why: the archive holds a booking
@@ -1285,7 +1285,7 @@ class Database:
             if filled_receipts:
                 self._conn.commit()
         with self._lock:
-            # Not just documents with a deadline: Robert wants the payment
+            # Not just documents with a deadline: the owner wants the payment
             # shown on ANY scanned document a booking belongs to. Statements
             # and CSV containers are excluded — they list payments, they are
             # not themselves something that gets paid.
@@ -2279,7 +2279,7 @@ class Database:
                              account_ids: list[int] | None = None) -> list[dict[str, Any]]:
         """Bestenliste des Spar-Spiels über ALLE Zeiträume.
 
-        Robert: „nun brauche ich noch eine übersicht welcher monat am
+        Wunsch: „nun brauche ich noch eine übersicht welcher monat am
         erfolgreichsten war, wo man alle sehen kann." Gewertet wird mit
         derselben Funktion wie die Karte auf /ausgaben
         (`finance.game.score_days`) — es gibt nur EINEN Regelsatz.
@@ -2860,7 +2860,7 @@ class Database:
                 out["amount"] = abs(float(tx.get("amount") or 0.0))
         from .finance.categories import INCOME_CATEGORIES
         for (kind, val), name in targets.items():
-            # Direction of a learned rule (Robert: „Ausgaben sind nie
+            # Direction of a learned rule (Wunsch: „Ausgaben sind nie
             # Erstattungen"): an income category → credits only; an expense
             # category learned from debits → debits only, so a credit from
             # that shop stays a refund; learned from a credit (pocket money
@@ -3285,7 +3285,7 @@ class Database:
                                 acknowledged: bool = True) -> bool:
         """Mark a hole in the statement chain as "this one does not exist".
 
-        Some statements simply cannot be obtained any more — Robert's bank
+        Some statements simply cannot be obtained any more — the owner's bank
         has no 5/2016 and no 12/2019 for the Giro, and he has no copy. The
         chain would otherwise ask for them forever. Ticking the gap off
         changes nothing about the money: the synthetic booking that bridges
@@ -3510,7 +3510,7 @@ class Database:
             out[k] = round(out.get(k, 0.0) + g["expected_amount"], 2)
         return out
 
-    # Robert (2026-09-19): „fixkosten sind miete, nebenkosten, auto, kredite,
+    # Wunsch (2026-09-19): „fixkosten sind miete, nebenkosten, auto, kredite,
     # telefon internet, versicherungen" — plus what runs on contract anyway
     # (Abos, Kita, Sparraten), each of which he can untick on /fixkosten.
     DEFAULT_FIXED_CATEGORIES = ("miete", "nebenkosten", "mobilitaet", "kredit", "versicherung",
@@ -3544,7 +3544,26 @@ class Database:
         self.meta_set("finance.fixed_categories", _json.dumps(clean))
         return self.finance_fixed_categories()
 
-    def finance_fixed_costs(self, *, months_back: int = 24, min_hits: int = 2) -> dict[str, Any]:
+    def account_picks(self, account_ids: list[int] | None = None) -> list[dict[str, Any]]:
+        """Die Konten, aus denen die Kontenauswahl besteht — je Konto ein
+        Name und ob es gerade eingerechnet wird.
+
+        🔴 EINE Stelle für /ausgaben und /fixkosten: beide Seiten zeigen
+        denselben Knopf mit denselben Namen, und eine leere Auswahl heißt
+        auf beiden „alle Konten". Sparkonten stehen nicht zur Wahl — sie
+        sind aus den Ausgabenzahlen ohnehin ausgenommen.
+        """
+        picked = set(account_ids or [])
+        return [
+            {"id": int(a["id"]),
+             "label": (a.get("bank_name") or "?") + (" \u00b7\u00b7\u00b7" + str(a["iban_last4"]) if a.get("iban_last4") else ""),
+             "is_savings": int(a.get("is_savings") or 0),
+             "selected": (not picked) or int(a["id"]) in picked}
+            for a in self.list_accounts() if not int(a.get("is_savings") or 0)
+        ]
+
+    def finance_fixed_costs(self, *, months_back: int = 24, min_hits: int = 2,
+                            account_ids: list[int] | None = None) -> dict[str, Any]:
         """Fixkostenrechner: recurring outgoing bookings per counterparty,
         their rhythm (monatlich / vierteljährlich / halbjährlich / jährlich),
         and what that means per month and per year.
@@ -3560,12 +3579,24 @@ class Database:
         counted — a tick takes them in) and `others` (every remaining payee
         with outgoing bookings, for the search box: anything can be taken
         into the fixed costs by hand, however irregular it looks).
+
+        `account_ids` narrows every figure to those accounts (Wunsch: „bei
+        den fixkosten will ich auch die konten auswählen können") — the
+        same selection as on /ausgaben, and like there an empty list means
+        all accounts. The filter sits in the ONE query this function reads
+        from, so contracts, the per-category averages and the totals can
+        never disagree about which accounts they cover.
         """
         from statistics import median
         from datetime import date as _d, timedelta
         from .finance.buckets import merchant_key
         import json as _json
         since = (_d.today() - timedelta(days=30 * months_back)).isoformat()
+        acc_sql = ""
+        acc_args: tuple[Any, ...] = ()
+        if account_ids:
+            acc_sql = " AND t.account_id IN (" + ",".join("?" * len(account_ids)) + ")"
+            acc_args = tuple(account_ids)
         with self._lock:
             rows = [dict(r) for r in self._conn.execute(
                 "SELECT t.id, t.booking_date, t.amount, t.counterparty, t.category, t.tx_type, t.purpose "
@@ -3574,7 +3605,8 @@ class Database:
                 "WHERE d.deleted_at IS NULL AND t.amount < 0 AND COALESCE(a.is_savings, 0) = 0 "
                 "  AND COALESCE(t.category, '') NOT IN ('uebertrag', 'bargeld', 'kreditkarte') "
                 "  AND t.booking_date >= ? AND t.counterparty IS NOT NULL AND TRIM(t.counterparty) != '' "
-                "ORDER BY t.booking_date", (since,),
+                + acc_sql +
+                " ORDER BY t.booking_date", (since,) + acc_args,
             ).fetchall()]
         try:
             overrides = _json.loads(self.meta_get("finance.fixed_cost_overrides") or "{}")
@@ -3659,7 +3691,7 @@ class Database:
                 # One booking counts once a year when its kind is fixed
                 # (yearly insurance) or when the user took it in by hand.
                 rhythm, per_year = ("jährlich", 1) if (single_ok or forced == "in") else ("einmalig", 0)
-            # Fixed = the category is one Robert calls fixed (configurable on
+            # Fixed = the category is one the owner calls fixed (configurable on
             # /fixkosten) AND the booking runs on contract (not a card
             # payment for fuel/toys) — regular eating out is never a fixed cost,
             # however regular.
@@ -3706,7 +3738,7 @@ class Database:
         # still costs money every month — groceries have no contract amount,
         # a car category holds fuel next to the loan. That remainder counts
         # as a monthly average over the last months with data, as its own
-        # line per category (Robert: ticked Lebensmittel, got 4,66 €).
+        # line per category (Wunsch: ticked Lebensmittel, got 4,66 €).
         contract_ids: set[int] = set()
         contract_rows: dict[str, list[dict[str, Any]]] = {}
         for k, ci, ncl, g in cluster_groups:
@@ -3782,6 +3814,7 @@ class Database:
             e["yearly"] = round(e["yearly"] + it["yearly"], 2)
             e["n"] += 1
         # Candidates the user may want to pin: recurring but not counted.
+        picks = self.account_picks(account_ids)
         return {
             "items": items,
             "candidates": candidates[:80],
@@ -3795,6 +3828,8 @@ class Database:
             "months_back": months_back,
             "since": since,
             "fixed_categories": sorted(fixed_cats),
+            "accounts": picks,
+            "accounts_filtered": bool(account_ids) and any(not a["selected"] for a in picks),
         }
 
     # ---------- Pending (vorgemerkte) bookings ----------
@@ -4605,7 +4640,7 @@ class Database:
                                   account_ids: list[int] | None = None) -> dict[str, Any]:
         """Spending of one month by *transaction category* — the categories
         the user assigns, the classifier explains and the rules learn. One
-        system for the whole app (v0.45 — Robert: „das tab ausgaben bekommt
+        system for the whole app (v0.45 — Wunsch: „das tab ausgaben bekommt
         neukategorisierungen nicht mit").
 
         Two ways to cut a "month":
@@ -4636,7 +4671,8 @@ class Database:
             # a category counted as a monthly average on /fixkosten
             return (r.get("category") or "sonstiges") in avg_cats
         if periods:
-            plist = [{"key": p["start"], "start": p["start"], "end": p["end"], "is_current": p.get("is_current", False)}
+            plist = [{"key": p["start"], "start": p["start"], "end": p["end"],
+                      "is_current": p.get("is_current", False), "due_date": p.get("due_date", "")}
                      for p in reversed(periods)]      # newest first, like the calendar list
             keys = [p["key"] for p in plist]
             mode = "salary"
@@ -4664,7 +4700,25 @@ class Database:
                 return "", ""
             if mode == "salary":
                 p = next((x for x in plist if x["key"] == key), None)
-                return (p["start"], p["end"]) if p else ("", "")
+                if not p:
+                    return "", ""
+                end = p["end"]
+                # 🔴 Der LAUFENDE Gehaltsmonat wird bis zu seinem erwarteten
+                # Ende gezeichnet, nicht bis heute (Wunsch: „auch am
+                # gehaltsmonatsanfang sollen alle tage schon zu sehen sein
+                # und zeigen wieviel pro tag ausgegeben werden darf max").
+                # `finance_salary_periods` schließt den offenen Zeitraum bei
+                # heute ab — damit stünden am dritten Tag drei Balken statt
+                # eines Monats. Die kommenden Tage markiert `_day_series`
+                # als `future`; sie zählen nirgends mit.
+                if p.get("is_current") and p.get("due_date"):
+                    from datetime import date as _dd, timedelta as _td
+                    try:
+                        expected = (_dd.fromisoformat(p["due_date"]) - _td(days=1)).isoformat()
+                        end = max(end, expected)
+                    except ValueError:
+                        pass
+                return p["start"], end
             y, m = int(key[:4]), int(key[5:7])
             last = 31 if m in (1, 3, 5, 7, 8, 10, 12) else 30 if m != 2 else (29 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 28)
             return f"{key}-01", f"{key}-{last:02d}"
@@ -4672,12 +4726,12 @@ class Database:
         def _rows(key: str, *, income: bool = False) -> list[dict[str, Any]]:
             """Bookings of the period on spending accounts, no transfers, no
             saving categories; `income=True` → the credits instead (v0.47.3:
-            Robert wants income shown and netted against the spending)."""
+            the owner wants income shown and netted against the spending)."""
             if not key:
                 return []
             a, b = _range(key)
-            # Kontenauswahl (Robert: „N26 raus, alle anderen drin — oder
-            # N26 drin, alle anderen raus"). Leere Auswahl = alle Konten.
+            # Kontenauswahl (Wunsch: „ein Konto raus, alle anderen drin —
+            # oder eines drin, alle anderen raus"). Leer = alle Konten.
             acc_sql = ""
             acc_args: tuple[Any, ...] = ()
             if account_ids:
@@ -4802,7 +4856,7 @@ class Database:
             "income_categories": income_categories,
             "income_open_count": sum(1 for r in inc_rows if (r["category"] or "sonstiges") == "sonstiges"),
             "open_count": sum(1 for r in cur_rows if (r["category"] or "sonstiges") == "sonstiges"),
-            # Tage OHNE Ausgabe gehören dazu (Robert: „es soll auch tage
+            # Tage OHNE Ausgabe gehören dazu (Wunsch: „es soll auch tage
             # anzeigen wo man nichts ausgegeben hat"). `per_day` kennt nur
             # Tage mit Buchung — die Reihe wird deshalb über den ganzen
             # Zeitraum aufgefüllt, aber höchstens bis HEUTE: ein Tag, der

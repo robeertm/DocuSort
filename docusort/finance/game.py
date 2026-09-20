@@ -22,7 +22,7 @@ Die Regeln, in Worten:
 * Unter drei gewerteten Tagen gibt es **keinen Rang** (`rated = False`),
   sonst stünde am ersten Tag eines Gehaltsmonats eine Wertung über einem
   Zeitraum, den es noch gar nicht gab.
-* Zusätzlich zählt das **Monatsergebnis** (Robert: „beim spiel sollte auch
+* Zusätzlich zählt das **Monatsergebnis** (Wunsch: „beim spiel sollte auch
   noch gewichtet werden wenn saldo am ende des monats positiv war"):
   Wer mehr eingenommen als ausgegeben hat, bekommt einen Bonus von bis zu
   20 % der Tagespunkte — voll ab einer Sparquote von 30 %. Der Bonus

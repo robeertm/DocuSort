@@ -7,6 +7,35 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.57.0] – 2026-09-20
+
+### Added
+- **Account filter on the fixed costs page** — the same control as on the
+  spending page: one tick per account, *Apply*, and every figure on the
+  page covers only those accounts: contracts, the per-category averages,
+  the category list and both totals. A line above the title then names the
+  accounts included, so a filtered total never looks like the full one.
+  All ticks set means all accounts.
+
+### Fixed
+- **The running salary month was only drawn up to today.** Since 0.52.0
+  the daily chart was meant to show the whole period with the days still
+  to come as faint dots; in fact it stopped at today, because that is
+  where the open period ends. On the third day of a salary month you saw
+  three bars instead of a month. The chart now reaches the expected end of
+  the salary month — the coming days still count nowhere.
+- On a phone the chart consequently scrolled into a strip of empty future
+  days; it now rests on the last day that has actually happened.
+- **Ten German strings on the fixed costs page** were missed in 0.56.0 and
+  showed in every language, among them the table heading, the saving
+  badge, “loading …”, “since …”, the monthly-average note and the contract
+  counter.
+- **The quick date ranges on the bookings page** (“Today”, “Yesterday”,
+  “Current month”, “Last 12 months”, …) were hard-coded German as well, as
+  were the two prompts for creating a category.
+- A first name appeared in a visible hint (the salary-month anchor day)
+  in all five languages, and in 37 source comments.
+
 ## [0.56.0] – 2026-09-20
 
 ### Added

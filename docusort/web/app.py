@@ -288,7 +288,7 @@ def create_app(
 
 
     # ---------- Authentication & permissions (0.48.0) ----------
-    # Robert's rule: he is admin and may do everything; users may add
+    # the owner's rule: he is admin and may do everything; users may add
     # documents but never delete, and never reach the settings.
     # `auth.USER_ALLOW` is an allowlist, so a route added next week is
     # admin-only until someone opens it on purpose.
@@ -1058,7 +1058,7 @@ def create_app(
             suffix = Path(up.filename or "").suffix.lower()
 
             # A bank CSV dropped here goes straight into the finances
-            # instead of being refused. Robert asked for "egal wo" — the
+            # instead of being refused. the owner asked for "egal wo" — the
             # upload page and the finance page should both work, so the
             # file type decides the route, not the page.
             if suffix == ".csv":
@@ -1558,15 +1558,9 @@ def create_app(
         # Welche Konten gibt es, und welche sind gerade gewählt? Die Seite
         # zeigt beides, damit eine gefilterte Zahl nie wie eine Gesamtzahl
         # aussieht.
-        picked = set(account_ids or [])
-        data["accounts"] = [
-            {"id": int(a["id"]),
-             "label": (a.get("bank_name") or "?") + (" ···" + str(a["iban_last4"]) if a.get("iban_last4") else ""),
-             "is_savings": int(a.get("is_savings") or 0),
-             "selected": (not picked) or int(a["id"]) in picked}
-            for a in db.list_accounts() if not int(a.get("is_savings") or 0)
-        ]
-        data["accounts_filtered"] = bool(picked) and any(not a["selected"] for a in data["accounts"])
+        data["accounts"] = db.account_picks(account_ids)
+        data["accounts_filtered"] = bool(account_ids) and any(
+            not a["selected"] for a in data["accounts"])
         return data
 
     @app.get("/api/ausgaben/data")
@@ -2638,8 +2632,10 @@ def create_app(
         return {"periods": out, "anchor_day": fin.period_anchor_day, "salary_match": fin.salary_match}
 
     @app.get("/api/finance/fixed-costs")
-    def api_finance_fixed_costs(months: int = Query(24)):
-        return db.finance_fixed_costs(months_back=max(1, min(60, months)))
+    def api_finance_fixed_costs(months: int = Query(24),
+                                accounts: list[int] = Query(default=[])):
+        return db.finance_fixed_costs(months_back=max(1, min(60, months)),
+                                      account_ids=accounts or None)
 
     @app.get("/api/finance/fixed-costs/categories")
     def api_finance_fixed_categories(request: Request):
@@ -2674,7 +2670,8 @@ def create_app(
         from ..finance.categories import TX_CATEGORIES
         return templates.TemplateResponse(
             request, "fixkosten.html",
-            {**base_ctx(request), "tx_categories": _cat_keys(request)},
+            {**base_ctx(request), "tx_categories": _cat_keys(request),
+             "accounts": db.account_picks(None)},
         )
 
     @app.get("/transactions", response_class=HTMLResponse)
@@ -3719,7 +3716,7 @@ def create_app(
         failed        = [r for r in results if not r["ok"]]
         if not ok_channels:
             # Every channel failed — hand the first concrete reason back to
-            # the UI so Robert sees what to fix.
+            # the UI so the owner sees what to fix.
             detail = "; ".join(f"{r['channel']}: {r['error']}" for r in failed)
             raise HTTPException(502, detail or "test delivery failed")
         return {"ok": True, "channels": ok_channels, "results": results}

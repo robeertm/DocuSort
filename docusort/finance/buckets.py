@@ -1,7 +1,7 @@
 """Everyday-spending buckets for the Monats-Ausgaben dashboard.
 
 The /finance tracker answers "rein / raus / übrig" per Gehaltsmonat. This
-module answers a narrower, very concrete question Robert asked for: *wofür*
+module answers a narrower, very concrete question the owner asked for: *wofür*
 ging das Geld diesen Monat drauf, in den paar Alltags-Töpfen, die er wirklich
 im Blick behalten will —
 
@@ -96,7 +96,7 @@ _ESSEN = (
     "gasthaus", "gasthof", "brauhaus", "eiscafe", "eiscafé", "cafe",
     "caf", "l osteria", "losteria", "hans im glueck", "peter pane",
     # English / anglicised names — häufig bei modernen Läden, die die reine
-    # Keyword-Liste sonst nicht fängt (Robert: „soul food ist ne suppenbar").
+    # Keyword-Liste sonst nicht fängt (Wunsch: „soul food ist ne suppenbar").
     "soul food", "soulfood", "food", "streetfood", "street food", "foodtruck",
     "kitchen", "grill", "steakhouse", "steak house", "diner", "deli",
     "canteen", "kantine", "mensa", "bowl", "poke", "ramen", "noodle",
@@ -134,7 +134,7 @@ _AUTO = (
     "automobile", "automobil", "autozentrum", "autocenter", "autopark",
     "autogalerie", "automobilhandel", "automobile gmbh", "car center",
     # Autobanken / Fahrzeug-Finanzierung — die Rate für Auto/Leasing läuft über
-    # eine markengebundene Bank. Robert will diese Raten im Auto-Topf sehen,
+    # eine markengebundene Bank. der Nutzer will diese Raten im Auto-Topf sehen,
     # nicht in „Sonstiges" (die reine KI schiebt „…Bank…" sonst zu sonstiges).
     "hyundai capital", "vw bank", "volkswagen bank", "vw financial",
     "vw leasing", "volkswagen leasing", "vw financial services",
@@ -218,7 +218,7 @@ def classify(tx: dict[str, Any], overrides: dict[str, str] | None = None) -> str
     Order: merchant keyword → KI-override (cached, for exotic/English names)
     → grobe Buchungs-Kategorie → Sonstiges. Amazon and Auto are checked
     early so an Amazon grocery order lands in Amazon and a Tankstellen-Shop
-    counts as Auto rather than Lebensmittel — the way Robert asked.
+    counts as Auto rather than Lebensmittel — the way the owner asked.
 
     `overrides` maps `merchant_key(counterparty)` → bucket id (from the
     lokale-KI cache). Only consulted when the keyword lists don't fire, so a

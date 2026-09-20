@@ -215,7 +215,15 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
       {# Am Handy scrollt die Karte — sie startet an den JÜNGSTEN Tagen,
          die älteren liegen wie gewohnt links davon. #}
       <div class="overflow-x-auto -mx-1 px-1" @scroll="hover = null"
-           x-init="$nextTick(() => { $el.scrollLeft = $el.scrollWidth; })">
+           x-init="$nextTick(() => {
+             // 🔴 Nicht ans ENDE scrollen, sondern an den letzten gelebten
+             // Tag: seit die Kurve den ganzen Gehaltsmonat zeigt, wäre das
+             // Ende ein Streifen leerer Zukunftstage — am Handy sähe man
+             // dann gar keinen Balken.
+             const all = (d.days || []).length || 1;
+             const lived = (d.days || []).filter(x => !x.future).length || all;
+             $el.scrollLeft = Math.max(0, $el.scrollWidth * (lived / all) - $el.clientWidth);
+           })">
         {# Auf dem Handy bekommt jeder Tag eine Mindestbreite und die Karte
            scrollt — sonst hätten weder Balken noch Betrag Platz. #}
         <div :style="'min-width: ' + (d.days.length * 30) + 'px'">

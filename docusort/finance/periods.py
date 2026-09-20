@@ -1,6 +1,6 @@
 """Salary-period ("Gehaltsmonat") cashflow.
 
-Robert's bank month doesn't line up with the calendar month: the CSV
+the owner's bank month doesn't line up with the calendar month: the CSV
 statements start around the 23rd/24th with the salary credit from his
 employer and the "month" runs until the day before the next salary lands
 (≈ the 22nd/23rd). This module turns the flat transaction stream into a

@@ -385,7 +385,7 @@
                        body: JSON.stringify({ account_id: accountId, after, before, acknowledged: ack }),
                      });
                      if (r.ok) { location.reload(); }
-                     else { const d = await r.json().catch(() => ({})); this.msg = d.detail || 'Fehler'; }
+                     else { const d = await r.json().catch(() => ({})); this.msg = d.detail || T['common.error'] || 'Error'; }
                    } catch (e) { this.msg = String(e); }
                    finally { this.busy = false; }
                  } }">

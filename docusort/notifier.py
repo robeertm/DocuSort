@@ -135,7 +135,7 @@ class _TelegramParseError(RuntimeError):
 
 
 def _telegram_hint(code: int, detail: str) -> str:
-    """Turn a raw Telegram Bot-API error into something Robert can act on."""
+    """Turn a raw Telegram Bot-API error into something the owner can act on."""
     low = (detail or "").lower()
     if code == 401 or "unauthorized" in low:
         return ("Telegram 401 Unauthorized — the bot token is wrong or was "

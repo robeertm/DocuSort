@@ -444,7 +444,7 @@ function dashboard() {
     },
     statusLabel(s) {
       switch (s) {
-        case 'failed':         return 'Fehler';
+        case 'failed':         return T['common.error'] || 'Error';
         case 'review':         return 'Review';
         case 'pending_review': return 'Wartet';
         case 'duplicate':      return 'Dup';
@@ -524,7 +524,7 @@ function dashboard() {
         }
         await this.refresh();
       } catch (e) {
-        alert('Fehler: ' + (e.message || String(e)));
+        alert((T['common.error'] || 'Error') + ': ' + (e.message || String(e)));
       } finally { this.busyDoc = null; }
     },
   };
