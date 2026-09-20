@@ -618,7 +618,7 @@ function paidWidget(docId, linked) {
           body: JSON.stringify({ tx_id: null }),
         });
         if (r.ok) { window.location.reload(); }
-        else { const d = await r.json().catch(() => ({})); this.message = d.detail || 'Fehler'; }
+        else { const d = await r.json().catch(() => ({})); this.message = d.detail || T['common.error'] || 'Error'; }
       } catch (e) { this.message = String(e); }
       finally { this.busy = false; }
     },

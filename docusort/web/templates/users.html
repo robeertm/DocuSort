@@ -157,7 +157,7 @@ function usersPage() {
         }
         const d = await r.json().catch(() => ({}));
         if (r.ok) { this.form = null; await this.reload(); this.flash(true, this.T['auth.saved'] || 'Gespeichert.'); }
-        else { this.flash(false, d.detail || 'Fehler'); }
+        else { this.flash(false, d.detail || this.T['common.error'] || 'Error'); }
       } finally { this.busy = false; }
     },
     async remove(u) {
@@ -167,7 +167,7 @@ function usersPage() {
       const r = await fetch('/api/users/' + u.id, { method: 'DELETE' });
       const d = await r.json().catch(() => ({}));
       if (r.ok) { await this.reload(); this.flash(true, this.T['auth.deleted'] || 'Deleted.'); }
-      else { this.flash(false, d.detail || 'Fehler'); }
+      else { this.flash(false, d.detail || this.T['common.error'] || 'Error'); }
     },
   };
 }

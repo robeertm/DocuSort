@@ -143,7 +143,7 @@ PUBLIC_PATHS = (
 )
 
 # What a non-admin may reach. Anything not listed is admin-only.
-# Robert's rule, 2026-09-20: add documents yes, delete no, settings no;
+# the owner's rule, 2026-09-20: add documents yes, delete no, settings no;
 # finance readable and categorisable; all documents visible; editing a
 # document's metadata is part of filing it.
 USER_ALLOW: tuple[tuple[str, str], ...] = (

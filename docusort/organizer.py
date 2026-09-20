@@ -130,7 +130,7 @@ def _reserve_unique(target: Path) -> Path:
     overwrite it safely). This closes the check-then-write gap that a
     plain exists()-based uniquify leaves open, which could otherwise
     let one document silently clobber another (the whole point of the
-    library being Robert's real archive).
+    library being the owner's real archive).
     """
     stem, suffix, parent = target.stem, target.suffix, target.parent
     parent.mkdir(parents=True, exist_ok=True)

@@ -410,15 +410,15 @@ function uploader() {
           } else if (rep && rep.error) {
             it.stage = "error";
             it.message = rep.hint_iban
-              ? (T['upload.csv_needs_admin'] || 'Diese Datei nennt kein Konto — bitte vom Administrator importieren lassen')
+              ? (T['upload.csv_needs_admin'] || 'This file names no account — ask an administrator to import it')
               : rep.error;
           } else {
             it.stage = "csv-imported";
             const dup = (rep && rep.rows_duplicate) || 0;
             const ins = (rep && rep.rows_inserted) || 0;
             it.message = (ins === 1
-                ? (T['upload.csv_done_one'] || '1 Buchung importiert')
-                : (T['upload.csv_done'] || '{n} Buchungen importiert').replace('{n}', ins))
+                ? (T['upload.csv_done_one'] || '1 booking imported')
+                : (T['upload.csv_done'] || '{n} bookings imported').replace('{n}', ins))
               + (dup ? " · " + (T['upload.csv_dup'] || '{n} schon vorhanden').replace('{n}', dup) : "");
             this.fileBlobs.delete(it.id);
           }

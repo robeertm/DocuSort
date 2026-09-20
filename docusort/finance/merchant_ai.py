@@ -2,7 +2,7 @@
 
 Die reine Keyword-Liste in `buckets.py` fängt die üblichen Verdächtigen
 (REWE, dm, Aral, Obi …). Sie scheitert aber an exotischen oder englischen
-Namen — Robert nennt „Soul Food", das eine Suppenbar ist und ins „Essen
+Namen — der Nutzer nennt „Soul Food", das eine Suppenbar ist und ins „Essen
 gehen" gehört, obwohl der Name das nirgends verrät.
 
 Dieses Modul lässt die **lokale KI** — dieselbe, die ohnehin jedes Dokument
@@ -172,7 +172,7 @@ def classify_merchants(provider: Provider, model: str,
 # (v0.43, „Sonstiges aufdröseln"). Gleiches Batch-/JSON-Protokoll, andere
 # Zielmenge — die 27 Kategorien aus finance.categories statt der 8 Töpfe.
 # Das Ergebnis wird als Regel (`category_rules`, source='ai') gespeichert;
-# eine Hand-Zuweisung von Robert überschreibt sie jederzeit.
+# eine Hand-Zuweisung von Hand überschreibt sie jederzeit.
 # ---------------------------------------------------------------------------
 
 from .categories import TX_CATEGORIES as _TX_CATEGORIES  # noqa: E402

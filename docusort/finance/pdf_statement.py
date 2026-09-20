@@ -537,7 +537,7 @@ def statement_subject(st: "ParsedStatement") -> str:
 def tidy_statement_documents(db, settings, *, log=None, only_doc_ids: set[int] | None = None) -> dict:
     """Give every recognised Kontoauszug in the library the metadata the
     parser knows for certain — the LLM had filed many as „Klassifizierung
-    fehlgeschlagen" / „Unbekannt" / without a date (Robert: „ganz viele
+    fehlgeschlagen" / „Unbekannt" / without a date (Wunsch: „ganz viele
     klassifizierung fehlgeschlagen, bitte aufräumen und einsortieren").
     Category Kontoauszug, subcategory Girokonto/Tagesgeld, date = closing
     day, sender = the bank, subject „Kontoauszug 8/2025 Girokonto …8621";

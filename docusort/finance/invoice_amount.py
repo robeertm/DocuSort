@@ -6,7 +6,7 @@ KI over the archive to get one would cost money for something the text
 already states, so this reads it instead.
 
 The rule is deliberately conservative: a wrong amount would mark a bill
-"paid" that was never paid, and Robert would miss it. Where the text
+"paid" that was never paid, and the owner would miss it. Where the text
 does not state a total plainly, we return None and the deadline keeps
 nagging — a missing match is harmless, a wrong one is not.
 """
