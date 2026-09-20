@@ -121,7 +121,7 @@ account, add your AI key in Settings, and drop the first scan into the inbox.
 ```yaml
 services:
   docusort:
-    image: ghcr.io/robeertm/DocuSort:latest
+    image: ghcr.io/robeertm/docusort:latest
     container_name: docusort
     restart: unless-stopped
     ports:

@@ -8,7 +8,7 @@
 # files are kept and only the image is refreshed.
 set -euo pipefail
 
-IMAGE="${DOCUSORT_IMAGE:-ghcr.io/robeertm/DocuSort:latest}"
+IMAGE="${DOCUSORT_IMAGE:-ghcr.io/robeertm/docusort:latest}"
 DIR="${DOCUSORT_DIR:-$PWD/docusort}"
 PORT="${DOCUSORT_PORT:-8080}"
 TZ_DEFAULT="${TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##')}"
