@@ -1,0 +1,118 @@
+# Category definitions for DocuSort.
+# Each top-level category has an optional list of subcategories. Files are
+# filed at library/<year>/<category>/<subcategory>/ when a subcategory is
+# present; otherwise just library/<year>/<category>/.
+#
+# Tags are free-form labels (lowercase, short) and are NOT part of the file
+# path — they live in the database for cross-cutting search like "all
+# Mahnungen across all categories" or "everything tagged 'police'".
+#
+# Keep "Sonstiges" as a fallback. You can freely rename, reorder, add or
+# remove entries.
+
+categories:
+  - name: "Rechnungen"
+    description: >
+      Rechnungen jeder Art (Strom, Wasser, Telefon, Mobilfunk, Internet,
+      Online-Shops, Handwerker). Merkmale: Rechnungsnummer, Betrag, Fälligkeit.
+
+  - name: "Vertraege"
+    description: >
+      Verträge und Vertragsunterlagen (Miet-, Arbeits-, Kauf-, Dienstleistungs-,
+      Mobilfunk-, Strom-, Wartungsverträge). Auch Kündigungen und Änderungen.
+
+  - name: "Behoerde"
+    description: >
+      Behördliche Dokumente (Einwohnermeldeamt, KFZ-Zulassung, Kommunalverwaltung,
+      Ausländerbehörde, Standesamt, Jobcenter, Justiz). Amtliche Bescheide.
+    subcategories: ["Meldewesen", "Sozialversicherung", "Justiz", "Sonstiges"]
+
+  - name: "Gesundheit"
+    description: >
+      Arzt-, Zahnarzt-, Krankenhaus-, Therapie- und Apotheken-Unterlagen.
+      Befunde, Arztbriefe, Rezepte, Atteste, Impfpass, Heilmittelverordnungen.
+    subcategories: ["Arzt", "Apotheke", "Krankenkasse", "Therapie", "Sonstiges"]
+
+  - name: "Gehalt"
+    description: >
+      Gehaltsabrechnungen, Lohnzettel, Jahresmeldungen zur Sozialversicherung,
+      Lohnsteuerbescheinigungen, Boni-Abrechnungen.
+
+  - name: "Steuer"
+    description: >
+      Steuererklärungen, Steuerbescheide vom Finanzamt, Belege fürs Finanzamt,
+      ELSTER-Ausdrucke, Spendenbescheinigungen, Steuerbescheinigungen.
+
+  - name: "Haus"
+    description: >
+      Wohnen — Mietvertrag, Hausbau, Renovierung, Grundstück, Grundbuch,
+      Bauunterlagen, Pläne, Energieausweis, Nebenkostenabrechnungen, Hausverwaltung.
+    subcategories: ["Miete", "Bau", "Nebenkosten", "Renovierung", "Grundstueck"]
+
+  - name: "Versicherung"
+    description: >
+      Versicherungspolicen und -schreiben jeder Sparte. Schadensmeldungen.
+    subcategories: ["KFZ", "Hausrat", "Haftpflicht", "Kranken", "Leben", "Reise", "Tier", "Rechtsschutz", "Sonstiges"]
+
+  - name: "Bank"
+    description: >
+      Bankunterlagen die KEINE laufenden Auszüge sind — Kreditverträge,
+      Darlehen, Wertpapierabrechnungen, Depot-Eröffnung, Bankbescheinigungen,
+      Kontoeröffnungs-Unterlagen, Kündigungen. Laufende Kontoauszüge,
+      PayPal-Übersichten und Kreditkartenabrechnungen gehen unter
+      "Kontoauszug", nicht hier.
+    subcategories: ["Kredit", "Wertpapiere", "Vertrag", "Sonstiges"]
+
+  - name: "Auto"
+    description: >
+      Alles rund um Fahrzeuge — KFZ-Zulassung, TÜV/HU, Werkstatt-Rechnungen,
+      Tankquittungen, Fahrräder, Motorräder. Versicherungen für Fahrzeuge
+      gehören unter Versicherung/KFZ, nicht hierher.
+    subcategories: ["KFZ", "Fahrrad", "Motorrad", "Sonstiges"]
+
+  - name: "Bildung"
+    description: >
+      Schule, Studium, Fortbildung, Zertifikate, Zeugnisse, Bewerbungs-Unterlagen.
+    subcategories: ["Schule", "Studium", "Fortbildung", "Zeugnisse"]
+
+  - name: "Familie"
+    description: >
+      Familiäre Unterlagen — Geburtsurkunden, Heirat, Erbsachen, Korrespondenz
+      mit Verwandten, Schreiben rund um Kinder oder pflegebedürftige Eltern.
+    subcategories: ["Kinder", "Erbe", "Eltern", "Sonstiges"]
+
+  - name: "Reise"
+    description: >
+      Reise-Buchungen, Flugtickets, Bahn-Tickets, Hotel-Belege, Reisepass-Sachen,
+      Visumsangelegenheiten. Reiseversicherung → Versicherung/Reise.
+    subcategories: ["Buchung", "Hotel", "Ticket", "Visum"]
+
+  - name: "Hobby"
+    description: >
+      Freizeit, Sport, Vereins-Mitgliedschaften, Musik, Sammeln, Abos für
+      Streamingdienste mit Hobby-Bezug (Spiele, Sport).
+    subcategories: ["Sport", "Musik", "Sammeln", "Sonstiges"]
+
+  - name: "Kassenzettel"
+    description: >
+      Kassenbons, Quittungen, Bewirtungsbelege — typisch ein schmaler Zettel
+      mit einem Shop-Header, mehreren Artikelzeilen mit Preisen und einer
+      Summe. NICHT für Online-Rechnungen oder Versorger-Rechnungen — die
+      gehen unter Rechnungen. Subcategory richtet sich nach dem Shop-Typ.
+    subcategories: ["Supermarkt", "Drogerie", "Baumarkt", "Restaurant", "Cafe", "Tankstelle", "Apotheke", "Bekleidung", "Elektronik", "Buecher", "Moebel", "Versand", "Sonstiges"]
+
+  - name: "Kontoauszug"
+    description: >
+      Kontoauszug eines Giro-, Tagesgeld-, Kreditkarten- oder PayPal-Kontos.
+      Erkennungsmerkmale: IBAN am Kopf, Banklogo (Sparkasse, DKB, ING,
+      Commerzbank, Volksbank, Postbank, comdirect, N26, Revolut, PayPal,
+      …), Buchungstabelle mit Datum / Verwendungszweck / Betrag, Anfangs-
+      und Endsaldo. Auch Kreditkartenabrechnungen und PayPal-Übersichten
+      gehören hierher. NICHT für einzelne Überweisungsbelege oder
+      Geldautomaten-Quittungen — die gehen unter Rechnungen oder
+      Kassenzettel. Subcategory ist der Bank-Typ.
+    subcategories: ["Girokonto", "Tagesgeld", "Kreditkarte", "Depot", "PayPal", "Sonstiges"]
+
+  - name: "Sonstiges"
+    description: >
+      Alles, was in keine andere Kategorie passt. Auch Fallback bei Unsicherheit.

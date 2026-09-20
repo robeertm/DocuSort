@@ -1,0 +1,17 @@
+services:
+  docusort:
+    image: ghcr.io/robeertm/docusort:latest
+    container_name: docusort
+    restart: unless-stopped
+    ports:
+      - "8080:8080"           # Web UI; open http://<nas-ip>:8080
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TZ=Europe/Berlin
+      - DOCUSORT_LOG_LEVEL=INFO
+    volumes:
+      # Adjust the left side of each mapping to wherever your documents live.
+      - ./data/inbox:/data/inbox
+      - ./data/library:/data/library
+      - ./config:/app/config
+      - ./logs:/app/logs

@@ -1,0 +1,1139 @@
+{% extends "base.html" %}
+{% block title %}{{ t('tx.title') }} · DocuSort{% endblock %}
+{% block content %}
+
+<div x-data="txExplorer()" x-init="init()" class="space-y-5">
+
+  <div class="flex items-start justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Buchungen durchsuchen</h1>
+      <p class="text-ink-400 mt-1 text-sm">
+        {{ t('tx.multi_payees') }} <code class="text-ink-200">rossmann, dm, müller</code>),
+        {{ t('tx.intro2') }}
+      </p>
+    </div>
+    <div class="flex items-center gap-3 text-xs text-ink-500">
+      <a href="/fixkosten" class="hover:text-emerald-300 underline">Fixkosten →</a>
+      <a href="/finance" class="hover:text-emerald-300 underline">Finance Dashboard →</a>
+    </div>
+  </div>
+
+  <!-- ============================ FILTER ============================ -->
+  {# Two tidy bands: WHEN (salary month, anchor day, from/to, one day, quick
+     picks) and WHAT (search, account, category, direction, amount). Every
+     control shares one height and one label style; on phones the grid
+     folds to two columns. #}
+  <div class="card p-4 sm:p-5 space-y-4">
+
+    <!-- Zeitraum -->
+    <div>
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-[10px] uppercase tracking-[0.2em] text-ink-500">Zeitraum</span>
+        <span class="h-px flex-1 bg-ink-800"></span>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-12 gap-x-3 gap-y-3 items-end">
+        <label class="col-span-2 md:col-span-4 block">
+          <span class="flt-label">Gehaltsmonat</span>
+          <select x-model="salaryPeriod" @change="applySalaryPeriod()" class="flt-input">
+            <option value="">{{ t('tx.pick_salary_month') }}</option>
+            <template x-for="p in periods" :key="p.start">
+              <option :value="p.start + '|' + p.end"
+                      x-text="p.label + (p.is_current ? ' · {{ t('tx.running') }}' : '') + (p.salary ? ' · {{ t('tx.salary') }} ' + Math.round(p.salary) + ' €' : '')"></option>
+            </template>
+          </select>
+        </label>
+        <label class="block md:col-span-1" title="{{ t('tx.salary_month_hint') }}">
+          <span class="flt-label">Monatsanfang</span>
+          <span class="relative block">
+            <input type="number" min="1" max="31" x-model.number="anchorDay" @change="saveAnchorDay()" class="flt-input tabular-nums pr-6">
+            <span class="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 text-sm pointer-events-none">.</span>
+          </span>
+        </label>
+        <label class="block md:col-span-2">
+          <span class="flt-label">Von</span>
+          <input type="date" x-model="filter.start" @change="reload()" class="flt-input">
+        </label>
+        <label class="block md:col-span-2">
+          <span class="flt-label">Bis</span>
+          <input type="date" x-model="filter.end" @change="reload()" class="flt-input">
+        </label>
+        <label class="block md:col-span-3" title="Setzt Von und Bis auf diesen Tag — zeigt alle Buchungen dieses Tages.">
+          <span class="flt-label">Bestimmter Tag</span>
+          <input type="date" :value="oneDay" @change="setOneDay($event.target.value)" class="flt-input">
+        </label>
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-1.5">
+        <template x-for="preset in periodPresets" :key="preset.label">
+          <button type="button" @click="applyPreset(preset)"
+                  class="text-xs rounded-full px-3 py-1.5 border border-ink-700 text-ink-300 hover:border-emerald-500/50 hover:text-emerald-300"
+                  x-text="(preset.salary && periods.some(x => x.is_current)) ? preset.salary : preset.label"></button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Filter -->
+    <div>
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-[10px] uppercase tracking-[0.2em] text-ink-500">Filter</span>
+        <span class="h-px flex-1 bg-ink-800"></span>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-12 gap-x-3 gap-y-3 items-end">
+        <label class="col-span-2 md:col-span-5 block">
+          <span class="flt-label">Suche <span class="text-ink-500/60 normal-case tracking-normal ml-1">— Teilstring, Komma trennt mehrere</span></span>
+          <!-- Wildcard substring match against counterparty + purpose. -->
+          <input type="search" x-model="filter.q" @input.debounce.300ms="reload()" placeholder="rossmann, dm, amazon …" class="flt-input">
+        </label>
+        <label class="block md:col-span-2">
+          <span class="flt-label">Konto</span>
+          <select x-model="filter.account_id" @change="reload()" class="flt-input">
+            <option value="">Alle Konten</option>
+            {% for a in accounts %}
+              <option value="{{ a.id }}">{{ a.bank_name }}{% if a.iban_last4 %} · …{{ a.iban_last4 }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="block md:col-span-2">
+          <span class="flt-label">Kategorie</span>
+          <select x-model="filter.category" @change="reload()" class="flt-input">
+            <option value="">Alle</option>
+            <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+          </select>
+        </label>
+        <label class="block md:col-span-1">
+          <span class="flt-label">Richtung</span>
+          <select x-model="filter.direction" @change="reload()" class="flt-input">
+            <option value="">+/−</option>
+            <option value="expense">Aus</option>
+            <option value="income">Ein</option>
+          </select>
+        </label>
+        <div class="block md:col-span-2">
+          <span class="flt-label" title="{{ t('tx.amount_hint') }}">{{ t('tx.amount_eur') }}</span>
+          <div class="grid grid-cols-2 gap-1.5">
+            <input type="number" step="0.01" x-model="filter.amount_min" @change="reload()" placeholder="min" class="flt-input tabular-nums">
+            <input type="number" step="0.01" x-model="filter.amount_max" @change="reload()" placeholder="max" class="flt-input tabular-nums">
+          </div>
+        </div>
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-1.5">
+        <template x-if="parsedTokens.length > 1">
+          <span class="text-[11px] uppercase tracking-wider text-ink-500">Aktive Tokens:</span>
+        </template>
+        <template x-for="tok in parsedTokens" :key="tok">
+          <button type="button" x-show="parsedTokens.length > 1" @click="removeToken(tok)"
+                  class="text-xs rounded-full bg-emerald-500/15 text-emerald-200 px-2.5 py-1 hover:bg-emerald-500/25">
+            <span x-text="tok"></span><span class="text-emerald-400/70 ml-1">×</span>
+          </button>
+        </template>
+        <button type="button" @click="reset()"
+                class="ml-auto text-xs rounded-full px-3 py-1.5 border border-ink-700 text-ink-400 hover:border-rose-500/50 hover:text-rose-300">
+          {{ t('tx.reset_filter') }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ KPIS ============================ -->
+  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.counted') }}</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="agg.count.toLocaleString(DS_LOCALE)"></div>
+      <div class="text-[11px] text-ink-500 mt-0.5" x-text="agg.first_date ? (agg.first_date + ' … ' + agg.last_date) : '—'"></div>
+    </div>
+    <div class="card p-4" :class="agg.transfer_count > 0 ? '' : 'opacity-60'"
+         title="{{ t('tx.transfers_hint') }}">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.transfers') }}</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums text-sky-300" x-text="(agg.transfer_count || 0).toLocaleString(DS_LOCALE)"></div>
+      <div class="text-[11px] text-ink-500 mt-0.5"
+           x-text="agg.transfer_count ? (fmtEur(agg.transfer_in || 0) + ' rein · ' + fmtEur(agg.transfer_out || 0) + ' raus') : 'keine im Filter'"></div>
+    </div>
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Eingang</div>
+      <div class="mt-1 text-2xl font-semibold text-emerald-300 tabular-nums" x-text="fmtEur(agg.sum_in)"></div>
+    </div>
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Ausgang</div>
+      <div class="mt-1 text-2xl font-semibold text-rose-300 tabular-nums" x-text="fmtEur(agg.sum_out)"></div>
+    </div>
+    <div class="card p-4" :class="agg.saved ? '' : 'opacity-60'"
+         title="{{ t('tx.saving_hint') }}">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Gespart / angelegt</div>
+      <div class="mt-1 text-2xl font-semibold text-violet-200 tabular-nums" x-text="fmtEur(agg.saved || 0)"></div>
+    </div>
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">Netto</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums"
+           :class="agg.sum_net >= 0 ? 'text-emerald-300' : 'text-rose-300'"
+           x-text="fmtEur(agg.sum_net)"></div>
+    </div>
+  </div>
+
+  <!-- ============================ MONTHLY TREND ============================ -->
+  <div class="card p-4" x-show="agg.monthly && agg.monthly.length > 0" x-cloak>
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400">
+        {{ t('tx.per_month_filter') }}
+      </h2>
+      <p class="text-[11px] text-ink-500">
+        Klick auf einen Balken, um auf diesen Monat zu zoomen.
+      </p>
+    </div>
+    <!-- The SVG is built as a string: an Alpine <template x-for> inside <svg>
+         lands in the SVG namespace and never renders (the chart was empty
+         since it was written). Clicks are delegated via data-month. -->
+    <div class="overflow-x-auto -mx-1" x-html="monthlySvg"
+         @click="const g = $event.target.closest('[data-month]'); if (g) zoomMonth(g.dataset.month)"></div>
+  </div>
+
+  <!-- ============================ TOPS + CATEGORY BREAKDOWN ============================ -->
+  <div class="grid gap-3 lg:grid-cols-3" x-show="agg.count > 0" x-cloak>
+    <div class="card p-4 min-w-0">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">Top Ausgaben</h2>
+      <ul class="space-y-1.5">
+        <template x-for="r in agg.top_expense" :key="r.counterparty">
+          <li class="flex items-center justify-between gap-2 text-sm hover:bg-ink-800/40 -mx-1 px-1 rounded">
+            <button type="button" @click="appendToken(r.counterparty)"
+                    class="truncate min-w-0 text-left flex-1 text-ink-200 hover:text-emerald-300"
+                    x-text="r.counterparty || '—'"></button>
+            <span class="text-xs text-ink-500 tabular-nums shrink-0" x-text="r.times + 'x'"></span>
+            <span class="tabular-nums text-rose-300 shrink-0 w-24 text-right" x-text="fmtEur(r.total)"></span>
+          </li>
+        </template>
+        <li x-show="!agg.top_expense || agg.top_expense.length === 0" x-cloak class="text-xs text-ink-500">
+          {{ t('tx.no_spending') }}
+        </li>
+      </ul>
+    </div>
+    <div class="card p-4 min-w-0">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">{{ t('tx.top_income') }}</h2>
+      <ul class="space-y-1.5">
+        <template x-for="r in agg.top_income" :key="r.counterparty">
+          <li class="flex items-center justify-between gap-2 text-sm hover:bg-ink-800/40 -mx-1 px-1 rounded">
+            <button type="button" @click="appendToken(r.counterparty)"
+                    class="truncate min-w-0 text-left flex-1 text-ink-200 hover:text-emerald-300"
+                    x-text="r.counterparty || '—'"></button>
+            <span class="text-xs text-ink-500 tabular-nums shrink-0" x-text="r.times + 'x'"></span>
+            <span class="tabular-nums text-emerald-300 shrink-0 w-24 text-right" x-text="fmtEur(r.total)"></span>
+          </li>
+        </template>
+        <li x-show="!agg.top_income || agg.top_income.length === 0" x-cloak class="text-xs text-ink-500">
+          {{ t('tx.no_income') }}
+        </li>
+      </ul>
+    </div>
+    <div class="card p-4 min-w-0">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">Nach Kategorie</h2>
+      <ul class="space-y-1.5">
+        <template x-for="r in agg.by_category" :key="r.cat">
+          <li class="flex items-center justify-between gap-2 text-sm">
+            <button type="button" @click="filter.category = r.cat; reload()"
+                    class="truncate min-w-0 text-left flex-1 text-ink-200 hover:text-emerald-300"
+                    x-text="catLabel(r.cat)"></button>
+            <span class="text-xs text-ink-500 tabular-nums shrink-0" x-text="r.n + 'x'"></span>
+            <span class="tabular-nums shrink-0 w-24 text-right"
+                  :class="r.total < 0 ? 'text-rose-300' : 'text-emerald-300'"
+                  x-text="fmtEur(r.total)"></span>
+          </li>
+        </template>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============================ BREAK DOWN 'OTHER' ============================ -->
+  <div class="card p-0 overflow-hidden" x-show="agg.count > 0 || unresolved.length > 0" x-cloak>
+    <button type="button" @click="toggleUnresolved()"
+            class="w-full px-4 py-3 flex items-center justify-between gap-3 flex-wrap text-left hover:bg-ink-800/30">
+      <div class="flex items-center gap-3">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400">
+          <span x-text="catLabel(unresolvedCat)"></span> {{ t('tx.unpack') }}
+        </h2>
+        <span class="text-xs text-ink-500" x-show="unresolvedLoaded"
+              x-text="unresolved.length + ' {{ t('tx.payees') }} · ' + unresolvedCount + ' {{ t('tx.bookings') }} · ' + fmtEur(unresolvedSum)"></span>
+      </div>
+      <span class="text-xs text-ink-500" x-text="showUnresolved ? '▲ zuklappen' : '▼ aufklappen'"></span>
+    </button>
+    <div x-show="showUnresolved" x-cloak class="border-t border-ink-800/60">
+      <div class="px-4 py-3 flex items-center gap-3 flex-wrap text-xs text-ink-400 bg-ink-900/30">
+        <span>{{ t('tx.assign_all') }} <b class="text-ink-200">{{ t('tx.all_word') }}</b> {{ t('tx.assign_all2') }}</span>
+        <select x-model="unresolvedCat" @change="loadUnresolved()"
+                class="rounded bg-ink-900/60 border border-ink-700 px-2 py-1 text-xs">
+          <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+        </select>
+        <label class="flex items-center gap-1">
+          <input type="checkbox" x-model="unresolvedInRange" @change="loadUnresolved()" class="rounded border-ink-700 bg-ink-900">
+          {{ t('tx.only_period') }}
+        </label>
+        <span class="ml-auto flex items-center gap-2">
+          <button type="button" @click="aiCategorize()" :disabled="ai.running || !ai.available"
+                  class="rounded-lg px-2.5 py-1.5 border border-violet-500/40 text-violet-200 hover:bg-violet-500/15 disabled:opacity-50"
+                  :title="ai.available ? '{{ t('tx.ai_hint') }}' : 'Keine KI eingerichtet (/setup)'">
+            <span x-show="!ai.running">{{ t('tx.ai_fetch') }}</span>
+            <span x-show="ai.running" x-cloak x-text="'KI arbeitet … ' + ai.done + '/' + ai.total"></span>
+          </button>
+          <button type="button" @click="reclassify()" :disabled="busy"
+                  class="rounded-lg px-2.5 py-1.5 border border-ink-700 text-ink-300 hover:text-emerald-300 hover:border-emerald-500/50"
+                  title="{{ t('tx.rerun_hint') }}">
+            ↻ Erkennung neu laufen lassen
+          </button>
+        </span>
+      </div>
+      <div class="overflow-x-auto max-h-[28rem] overflow-y-auto">
+        <table class="w-full text-sm table-fixed sm:table-auto">
+          <thead class="text-xs uppercase tracking-wider text-ink-500 bg-ink-900/40 sticky top-0">
+            <tr>
+              <th class="text-left px-2 sm:px-3 py-2 font-medium">{{ t('tx.payee_col') }}</th>
+              <th class="text-left px-3 py-2 font-medium hidden md:table-cell">Beispiel-Zweck</th>
+              <th class="text-right px-3 py-2 font-medium hidden sm:table-cell">Anzahl</th>
+              <th class="text-right px-2 sm:px-3 py-2 font-medium w-24 sm:w-auto">Ausgang</th>
+              <th class="text-right px-3 py-2 font-medium hidden sm:table-cell">Eingang</th>
+              <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">Zuletzt</th>
+              <th class="text-left px-2 sm:px-3 py-2 font-medium w-32 sm:w-auto">{{ t('tx.category') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="m in unresolved" :key="m.key">
+              <tr class="border-t border-ink-800/50 hover:bg-ink-800/30" :class="m._done ? 'opacity-40' : ''">
+                <td class="px-2 sm:px-3 py-2 font-medium max-w-[300px] min-w-0 [overflow-wrap:anywhere]">
+                  <button type="button" @click="appendToken(m.name)" class="block text-left hover:text-emerald-300 max-w-full break-words leading-snug"
+                          :title="m.name + (m.iban ? ' · ' + m.iban : '')" x-text="m.name"></button>
+                  <span class="text-[10px] text-ink-500" x-show="m.iban" x-text="'IBAN …' + m.iban.slice(-4)"></span>
+                  <span class="block text-[10px] text-ink-500 sm:hidden" x-text="m.count + '× · zuletzt ' + m.last_date + (m.sum_in ? ' · +' + fmtEur(m.sum_in) : '')"></span>
+                </td>
+                <td class="px-3 py-2 text-ink-500 text-xs max-w-[260px] break-words leading-snug hidden md:table-cell" :title="m.sample" x-text="(m.sample || '—').slice(0, 90)"></td>
+                <td class="px-3 py-2 text-right tabular-nums text-ink-300 hidden sm:table-cell" x-text="m.count"></td>
+                <td class="px-2 sm:px-3 py-2 text-right tabular-nums text-rose-300 whitespace-nowrap align-top" x-text="m.sum_out ? fmtEur(-m.sum_out) : ''"></td>
+                <td class="px-3 py-2 text-right tabular-nums text-emerald-300 hidden sm:table-cell" x-text="m.sum_in ? '+' + fmtEur(m.sum_in) : ''"></td>
+                <td class="px-3 py-2 text-ink-500 text-xs tabular-nums whitespace-nowrap hidden sm:table-cell" x-text="m.last_date"></td>
+                <td class="px-2 sm:px-3 py-2 align-top">
+                  <div class="w-28 sm:w-44"><select @change="pickCategory($event, (k) => assignMerchant(m, k), '')" :disabled="busy"
+                          class="w-full rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs">
+                    <option value="">{{ t('tx.choose') }}</option>
+                    <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+                    <option value="__new__">+ Neue Kategorie …</option>
+                  </select></div>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="unresolvedLoaded && unresolved.length === 0" x-cloak>
+              <td colspan="7" class="px-3 py-6 text-center text-ink-500 text-sm">
+                Nichts mehr offen in dieser Kategorie. 🎉
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="px-4 py-2 border-t border-ink-800/60 text-xs text-ink-500 flex items-center gap-3 flex-wrap">
+        <span x-text="rules.length + ' gelernte Regel(n)'"></span>
+        <button type="button" @click="showRules = !showRules" class="underline hover:text-emerald-300"
+                x-text="showRules ? 'Regeln ausblenden' : 'Regeln anzeigen'"></button>
+        <span class="text-ink-600">·</span>
+        <button type="button" @click="showCats = !showCats" class="underline hover:text-emerald-300"
+                x-text="showCats ? 'Kategorien ausblenden' : ('Eigene Kategorien (' + customCats.length + ')')"></button>
+        <div x-show="showCats" x-cloak class="w-full mt-1 space-y-2">
+          <form @submit.prevent="addCategory()" class="flex items-center gap-2 flex-wrap">
+            <input type="text" x-model="newCatLabel" placeholder="Neue Kategorie, z. B. Hund, Garten, Hobby-Elektronik"
+                   class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-xs w-64 max-w-full">
+            <label class="flex items-center gap-1"><input type="checkbox" x-model="newCatFixed" class="rounded border-ink-700 bg-ink-900">{{ t('tx.counts_fixed') }}</label>
+            <label class="flex items-center gap-1" title="{{ t('tx.saving_cat_hint') }}"><input type="checkbox" x-model="newCatSaving" class="rounded border-ink-700 bg-ink-900"> zählt als Sparen/Anlage</label>
+            <button type="submit" :disabled="!newCatLabel.trim() || busy"
+                    class="rounded-lg px-2.5 py-1.5 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/15 disabled:opacity-50">Anlegen</button>
+          </form>
+          <div class="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+            <template x-for="c in customCats" :key="c.key">
+              <div class="flex items-center gap-2 rounded bg-ink-900/40 px-2 py-1">
+                <input type="text" :value="c.label" @change="renameCategory(c, $event.target.value)"
+                       class="flex-1 min-w-0 bg-transparent border-b border-transparent hover:border-ink-600 focus:border-emerald-500 text-ink-200 text-xs px-0.5">
+                <label class="flex items-center gap-1 text-[10px] text-ink-500" title="{{ t('tx.counts_fixed_short') }}">
+                  <input type="checkbox" :checked="c.is_fixed" @change="toggleFlag(c, 'is_fixed', $event.target.checked)" class="rounded border-ink-700 bg-ink-900"> fix
+                </label>
+                <label class="flex items-center gap-1 text-[10px] text-ink-500" title="{{ t('tx.counts_saved_short') }}">
+                  <input type="checkbox" :checked="c.is_saving" @change="toggleFlag(c, 'is_saving', $event.target.checked)" class="rounded border-ink-700 bg-ink-900"> spar
+                </label>
+                <button type="button" @click="deleteCategory(c)" class="text-ink-500 hover:text-rose-300"
+                        title="{{ t('tx.delete_cat') }}">✕</button>
+              </div>
+            </template>
+            <span x-show="!customCats.length" x-cloak class="text-ink-600">Noch keine eigenen — die eingebauten reichen oft; lege an, was dir fehlt.</span>
+          </div>
+        </div>
+        <div x-show="showRules" x-cloak class="w-full mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+          <template x-for="r in rules" :key="r.id">
+            <div class="flex items-center gap-2 rounded bg-ink-900/40 px-2 py-1">
+              <span class="text-[10px] uppercase rounded px-1"
+                    :class="r.source === 'ai' ? 'bg-violet-500/20 text-violet-200' : 'bg-emerald-500/20 text-emerald-200'"
+                    x-text="r.source === 'ai' ? 'KI' : 'du'"></span>
+              <span class="truncate flex-1 text-ink-300" :title="r.match_kind + ': ' + r.match_value"
+                    x-text="(r.sample_name || r.match_value) + (r.match_kind === 'merchant_amount' ? ' · ' + fmtEur(r.match_value.split('|').pop()) : '') + (r.match_kind === 'iban' ? ' · IBAN' : '') + (r.direction === 'in' ? ' · nur Gutschriften' : r.direction === 'out' ? ' · nur Abbuchungen' : '')"></span>
+              <span class="text-ink-400 whitespace-nowrap" x-text="'→ ' + catLabel(r.category)"></span>
+              <button type="button" @click="deleteRule(r)" class="text-ink-500 hover:text-rose-300" title="{{ t('tx.delete_rule') }}">✕</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ VORGEMERKT ============================ -->
+  <div class="card p-0 overflow-hidden border-amber-500/30" x-show="pending.length" x-cloak>
+    <button type="button" @click="showPending = !showPending"
+            class="w-full px-4 py-3 border-b border-ink-800/60 flex items-center justify-between gap-3 flex-wrap text-left">
+      <div class="text-sm">
+        <span class="inline-block text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border border-amber-500/50 text-amber-200 bg-amber-500/10 mr-2">vorgemerkt</span>
+        <span class="text-ink-200 font-medium" x-text="pending.length + ' {{ t('tx.pending_n') }}'"></span>
+        <span class="text-ink-500" x-text="'· ' + fmtEur(pendingSum) + ' — {{ t('tx.count_nowhere') }}'"></span>
+      </div>
+      <span class="text-xs text-ink-500" x-text="showPending ? 'einklappen' : 'anzeigen'"></span>
+    </button>
+    <div x-show="showPending" x-cloak>
+      <p class="px-4 pt-3 text-xs text-ink-500">
+        Kartenzahlungen erscheinen bei der Sparkasse erst als „SONSTIGER EINZUG“ mit einer Terminalnummer, die DKB meldet
+        {{ t('tx.pending_hint') }}
+      </p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <tbody>
+            <template x-for="p in pending" :key="p.id">
+              <tr class="border-t border-ink-800/50">
+                <td class="px-4 py-2 text-ink-400 tabular-nums whitespace-nowrap" x-text="p.booking_date"></td>
+                <td class="px-3 py-2 text-ink-200 break-words max-w-[260px]" x-text="p.counterparty || '—'"></td>
+                <td class="px-3 py-2 text-ink-500 text-xs break-words hidden md:table-cell" x-text="(p.purpose || '').slice(0, 90)"></td>
+                <td class="px-3 py-2 text-ink-500 text-xs whitespace-nowrap hidden lg:table-cell" x-text="(p.bank_name || '') + ' · …' + (p.iban_last4 || '')"></td>
+                <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap" :class="p.amount < 0 ? 'text-rose-300' : 'text-emerald-300'" x-text="fmtEur(p.amount)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ TX TABLE + SELECTION ============================ -->
+  <div class="card p-0 overflow-hidden">
+    <div class="px-4 py-3 border-b border-ink-800/60 flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-3 text-sm">
+        <span class="text-ink-300 font-medium">
+          <span x-text="rows.length.toLocaleString(DS_LOCALE)"></span> /
+          <span class="text-ink-500" x-text="agg.count.toLocaleString(DS_LOCALE)"></span> {{ t('tx.shown') }}
+        </span>
+        <span x-show="loading" x-cloak class="text-xs text-ink-500">lade …</span>
+        <span x-show="rows.length < agg.count + (agg.transfer_count || 0) && !loading" x-cloak>
+          <button type="button" @click="loadMore()"
+                  class="text-xs underline text-emerald-300 hover:text-emerald-200">
+            Mehr laden (+500)
+          </button>
+        </span>
+        <label class="flex items-center gap-1 text-xs text-ink-400 ml-2"
+               title="{{ t('tx.learn_hint') }}">
+          <input type="checkbox" x-model="learn" @change="saveLearn()" class="rounded border-ink-700 bg-ink-900">
+          {{ t('tx.learn_toggle') }}
+        </label>
+      </div>
+      <div x-show="selected.size > 0" x-cloak
+           class="flex items-center gap-2 text-sm rounded-lg bg-emerald-500/10 px-3 py-1.5">
+        <span class="text-emerald-200" x-text="selected.size + ' {{ t('tx.selected') }}'"></span>
+        <select x-model="bulkCategory" @change="if (bulkCategory === '__new__') { bulkCategory = ''; newCategory((k) => { bulkCategory = k; }); }"
+                class="rounded bg-ink-900/60 border border-ink-700 px-2 py-1 text-xs">
+          <option value="">{{ t('tx.pick_category') }}</option>
+          <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+          <option value="__new__">+ Neue Kategorie …</option>
+        </select>
+        <button type="button" @click="bulkApply()" :disabled="!bulkCategory || busy"
+                class="text-xs rounded px-2 py-1 bg-emerald-500/30 text-emerald-100 hover:bg-emerald-500/50 disabled:opacity-50">
+          Anwenden
+        </button>
+        <button type="button" @click="selected = new Set(); $event.stopPropagation()"
+                class="text-xs text-ink-400 hover:text-ink-200">
+          {{ t('tx.clear_selection') }}
+        </button>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-fixed sm:table-auto">
+        <thead class="text-xs uppercase tracking-wider text-ink-500 bg-ink-900/40">
+          <tr>
+            <th class="px-3 py-2 w-8">
+              <input type="checkbox" @change="toggleAll($event)"
+                     :checked="rows.length > 0 && selected.size === rows.length"
+                     class="rounded border-ink-700 bg-ink-900">
+            </th>
+            <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">{{ t('tx.date') }}</th>
+            <th class="text-left px-2 sm:px-3 py-2 font-medium">{{ t('tx.payee_col') }}</th>
+            <th class="text-left px-3 py-2 font-medium hidden md:table-cell">Verwendungszweck</th>
+            <th class="text-left px-3 py-2 font-medium hidden lg:table-cell">{{ t('tx.account') }}</th>
+            <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">{{ t('tx.category') }}</th>
+            <th class="text-left px-3 py-2 font-medium hidden sm:table-cell" title="{{ t('tx.why_hint') }}">{{ t('tx.why_col') }}</th>
+            <th class="text-right px-2 sm:px-3 py-2 font-medium w-24 sm:w-auto">{{ t('tx.amount') }}</th>
+            <th class="text-center px-2 py-2 font-medium hidden xl:table-cell" title="Quell-Kontoauszug">{{ t('tx.statement') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="tx in rows" :key="tx.id">
+            <tr class="border-t border-ink-800/50 hover:bg-ink-800/30"
+                :class="(selected.has(tx.id) ? 'bg-emerald-500/5 ' : '') + (tx.category === 'uebertrag' ? 'opacity-60' : '')">
+              <td class="px-2 sm:px-3 py-2 align-middle">
+                <input type="checkbox" :checked="selected.has(tx.id)"
+                       @change="toggleRow(tx.id)"
+                       class="rounded border-ink-700 bg-ink-900">
+              </td>
+              <td class="px-3 py-2 tabular-nums text-ink-300 whitespace-nowrap hidden sm:table-cell" x-text="tx.booking_date || '—'"></td>
+              <td class="px-2 sm:px-3 py-2 font-medium max-w-[220px] min-w-0 [overflow-wrap:anywhere]">
+                <template x-if="tx.has_doc">
+                  <a :href="'/document/' + tx.doc_id" class="hover:text-emerald-300 block break-words leading-snug" :title="tx.counterparty" x-text="tx.counterparty || '—'"></a>
+                </template>
+                <template x-if="!tx.has_doc">
+                  <span class="block break-words leading-snug" :title="tx.counterparty" x-text="tx.counterparty || '—'"></span>
+                </template>
+                <span class="block text-[11px] text-ink-500 md:hidden" x-text="(tx.purpose || '').slice(0, 80)"></span>
+                <!-- phone: date, reason badge and the category picker live under the name -->
+                <div class="sm:hidden mt-1 flex items-center gap-2 flex-wrap">
+                  <span class="text-[11px] tabular-nums text-ink-400" x-text="tx.booking_date || '—'"></span>
+                  <button type="button" @click="explain(tx)" class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border"
+                          :class="badgeClass(tx.category_source)" x-text="badgeLabel(tx.category_source)"></button>
+                  <select x-effect="const v = tx.category || ''; $nextTick(() => { $el.value = v; })" @change="pickCategory($event, (k) => setRowCategory(tx, k), tx.category)"
+                          class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-0.5 text-xs max-w-[9rem]">
+                    <option value="">—</option>
+                    <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+                    <option value="__new__">+ Neue Kategorie …</option>
+                  </select>
+                </div>
+              </td>
+              <td class="px-3 py-2 text-ink-400 max-w-[260px] text-xs leading-snug break-words hidden md:table-cell" :title="tx.purpose" x-text="(tx.purpose || '').slice(0, 140) + ((tx.purpose || '').length > 140 ? ' …' : '')"></td>
+              <td class="px-3 py-2 text-ink-500 text-xs whitespace-nowrap hidden lg:table-cell">
+                <span x-text="tx.bank_name || '—'"></span>
+                <template x-if="tx.iban_last4"><span> · …<span x-text="tx.iban_last4"></span></span></template>
+              </td>
+              <td class="px-3 py-2 hidden sm:table-cell">
+                <select x-effect="const v = tx.category || ''; $nextTick(() => { $el.value = v; })" @change="pickCategory($event, (k) => setRowCategory(tx, k), tx.category)"
+                        class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs max-w-[11rem]">
+                  <option value="">—</option>
+                  <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+                  <option value="__new__">+ Neue Kategorie …</option>
+                </select>
+              </td>
+              <td class="px-3 py-2 whitespace-nowrap hidden sm:table-cell">
+                <button type="button" @click="explain(tx)"
+                        class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border"
+                        :class="badgeClass(tx.category_source)"
+                        :title="tx.category_reason || '{{ t('tx.no_reason') }}'"
+                        x-text="badgeLabel(tx.category_source)"></button>
+              </td>
+              <td class="px-2 sm:px-3 py-2 text-right tabular-nums whitespace-nowrap align-top"
+                  :class="tx.category === 'uebertrag' ? 'text-sky-300' : (tx.amount < 0 ? 'text-rose-300' : 'text-emerald-300')">
+                <span x-text="(tx.amount > 0 ? '+' : '') + fmtEur(tx.amount)"></span>
+                <span x-show="tx.category === 'uebertrag'" x-cloak class="text-[10px] text-sky-400/80 block" x-text="tx.synthetic ? '{{ t('tx.synthetic_added') }}' : '{{ t('tx.not_counted_short') }}'"></span>
+              </td>
+              <td class="px-2 py-2 text-center whitespace-nowrap hidden xl:table-cell">
+                <template x-if="tx.doc_id && tx.has_doc">
+                  <a :href="'/document/' + tx.doc_id"
+                     class="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-emerald-300 underline decoration-dotted underline-offset-2"
+                     :title="'{{ t('tx.source_statement') }} ' + tx.doc_id">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         class="h-3.5 w-3.5">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+                    </svg>
+                    PDF
+                  </a>
+                </template>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!loading && rows.length === 0" x-cloak>
+            <td colspan="9" class="px-3 py-10 text-center text-ink-500 text-sm">
+              {{ t('tx.no_bookings') }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div x-show="message" x-cloak
+       class="rounded-lg px-3 py-2 text-sm"
+       :class="messageOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+       x-text="message"></div>
+
+  <!-- reasoning behind a booking -->
+  <div x-show="explainTx" x-cloak @click.self="explainTx = null"
+       class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
+    <div class="card p-5 max-w-lg w-full space-y-2" x-show="explainTx">
+      <div class="flex items-start justify-between gap-3">
+        <h3 class="font-semibold">Warum diese Kategorie?</h3>
+        <button type="button" @click="explainTx = null" class="text-ink-500 hover:text-ink-200">✕</button>
+      </div>
+      <template x-if="explainTx">
+        <div class="text-sm space-y-2">
+          <div class="text-ink-300"><span x-text="explainTx.booking_date"></span> · <b x-text="explainTx.counterparty || '—'"></b>
+            · <span :class="explainTx.amount < 0 ? 'text-rose-300' : 'text-emerald-300'" x-text="(explainTx.amount > 0 ? '+' : '') + fmtEur(explainTx.amount)"></span></div>
+          <div class="text-ink-500 text-xs" x-text="explainTx.purpose"></div>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border" :class="badgeClass(explainTx.category_source)" x-text="badgeLabel(explainTx.category_source)"></span>
+            <span class="font-medium" x-text="catLabel(explainTx.category || 'sonstiges')"></span>
+          </div>
+          <p class="text-ink-200" x-text="explainTx.category_reason || '{{ t('tx.no_reason_long') }}'"></p>
+          <p class="text-ink-500 text-xs">
+            {{ t('tx.counts_as') }}
+            <b class="text-ink-300" x-text="explainTx.category === 'uebertrag' ? 'Umbuchung (weder Einnahme noch Ausgabe)' : (explainTx.amount < 0 ? 'Ausgabe' : 'Einnahme')"></b>
+            <span x-show="explainTx.is_savings" x-cloak>{{ t('tx.on_savings_account') }}</span>
+          </p>
+          <p class="text-ink-500 text-xs">Rangfolge: Hand › Umbuchung (IBAN) › gelernte Regel › KI-Vorschlag › eingebaute Erkennung › Buchungstyp der Bank › offen.</p>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<script>
+function txExplorer() {
+  return {
+    filter: {
+      q: '', account_id: '', category: '', direction: '',
+      start: '', end: '', amount_min: '', amount_max: '',
+    },
+    rows: [],
+    agg: { count: 0, sum_in: 0, sum_out: 0, sum_net: 0,
+           top_expense: [], top_income: [], monthly: [], by_category: [],
+           first_date: '', last_date: '' },
+    selected: new Set(),
+    bulkCategory: '',
+    loading: false,
+    busy: false,
+    message: '',
+    messageOk: false,
+    pageSize: 500,
+    offset: 0,
+    // v0.43 — salary month, learning, the 'Other' panel, reasoning
+    periods: [],
+    salaryPeriod: '',
+    anchorDay: 23,
+    learn: true,
+    unresolved: [],
+    unresolvedCat: 'sonstiges',
+    unresolvedInRange: false,
+    unresolvedLoaded: false,
+    showUnresolved: false,
+    rules: [],
+    showRules: false,
+    ai: { running: false, done: 0, total: 0, available: false },
+    explainTx: null,
+    sourceLabels: {{ source_labels | tojson }},
+    cats: {{ tx_categories | tojson }},
+    pending: [], showPending: false,
+    customCats: {{ custom_categories | tojson }},
+    showCats: false,
+    newCatLabel: '',
+    newCatFixed: false,
+    newCatSaving: false,
+    // Bumped on every reload so a slow earlier request can't overwrite
+    // the result of a faster later one. Without this, typing a query and
+    // then quickly applying a date preset gives an aggregate from the
+    // no-date query but a row list from the dated one — visibly
+    // inconsistent (count: 183 / rows: 1).
+    _reqToken: 0,
+
+    periodPresets: [
+      { label: 'Heute',            fn: 'today'     },
+      { label: 'Gestern',          fn: 'yesterday' },
+      { label: 'Aktueller Monat',  fn: 'thisMonth', salary: 'Aktueller Gehaltsmonat' },
+      { label: 'Letzter Monat',    fn: 'lastMonth', salary: 'Letzter Gehaltsmonat' },
+      { label: 'Letzte 12 Monate', fn: 'last12m'   },
+      { label: 'Dieses Jahr',      fn: 'thisYear'  },
+      { label: 'Alle',             fn: 'all'       },
+    ],
+
+    // True iff the filter is currently scoped to a single day —
+    // exposes that to the "Bestimmter Tag" picker so it round-trips.
+    get oneDay() {
+      return (this.filter.start && this.filter.start === this.filter.end)
+        ? this.filter.start : '';
+    },
+
+    get parsedTokens() {
+      return (this.filter.q || '')
+        .split(',').map(t => t.trim()).filter(Boolean);
+    },
+
+    get monthlyChart() {
+      const m = this.agg.monthly || [];
+      const colWidth = 36;
+      const height = 120;
+      const halfH = (height - 18) / 2;
+      const zeroY = halfH + 4;
+      const maxAbs = Math.max(
+        1,
+        ...m.map(x => Math.max(Math.abs(x.sum_in || 0), Math.abs(x.sum_out || 0)))
+      );
+      return { colWidth, height, halfH, zeroY, maxAbs, width: m.length * colWidth };
+    },
+
+    get monthlySvg() {
+      const m = this.agg.monthly || [];
+      const c = this.monthlyChart;
+      if (!m.length) return '';
+      const esc = (t) => String(t).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+      let out = `<svg width="${Math.max(c.width, 320)}" height="${c.height}" class="block">`;
+      m.forEach((x, i) => {
+        const hIn  = ((x.sum_in || 0) / c.maxAbs) * c.halfH;
+        const hOut = (Math.abs(x.sum_out || 0) / c.maxAbs) * c.halfH;
+        const x0 = i * c.colWidth + 4, w = c.colWidth - 8;
+        out += `<g data-month="${esc(x.month)}" class="cursor-pointer"><title>${esc(x.month)}: +${this.fmtEur(x.sum_in)} / ${this.fmtEur(x.sum_out)} (${x.n})</title>`;
+        out += `<rect x="${x0}" y="${c.zeroY - hIn}" width="${w}" height="${hIn}" fill="#34d399" opacity="0.85"></rect>`;
+        out += `<rect x="${x0}" y="${c.zeroY}" width="${w}" height="${hOut}" fill="#fb7185" opacity="0.85"></rect>`;
+        out += `<text x="${i * c.colWidth + c.colWidth / 2}" y="${c.height - 4}" text-anchor="middle" fill="#94a3b8" font-size="10">${esc(x.month.slice(2))}</text></g>`;
+      });
+      out += `<line x1="0" x2="${m.length * c.colWidth}" y1="${c.zeroY}" y2="${c.zeroY}" stroke="#475569" stroke-width="1"></line></svg>`;
+      return out;
+    },
+
+    fmtEur(v) {
+      const n = Number(v) || 0;
+      return n.toLocaleString(DS_LOCALE,
+        { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 });
+    },
+    catLabel(key) { return catLabel(key); },
+
+    // ---- eigene Kategorien ----
+    pickCategory(ev, apply, previous) {
+      const v = ev.target.value;
+      if (v === '__new__') {
+        ev.target.value = previous || '';
+        this.newCategory((k) => { ev.target.value = k; apply(k); });
+        return;
+      }
+      apply(v);
+    },
+    newCategory(then) {
+      const label = window.prompt('Name der neuen Kategorie:');
+      if (!label || !label.trim()) return;
+      const fixed = window.confirm('{{ t('tx.counts_q') }}' + label.trim() + '{{ t('tx.fixed_q') }}');
+      const saving = window.confirm('Ist „' + label.trim() + '“ Sparen/Anlage (Geld nicht weg, nur woanders)? (OK = ja, Abbrechen = nein)');
+      this.createCategory(label.trim(), fixed, saving).then((c) => { if (c) then(c.key); });
+    },
+    async createCategory(label, isFixed, isSaving) {
+      try {
+        const r = await fetch('/api/finance/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, is_fixed: !!isFixed, is_saving: !!isSaving }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.applyCategoryList(d);
+        this.flash(true, `Kategorie „${d.category.label}“ angelegt.`);
+        return d.category;
+      } catch (e) { this.flash(false, e.message || String(e)); return null; }
+    },
+    applyCategoryList(d) {
+      if (d.keys) this.cats = d.keys;
+      if (d.labels) Object.assign(CAT_LABELS, d.labels);
+      this.loadCustomCats();
+    },
+    async loadCustomCats() {
+      try { const r = await fetch('/api/finance/categories'); const d = await r.json(); this.customCats = d.custom || []; this.cats = d.keys || this.cats; Object.assign(CAT_LABELS, d.labels || {}); } catch {}
+    },
+    async addCategory() {
+      const c = await this.createCategory(this.newCatLabel, this.newCatFixed, this.newCatSaving);
+      if (c) { this.newCatLabel = ''; this.newCatFixed = false; this.newCatSaving = false; }
+    },
+    async renameCategory(c, label) {
+      if (!label.trim() || label.trim() === c.label) return;
+      try {
+        const r = await fetch('/api/finance/categories/' + encodeURIComponent(c.key), { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: label.trim() }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.applyCategoryList(d); this.flash(true, 'Umbenannt.'); this.reload();
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+    async toggleFlag(c, flag, on) {
+      try {
+        const r = await fetch('/api/finance/categories/' + encodeURIComponent(c.key), { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [flag]: !!on }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.loadCustomCats();
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+    async deleteCategory(c) {
+      if (!window.confirm(`„${c.label}“ {{ t('tx.delete_cat_q') }}`)) return;
+      try {
+        const r = await fetch('/api/finance/categories/' + encodeURIComponent(c.key), { method: 'DELETE' });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.applyCategoryList(d);
+        this.flash(true, `{{ t('tx.deleted') }} ${d.bookings} {{ t('tx.back_to_other') }} ${d.rules} {{ t('tx.rules_removed') }}`);
+        this.reload(); this.loadRules(); if (this.unresolvedLoaded) this.loadUnresolved();
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+
+    init() {
+      // Parse the URL once on entry so links from /finance ("show all
+      // for this category") drop the user into a pre-filtered view.
+      const u = new URL(location.href);
+      for (const k of Object.keys(this.filter)) {
+        const v = u.searchParams.get(k);
+        if (v !== null) this.filter[k] = v;
+      }
+      try { this.learn = localStorage.getItem('docusort-learn') !== '0'; } catch {}
+      this.reload();
+      this.loadPeriods();
+      this.loadRules();
+      this.loadPending();
+      this.pollAi(true);
+      if (u.searchParams.get('open') === 'sonstiges') { this.showUnresolved = true; this.loadUnresolved(); }
+    },
+
+    async loadPending() {
+      try { const r = await fetch('/api/finance/pending'); const d = await r.json(); this.pending = d.pending || []; } catch { this.pending = []; }
+    },
+    get pendingSum() { return this.pending.reduce((a, p) => a + (p.amount || 0), 0); },
+    get unresolvedCount() { return this.unresolved.reduce((a, m) => a + (m.count || 0), 0); },
+    get unresolvedSum()   { return this.unresolved.reduce((a, m) => a + (m.sum_out || 0) + (m.sum_in || 0), 0); },
+
+    badgeLabel(src) { return this.sourceLabels[src || 'none'] || (src || 'offen'); },
+    badgeClass(src) {
+      return ({
+        manual:   'border-emerald-500/50 text-emerald-200 bg-emerald-500/10',
+        transfer: 'border-sky-500/50 text-sky-200 bg-sky-500/10',
+        rule:     'border-emerald-500/40 text-emerald-300 bg-emerald-500/5',
+        ai:       'border-violet-500/50 text-violet-200 bg-violet-500/10',
+        keyword:  'border-ink-600 text-ink-300 bg-ink-800/40',
+        bank:     'border-ink-600 text-ink-400 bg-ink-800/40',
+        import:   'border-amber-500/40 text-amber-200 bg-amber-500/10',
+      })[src || 'none'] || 'border-rose-500/40 text-rose-200 bg-rose-500/10';
+    },
+    explain(tx) { this.explainTx = tx; },
+    saveLearn() { try { localStorage.setItem('docusort-learn', this.learn ? '1' : '0'); } catch {} },
+
+    async loadPeriods() {
+      try {
+        const r = await fetch('/api/finance/periods');
+        const d = await r.json();
+        this.periods = d.periods || [];
+        this.anchorDay = d.anchor_day || 23;
+        // Reflect the active filter in the picker when it matches a period.
+        const hit = this.periods.find(p => p.start === this.filter.start && p.end === this.filter.end);
+        this.salaryPeriod = hit ? (hit.start + '|' + hit.end) : '';
+      } catch {}
+    },
+    applySalaryPeriod() {
+      if (!this.salaryPeriod) return;
+      const [a, b] = this.salaryPeriod.split('|');
+      this.filter.start = a; this.filter.end = b;
+      this.reload();
+      if (this.unresolvedInRange) this.loadUnresolved();
+    },
+    async saveAnchorDay() {
+      const day = Math.max(1, Math.min(31, parseInt(this.anchorDay, 10) || 23));
+      this.anchorDay = day;
+      try {
+        const r = await fetch('/api/settings/finance', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ period_anchor_day: day }) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        this.flash(true, `Monatsanfang auf den ${day}. gesetzt — Gehaltsmonate neu berechnet.`);
+        await this.loadPeriods();
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+
+    toggleUnresolved() {
+      this.showUnresolved = !this.showUnresolved;
+      if (this.showUnresolved && !this.unresolvedLoaded) this.loadUnresolved();
+    },
+    async loadUnresolved() {
+      const p = new URLSearchParams({ category: this.unresolvedCat, limit: 400 });
+      if (this.unresolvedInRange) {
+        if (this.filter.start) p.set('start', this.filter.start);
+        if (this.filter.end) p.set('end', this.filter.end);
+      }
+      try {
+        const r = await fetch('/api/finance/unresolved?' + p.toString());
+        const d = await r.json();
+        this.unresolved = d.merchants || [];
+        this.unresolvedLoaded = true;
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+    async loadRules() {
+      try { const r = await fetch('/api/finance/rules'); const d = await r.json(); this.rules = d.rules || []; } catch {}
+    },
+    async assignMerchant(m, cat) {
+      if (!cat) return;
+      this.busy = true;
+      try {
+        const kind = m.key.startsWith('iban:') ? 'iban' : 'merchant';
+        const value = kind === 'iban' ? m.key.slice(5) : m.key;
+        if (m.key.startsWith('purpose:')) throw new Error('{{ t('tx.no_payee_learn') }}');
+        const r = await fetch('/api/finance/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind, value, category: cat, name: m.name, iban: m.iban || '' }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        m._done = true;
+        this.flash(true, `„${m.name}“ → ${this.catLabel(cat)}: ${d.applied} Buchung(en) zugeordnet, Regel gemerkt.`);
+        this.loadRules();
+        this.reload();
+        setTimeout(() => this.loadUnresolved(), 300);
+      } catch (e) { this.flash(false, e.message || String(e)); }
+      finally { this.busy = false; }
+    },
+    async deleteRule(r) {
+      try {
+        const res = await fetch('/api/finance/rules/' + r.id, { method: 'DELETE' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || ('HTTP ' + res.status));
+        this.flash(true, `{{ t('tx.rule_deleted') }} ${d.reverted} {{ t('tx.fall_back') }}`);
+        this.loadRules(); this.reload(); if (this.unresolvedLoaded) this.loadUnresolved();
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+    async reclassify() {
+      this.busy = true;
+      try {
+        const r = await fetch('/api/finance/reclassify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.flash(true, `{{ t('tx.detection_ran') }} ${d.changed} {{ t('tx.cats_changed') }} ${d.explained} {{ t('tx.reasons_added') }} ${d.kept} {{ t('tx.unchanged') }}`);
+        this.reload(); if (this.unresolvedLoaded) this.loadUnresolved();
+      } catch (e) { this.flash(false, e.message || String(e)); }
+      finally { this.busy = false; }
+    },
+    async aiCategorize() {
+      try {
+        const r = await fetch('/api/finance/ai-categorize', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: this.unresolvedCat }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        if (!d.started) { this.flash(true, d.reason === 'nothing to classify' ? '{{ t('tx.nothing_for_ai') }}' : '{{ t('tx.ai_running') }}'); }
+        this.pollAi(false);
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+    async pollAi(once) {
+      try {
+        const r = await fetch('/api/finance/ai-progress');
+        const d = await r.json();
+        const was = this.ai.running;
+        this.ai = { running: !!d.running, done: d.done || 0, total: d.total || 0, available: !!d.available };
+        if (was && !d.running) {
+          this.flash(true, d.last_error ? ('{{ t('tx.ai_error') }} ' + d.last_error) : '{{ t('tx.ai_done') }}');
+          this.loadRules(); this.reload(); if (this.unresolvedLoaded) this.loadUnresolved();
+        }
+        if (d.running && !once) setTimeout(() => this.pollAi(false), 1500);
+        else if (d.running && once) setTimeout(() => this.pollAi(false), 1500);
+      } catch {}
+    },
+
+    pushUrl() {
+      const u = new URL(location.href);
+      for (const [k, v] of Object.entries(this.filter)) {
+        if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);
+      }
+      history.replaceState(null, '', u);
+    },
+
+    queryParams(extra) {
+      const p = new URLSearchParams();
+      for (const [k, v] of Object.entries(this.filter)) {
+        if (v) p.set(k, v);
+      }
+      if (extra) for (const [k, v] of Object.entries(extra)) p.set(k, v);
+      return p;
+    },
+
+    async reload() {
+      this.offset = 0;
+      this.selected = new Set();
+      this.pushUrl();
+      this.loading = true;
+      const token = ++this._reqToken;
+      try {
+        const p = this.queryParams({ limit: this.pageSize, offset: 0, with_aggregates: 1 });
+        const r = await fetch('/api/transactions/search?' + p.toString());
+        const d = await r.json();
+        // A newer reload started while we were waiting — drop this
+        // result on the floor so we don't overwrite the fresh state.
+        if (token !== this._reqToken) return;
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.rows = d.transactions || [];
+        if (d.aggregate) this.agg = d.aggregate;
+      } catch (e) {
+        if (token === this._reqToken) this.flash(false, e.message || String(e));
+      } finally {
+        if (token === this._reqToken) this.loading = false;
+      }
+    },
+
+    async loadMore() {
+      if (this.rows.length >= this.agg.count) return;
+      this.loading = true;
+      const token = this._reqToken;  // tied to the current page state
+      try {
+        this.offset = this.rows.length;
+        const p = this.queryParams({ limit: this.pageSize, offset: this.offset, with_aggregates: 0 });
+        const r = await fetch('/api/transactions/search?' + p.toString());
+        const d = await r.json();
+        // Filter changed underneath us — abandon this page since it
+        // belongs to a different filter.
+        if (token !== this._reqToken) return;
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.rows = this.rows.concat(d.transactions || []);
+      } catch (e) {
+        if (token === this._reqToken) this.flash(false, e.message || String(e));
+      } finally {
+        if (token === this._reqToken) this.loading = false;
+      }
+    },
+
+    appendToken(name) {
+      if (!name) return;
+      const tokens = new Set(this.parsedTokens.map(t => t.toLowerCase()));
+      if (!tokens.has(name.toLowerCase())) {
+        this.filter.q = this.parsedTokens.concat([name]).join(', ');
+      }
+      this.reload();
+    },
+    removeToken(name) {
+      this.filter.q = this.parsedTokens
+        .filter(t => t.toLowerCase() !== name.toLowerCase())
+        .join(', ');
+      this.reload();
+    },
+
+    setOneDay(date) {
+      // Sets start = end = the picked day, so the table shows
+      // exactly that day's bookings in one shot.
+      if (!date) { this.filter.start = ''; this.filter.end = ''; }
+      else { this.filter.start = date; this.filter.end = date; }
+      this.reload();
+    },
+
+    applyPreset(p) {
+      const today = new Date();
+      // Local calendar date — toISOString() is UTC and turns a local
+      // midnight into the day before (Europe/Berlin: 01.08. → 31.07.).
+      const fmt = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      // With salary months known, "this / last month" means Gehalt bis
+      // Gehalt — the same periods as the picker and /ausgaben.
+      const cur = this.periods.find(x => x.is_current);
+      if (cur && (p.fn === 'thisMonth' || p.fn === 'lastMonth')) {
+        const idx = this.periods.indexOf(cur);
+        const per = p.fn === 'thisMonth' ? cur : this.periods[idx + 1];   // newest first
+        if (per) {
+          this.filter.start = per.start; this.filter.end = per.end;
+          this.salaryPeriod = per.start + '|' + per.end;
+          this.reload();
+          return;
+        }
+      }
+      if (p.fn === 'today')      { this.filter.start = fmt(today); this.filter.end = fmt(today); }
+      if (p.fn === 'yesterday')  {
+        const y = new Date(today); y.setDate(y.getDate() - 1);
+        this.filter.start = fmt(y); this.filter.end = fmt(y);
+      }
+      if (p.fn === 'all')        { this.filter.start = ''; this.filter.end = ''; }
+      if (p.fn === 'thisYear')   { this.filter.start = today.getFullYear() + '-01-01'; this.filter.end = ''; }
+      if (p.fn === 'last12m')    {
+        const d = new Date(today); d.setMonth(d.getMonth() - 12);
+        this.filter.start = fmt(d); this.filter.end = '';
+      }
+      if (p.fn === 'thisMonth')  {
+        this.filter.start = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-01';
+        this.filter.end = '';
+      }
+      if (p.fn === 'lastMonth')  {
+        const last = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const end  = new Date(today.getFullYear(), today.getMonth(), 0);
+        this.filter.start = fmt(last); this.filter.end = fmt(end);
+      }
+      this.reload();
+    },
+    zoomMonth(month) {
+      // month is YYYY-MM — set start/end to that calendar month.
+      const [y, mo] = month.split('-').map(Number);
+      const last = new Date(y, mo, 0).getDate();
+      this.filter.start = month + '-01';
+      this.filter.end   = month + '-' + String(last).padStart(2, '0');
+      this.reload();
+    },
+
+    reset() {
+      this.filter = { q: '', account_id: '', category: '', direction: '',
+                      start: '', end: '', amount_min: '', amount_max: '' };
+      this.reload();
+    },
+
+    toggleRow(id) {
+      const s = new Set(this.selected);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      this.selected = s;
+    },
+    toggleAll(ev) {
+      this.selected = ev.target.checked
+        ? new Set(this.rows.map(r => r.id))
+        : new Set();
+    },
+
+    async setRowCategory(tx, cat) {
+      if (!cat) return;
+      try {
+        const r = await fetch('/api/transactions/categorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [tx.id], category: cat, learn: this.learn }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        tx.category = cat; tx.category_source = 'manual'; tx.category_reason = '{{ t('tx.by_hand') }}';
+        if (this.learn && d.rules) {
+          const who = (d.merchants || [tx.counterparty])[0] || '—';
+          this.flash(true, d.scope === 'amount'
+            ? `„${who}“ ` + '{{ t('tx.learned_amount') }}'.replace('{amt}', this.fmtEur(d.amount)).replace('{cat}', this.catLabel(cat)) + ` ${d.applied} {{ t('tx.more_adjusted') }}`
+            : `„${who}“ ` + '{{ t('tx.learned_all') }}'.replace('{cat}', this.catLabel(cat)) + ` ${d.applied} {{ t('tx.more_bookings_adjusted') }}`);
+          this.loadRules();
+          this.reload();
+        } else {
+          this.flash(true, '{{ t('tx.one_recat') }}');
+          this.reloadAggOnly();
+        }
+        if (this.unresolvedLoaded) this.loadUnresolved();
+      } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+
+    async bulkApply() {
+      if (!this.bulkCategory || this.selected.size === 0) return;
+      const ids = Array.from(this.selected);
+      const cat = this.bulkCategory;
+      this.busy = true;
+      try {
+        const r = await fetch('/api/transactions/categorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids, category: cat, learn: this.learn }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        for (const row of this.rows) {
+          if (this.selected.has(row.id)) { row.category = cat; row.category_source = 'manual'; }
+        }
+        this.selected = new Set();
+        this.bulkCategory = '';
+        this.flash(true, `${d.updated} Buchung(en) auf "${this.catLabel(cat)}" gesetzt` +
+          (this.learn && d.rules ? `, ${d.rules} Regel(n) gelernt, ${d.applied} weitere angepasst.` : '.'));
+        if (this.learn && d.rules) { this.loadRules(); this.reload(); } else { this.reloadAggOnly(); }
+        if (this.unresolvedLoaded) this.loadUnresolved();
+      } catch (e) {
+        this.flash(false, e.message || String(e));
+      } finally { this.busy = false; }
+    },
+
+    async reloadAggOnly() {
+      const token = this._reqToken;
+      try {
+        const p = this.queryParams({ limit: 0, offset: 0, with_aggregates: 1 });
+        const r = await fetch('/api/transactions/search?' + p.toString());
+        const d = await r.json();
+        if (token !== this._reqToken) return;  // user moved on
+        if (r.ok && d.aggregate) this.agg = d.aggregate;
+      } catch {}
+    },
+
+    flash(ok, msg) {
+      this.message = msg; this.messageOk = ok;
+      setTimeout(() => { this.message = ''; }, 3500);
+    },
+  };
+}
+</script>
+
+{% endblock %}

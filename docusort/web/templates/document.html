@@ -1,0 +1,800 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.subject or doc.filename }} · DocuSort{% endblock %}
+{% block content %}
+
+{# Build the sibling-nav query string once so prev / next links keep
+   the active filter in the URL (lets the user F5 / share the link
+   and stay in the same slice). #}
+{% set _nav_parts = [] %}
+{% if nav_filters.category    %}{% set _ = _nav_parts.append('category='    ~ nav_filters.category    | urlencode) %}{% endif %}
+{% if nav_filters.subcategory %}{% set _ = _nav_parts.append('subcategory=' ~ nav_filters.subcategory | urlencode) %}{% endif %}
+{% if nav_filters.tag         %}{% set _ = _nav_parts.append('tag='         ~ nav_filters.tag         | urlencode) %}{% endif %}
+{% if nav_filters.status      %}{% set _ = _nav_parts.append('status='      ~ nav_filters.status      | urlencode) %}{% endif %}
+{% if nav_filters.year        %}{% set _ = _nav_parts.append('year='        ~ nav_filters.year        | urlencode) %}{% endif %}
+{% if nav_filters.q           %}{% set _ = _nav_parts.append('q='           ~ nav_filters.q           | urlencode) %}{% endif %}
+{% if nav_filters.trash       %}{% set _ = _nav_parts.append('trash=1') %}{% endif %}
+{% set _nav_qs = ('?' ~ _nav_parts | join('&')) if _nav_parts else '' %}
+
+<div class="mb-6 flex items-start gap-3"
+     x-data='{
+       prevId: {{ siblings.prev_id or "null" }},
+       nextId: {{ siblings.next_id or "null" }},
+       navQs:  {{ _nav_qs | tojson }},
+       go(id) {
+         if (id) window.location.href = "/document/" + id + this.navQs;
+       },
+     }'
+     @keydown.window.arrow-left.prevent="go(prevId)"
+     @keydown.window.arrow-right.prevent="go(nextId)">
+  {%- set back_year = (doc.doc_date or doc.created_at)[:4] -%}
+  <a href="/library?year={{ back_year }}&category={{ doc.category }}{% if doc.subcategory %}&subcategory={{ doc.subcategory }}{% endif %}"
+     onclick="if (window.history.length > 1 && document.referrer) { event.preventDefault(); window.history.back(); }"
+     class="btn-ghost shrink-0">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <path d="m15 18-6-6 6-6"/>
+    </svg>
+    {{ t('document.back') }}
+  </a>
+
+  {# Sibling navigation: ←/→ buttons + position counter. Only render
+     when there's actually a sibling list (more than one doc in the
+     current filter), otherwise the chrome is just noise. #}
+  {% if siblings.total and siblings.total > 1 %}
+  <div class="hidden sm:flex items-center gap-1.5 shrink-0 ml-1">
+    <button type="button"
+            @click="go(prevId)"
+            :disabled="!prevId"
+            :class="!prevId ? 'opacity-30 cursor-not-allowed' : ''"
+            class="btn-ghost !p-1.5"
+            :title="(T['document.nav.prev'] || 'Older ({pos}/{total})')
+                     .replace('{pos}', {{ siblings.position or 0 }})
+                     .replace('{total}', {{ siblings.total }})">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="m15 18-6-6 6-6"/>
+      </svg>
+    </button>
+    <span class="text-xs text-ink-400 tabular-nums px-1 select-none whitespace-nowrap">
+      {{ siblings.position or '—' }} / {{ siblings.total }}
+    </span>
+    <button type="button"
+            @click="go(nextId)"
+            :disabled="!nextId"
+            :class="!nextId ? 'opacity-30 cursor-not-allowed' : ''"
+            class="btn-ghost !p-1.5"
+            :title="(T['document.nav.next'] || 'Newer ({pos}/{total})')
+                     .replace('{pos}', {{ siblings.position or 0 }})
+                     .replace('{total}', {{ siblings.total }})">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="m9 18 6-6-6-6"/>
+      </svg>
+    </button>
+  </div>
+  {% endif %}
+  <div class="flex-1 min-w-0">
+    <div class="flex flex-wrap gap-2 mb-2">
+      <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ cat(doc.category) }}{% if doc.subcategory %} · {{ sub(doc.category, doc.subcategory) }}{% endif %}</span>
+      {% for tag in doc.tags_list %}
+        <a href="/library?tag={{ tag }}"
+           class="chip bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/20 hover:bg-sky-500/20">#{{ tag }}</a>
+      {% endfor %}
+      {% if doc.status == 'review' %}<span class="chip bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20">{{ t('card.review') }}</span>{% endif %}
+      {% if doc.status == 'failed' %}<span class="chip bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/20">{{ t('card.failed') }}</span>{% endif %}
+      {% if doc.status == 'duplicate' %}<span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">{{ t('card.duplicate') }}</span>{% endif %}
+      {% if doc.ocr_used %}<span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">{{ t('card.ocr') }}</span>{% endif %}
+    </div>
+    <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">{{ doc.subject or doc.filename }}</h1>
+    <div class="text-ink-300 mt-1">{{ doc.sender or '—' }}</div>
+  </div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-[1fr_380px] items-start">
+
+  <!-- Preview -->
+  <div class="card overflow-hidden lg:sticky lg:top-4">
+    {% if doc.library_path.lower().endswith('.pdf') %}
+      <div class="relative group">
+        <iframe src="/document/{{ doc.id }}/file#toolbar=0&view=Fit"
+                class="w-full bg-white h-[40vh] sm:h-[55vh] lg:h-[calc(100vh-6rem)]"
+                title="PDF Preview"></iframe>
+        <!-- tap overlay: mobile only. Desktop users have the button below. -->
+        <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
+           class="absolute inset-0 sm:hidden"
+           aria-label="{{ t('document.fullscreen') }}"></a>
+        <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
+           class="absolute top-2 right-2 btn-secondary !py-1.5 !px-2.5 text-xs opacity-0 group-hover:opacity-100 transition shadow-lg">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+            <path d="M3 7V3h4M21 7V3h-4M3 17v4h4M21 17v4h-4"/>
+          </svg>
+          {{ t('document.fullscreen') }}
+        </a>
+      </div>
+    {% else %}
+      <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener" class="block">
+        <img src="/document/{{ doc.id }}/file" alt="{{ doc.filename }}"
+             class="w-full max-h-[60vh] object-contain bg-white">
+      </a>
+    {% endif %}
+    <div class="p-3 flex items-center justify-between gap-2 text-xs text-ink-400 border-t border-ink-700/50">
+      <span class="truncate min-w-0">{{ doc.filename }}</span>
+      <div class="flex items-center gap-1 shrink-0">
+        <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
+           class="btn-ghost sm:hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path d="M3 7V3h4M21 7V3h-4M3 17v4h4M21 17v4h-4"/>
+          </svg>
+          {{ t('document.fullscreen') }}
+        </a>
+        <a href="/document/{{ doc.id }}/file?download=true" class="btn-ghost">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>
+          {{ t('document.download') }}
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <aside class="space-y-4" x-data="retryWidget({{ doc.id }})">
+
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('document.meta') }}</h2>
+      <dl class="text-sm space-y-2">
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.date') }}</dt><dd class="tabular-nums">{{ doc.doc_date or '—' }}</dd></div>
+        {% if doc.due_date %}
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.due.label') }}</dt>
+          <dd class="tabular-nums text-amber-300">
+            {{ doc.due_date }}{% if doc.due_kind == 'zahlung' %} · {{ t('document.due.zahlung_short') }}{% elif doc.due_kind == 'kuendigung' %} · {{ t('document.due.kuendigung_short') }}{% endif %}
+          </dd>
+        </div>
+        {% endif %}
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.confidence') }}</dt>
+          <dd class="tabular-nums {% if doc.confidence < 0.65 %}text-amber-300{% else %}text-emerald-300{% endif %}">
+            {{ '%.0f'|format(doc.confidence * 100) }} %
+          </dd>
+        </div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.status') }}</dt><dd>{{ doc.status }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.pages') }}</dt><dd class="tabular-nums">{{ doc.page_count or '—' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.size') }}</dt><dd class="tabular-nums">{{ doc.file_size | human_size }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.original') }}</dt><dd class="text-right truncate">{{ doc.original_name }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.processed') }}</dt><dd class="tabular-nums">{{ doc.created_at[:16].replace('T', ' ') }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('document.costs') }}</h2>
+      <dl class="text-sm space-y-2">
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.model') }}</dt><dd class="font-mono text-xs">{{ doc.model or '—' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.input_tokens') }}</dt><dd class="tabular-nums">{{ '{:,}'.format(doc.input_tokens or 0) }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.output_tokens') }}</dt><dd class="tabular-nums">{{ '{:,}'.format(doc.output_tokens or 0) }}</dd></div>
+        {% if doc.cache_creation_tokens %}
+          <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.cache_write') }}</dt><dd class="tabular-nums text-indigo-300">{{ '{:,}'.format(doc.cache_creation_tokens) }}</dd></div>
+        {% endif %}
+        {% if doc.cache_read_tokens %}
+          <div class="flex justify-between gap-4"><dt class="text-ink-400">{{ t('document.cache_read') }}</dt><dd class="tabular-nums text-emerald-300">{{ '{:,}'.format(doc.cache_read_tokens) }} · 0,1×</dd></div>
+        {% endif %}
+        <div class="flex justify-between gap-4 pt-2 border-t border-ink-700/50">
+          <dt class="text-ink-300 font-medium">{{ t('document.total_cost') }}</dt>
+          <dd class="tabular-nums font-semibold">{{ doc.cost_usd | usd }} <span class="text-ink-500 text-xs">/ {{ doc.cost_usd | eur }}</span></dd>
+        </div>
+        {% if doc.content_hash %}
+          <div class="flex justify-between gap-4 pt-2 border-t border-ink-700/50">
+            <dt class="text-ink-400">{{ t('document.sha256') }}</dt>
+            <dd class="font-mono text-[10px] text-ink-500 truncate max-w-[160px]">{{ doc.content_hash }}</dd>
+          </div>
+        {% endif %}
+      </dl>
+    </div>
+
+    {% if doc.reasoning %}
+    <div class="card p-5">
+      <h2 class="font-semibold mb-2 text-sm uppercase tracking-wide text-ink-400">{{ t('document.reasoning') }}</h2>
+      <p class="text-sm text-ink-200 leading-relaxed italic">„{{ doc.reasoning }}"</p>
+    </div>
+    {% endif %}
+
+    <div class="card p-5" x-data='diagnosticsPanel({{ doc.id }})'>
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.diagnostics_heading') }}</h2>
+        <button type="button" @click="run()" :disabled="busy"
+                class="rounded-lg bg-emerald-500 hover:bg-emerald-300 disabled:opacity-50 px-3 py-1.5 text-xs text-ink-950 font-medium"
+                x-text="busy ? '…' : tr('document.diagnostics_run')"
+                >{{ t('document.diagnostics_run') }}</button>
+      </div>
+      <div x-show="result" x-cloak class="space-y-2 text-xs">
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+          <div class="text-ink-400">DB category</div>
+          <div class="font-mono"
+               :class="result?.category === 'Kassenzettel' ? 'text-emerald-300' : 'text-amber-300'"
+               x-text="(result?.category || '—') + (result?.subcategory ? '/' + result.subcategory : '')"></div>
+
+          <div class="text-ink-400">Status</div>
+          <div class="font-mono" x-text="result?.status || '—'"></div>
+
+          <div class="text-ink-400">OCR-Text</div>
+          <div class="font-mono tabular-nums" x-text="(result?.ocr_chars ?? 0) + ' chars'"></div>
+
+          <div class="text-ink-400">Receipt-Row</div>
+          <div class="font-mono"
+               :class="result?.receipt_exists ? (result.receipt_items > 0 ? 'text-emerald-300' : 'text-amber-300') : 'text-ink-500'"
+               x-text="result?.receipt_exists ? (result.receipt_items + ' Items, ' + (result.receipt_total ?? '—') + ' € · ' + (result.receipt_shop || '—')) : '—'"></div>
+
+          <div class="text-ink-400">Salvage-Signale</div>
+          <div class="font-mono"
+               :class="result?.signal_count >= 2 ? 'text-emerald-300' : 'text-rose-300'"
+               x-text="(result?.signal_count ?? 0) + ' / 2 needed'"></div>
+
+          <div class="text-ink-400">Invoice-Blocker</div>
+          <div class="font-mono"
+               :class="result?.invoice_blockers_hit >= 2 ? 'text-rose-300' : 'text-ink-300'"
+               x-text="(result?.invoice_blockers_hit ?? 0) + ' / 2 blockt'"></div>
+
+          <div class="text-ink-400">Salvageable</div>
+          <div class="font-mono"
+               :class="result?.salvage_eligible ? 'text-emerald-300' : 'text-ink-500'"
+               x-text="result?.salvage_eligible ? 'YES — would appear in the /analytics banner' : (result?.salvage_would_promote ? 'OCR matches, but the category is not in the promotable list' : 'OCR does not match (too few signals)')"></div>
+        </div>
+
+        <div x-show="result?.matched_signals?.length > 0" x-cloak>
+          <div class="text-ink-400 mb-1">Erkannte Signale:</div>
+          <div class="flex flex-wrap gap-1">
+            <template x-for="s in (result?.matched_signals || [])" :key="s">
+              <span class="rounded bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5 text-[10px]" x-text="s"></span>
+            </template>
+          </div>
+        </div>
+
+        <details class="mt-2">
+          <summary class="text-ink-400 cursor-pointer hover:text-ink-200">OCR-Preview (erste 1500 Zeichen)</summary>
+          <pre class="mt-2 text-[10px] text-ink-300 bg-ink-900/60 p-2 rounded overflow-x-auto whitespace-pre-wrap break-all" x-text="result?.ocr_preview || '(leer)'"></pre>
+        </details>
+      </div>
+      <div x-show="error" x-cloak class="text-xs text-rose-300" x-text="error"></div>
+    </div>
+
+    {% if receipt %}
+    <div class="card p-5" x-data='receiptEditor({{ doc.id }}, {{ {
+            "shop_name": receipt.shop_name or "",
+            "shop_type": receipt.shop_type or "",
+            "payment_method": receipt.payment_method or "",
+            "total_amount": receipt.total_amount,
+            "currency": receipt.currency or "EUR",
+            "receipt_date": receipt.receipt_date or (doc.doc_date or ""),
+            "items": receipt["items"],
+        } | tojson }}, {{ shop_types | tojson }}, {{ item_categories | tojson }}, {{ payment_methods | tojson }})'>
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="min-w-0">
+          <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('receipt.heading') }}</h2>
+          <p class="text-xs text-ink-500 mt-0.5">{{ t('receipt.edit_hint') }}</p>
+        </div>
+        <button type="button" @click="reextract()" :disabled="busy"
+                class="btn-ghost text-xs shrink-0"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                x-text="reextracting ? T['receipt.reextracting'] : T['receipt.reextract']"></button>
+      </div>
+
+      <!-- Header row: shop, type, payment -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+        <label class="block">
+          <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_shop') }}</span>
+          <input type="text" x-model="header.shop_name" maxlength="200"
+                 class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm">
+        </label>
+        <label class="block">
+          <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_shop_type') }}</span>
+          <select x-model="header.shop_type"
+                  class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm">
+            <option value="">—</option>
+            <template x-for="st in shopTypes" :key="st">
+              <option :value="st" x-text="T['receipt.shop.' + st] || st"></option>
+            </template>
+          </select>
+        </label>
+        <label class="block">
+          <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_payment') }}</span>
+          <select x-model="header.payment_method"
+                  class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm">
+            <option value="">—</option>
+            <template x-for="pm in paymentMethods" :key="pm">
+              <option :value="pm" x-text="T['receipt.payment.' + pm] || pm"></option>
+            </template>
+          </select>
+        </label>
+        <label class="block">
+          <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_date') }}</span>
+          <input type="date" x-model="header.receipt_date"
+                 class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm tabular-nums">
+        </label>
+      </div>
+
+      <!-- Items table (editable) -->
+      <div class="overflow-x-auto -mx-5">
+        <table class="w-full text-sm">
+          <thead class="text-xs uppercase tracking-wider text-ink-500">
+            <tr>
+              <th class="text-left px-5 py-1 font-medium">{{ t('receipt.col_item') }}</th>
+              <th class="text-right px-1 py-1 font-medium w-14">{{ t('receipt.col_qty') }}</th>
+              <th class="text-right px-1 py-1 font-medium w-20">{{ t('receipt.col_unit') }}</th>
+              <th class="text-right px-1 py-1 font-medium w-20">{{ t('receipt.col_total') }}</th>
+              <th class="px-2 py-1 w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(it, idx) in items" :key="idx">
+              <tr class="border-t border-ink-800/50 align-top">
+                <td class="px-5 py-1">
+                  <input type="text" x-model="it.name" maxlength="200"
+                         class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-0 py-1 text-sm focus:outline-none focus:ring-0"
+                         :placeholder="T['receipt.col_item']">
+                  <select x-model="it.item_category"
+                          class="block mt-1 w-full bg-transparent border-0 px-0 py-0 text-[10px] uppercase tracking-wider text-ink-500 focus:outline-none focus:ring-0 cursor-pointer">
+                    <option value="">—</option>
+                    <template x-for="cat in itemCategories" :key="cat">
+                      <option :value="cat" x-text="T['receipt.cat.' + cat] || cat"></option>
+                    </template>
+                  </select>
+                </td>
+                <td class="px-1 py-1">
+                  <input type="number" step="any" x-model.number="it.quantity"
+                         @input="recalcItemTotal(it)"
+                         class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0">
+                </td>
+                <td class="px-1 py-1">
+                  <input type="number" step="0.01" x-model.number="it.unit_price"
+                         @input="recalcItemTotal(it)"
+                         class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0">
+                </td>
+                <td class="px-1 py-1">
+                  <input type="number" step="0.01" x-model.number="it.total_price"
+                         @input="recalcHeaderTotal()"
+                         class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-1 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-0"
+                         :class="(it.total_price !== null && it.total_price < 0) ? 'text-rose-300' : ''">
+                </td>
+                <td class="px-2 py-1 text-right">
+                  <button type="button" @click="removeItem(idx)"
+                          class="text-ink-500 hover:text-rose-300 p-1" :title="T['receipt.remove_item']">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+                    </svg>
+                  </button>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="items.length === 0" class="border-t border-ink-800/50">
+              <td colspan="5" class="px-5 py-3 text-sm text-ink-500 italic">{{ t('receipt.no_items') }}</td>
+            </tr>
+          </tbody>
+          <tfoot class="border-t-2 border-ink-700/60">
+            <tr>
+              <td colspan="3" class="px-5 py-2 text-right text-xs uppercase tracking-wider text-ink-400">
+                {{ t('receipt.total') }}
+              </td>
+              <td class="px-1 py-2">
+                <div class="flex items-center gap-1">
+                  <input type="number" step="0.01" x-model.number="header.total_amount"
+                         class="w-full bg-ink-900/60 border border-ink-700 rounded px-1.5 py-1 text-sm text-right tabular-nums font-semibold text-emerald-300 focus:outline-none focus:ring-1 focus:ring-emerald-500/40">
+                  <input type="text" x-model="header.currency" maxlength="4"
+                         class="w-12 bg-transparent border-0 px-0 py-1 text-xs text-ink-400 uppercase focus:outline-none focus:ring-0">
+                </div>
+              </td>
+              <td></td>
+            </tr>
+            <tr x-show="computedSum !== null" x-cloak>
+              <td colspan="3" class="px-5 py-1 text-right text-[11px] text-ink-500">
+                {{ t('receipt.computed_sum') }}
+              </td>
+              <td class="px-1 py-1 text-right text-xs tabular-nums text-ink-400"
+                  :class="totalMismatch ? 'text-amber-300' : ''"
+                  x-text="computedSum !== null ? computedSum.toFixed(2) + ' ' + (header.currency || 'EUR') : ''"></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" @click="addItem()" class="btn-ghost text-xs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          {{ t('receipt.add_item') }}
+        </button>
+        <span x-show="totalMismatch" x-cloak class="text-xs text-amber-300">
+          {{ t('receipt.total_mismatch') }}
+        </span>
+        <div class="flex-1"></div>
+        <button type="button" @click="save()" :disabled="busy"
+                class="btn-primary text-sm"
+                :class="busy ? 'opacity-50 cursor-not-allowed' : ''"
+                x-text="saving ? T['receipt.saving'] : T['receipt.save']"></button>
+      </div>
+
+      <div x-show="message" x-cloak class="mt-3 text-sm rounded-lg px-3 py-2"
+           :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+           x-text="message"></div>
+    </div>
+    {% elif doc.category == 'Kassenzettel' %}
+    <div class="card p-5">
+      <h2 class="font-semibold mb-2 text-sm uppercase tracking-wide text-ink-400">{{ t('receipt.heading') }}</h2>
+      <p class="text-sm text-ink-400 mb-3">{{ t('receipt.not_extracted_yet') }}</p>
+      <button type="button"
+              x-data="{ extracting: false }"
+              @click="extracting = true;
+                fetch('/api/document/{{ doc.id }}/receipt/extract', { method: 'POST' })
+                  .then(r => r.ok ? location.reload() : alert('Extraction failed'))
+                  .finally(() => extracting = false)"
+              :disabled="extracting"
+              class="btn-primary text-sm"
+              x-text="extracting ? T['receipt.reextracting'] : T['receipt.extract_now']"></button>
+    </div>
+    {% endif %}
+
+
+    {% if doc.status in ('review', 'failed') %}
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('retry.heading') }}</h2>
+      <p class="text-xs text-ink-400 mb-3">{{ t('retry.hint') }}</p>
+      <button type="button" @click="retry()" :disabled="busy"
+              class="btn-primary w-full" :class="busy && 'opacity-60 cursor-wait'">
+        <svg x-show="!busy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M21 12a9 9 0 1 1-3.51-7.13L21 8"/><path d="M21 3v5h-5"/>
+        </svg>
+        <svg x-show="busy" class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+        </svg>
+        <span x-text="busy ? tr('retry.running') : tr('retry.button')"></span>
+      </button>
+      <div x-show="message" x-cloak class="mt-3 text-xs" :class="isError ? 'text-rose-300' : 'text-emerald-300'" x-text="message"></div>
+    </div>
+    {% endif %}
+
+    {% if not doc.deleted_at %}
+    <form action="/document/{{ doc.id }}/edit" method="post" class="card p-5 space-y-3"
+          x-data='editForm({ category: {{ doc.category | tojson }}, subcategory: {{ (doc.subcategory or "") | tojson }}, subMap: {{ subcategory_map | tojson }}, subLabels: {{ subcategory_labels | tojson }} })'>
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.edit_heading') }}</h2>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_category') }}</span>
+        <select name="category" x-model="category" @change="onCategoryChange()"
+                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+          {% for c in categories %}
+            <option value="{{ c }}"{% if c == doc.category %} selected{% endif %}>{{ cat(c) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="block" x-show="subs.length > 0" x-cloak>
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_subcategory') }}</span>
+        <select name="subcategory" x-model="subcategory"
+                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+          <option value="">{{ t('document.subcategory_none') }}</option>
+          <template x-for="s in subs" :key="s">
+            <option :value="s" x-text="(subLabels[category] && subLabels[category][s]) || s"></option>
+          </template>
+        </select>
+      </label>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_date') }}</span>
+        <input type="date" name="doc_date" value="{{ doc.doc_date or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm tabular-nums">
+      </label>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_sender') }}</span>
+        <input type="text" name="sender" value="{{ doc.sender or '' }}" maxlength="120"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+      </label>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_subject') }}</span>
+        <input type="text" name="subject" value="{{ doc.subject or '' }}" maxlength="200"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+      </label>
+
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_tags') }}</span>
+        <input type="text" name="tags"
+               value="{{ doc.tags_list | join(', ') if doc.tags_list else '' }}"
+               placeholder="{{ t('document.tags_placeholder') }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+        <span class="block text-[11px] text-ink-500 mt-1">{{ t('document.tags_hint') }}</span>
+      </label>
+
+      <div class="grid grid-cols-2 gap-2">
+        <label class="block">
+          <span class="block text-xs text-ink-400 mb-1">{{ t('document.due.field_label') }}</span>
+          <input type="date" name="due_date" value="{{ doc.due_date or '' }}"
+                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm tabular-nums">
+        </label>
+        <label class="block">
+          <span class="block text-xs text-ink-400 mb-1">{{ t('document.due.kind_label') }}</span>
+          <select name="due_kind"
+                  class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+            <option value=""            {{ 'selected' if not doc.due_kind else '' }}>{{ t('document.due.kind_none') }}</option>
+            <option value="zahlung"     {{ 'selected' if doc.due_kind == 'zahlung' else '' }}>{{ t('document.due.kind_zahlung') }}</option>
+            <option value="kuendigung"  {{ 'selected' if doc.due_kind == 'kuendigung' else '' }}>{{ t('document.due.kind_kuendigung') }}</option>
+          </select>
+        </label>
+      </div>
+      <span class="block text-[11px] text-ink-500 -mt-1">{{ t('document.due.hint') }}</span>
+
+      <button type="submit" class="btn-primary w-full">{{ t('document.save') }}</button>
+    </form>
+    {% endif %}
+
+    <!-- Delete / Restore / Purge -->
+    {# Payment status. Shown for any document a booking belongs to — not
+       only for bills with a formal deadline — plus every open payment
+       deadline, so "still unpaid" is visible too. #}
+    {% if payment or (doc.due_kind == 'zahlung' and doc.due_date) %}
+    <div class="card p-5" x-data="paidWidget({{ doc.id }}, {{ (payment is not none) | tojson }})">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">
+        {{ t('document.paid.title') }}
+      </h2>
+      {% if payment %}
+        <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="text-emerald-300 font-medium">{{ t('dashboard.deadlines.paid') }}</span>
+            <span class="tabular-nums text-emerald-300">{{ (payment.amount | abs) | money }}</span>
+          </div>
+          <div class="text-xs text-ink-400 mt-1">
+            {{ payment.booking_date }} · {{ payment.counterparty or '—' }}
+          </div>
+          <div class="text-[11px] text-ink-500 mt-1">
+            {{ t('document.paid.auto') if payment.paid_source == 'auto' else t('document.paid.manual') }}
+          </div>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <a href="/transactions" class="btn-secondary flex-1 justify-center text-xs">
+            {{ t('document.paid.open_booking') }}
+          </a>
+          <button type="button" @click="unlink()" :disabled="busy"
+                  class="btn-ghost text-xs text-rose-300 hover:bg-rose-500/10">
+            {{ t('document.paid.unlink') }}
+          </button>
+        </div>
+      {% else %}
+        <p class="text-sm text-ink-400">{{ t('document.paid.none') }}</p>
+      {% endif %}
+      {% if doc.due_amount %}
+        <p class="text-[11px] text-ink-500 mt-3">
+          {{ t('document.paid.amount_read') }}: <span class="tabular-nums">{{ doc.due_amount | money }}</span>
+          {% if doc.due_amount_src %}<br><span class="text-ink-600">„{{ doc.due_amount_src }}"</span>{% endif %}
+        </p>
+      {% endif %}
+      <p class="text-[11px] text-ink-600 mt-2">{{ t('document.paid.hint') }}</p>
+      <div x-show="message" x-cloak class="mt-2 text-xs text-ink-400" x-text="message"></div>
+    </div>
+    {% endif %}
+
+    {% if me and me.is_admin %}
+    <div class="card p-5" x-data="trashWidget({{ doc.id }}, {{ doc.deleted_at is not none | tojson }})">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">
+        {% if doc.deleted_at %}{{ t('trash.restore_or_purge') }}{% else %}{{ t('trash.move_to_trash') }}{% endif %}
+      </h2>
+      <p class="text-xs text-ink-400 mb-3">
+        {% if doc.deleted_at %}{{ t('trash.hint_in_trash') }}{% else %}{{ t('trash.hint_active') }}{% endif %}
+      </p>
+
+      {% if doc.deleted_at %}
+        <div class="flex gap-2">
+          <button type="button" @click="restore()" :disabled="busy" class="btn-secondary flex-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+              <path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 5v4h4"/>
+            </svg>
+            <span x-text="tr('trash.restore_button')"></span>
+          </button>
+          <button type="button" @click="purge()" :disabled="busy" class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+            </svg>
+            <span x-text="tr('trash.purge_button')"></span>
+          </button>
+        </div>
+      {% else %}
+        <button type="button" @click="del()" :disabled="busy" class="btn-ghost w-full text-rose-300 hover:bg-rose-500/10">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+          </svg>
+          <span x-text="tr('trash.delete_button')"></span>
+        </button>
+      {% endif %}
+
+      <div x-show="message" x-cloak class="mt-3 text-xs" :class="isError ? 'text-rose-300' : 'text-emerald-300'" x-text="message"></div>
+    </div>
+    {% endif %}
+  </aside>
+</div>
+
+<script>
+function paidWidget(docId, linked) {
+  return {
+    busy: false, message: '',
+    async unlink() {
+      this.busy = true;
+      try {
+        const r = await fetch(`/api/document/${docId}/paid`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tx_id: null }),
+        });
+        if (r.ok) { window.location.reload(); }
+        else { const d = await r.json().catch(() => ({})); this.message = d.detail || 'Fehler'; }
+      } catch (e) { this.message = String(e); }
+      finally { this.busy = false; }
+    },
+  };
+}
+function diagnosticsPanel(docId) {
+  return {
+    busy: false, result: null, error: '',
+    async run() {
+      this.busy = true; this.error = ''; this.result = null;
+      try {
+        const r = await fetch('/api/document/' + docId + '/diagnostics');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        this.result = await r.json();
+      } catch (e) {
+        this.error = e.message || String(e);
+      } finally {
+        this.busy = false;
+      }
+    },
+  };
+}
+
+function editForm({ category, subcategory, subMap, subLabels }) {
+  return {
+    category, subcategory, subMap, subLabels,
+    get subs() { return this.subMap[this.category] || []; },
+    onCategoryChange() {
+      // Reset subcategory if it doesn't fit the new category.
+      if (!this.subs.includes(this.subcategory)) this.subcategory = '';
+    },
+  };
+}
+
+function retryWidget(docId) {
+  return {
+    busy: false, message: '', isError: false,
+    async retry() {
+      this.busy = true; this.message = ''; this.isError = false;
+      try {
+        const r = await fetch('/api/document/' + docId + '/retry', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        this.message = tr('retry.done', {
+          category: d.category,
+          confidence: Math.round(d.confidence * 100),
+          cost: d.cost_usd.toFixed(4),
+        });
+        setTimeout(() => location.reload(), 1500);
+      } catch (e) {
+        this.isError = true;
+        this.message = tr('retry.failed') + ' ' + (e.message || e);
+      } finally { this.busy = false; }
+    },
+  };
+}
+
+function receiptEditor(docId, initial, shopTypes, itemCategories, paymentMethods) {
+  return {
+    docId, shopTypes, itemCategories, paymentMethods,
+    header: {
+      shop_name:      initial.shop_name      || '',
+      shop_type:      initial.shop_type      || '',
+      payment_method: initial.payment_method || '',
+      total_amount:   initial.total_amount,
+      currency:       initial.currency       || 'EUR',
+      receipt_date:   initial.receipt_date   || '',
+    },
+    items: (initial.items || []).map(it => ({
+      name: it.name || '',
+      quantity:      it.quantity      ?? null,
+      unit_price:    it.unit_price    ?? null,
+      total_price:   it.total_price   ?? null,
+      item_category: it.item_category || '',
+    })),
+    saving: false, reextracting: false, message: '', ok: false,
+    get busy() { return this.saving || this.reextracting; },
+    get computedSum() {
+      const sum = this.items.reduce((acc, it) =>
+        acc + (typeof it.total_price === 'number' && !isNaN(it.total_price) ? it.total_price : 0), 0);
+      return this.items.length ? Math.round(sum * 100) / 100 : null;
+    },
+    get totalMismatch() {
+      if (this.computedSum === null) return false;
+      if (this.header.total_amount === null || this.header.total_amount === undefined || isNaN(this.header.total_amount)) return false;
+      return Math.abs(this.computedSum - this.header.total_amount) > 0.01;
+    },
+    addItem() {
+      this.items.push({ name: '', quantity: null, unit_price: null, total_price: null, item_category: '' });
+      this.recalcHeaderTotal();
+    },
+    removeItem(idx) {
+      this.items.splice(idx, 1);
+      this.recalcHeaderTotal();
+    },
+    // When the user edits quantity or unit_price on a row, refresh
+    // that row's total_price (= qty × unit_price) and propagate the
+    // change up to the header total. Skipped when either field isn't
+    // a usable number — that way the user can still type a quantity
+    // first and a unit_price after without the row briefly going
+    // through a NaN total in between.
+    recalcItemTotal(it) {
+      const q = it.quantity, u = it.unit_price;
+      if (typeof q === 'number' && !isNaN(q)
+          && typeof u === 'number' && !isNaN(u)) {
+        it.total_price = Math.round(q * u * 100) / 100;
+      }
+      this.recalcHeaderTotal();
+    },
+    // Sync the header total to the sum of line totals. Triggered on
+    // any item edit and on add/remove. The user can still type a
+    // different value into the header field manually afterwards —
+    // we just don't try to keep it locked to that override across
+    // subsequent item edits, on the assumption that the cleaner
+    // workflow is "fix items first, then verify the total".
+    recalcHeaderTotal() {
+      const sum = this.computedSum;
+      if (sum !== null) this.header.total_amount = sum;
+    },
+    async save() {
+      this.saving = true; this.message = ''; this.ok = false;
+      try {
+        const payload = {
+          ...this.header,
+          items: this.items.filter(it => (it.name || '').trim()),
+        };
+        const r = await fetch('/api/document/' + this.docId + '/receipt', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        this.ok = true; this.message = T['receipt.saved'];
+      } catch (e) {
+        this.ok = false; this.message = (e.message || String(e));
+      } finally { this.saving = false; }
+    },
+    async reextract() {
+      if (!confirm(T['receipt.reextract_confirm'])) return;
+      this.reextracting = true; this.message = ''; this.ok = false;
+      try {
+        const r = await fetch('/api/document/' + this.docId + '/receipt/extract', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        location.reload();
+      } catch (e) {
+        this.ok = false; this.message = (e.message || String(e));
+      } finally { this.reextracting = false; }
+    },
+  };
+}
+
+
+function trashWidget(docId, inTrash) {
+  return {
+    busy: false, message: '', isError: false,
+    async _call(action, confirmKey, afterKey, redirect) {
+      if (confirmKey && !confirm(tr(confirmKey))) return;
+      this.busy = true; this.message = ''; this.isError = false;
+      try {
+        const r = await fetch('/api/document/' + docId + '/' + action, { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        this.message = tr(afterKey);
+        setTimeout(() => { location.href = redirect; }, 900);
+      } catch (e) {
+        this.isError = true;
+        this.message = (e.message || String(e));
+      } finally { this.busy = false; }
+    },
+    del()     { return this._call('delete',  null,                 'trash.deleted',  '/library'); },
+    restore() { return this._call('restore', null,                 'trash.restored', '/document/' + docId); },
+    purge()   { return this._call('purge',   'trash.confirm_purge','trash.purged',   '/library?trash=1'); },
+  };
+}
+</script>
+
+{% endblock %}

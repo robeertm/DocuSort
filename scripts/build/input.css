@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Dark (default): ink = slate. */
+  :root {
+    --ink-50: 248 250 252; --ink-100: 241 245 249; --ink-200: 226 232 240; --ink-300: 203 213 225;
+    --ink-400: 148 163 184; --ink-500: 100 116 139; --ink-600: 71 85 105;   --ink-700: 51 65 85;
+    --ink-800: 30 41 59;    --ink-900: 15 23 42;    --ink-950: 2 6 23;
+    color-scheme: dark;
+  }
+  /* Light („Tagesansicht"): the palette is mirrored — what was deep ink
+     becomes paper, what was faint becomes strong. 500 stays the pivot. */
+  html[data-theme="light"] {
+    --ink-50: 2 6 23;       --ink-100: 15 23 42;    --ink-200: 30 41 59;    --ink-300: 51 65 85;
+    --ink-400: 71 85 105;   --ink-500: 100 116 139; --ink-600: 148 163 184; --ink-700: 203 213 225;
+    --ink-800: 226 232 240; --ink-900: 241 245 249; --ink-950: 255 255 255;
+    color-scheme: light;
+  }
+  html { background: #0b1220; }
+  html[data-theme="light"] { background: #f1f5f9; }
+  body { -webkit-tap-highlight-color: transparent; }
+}
+
+@layer components {
+  .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap; }
+  /* Form controls: one look everywhere. Dark = translucent ink well; light = paper field with a hairline. */
+  .flt-label { @apply block text-[11px] uppercase tracking-wider text-ink-500 mb-1; }
+  .flt-input { @apply w-full h-10 rounded-xl bg-ink-900/60 border border-ink-700 px-3 text-sm text-ink-100 placeholder:text-ink-500; }
+  .card { @apply rounded-2xl bg-ink-800/60 border border-ink-700/60 backdrop-blur; }
+  .btn  { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap bg-emerald-500 text-white hover:bg-emerald-400 active:bg-emerald-600; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap bg-ink-700 text-ink-100 hover:bg-ink-600 active:bg-ink-800; }
+  .btn-ghost { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition whitespace-nowrap text-ink-300 hover:bg-ink-700/50; }
+  [x-cloak] { display: none !important; }
+
+  /* Light surfaces: paper cards on a cool slate ground, crisp white fields. */
+  html[data-theme="light"] body { background: linear-gradient(to bottom, #f6f8fb, #eef2f7 40%, #e6ebf2); }
+  html[data-theme="light"] .card {
+    background-color: #ffffff; border-color: #d9e0e9;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 6px 18px rgb(15 23 42 / 0.06);
+  }
+  html[data-theme="light"] body > header { background-color: rgb(255 255 255 / 0.92); border-color: #d9e0e9; box-shadow: 0 1px 0 rgb(15 23 42 / 0.03); }
+  html[data-theme="light"] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+    background-color: #ffffff; border-color: #cbd5e1; color: #0f172a;
+  }
+  html[data-theme="light"] :is(input, select, textarea):focus { border-color: #10b981; outline: none; box-shadow: 0 0 0 3px rgb(16 185 129 / 0.15); }
+  html[data-theme="light"] input::placeholder, html[data-theme="light"] textarea::placeholder { color: #94a3b8; }
+  html[data-theme="light"] .btn-secondary { background-color: #e2e8f0; color: #0f172a; }
+  html[data-theme="light"] .btn-secondary:hover { background-color: #cbd5e1; }
+  html[data-theme="light"] .btn-ghost:hover { background-color: rgb(226 232 240 / 0.7); }
+  /* Semantic pastel text (emerald-300 etc.) glows on ink, washes out on paper → the 700 sibling. */
+  html[data-theme="light"] :is(.text-emerald-100, .text-emerald-200, .text-emerald-300, .text-emerald-400) { color: #047857; }
+  html[data-theme="light"] .text-emerald-500 { color: #059669; }
+  html[data-theme="light"] :is(.text-rose-100, .text-rose-200, .text-rose-300, .text-rose-400) { color: #be123c; }
+  html[data-theme="light"] :is(.text-amber-100, .text-amber-200, .text-amber-300, .text-amber-400) { color: #b45309; }
+  html[data-theme="light"] :is(.text-indigo-200, .text-indigo-300, .text-indigo-400) { color: #4338ca; }
+  html[data-theme="light"] :is(.text-sky-200, .text-sky-300, .text-sky-400) { color: #0369a1; }
+  html[data-theme="light"] :is(.text-cyan-100, .text-cyan-200, .text-cyan-300, .text-cyan-400) { color: #0e7490; }
+  html[data-theme="light"] :is(.text-violet-200, .text-violet-300, .text-violet-400) { color: #6d28d9; }
+  html[data-theme="light"] :is(.bg-emerald-500 .text-emerald-300, .bg-emerald-500.text-emerald-300, .bg-rose-500 .text-rose-300, .bg-rose-500.text-rose-300) { color: #ffffff; }
+  /* Translucent tints over white are far paler than over ink — one notch stronger. */
+  html[data-theme="light"] .bg-emerald-500\/5  { background-color: rgb(16 185 129 / 0.10); }
+  html[data-theme="light"] .bg-emerald-500\/10 { background-color: rgb(16 185 129 / 0.16); }
+  html[data-theme="light"] .bg-emerald-500\/15 { background-color: rgb(16 185 129 / 0.20); }
+  html[data-theme="light"] .bg-rose-500\/5     { background-color: rgb(244 63 94 / 0.09); }
+  html[data-theme="light"] .bg-rose-500\/10    { background-color: rgb(244 63 94 / 0.14); }
+  html[data-theme="light"] .bg-rose-500\/15    { background-color: rgb(244 63 94 / 0.18); }
+  html[data-theme="light"] .bg-amber-500\/5    { background-color: rgb(245 158 11 / 0.10); }
+  html[data-theme="light"] .bg-amber-500\/10   { background-color: rgb(245 158 11 / 0.16); }
+  html[data-theme="light"] .bg-cyan-500\/10    { background-color: rgb(6 182 212 / 0.14); }
+  html[data-theme="light"] .bg-indigo-500\/15  { background-color: rgb(99 102 241 / 0.16); }
+  /* Header gradient stops keep their ink names; flipped variables already make them paper. */
+}

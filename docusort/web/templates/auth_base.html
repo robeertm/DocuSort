@@ -1,0 +1,43 @@
+{# Standalone shell for the pages that exist BEFORE a session does.
+   It deliberately does not extend base.html: that template renders the
+   whole navigation, and an unauthenticated visitor must not be shown
+   the shape of the archive — not even the tab names. #}
+<!doctype html>
+<html lang="{{ lang }}" class="h-full">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>{% block title %}DocuSort{% endblock %}</title>
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem('docusort-theme');
+      var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      var theme = saved || (prefers ? 'light' : 'dark');
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]').setAttribute(
+        'content', theme === 'light' ? '#f1f5f9' : '#0f172a');
+    } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="/static/tailwind.css?v={{ version }}">
+</head>
+<body class="min-h-full bg-gradient-to-b from-ink-950 via-ink-900 to-ink-950 text-ink-100 antialiased">
+<main class="min-h-screen grid place-items-center px-4 py-10">
+  <div class="w-full max-w-sm">
+    <div class="flex items-center justify-center gap-2 mb-8">
+      <span class="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+          <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>
+          <path d="M14 4v6h6"/><path d="M7 14h10M7 18h7"/>
+        </svg>
+      </span>
+      <span class="text-xl font-semibold tracking-tight">DocuSort</span>
+    </div>
+    {% block content %}{% endblock %}
+    <p class="mt-8 text-center text-xs text-ink-500">v{{ version }}</p>
+  </div>
+</main>
+</body>
+</html>

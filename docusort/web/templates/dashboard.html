@@ -1,0 +1,534 @@
+{% extends "base.html" %}
+{% block title %}{{ t('hub.title') }} · DocuSort{% endblock %}
+{% block content %}
+
+<div x-data="dashboard()" x-init="init()" class="space-y-5 sm:space-y-6">
+
+  <!-- =========== HEADER =========== -->
+  <header class="flex items-baseline justify-between gap-3 flex-wrap">
+    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('hub.title') }}</h1>
+    <div class="flex items-center gap-2 text-xs text-ink-500">
+      <span x-show="lastUpdate" x-cloak>{{ t('hub.last_update') }} <span x-text="lastUpdate"></span></span>
+      <button @click="refresh()" :disabled="loading"
+              class="rounded-lg border border-ink-700 px-2 py-1 hover:border-emerald-500/50 hover:text-emerald-300"
+              :class="loading ? 'opacity-50' : ''"
+              :aria-label="'{{ t('hub.refresh') }}'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             class="h-3.5 w-3.5 inline" :class="loading ? 'animate-spin' : ''">
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- =========== LIVE PIPELINE =========== -->
+  <section class="card p-4 sm:p-5">
+    <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+      <div class="flex items-center gap-3">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             class="h-5 w-5 shrink-0"
+             :class="anyActivity ? 'text-cyan-300 animate-spin' : 'text-ink-500'">
+          <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+        </svg>
+        <h2 class="font-semibold">{{ t('hub.live.title') }}</h2>
+      </div>
+      <!-- Bridge status pill -->
+      <div class="flex items-center gap-2 text-xs">
+        <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1"
+              :class="state.bridge && state.bridge.connected
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : 'bg-rose-500/15 text-rose-300'">
+          <span class="h-1.5 w-1.5 rounded-full"
+                :class="state.bridge && state.bridge.connected ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+          <span x-text="state.bridge && state.bridge.connected
+                          ? '{{ t('hub.bridge.connected') }}'
+                          : '{{ t('hub.bridge.offline') }}'"></span>
+        </span>
+      </div>
+    </div>
+
+    <!-- Idle state -->
+    <div x-show="!anyActivity" x-cloak class="text-sm text-ink-400 py-4 text-center">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           class="h-8 w-8 mx-auto mb-2 text-ink-600">
+        <path d="M5 12l5 5L20 7"/>
+      </svg>
+      {{ t('hub.live.idle') }}
+      <a href="/upload" class="underline hover:text-emerald-300">/upload</a>
+      ·
+      <a href="/finance" class="underline hover:text-emerald-300">/finance</a>
+    </div>
+
+    <!-- LLM in flight (header dot) -->
+    <div x-show="state.in_flight > 0" x-cloak
+         class="rounded-xl bg-cyan-500/10 border border-cyan-500/30 px-3 py-2.5 text-sm flex items-center gap-3 mb-2">
+      <svg class="h-4 w-4 animate-spin text-cyan-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+      </svg>
+      <div class="text-cyan-100">
+        <span class="font-medium" x-text="state.in_flight"></span>
+        <span x-text="state.in_flight === 1
+                       ? '{{ t('hub.live.llm_one') }}'
+                       : '{{ t('hub.live.llm_many') }}'"></span>
+      </div>
+    </div>
+
+    <!-- Bulk re-analyse -->
+    <div x-show="bulk && (bulk.running || bulk.paused)" x-cloak
+         class="rounded-xl bg-cyan-500/5 border border-cyan-500/30 px-3 py-3 text-sm">
+      <div class="flex items-center gap-3 flex-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             class="h-4 w-4 text-cyan-300 shrink-0"
+             :class="bulk && bulk.running ? 'animate-spin' : ''">
+          <path d="M3 12h4l3-9 4 18 3-9h4"/>
+        </svg>
+        <div class="flex-1 min-w-0">
+          <div class="text-cyan-100 font-medium">
+            <template x-if="bulk && bulk.running">
+              <span>{{ t('hub.live.bulk_running') }}</span>
+            </template>
+            <template x-if="bulk && bulk.paused">
+              <span class="text-amber-200">{{ t('hub.live.bulk_paused') }}</span>
+            </template>
+          </div>
+          <div class="text-xs text-cyan-200/80 mt-0.5 truncate" x-text="bulk && bulk.current"></div>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          <button x-show="bulk && bulk.running" @click="pauseBulk()"
+                  class="rounded-lg px-2.5 py-1 text-xs border border-amber-500/40 text-amber-200 hover:bg-amber-500/10">
+            ⏸ {{ t('hub.bulk.pause') }}
+          </button>
+          <button x-show="bulk && bulk.paused" @click="resumeBulk()"
+                  class="rounded-lg px-2.5 py-1 text-xs border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10">
+            ▶ {{ t('hub.bulk.resume') }}
+          </button>
+        </div>
+      </div>
+      <!-- Progress bars: docs + pages within current doc -->
+      <div class="mt-2.5 space-y-1.5">
+        <div>
+          <div class="h-1.5 rounded bg-ink-800 overflow-hidden">
+            <div class="h-full bg-cyan-400/80 transition-all"
+                 :style="`width: ${(bulk && bulk.total) ? (100 * bulk.done / bulk.total) : 0}%`"></div>
+          </div>
+          <div class="flex justify-between mt-1 text-[11px] text-ink-400">
+            <span>{{ t('hub.bulk.statement') }} <span x-text="(bulk && bulk.done) || 0"></span> {{ t('hub.bulk.of') }} <span x-text="(bulk && bulk.total) || 0"></span></span>
+            <!-- Only show "last error" when the current run is actually
+                 still running AND the error is fresh (within the last 5
+                 doc iterations). Stale messages from earlier paused
+                 runs were confusing — "bridge offline" shown while
+                 bridge is happily connected. -->
+            <template x-if="showLastError">
+              <span class="text-rose-300/80 truncate ml-2"
+                    x-text="`{{ t('hub.bulk.last_error') }} ${bulk.last_error}`"></span>
+            </template>
+          </div>
+        </div>
+        <template x-if="bulk && bulk.total_pages > 0">
+          <div>
+            <div class="h-1 rounded bg-ink-800 overflow-hidden">
+              <div class="h-full bg-cyan-300/60 transition-all"
+                   :style="`width: ${(bulk.total_pages > 0) ? (100 * bulk.current_page / bulk.total_pages) : 0}%`"></div>
+            </div>
+            <div class="text-[11px] text-cyan-200/70 mt-0.5">
+              {{ t('hub.bulk.page') }} <span x-text="bulk.current_page || 0"></span> {{ t('hub.bulk.of') }} <span x-text="bulk.total_pages"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========== STATS GRID =========== -->
+  <section class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+    <a href="/library" class="card p-3 hover:border-ink-600">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.docs') }}</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="(state.counts && state.counts.total) || 0"></div>
+    </a>
+    <a href="/library?status=review" class="card p-3 hover:border-amber-500/40"
+       :class="(state.counts && state.counts.review > 0) ? 'border-amber-500/40 bg-amber-500/5' : ''">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.review') }}</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums"
+           :class="(state.counts && state.counts.review > 0) ? 'text-amber-300' : ''"
+           x-text="(state.counts && state.counts.review) || 0"></div>
+    </a>
+    <a href="/library?status=failed" class="card p-3 hover:border-rose-500/40"
+       :class="(state.counts && state.counts.failed > 0) ? 'border-rose-500/40 bg-rose-500/5' : ''">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.failed') }}</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums"
+           :class="(state.counts && state.counts.failed > 0) ? 'text-rose-300' : ''"
+           x-text="(state.counts && state.counts.failed) || 0"></div>
+    </a>
+    <a href="/finance" class="card p-3 hover:border-cyan-500/40">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.statements') }}</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="(state.counts && state.counts.kontoauszug) || 0"></div>
+      <div class="text-[10px] text-ink-500 mt-0.5"
+           x-show="state.counts && state.counts.empty_statements > 0" x-cloak>
+        <span x-text="state.counts && state.counts.empty_statements"></span> {{ t('hub.tile.empty_suffix') }}
+      </div>
+    </a>
+  </section>
+
+  <!-- =========== FÄLLIG DEMNÄCHST =========== -->
+  <section class="card p-4 sm:p-5" x-show="(state.deadlines || []).length > 0" x-cloak>
+    <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+      <h2 class="font-semibold flex items-center gap-2">
+        <span>⏰</span> {{ t('dashboard.deadlines.title') }}
+      </h2>
+      <div class="text-xs text-ink-500">
+        <span x-text="(state.deadlines || []).length"></span> {{ t('dashboard.deadlines.count_suffix') }}
+      </div>
+    </div>
+    <ul class="space-y-1">
+      <template x-for="d in (state.deadlines || [])" :key="d.id">
+        <li class="rounded-xl border p-3"
+            :class="d.paid_at ? 'border-emerald-500/30 bg-emerald-500/5'
+                              : (doneDeadline === d.id ? 'border-ink-800 bg-ink-900/40 opacity-40'
+                                                       : 'border-ink-800 bg-ink-900/40')">
+          <div class="flex items-start gap-2">
+            {# A settled bill keeps its row but stops asking to be ticked —
+               the tick is for "I dealt with this", and the booking already
+               says so. #}
+            <template x-if="d.paid_at">
+              <span class="shrink-0 mt-0.5 h-5 w-5 rounded-md bg-emerald-500/20 text-emerald-300
+                           flex items-center justify-center"
+                    :title="T['dashboard.deadlines.paid'] || 'Bezahlt'">
+                <span class="text-xs leading-none">✓</span>
+              </span>
+            </template>
+            <template x-if="!d.paid_at">
+              <button type="button"
+                      @click="markDeadlineDone(d.id)"
+                      :disabled="doneDeadline === d.id"
+                      :title="'{{ t('dashboard.deadlines.done_hint') }}'"
+                      :aria-label="'{{ t('dashboard.deadlines.done_hint') }}'"
+                      class="shrink-0 mt-0.5 h-5 w-5 rounded-md border border-ink-600 text-emerald-300
+                             hover:border-emerald-400 hover:bg-emerald-500/10 flex items-center justify-center
+                             disabled:opacity-50 transition">
+                <span class="text-xs leading-none">✓</span>
+              </button>
+            </template>
+            <span class="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider"
+                  :class="d.paid_at ? 'bg-emerald-500/20 text-emerald-300' : dueClass(d.due_date)"
+                  x-text="d.paid_at ? (T['dashboard.deadlines.paid'] || 'Bezahlt') : dueWhen(d.due_date)"></span>
+            <div class="flex-1 min-w-0">
+              <a :href="'/document/' + d.id"
+                 class="block font-medium hover:text-emerald-300 truncate"
+                 :class="d.paid_at ? 'text-ink-300' : 'text-ink-100'"
+                 x-text="d.subject || d.filename || ('Dok ' + d.id)"></a>
+              <div class="text-[11px] text-ink-500 mt-0.5">
+                <span x-text="dueKindLabel(d.due_kind)"></span>
+                <span> · </span><span x-text="d.due_date"></span>
+                <template x-if="d.due_amount"><span> · <span class="tabular-nums" x-text="eur(d.due_amount)"></span></span></template>
+                <template x-if="d.sender"><span> · <span x-text="d.sender"></span></span></template>
+              </div>
+              {# Why we believe it is paid: the booking, by date. #}
+              <template x-if="d.paid_at">
+                <a href="/transactions" class="mt-1 inline-block text-[11px] text-emerald-300 hover:underline">
+                  <span x-text="(T['dashboard.deadlines.paid_on'] || 'bezahlt am {d}').replace('{d}', d.paid_at)"></span>
+                  <template x-if="d.paid_source === 'auto'">
+                    <span class="text-ink-500"> · <span x-text="T['dashboard.deadlines.paid_auto'] || 'automatisch erkannt'"></span></span>
+                  </template>
+                </a>
+              </template>
+            </div>
+            <a :href="'/document/' + d.id"
+               class="rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500 shrink-0">→</a>
+          </div>
+        </li>
+      </template>
+    </ul>
+  </section>
+
+  <!-- =========== PROBLEMS / QUEUE =========== -->
+  <section class="card p-4 sm:p-5">
+    <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+      <h2 class="font-semibold">{{ t('hub.problems.title') }}</h2>
+      <div class="text-xs text-ink-500" x-show="(state.failed || []).length > 0" x-cloak>
+        <span x-text="(state.failed || []).length"></span> {{ t('hub.problems.entries') }}
+      </div>
+    </div>
+
+    <!-- Tab-Filter -->
+    <div class="flex flex-wrap gap-1.5 mb-3">
+      <button @click="problemsTab = 'all'"
+              class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
+              :class="problemsTab === 'all'
+                       ? 'bg-ink-700 border-ink-600 text-ink-100'
+                       : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+        {{ t('hub.problems.all') }} <span class="ml-1 text-ink-500" x-text="`(${(state.failed || []).length})`"></span>
+      </button>
+      <button @click="problemsTab = 'failed'"
+              class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
+              :class="problemsTab === 'failed'
+                       ? 'bg-rose-500/20 border-rose-500/40 text-rose-200'
+                       : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+        {{ t('hub.problems.failed') }} <span class="ml-1 text-ink-500"
+                              x-text="`(${countByStatus('failed')})`"></span>
+      </button>
+      <button @click="problemsTab = 'review'"
+              class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
+              :class="problemsTab === 'review'
+                       ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+                       : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+        {{ t('hub.problems.review') }} <span class="ml-1 text-ink-500"
+                                   x-text="`(${countByStatus('review')})`"></span>
+      </button>
+      <button @click="problemsTab = 'pending_review'"
+              class="rounded-lg px-3 py-1.5 text-xs whitespace-nowrap border"
+              :class="problemsTab === 'pending_review'
+                       ? 'bg-sky-500/20 border-sky-500/40 text-sky-200'
+                       : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+        {{ t('hub.problems.pending') }} <span class="ml-1 text-ink-500"
+                                   x-text="`(${countByStatus('pending_review')})`"></span>
+      </button>
+    </div>
+
+    <ul x-show="filteredProblems().length > 0" x-cloak class="space-y-1">
+      <template x-for="d in filteredProblems()" :key="d.id">
+        <li class="rounded-xl border border-ink-800 bg-ink-900/40 p-3">
+          <div class="flex items-start gap-2">
+            <span class="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider"
+                  :class="statusClass(d.status)" x-text="statusLabel(d.status)"></span>
+            <div class="flex-1 min-w-0">
+              <a :href="'/document/' + d.id"
+                 class="block font-medium text-ink-100 hover:text-emerald-300 truncate"
+                 x-text="d.subject || d.original_name || ('Dok ' + d.id)"></a>
+              <div class="text-[11px] text-ink-500 mt-0.5">
+                <span x-text="d.sender || 'Unbekannter Absender'"></span>
+                <template x-if="d.doc_date"><span> · <span x-text="d.doc_date"></span></span></template>
+                <template x-if="d.reasoning">
+                  <span class="ml-2 text-rose-300/80" x-text="'„' + d.reasoning.slice(0, 80) + '“'"></span>
+                </template>
+              </div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <button @click="retryDoc(d.id)" :disabled="busyDoc === d.id"
+                      class="rounded-lg px-2 py-1 text-[11px] border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10"
+                      :class="busyDoc === d.id ? 'opacity-50' : ''"
+                      :title="'{{ t('hub.problems.retry') }}'">
+                <span x-show="busyDoc !== d.id">↻</span>
+                <span x-show="busyDoc === d.id">…</span>
+              </button>
+              <a :href="'/document/' + d.id"
+                 class="rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500"
+                 :title="'{{ t('hub.problems.open') }}'">→</a>
+            </div>
+          </div>
+        </li>
+      </template>
+    </ul>
+
+    <div x-show="filteredProblems().length === 0" x-cloak
+         class="text-sm text-ink-500 py-6 text-center">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           class="h-8 w-8 mx-auto mb-2 text-emerald-400/60">
+        <path d="M5 12l5 5L20 7"/>
+      </svg>
+      {{ t('hub.problems.empty') }}
+    </div>
+  </section>
+
+  <!-- =========== RECENT FEED =========== -->
+  <section class="card p-4 sm:p-5">
+    <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+      <h2 class="font-semibold">{{ t('hub.recent.title') }}</h2>
+      <a href="/library" class="text-xs text-ink-400 hover:text-emerald-300 underline">
+        {{ t('hub.recent.all') }} →
+      </a>
+    </div>
+    <ul x-show="(state.recent || []).length > 0" class="divide-y divide-ink-800/60">
+      <template x-for="d in (state.recent || [])" :key="d.id">
+        <li class="py-2.5 first:pt-0 last:pb-0">
+          <div class="flex items-start gap-2">
+            <span class="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider"
+                  :class="statusClass(d.status)" x-text="statusLabel(d.status)"></span>
+            <div class="flex-1 min-w-0">
+              <a :href="'/document/' + d.id"
+                 class="block text-sm font-medium hover:text-emerald-300 truncate"
+                 x-text="d.subject || d.original_name || ('Dok ' + d.id)"></a>
+              <div class="text-[11px] text-ink-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span class="truncate" x-text="d.category + (d.subcategory ? ' / ' + d.subcategory : '')"></span>
+                <template x-if="d.sender"><span class="text-ink-600">·</span><span class="truncate" x-text="d.sender"></span></template>
+                <template x-if="d.doc_date"><span class="text-ink-600">·</span><span x-text="d.doc_date"></span></template>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-500 shrink-0 tabular-nums" x-text="ago(d.created_at)"></div>
+          </div>
+        </li>
+      </template>
+    </ul>
+    <div x-show="(state.recent || []).length === 0" x-cloak
+         class="text-sm text-ink-500 py-6 text-center">
+      {{ t('hub.recent.empty') }} <a href="/upload" class="underline hover:text-emerald-300">/upload</a>
+    </div>
+  </section>
+
+</div>
+
+<script>
+function dashboard() {
+  return {
+    state: { counts: {}, recent: [], failed: [], deadlines: [], bridge: {connected: false},
+             in_flight: 0, bulk_job: null },
+    loading: false,
+    lastUpdate: '',
+    pollHandle: null,
+    problemsTab: 'all',
+    busyDoc: null,
+    doneDeadline: null,
+    get bulk() { return this.state.bulk_job; },
+    get anyActivity() {
+      return (this.state.in_flight > 0)
+          || (this.bulk && (this.bulk.running || this.bulk.paused));
+    },
+    // Only show the "zuletzt: …" line when the error is actually
+    // recent + still relevant. The bulk worker leaves last_error
+    // populated forever; without this gate a long-resolved
+    // "bridge offline" stays on screen even after the bridge has
+    // happily reconnected and dozens of statements went through.
+    get showLastError() {
+      if (!this.bulk || !this.bulk.last_error) return false;
+      // If approved > failed since the error showed up, the issue
+      // resolved itself — hide.
+      const ok = (this.bulk.approved || []).length;
+      const fail = (this.bulk.failed || []).length;
+      if (ok > 0 && ok >= fail) return false;
+      // If the error mentions "bridge … not connected" but the
+      // bridge is currently connected, hide.
+      const stale = /bridge.*not connected|client is connected/i.test(this.bulk.last_error);
+      if (stale && this.state.bridge && this.state.bridge.connected) return false;
+      return true;
+    },
+    init() {
+      this.refresh();
+      this.pollHandle = setInterval(() => this.refresh(), 2500);
+    },
+    async refresh() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/dashboard');
+        if (r.ok) {
+          this.state = await r.json();
+          this.lastUpdate = new Date().toLocaleTimeString();
+        }
+      } catch (e) { /* network blip */ }
+      finally { this.loading = false; }
+    },
+    countByStatus(s) {
+      return (this.state.failed || []).filter(d => d.status === s).length;
+    },
+    filteredProblems() {
+      const all = this.state.failed || [];
+      if (this.problemsTab === 'all') return all;
+      return all.filter(d => d.status === this.problemsTab);
+    },
+    // Amounts on the deadline card. Defined here rather than reaching for
+    // a global: the card renders inside this component, and an undefined
+    // helper in an x-text silently kills the whole card.
+    eur(v) {
+      if (v === null || v === undefined || v === '') return '';
+      const n = Number(v);
+      if (!isFinite(n)) return '';
+      return n.toLocaleString(DS_LOCALE, { style: 'currency', currency: 'EUR' });
+    },
+    statusClass(s) {
+      switch (s) {
+        case 'failed':         return 'bg-rose-500/20 text-rose-300';
+        case 'review':         return 'bg-amber-500/20 text-amber-300';
+        case 'pending_review': return 'bg-sky-500/20 text-sky-300';
+        case 'duplicate':      return 'bg-ink-700 text-ink-400';
+        case 'filed':          return 'bg-emerald-500/15 text-emerald-300';
+        default:               return 'bg-ink-700 text-ink-400';
+      }
+    },
+    statusLabel(s) {
+      switch (s) {
+        case 'failed':         return 'Fehler';
+        case 'review':         return 'Review';
+        case 'pending_review': return 'Wartet';
+        case 'duplicate':      return 'Dup';
+        case 'filed':          return 'OK';
+        default:               return s || '?';
+      }
+    },
+    daysUntil(iso) {
+      if (!iso) return null;
+      const d = new Date(iso + 'T00:00:00');
+      const today = new Date(); today.setHours(0,0,0,0);
+      return Math.round((d - today) / 86400000);
+    },
+    dueWhen(iso) {
+      const n = this.daysUntil(iso);
+      if (n === null) return '';
+      if (n < 0)  return (T['dashboard.deadlines.overdue'] || '{n}d overdue').replace('{n}', -n);
+      if (n === 0) return T['dashboard.deadlines.today'] || 'today';
+      if (n === 1) return T['dashboard.deadlines.tomorrow'] || 'tomorrow';
+      return (T['dashboard.deadlines.in_days'] || 'in {n}d').replace('{n}', n);
+    },
+    dueClass(iso) {
+      const n = this.daysUntil(iso);
+      if (n === null) return 'bg-ink-700 text-ink-400';
+      if (n < 0)  return 'bg-rose-500/20 text-rose-300';
+      if (n <= 7) return 'bg-amber-500/20 text-amber-300';
+      return 'bg-emerald-500/15 text-emerald-300';
+    },
+    async markDeadlineDone(docId) {
+      // Optimistically drop it from the card, then persist. Refresh
+      // re-syncs from the server (the row is now filtered out).
+      this.doneDeadline = docId;
+      try {
+        const r = await fetch('/api/document/' + docId + '/deadline-done', { method: 'POST' });
+        if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+        this.state.deadlines = (this.state.deadlines || []).filter(d => d.id !== docId);
+        this.refresh();
+      } catch (e) {
+        alert(e.message || String(e));
+      } finally {
+        this.doneDeadline = null;
+      }
+    },
+    dueKindLabel(k) {
+      if (k === 'zahlung')    return T['dashboard.deadlines.kind.zahlung']    || 'Payment due';
+      if (k === 'kuendigung') return T['dashboard.deadlines.kind.kuendigung'] || 'cancel by';
+      return T['dashboard.deadlines.kind.other'] || 'Deadline';
+    },
+    ago(iso) {
+      if (!iso) return '';
+      const t = new Date(iso).getTime();
+      const dt = (Date.now() - t) / 1000;
+      if (dt < 60)    return Math.max(1, Math.floor(dt)) + 's';
+      if (dt < 3600)  return Math.floor(dt / 60) + 'm';
+      if (dt < 86400) return Math.floor(dt / 3600) + 'h';
+      return Math.floor(dt / 86400) + 'd';
+    },
+    async pauseBulk() {
+      try {
+        await fetch('/api/finance/analyze-pause', { method: 'POST' });
+        this.refresh();
+      } catch (e) { alert(e.message || String(e)); }
+    },
+    async resumeBulk() {
+      try {
+        await fetch('/api/finance/analyze-resume', { method: 'POST' });
+        this.refresh();
+      } catch (e) { alert(e.message || String(e)); }
+    },
+    async retryDoc(docId) {
+      this.busyDoc = docId;
+      try {
+        const r = await fetch('/api/document/' + docId + '/retry', { method: 'POST' });
+        if (!r.ok) {
+          const txt = await r.text();
+          throw new Error(txt || ('HTTP ' + r.status));
+        }
+        await this.refresh();
+      } catch (e) {
+        alert('Fehler: ' + (e.message || String(e)));
+      } finally { this.busyDoc = null; }
+    },
+  };
+}
+</script>
+
+{% endblock %}

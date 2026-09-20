@@ -1,0 +1,571 @@
+"""Receipt (Kassenzettel) line-item extractor.
+
+When the main classifier marks a document as `category = "Kassenzettel"`,
+this module runs a second LLM pass to pull structured data out of the
+OCR text:
+
+  - shop name and type (supermarkt / drogerie / restaurant / tankstelle / …)
+  - payment method (bar, girocard, kreditkarte, paypal)
+  - total amount + currency
+  - per-line items: name, quantity, unit price, line total, item category
+
+The output is stored in the `receipts` and `receipt_items` SQLite tables
+(see db.py) and rendered on the document detail page + the analytics
+dashboard.
+
+We deliberately keep this a SECOND-PASS extractor (only invoked for receipts)
+so the main classifier prompt stays compact and doesn't blow up
+prompt-cache effectiveness for non-receipt documents.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from typing import Any
+
+from .providers import Provider, ProviderError
+
+
+logger = logging.getLogger("docusort.receipts")
+
+
+SHOP_TYPES = (
+    "supermarkt", "drogerie", "baumarkt", "restaurant", "cafe",
+    "tankstelle", "apotheke", "bekleidung", "elektronik", "buecher",
+    "moebel", "versand", "sonstiges",
+)
+
+ITEM_CATEGORIES = (
+    "lebensmittel", "getraenke", "haushalt", "koerperpflege",
+    "elektronik", "bekleidung", "buecher", "essen-trinken-aussehaus",
+    "transport", "baumarkt", "tabak", "pfand", "rabatt", "sonstiges",
+)
+
+PAYMENT_METHODS = ("bar", "girocard", "kreditkarte", "paypal", "sonstiges")
+
+
+@dataclass
+class ReceiptItem:
+    name: str
+    quantity: float | None = None
+    unit_price: float | None = None
+    total_price: float | None = None
+    item_category: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "quantity": self.quantity,
+            "unit_price": self.unit_price,
+            "total_price": self.total_price,
+            "item_category": self.item_category,
+        }
+
+
+@dataclass
+class Receipt:
+    shop_name: str = ""
+    shop_type: str = ""
+    payment_method: str = ""
+    total_amount: float | None = None
+    currency: str = "EUR"
+    receipt_date: str = ""
+    items: list[ReceiptItem] = field(default_factory=list)
+    raw_response: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "shop_name": self.shop_name,
+            "shop_type": self.shop_type,
+            "payment_method": self.payment_method,
+            "total_amount": self.total_amount,
+            "currency": self.currency,
+            "receipt_date": self.receipt_date,
+            "items": [i.as_dict() for i in self.items],
+        }
+
+
+SYSTEM_PROMPT = f"""You are a receipt parser for a German personal-finance app. You receive the OCR text of a Kassenzettel (Bon, Quittung, Bewirtungsbeleg) and reply with ONE JSON object describing it.
+
+# Output format (strict)
+
+Reply with ONE JSON object, no prose, no markdown fences, no trailing text.
+
+Schema:
+{{
+  "shop_name": string,            // shop / restaurant / chain name as printed (e.g. "REWE", "dm", "Aral")
+  "shop_type": string,            // EXACTLY one of: {", ".join(SHOP_TYPES)}
+  "payment_method": string,       // one of: {", ".join(PAYMENT_METHODS)} or empty if unknown
+  "total_amount": number | null,  // GRAND TOTAL including tax, in major units (e.g. 23.87)
+  "currency": string,             // 3-letter ISO code; default "EUR"
+  "receipt_date": string,         // ISO YYYY-MM-DD; if absent, return ""
+  "items": [
+    {{
+      "name": string,             // human-readable line description ("Bio Vollmilch 1L")
+      "quantity": number | null,  // 1 if not printed; for "2 x" lines use 2
+      "unit_price": number | null,// per unit before discount (null when only total is printed)
+      "total_price": number | null,// signed line total — POSITIVE for purchases, NEGATIVE for discounts/Rabatt/Pfand-Rückgabe
+      "item_category": string     // EXACTLY one of: {", ".join(ITEM_CATEGORIES)}
+    }},
+    ...
+  ]
+}}
+
+# Rules
+
+- Numbers use a dot as decimal separator: "1,29" → 1.29.
+- Drop pure layout noise: SUMME, ZWISCHENSUMME, MwSt-Tabellen, Kassenstammdaten,
+  Adresszeilen, "Vielen Dank", Bon-Nr., Kassierer-Nr., Terminal-/TA-/TSE-data,
+  PAYBACK lines, EMV-Daten, K-U-N-D-E-N-B-E-L-E-G separators.
+- KEEP discount lines as separate items with NEGATIVE total_price (e.g.
+  "RABATT -1,50" → {{name: "Rabatt", total_price: -1.50}}).
+- If a line has "2 x 1,29 = 2,58", set quantity=2, unit_price=1.29, total_price=2.58.
+- If only one number is printed for a line, set total_price to that number.
+- ALDI / some others print quantity on a SEPARATE LINE ABOVE the item name
+  ("2 x 1,19 €" then "SKYR 2,38 € 1", or "0,463 kg x 11,99 €/kg" then
+  "SCHWEINEFILET-QS 5,55 € 1"). Read the line above to set quantity and
+  unit_price; the item line itself gives name + total_price.
+- A trailing single digit "1" or "2" after the price is the tax-class
+  marker (1=7% VAT, 2=19% VAT). IGNORE it — never include it in any
+  numeric field.
+- Combo menus (Kino, Fast Food) print sub-items with "1 *" prefix that
+  describe what the menu contains — these sub-lines have NO separate
+  prices. Emit ONE item for the whole combo with the menu price; fold
+  the sub-item names into the item name.
+- If the OCR text is just a Kartenzahlungsbeleg / Zahlungsbeleg without
+  any product lines (only "Betrag X,XX EUR" + "Zahlung erfolgt"),
+  return items=[] and set total_amount from the Betrag line.
+- shop_type maps to common chains:
+  - REWE, EDEKA, Aldi, Lidl, Kaufland, Penny, Netto, Real, Norma, Tegut → supermarkt
+  - dm, Rossmann, Müller (drogerie context), Budni, Douglas → drogerie
+  - Obi, Bauhaus, Hornbach, Hagebau, Toom, Globus → baumarkt
+  - Aral, Shell, Total, Esso, Star, BP, Jet, OMV → tankstelle
+  - Apotheke, Apotheker, "Apo " prefix → apotheke
+  - H&M, C&A, Zara, Primark, Tom Tailor → bekleidung
+  - MediaMarkt, Saturn, Cyberport, Conrad, Reichelt → elektronik
+  - Thalia, Hugendubel, Mayersche → buecher
+  - Ikea, Möbel ..., Höffner, XXXLutz → moebel
+  - Amazon Lieferschein, Zalando, Otto Versand → versand
+  - sit-down places → restaurant; takeaway / coffee → cafe
+  - everything else → sonstiges
+
+# Pfand handling — read carefully
+
+Pfand on a German receipt comes in two flavours and they map to DIFFERENT
+item_categories. This is critical for the analytics breakdown — get it
+right.
+
+1. **Pfand-Aufschlag** (deposit charge added when you BUY a drink in a
+   returnable bottle/can): line shows POSITIVE amount, e.g.
+   "PFAND 0,25 A", "EINWEG 0,25 A", "MEHRWEG 0,15".
+   This is part of the drink purchase. Set:
+     - total_price = positive value
+     - item_category = "getraenke"
+     - name = "Pfand" (or "Einwegpfand" / "Mehrwegpfand" as printed)
+
+2. **Pfand-Rückgabe / Leergut-Rücknahme** (deposit refunded when you
+   RETURN empty bottles, often via a Leergutautomat): line shows
+   NEGATIVE amount, e.g. "LEERGUT -1,50", "PFAND-RÜCKGABE -3,00",
+   "FLASCHENRÜCKNAHME -0,75".
+   This is money back. Set:
+     - total_price = negative value
+     - item_category = "pfand"
+     - name = "Pfand-Rückgabe" (or "Leergut" as printed)
+
+NEVER use item_category="pfand" for ordinary product lines. The "pfand"
+category is RESERVED for negative Pfand-Rückgabe / Leergut entries. If a
+line is positive and not clearly a deposit, it is NOT pfand — pick the
+matching product category instead.
+
+# item_category guidance (non-Pfand)
+
+  - food / fresh produce / pasta / bread / dairy → lebensmittel
+  - sodas / juice / beer / wine / spirits / mineral water → getraenke
+  - cleaning supplies / toilet paper / kitchen rolls → haushalt
+  - shampoo / lotion / cosmetics / toothpaste → koerperpflege
+  - cigarettes / tobacco → tabak
+  - discount / Rabatt / Coupon (negative) → rabatt
+  - fuel → transport
+  - in restaurants/cafes, all consumed food/drink → essen-trinken-aussehaus
+  - everything else → sonstiges (don't guess if unclear)
+
+- Be defensive about OCR noise: "1.D0" might mean "1.00", "1 .29" → 1.29, "I,29" → 1.29.
+- Never invent items not in the text. If the receipt has 5 visible items and the rest is unreadable, return 5 items.
+
+# Few-shot examples
+
+## Example A — REWE supermarket (with Pfand-Aufschlag, NOT a refund)
+
+OCR text:
+"REWE Markt GmbH · Marktstraße 78 · 04910 Musterstadt
+Bon-Nr. 4711 Kasse 02 17:42 12.04.2026
+Bio Vollmilch 1L         1,29 A
+Vollkornbrot             2,49 A
+Tomaten 500g             1,79 A
+2 x Joghurt Erdbeer
+   à 0,89                1,78 A
+Mineralwasser 1,5L       0,79 A
+PFAND 0,25                0,25 A
+RABATT Coupon           -0,50 A
+SUMME EUR              23,87
+Gegeben girocard       23,87"
+
+Note the PFAND line is POSITIVE — it's the deposit charged for the
+mineral-water bottle. That is part of the drink purchase, so
+item_category="getraenke" (NOT "pfand").
+
+Output:
+{{"shop_name":"REWE","shop_type":"supermarkt","payment_method":"girocard","total_amount":23.87,"currency":"EUR","receipt_date":"2026-04-12","items":[{{"name":"Bio Vollmilch 1L","quantity":1,"unit_price":1.29,"total_price":1.29,"item_category":"lebensmittel"}},{{"name":"Vollkornbrot","quantity":1,"unit_price":2.49,"total_price":2.49,"item_category":"lebensmittel"}},{{"name":"Tomaten 500g","quantity":1,"unit_price":1.79,"total_price":1.79,"item_category":"lebensmittel"}},{{"name":"Joghurt Erdbeer","quantity":2,"unit_price":0.89,"total_price":1.78,"item_category":"lebensmittel"}},{{"name":"Mineralwasser 1,5L","quantity":1,"unit_price":0.79,"total_price":0.79,"item_category":"getraenke"}},{{"name":"Pfand","quantity":1,"unit_price":0.25,"total_price":0.25,"item_category":"getraenke"}},{{"name":"Coupon-Rabatt","quantity":1,"unit_price":-0.50,"total_price":-0.50,"item_category":"rabatt"}}]}}
+
+## Example A2 — Leergutautomat / Pfand-Rückgabe (negative, IS the refund)
+
+OCR text:
+"EDEKA Müller · Hauptstr. 5
+Leergut-Rücknahme  18.04.2026
+LEERGUT             -1,50
+PFAND-Rückgabe      -0,75
+SUMME              -2,25"
+
+Both lines are NEGATIVE — the customer is getting deposit back. THIS is
+what item_category="pfand" is for.
+
+Output:
+{{"shop_name":"EDEKA","shop_type":"supermarkt","payment_method":"","total_amount":-2.25,"currency":"EUR","receipt_date":"2026-04-18","items":[{{"name":"Leergut","quantity":1,"unit_price":-1.50,"total_price":-1.50,"item_category":"pfand"}},{{"name":"Pfand-Rückgabe","quantity":1,"unit_price":-0.75,"total_price":-0.75,"item_category":"pfand"}}]}}
+
+## Example B — Tankquittung Aral
+
+OCR text:
+"Aral Tankstelle · Bautzner Landstr.
+Beleg 8821 18.03.2026 09:12
+Super E10 41,32 L à 1,789 EUR/L
+                       73,93
+EC-Karte               73,93"
+
+Output:
+{{"shop_name":"Aral","shop_type":"tankstelle","payment_method":"girocard","total_amount":73.93,"currency":"EUR","receipt_date":"2026-03-18","items":[{{"name":"Super E10","quantity":41.32,"unit_price":1.789,"total_price":73.93,"item_category":"transport"}}]}}
+
+## Example D — ALDI two-line layout (qty/multiplier above the item)
+
+ALDI prints the multiplier or weight on a SEPARATE LINE ABOVE the item
+name. The price column may have a trailing tax-class digit ("1" for 7%
+VAT, "2" for 19% VAT) — IGNORE that digit. Negative LEERGUTRÜCKNAHME
+("-N x 0,25 €") is a Pfand-Rückgabe; positive PFANDWERT is a Pfand-
+Aufschlag (drink purchase) and goes to "getraenke".
+
+OCR text:
+"ALDI · Marktweg 7, 04910 Musterstadt
+-8 x 0,25 €
+LEERGUTRÜCKNAHME 19%      -2,00 € 2
+SPITZPAPRIKA MIX           2,19 € 1
+PFANDWERT 1,50             1,50 € 2
+2 x 1,19 €
+SKYR                       2,38 € 1
+0,463 kg x 11,99 €/kg
+SCHWEINEFILET-QS, GANZ     5,55 € 1
+KARTOFFELN FK KLEIN        1,79 € 1
+ZU ZAHLEN                 13,41 €"
+
+Note: the line "-8 x 0,25 €" is the multiplier for LEERGUTRÜCKNAHME →
+quantity=8 (positive count of bottles), unit_price=-0.25 (negative
+because deposit is refunded), total_price=-2.00, category="pfand".
+"PFANDWERT 1,50" is positive → Pfand-Aufschlag → "getraenke".
+"SKYR" with "2 x 1,19 €" above → quantity=2, unit_price=1.19,
+total_price=2.38. "SCHWEINEFILET-QS, GANZ" with "0,463 kg x 11,99
+€/kg" above → quantity=0.463, unit_price=11.99, total_price=5.55.
+
+Output:
+{{"shop_name":"ALDI","shop_type":"supermarkt","payment_method":"","total_amount":13.41,"currency":"EUR","receipt_date":"","items":[{{"name":"Leergutrücknahme","quantity":8,"unit_price":-0.25,"total_price":-2.00,"item_category":"pfand"}},{{"name":"Spitzpaprika Mix","quantity":1,"unit_price":2.19,"total_price":2.19,"item_category":"lebensmittel"}},{{"name":"Pfandwert","quantity":1,"unit_price":1.50,"total_price":1.50,"item_category":"getraenke"}},{{"name":"Skyr","quantity":2,"unit_price":1.19,"total_price":2.38,"item_category":"lebensmittel"}},{{"name":"Schweinefilet-QS, Ganz","quantity":0.463,"unit_price":11.99,"total_price":5.55,"item_category":"lebensmittel"}},{{"name":"Kartoffeln FK klein","quantity":1,"unit_price":1.79,"total_price":1.79,"item_category":"lebensmittel"}}]}}
+
+## Example E — Cineplex (Kinomenü with informational sub-items)
+
+Combo menus print the menu PRICE on the header line, and sub-items
+with "1 *" prefix that DESCRIBE the menu contents — they have NO
+separate prices. Treat the whole combo as ONE item, ignore the
+"1 * Coca-Cola 0,75l" / "1 * Nachos Klein" / "1 * Salsa-Dip hot"
+sub-lines.
+
+OCR text:
+"Kino am Markt · 04910 Musterstadt
+Datum: 03.05.26  Uhrzeit: 16:37
+Menü 2 Nacho                10,00 EUR
+  1 * 10,00 EUR
+  1 * Coca-Cola 0,75l
+  1 * Nachos Klein
+  1 * Salsa-Dip hot
+Summe :                     10,00 EUR
+Telecash Kasse              10,00 EUR"
+
+Output:
+{{"shop_name":"Kino am Markt","shop_type":"sonstiges","payment_method":"","total_amount":10.00,"currency":"EUR","receipt_date":"2026-05-03","items":[{{"name":"Menü 2 Nacho (Coca-Cola 0,75l, Nachos klein, Salsa-Dip)","quantity":1,"unit_price":10.00,"total_price":10.00,"item_category":"essen-trinken-aussehaus"}}]}}
+
+## Example F — Card-payment slip (no items)
+
+Some receipts are JUST the card-payment confirmation (Kartenzahlung-
+beleg / Zahlungsbeleg) and contain no item list — only the total. In
+that case return items=[] and set total_amount from the "Betrag" line.
+Don't invent items.
+
+OCR text:
+"DEICHMANN
+Deichmann SE · Musterallee 12, 04910 Musterstadt
+Kartenzahlung   girocard Contactless
+Datum  28.04.2026
+Betrag      32,08 EUR
+00 Zahlung erfolgt"
+
+Output:
+{{"shop_name":"Deichmann","shop_type":"bekleidung","payment_method":"girocard","total_amount":32.08,"currency":"EUR","receipt_date":"2026-04-28","items":[]}}
+
+## Example C — Restaurantrechnung
+
+OCR text:
+"Trattoria Da Vinci · Schloßstr. 12 · 04910 Musterstadt
+22.03.2026 19:42
+2 x Spaghetti Carbonara à 14,50    29,00
+1 x Salat gemischt                  6,50
+2 x Mineralwasser à 3,50            7,00
+1 x Tiramisu                        6,00
+SUMME                              48,50
+Gegeben Kreditkarte                50,00
+Trinkgeld                           1,50"
+
+Output:
+{{"shop_name":"Trattoria Da Vinci","shop_type":"restaurant","payment_method":"kreditkarte","total_amount":48.50,"currency":"EUR","receipt_date":"2026-03-22","items":[{{"name":"Spaghetti Carbonara","quantity":2,"unit_price":14.50,"total_price":29.00,"item_category":"essen-trinken-aussehaus"}},{{"name":"Salat gemischt","quantity":1,"unit_price":6.50,"total_price":6.50,"item_category":"essen-trinken-aussehaus"}},{{"name":"Mineralwasser","quantity":2,"unit_price":3.50,"total_price":7.00,"item_category":"essen-trinken-aussehaus"}},{{"name":"Tiramisu","quantity":1,"unit_price":6.00,"total_price":6.00,"item_category":"essen-trinken-aussehaus"}}]}}
+
+# Reminder
+
+ONE JSON object. No prose. shop_type and item_category MUST be from the
+allowed lists. Numbers as floats, no currency symbols inside the numbers.
+"""
+
+
+_USER_TEMPLATE = (
+    "Extract the structured receipt from this OCR text. "
+    "Return the JSON object now.\n\n---\n{text}\n---"
+)
+
+
+def _parse_response(raw: str) -> dict[str, Any]:
+    """Pull the first JSON object out of the model reply."""
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].lstrip()
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(raw[i:])
+            return obj
+        except json.JSONDecodeError:
+            continue
+    raise ValueError(f"No valid JSON in receipt extractor reply: {raw[:200]!r}")
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalise_item(d: dict[str, Any]) -> ReceiptItem | None:
+    name = str(d.get("name") or "").strip()
+    if not name:
+        return None
+    cat = str(d.get("item_category") or "").strip().lower()
+    if cat and cat not in ITEM_CATEGORIES:
+        cat = "sonstiges"
+    return ReceiptItem(
+        name=name[:128],
+        quantity=_coerce_float(d.get("quantity")),
+        unit_price=_coerce_float(d.get("unit_price")),
+        total_price=_coerce_float(d.get("total_price")),
+        item_category=cat,
+    )
+
+
+def backfill_receipts(settings, db, classifier, *, dry_run: bool = False,
+                      force: bool = False,
+                      progress_cb=None) -> dict:
+    """Extract / re-extract receipts for Kassenzettel docs.
+
+    By default only handles docs that don't have a receipt row yet (useful
+    after upgrading from a version that didn't auto-extract). Pass
+    `force=True` to re-run on EVERY Kassenzettel doc — this overwrites
+    existing extractions and costs LLM tokens, but is what you want after
+    a prompt update that fixes systematic mis-classifications.
+
+    Reads the stored OCR text from `documents.extracted_text`, so no new
+    OCR cost is incurred. The LLM call is what's billed.
+    """
+    extractor = ReceiptExtractor(
+        classifier.provider, settings.ai.model,
+        max_text_chars=settings.ai.max_text_chars,
+        holder_names=settings.finance.holder_names,
+        pseudonymize=settings.finance.pseudonymize,
+    )
+    if force:
+        sql = (
+            "SELECT id, extracted_text, doc_date FROM documents "
+            "WHERE category = 'Kassenzettel' AND deleted_at IS NULL "
+            "  AND extracted_text IS NOT NULL AND extracted_text != ''"
+        )
+    else:
+        sql = (
+            "SELECT id, extracted_text, doc_date FROM documents "
+            "WHERE category = 'Kassenzettel' AND deleted_at IS NULL "
+            "  AND id NOT IN (SELECT doc_id FROM receipts) "
+            "  AND extracted_text IS NOT NULL AND extracted_text != ''"
+        )
+    rows = db._conn.execute(sql).fetchall()
+    total = len(rows)
+    processed: list[int] = []
+    failed: list[dict] = []
+    mode = "re-extract" if force else "backfill"
+    logger.info("Receipt %s: %d Kassenzettel doc(s) to process", mode, total)
+    for idx, r in enumerate(rows, 1):
+        doc_id = int(r["id"])
+        try:
+            receipt = extractor.extract(r["extracted_text"])
+        except Exception as exc:
+            failed.append({"doc_id": doc_id, "error": str(exc)})
+            logger.warning("Receipt %s [%d/%d] doc %d FAILED: %s",
+                           mode, idx, total, doc_id, exc)
+            if progress_cb is not None:
+                try:
+                    progress_cb(idx, total, doc_id, None, str(exc))
+                except Exception:
+                    pass
+            continue
+        if dry_run:
+            logger.info("Receipt %s (dry-run) [%d/%d] doc %d -> shop=%s items=%d",
+                        mode, idx, total, doc_id, receipt.shop_name, len(receipt.items))
+        else:
+            db.upsert_receipt(
+                doc_id,
+                shop_name=receipt.shop_name, shop_type=receipt.shop_type,
+                payment_method=receipt.payment_method,
+                total_amount=receipt.total_amount, currency=receipt.currency,
+                receipt_date=receipt.receipt_date or (r["doc_date"] or ""),
+                items=[i.as_dict() for i in receipt.items],
+                extra_json=receipt.raw_response,
+            )
+            logger.info("Receipt %s [%d/%d] doc %d OK shop=%r items=%d total=%s",
+                        mode, idx, total, doc_id, receipt.shop_name,
+                        len(receipt.items), receipt.total_amount)
+        processed.append(doc_id)
+        if progress_cb is not None:
+            try:
+                progress_cb(idx, total, doc_id, receipt, None)
+            except Exception:
+                pass
+    logger.info("Receipt %s done: %d processed, %d failed",
+                mode, len(processed), len(failed))
+    return {
+        "found": total,
+        "processed": processed,
+        "failed": failed,
+        "dry_run": dry_run,
+    }
+
+
+_LOCAL_PROVIDERS = ("openai_compat", "bridge")
+
+
+# Receipts can be very long (5-metre ALDI Großeinkauf with 80+ items).
+# We deliberately set effectively-unlimited budgets for receipt
+# extraction so no item is ever dropped due to truncation. Bons run
+# one at a time and the user is on a local LLM (Ollama), so token
+# cost is not a concern — only the model's actual context window is.
+# If the local model's context can't fit a particular bon, that's a
+# server-side `num_ctx` configuration question, not something we cap
+# from here.
+_RECEIPT_MAX_TEXT_CHARS = 200_000
+_RECEIPT_MAX_OUTPUT_TOKENS = 100_000
+
+
+class ReceiptExtractor:
+    """Wraps a Provider to extract structured receipts from OCR text."""
+
+    def __init__(self, provider: Provider, model: str,
+                 max_text_chars: int = 12000,
+                 holder_names: list[str] | None = None,
+                 pseudonymize: bool = True):
+        self.provider = provider
+        self.model = model
+        # Floor at _RECEIPT_MAX_TEXT_CHARS — global setting may be lower
+        # for the classifier (cache-friendliness) but receipts need the
+        # full input every time.
+        self.max_text_chars = max(max_text_chars, _RECEIPT_MAX_TEXT_CHARS)
+        self.holder_names = list(holder_names or [])
+        self.pseudonymize = pseudonymize
+
+    def extract(self, ocr_text: str) -> Receipt:
+        if not ocr_text:
+            raise ValueError("no OCR text provided")
+        body = ocr_text[: self.max_text_chars]
+        if len(ocr_text) > self.max_text_chars:
+            logger.warning(
+                "Receipt OCR text %d chars exceeds limit %d — items past "
+                "the cutoff will be missing. Consider raising "
+                "_RECEIPT_MAX_TEXT_CHARS in receipts.py.",
+                len(ocr_text), self.max_text_chars,
+            )
+
+        is_local = self.provider.name in _LOCAL_PROVIDERS
+        do_pseudo = self.pseudonymize and not is_local
+        pseudo = None
+        if do_pseudo:
+            from .finance.pseudonymizer import pseudonymize_for_cloud
+            body, pseudo = pseudonymize_for_cloud(body, self.holder_names)
+
+        try:
+            resp = self.provider.classify(
+                system_prompt=SYSTEM_PROMPT,
+                user_prompt=_USER_TEMPLATE.format(text=body),
+                model=self.model,
+                max_output_tokens=_RECEIPT_MAX_OUTPUT_TOKENS,
+            )
+        except ProviderError as exc:
+            logger.error("Receipt extractor: provider call failed: %s", exc)
+            raise
+
+        data = _parse_response(resp.raw_text)
+        if pseudo is not None:
+            data = pseudo.restore(data)
+
+        shop_type = str(data.get("shop_type") or "").strip().lower()
+        if shop_type and shop_type not in SHOP_TYPES:
+            shop_type = "sonstiges"
+
+        payment = str(data.get("payment_method") or "").strip().lower()
+        if payment and payment not in PAYMENT_METHODS:
+            payment = "sonstiges"
+
+        items_raw = data.get("items") or []
+        items: list[ReceiptItem] = []
+        if isinstance(items_raw, list):
+            for d in items_raw:
+                if not isinstance(d, dict):
+                    continue
+                item = _normalise_item(d)
+                if item is not None:
+                    items.append(item)
+
+        return Receipt(
+            shop_name=str(data.get("shop_name") or "").strip()[:128],
+            shop_type=shop_type,
+            payment_method=payment,
+            total_amount=_coerce_float(data.get("total_amount")),
+            currency=str(data.get("currency") or "EUR").strip().upper()[:8] or "EUR",
+            receipt_date=str(data.get("receipt_date") or "").strip()[:10],
+            items=items,
+            raw_response=resp.raw_text[:6000],
+        )

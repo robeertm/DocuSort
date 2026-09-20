@@ -1,0 +1,563 @@
+{% extends "base.html" %}
+{% block title %}{{ t('upload.title') }} · DocuSort{% endblock %}
+{% block content %}
+
+<div class="mb-6">
+  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('upload.title') }}</h1>
+  <p class="text-ink-400 mt-1 text-sm">{{ t('upload.subtitle') }}</p>
+</div>
+
+<script type="application/json" id="ds-upload-accounts" data-admin="{{ 1 if (me and me.is_admin) else 0 }}">{{ (upload_accounts or []) | tojson }}</script>
+
+<div x-data="uploader()" class="max-w-2xl mx-auto space-y-4">
+
+  <!-- Drop zone -->
+  <label
+    @dragover.prevent="dragOver = true"
+    @dragleave.prevent="dragOver = false"
+    @drop.prevent="handleDrop($event)"
+    :class="dragOver ? 'border-emerald-400 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-500'"
+    class="card flex flex-col items-center justify-center gap-3 py-12 px-6 border-2 border-dashed cursor-pointer transition text-center"
+  >
+    <input type="file" class="hidden" multiple accept=".pdf,.csv,text/csv,image/*"
+           @change="handleFiles($event.target.files); $event.target.value=''">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-12 w-12 text-ink-400">
+      <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
+    </svg>
+    <div>
+      <div class="font-medium">
+        {{ t('upload.drop_label_primary') }}
+        <span class="text-emerald-300">{{ t('upload.drop_label_choose') }}</span>
+      </div>
+      <div class="text-xs text-ink-400 mt-1">{{ t('upload.drop_label_hint') }}</div>
+    </div>
+  </label>
+
+  <!-- Folder picker -->
+  <label class="card p-4 flex items-center gap-4 cursor-pointer hover:bg-ink-800/80 transition">
+    <input type="file" class="hidden" webkitdirectory directory multiple
+           @change="handleFiles($event.target.files); $event.target.value=''">
+    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-300">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <path d="M8 12h8M12 8v8"/>
+      </svg>
+    </div>
+    <div class="min-w-0">
+      <div class="font-medium">{{ t('upload.folder_picker_title') }}</div>
+      <div class="text-xs text-ink-400 mt-0.5">{{ t('upload.folder_picker_hint') }}</div>
+    </div>
+  </label>
+
+  <!-- Mobile camera -->
+  <label class="card p-4 flex items-center gap-4 cursor-pointer hover:bg-ink-800/80 transition sm:hidden">
+    <input type="file" class="hidden" accept="image/*" capture="environment"
+           @change="handleFiles($event.target.files); $event.target.value=''">
+    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+        <circle cx="12" cy="13" r="4"/>
+      </svg>
+    </div>
+    <div>
+      <div class="font-medium">{{ t('upload.camera_title') }}</div>
+      <div class="text-xs text-ink-400 mt-0.5">{{ t('upload.camera_hint') }}</div>
+    </div>
+  </label>
+
+  <!-- Activity banner -->
+  <template x-if="items.length > 0 && anyActive()">
+    <div class="card p-3 flex items-center gap-2 text-xs text-amber-300 bg-amber-500/5 border-amber-500/20">
+      <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+      </svg>
+      <span x-text="tr('upload.foreground_hint')"></span>
+    </div>
+  </template>
+
+  <!-- Queue -->
+  <template x-if="items.length > 0">
+    <div class="card p-5">
+      <div class="flex items-baseline justify-between gap-3 mb-3">
+        <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('upload.queue_heading') }}</h2>
+        <button type="button" @click="clearHistory()" class="text-xs text-ink-400 hover:text-ink-200 underline">
+          {{ t('upload.clear_history') }}
+        </button>
+      </div>
+      <ul class="divide-y divide-ink-700/50 -my-3 max-h-[60vh] overflow-y-auto">
+        <template x-for="it in items" :key="it.id">
+          <li class="flex items-center gap-3 py-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" :class="iconBg(it.stage)">
+              <svg x-show="['filed','csv-imported'].includes(it.stage)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4 text-emerald-300"><path d="M20 6 9 17l-5-5"/></svg>
+              <svg x-show="it.stage === 'review'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-amber-300"><path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/></svg>
+              <svg x-show="['failed','error','needs-repick'].includes(it.stage)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-rose-300"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+              <svg x-show="it.stage === 'needs-account'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-amber-300"><circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17h.01"/></svg>
+              <svg x-show="it.stage === 'skipped'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-ink-400"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+              <svg x-show="it.stage === 'duplicate'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-indigo-300"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M3 14V5a2 2 0 0 1 2-2h9"/></svg>
+              <svg x-show="['pending-upload','uploading','queued','server-queued','processing'].includes(it.stage)"
+                   class="h-4 w-4 animate-spin text-ink-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/></svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm font-medium" x-text="it.displayName"></div>
+              <div class="mt-1 text-xs" :class="stageColor(it.stage)" x-text="stageLabel(it)"></div>
+              <template x-if="it.stage === 'needs-account'">
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <select x-model="it.ibanChoice"
+                          class="rounded border border-ink-700 bg-ink-900/60 px-2 py-1 text-xs text-ink-200">
+                    <option value="">{{ t('upload.account_choose') }}</option>
+                    <template x-for="a in ACCOUNTS" :key="a.iban">
+                      <option :value="a.iban" x-text="a.label"></option>
+                    </template>
+                    <option value="__manual">{{ t('upload.account_manual') }}</option>
+                  </select>
+                  <input x-show="it.ibanChoice === '__manual'" x-cloak
+                         x-model="it.ibanManual" type="text" spellcheck="false" autocomplete="off"
+                         placeholder="{{ t('finance.csv.iban_ph') }}"
+                         class="rounded border border-ink-700 bg-ink-900/60 px-2 py-1 font-mono text-xs text-ink-200 w-56"/>
+                  <button type="button" class="btn-secondary text-xs"
+                          :disabled="!chosenIban(it)"
+                          @click="retryWithAccount(it)">{{ t('upload.account_import') }}</button>
+                </div>
+              </template>
+            </div>
+            <template x-if="it.doc_id">
+              <a :href="`/document/${it.doc_id}`" class="btn-ghost shrink-0 text-xs" x-text="tr('upload.view')"></a>
+            </template>
+          </li>
+        </template>
+      </ul>
+      <div class="mt-4 flex items-center justify-between text-xs text-ink-400">
+        <span x-text="summary()"></span>
+        <a href="/library" class="btn-ghost" x-show="allDone()" x-text="tr('upload.to_library')"></a>
+      </div>
+    </div>
+  </template>
+
+  <div class="card p-4 text-sm text-ink-300">
+    <div class="flex gap-2 items-start">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-ink-400 shrink-0 mt-0.5">
+        <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+      </svg>
+      <p class="leading-relaxed">{{ t('upload.ocr_hint') | safe }}</p>
+    </div>
+  </div>
+
+  {# The key that explains the one-way-in rule existed since 0.50.0 but was
+     never rendered anywhere. #}
+  <div class="card p-4 text-sm text-ink-300">
+    <div class="flex gap-2 items-start">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-emerald-300 shrink-0 mt-0.5">
+        <path d="M3 10h18M7 15h4"/><rect x="3" y="5" width="18" height="14" rx="2"/>
+      </svg>
+      <p class="leading-relaxed">{{ t('upload.csv_hint') }}</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// In-memory uploads only.
+// IndexedDB stores metadata (so the dashboard widget + a tab reload still
+// see what's in flight), but never the file blob — Safari has a long-
+// standing bug where Blobs round-tripped through IndexedDB come back
+// 0 bytes when re-read in another execution context (e.g. a Service
+// Worker). We sidestep it by keeping File refs in a JS Map keyed by the
+// IDB id; if the tab closes mid-upload the pending items get marked
+// 'needs-repick' on next visit so the user knows to re-select them.
+const DB_NAME = "docusort-uploads";
+const STORE = "items";
+const ALLOWED_EXT = ["pdf","jpg","jpeg","png","tif","tiff","bmp","csv"];
+const TERMINAL = new Set(["filed","review","failed","duplicate","unknown","error","needs-repick","csv-imported","skipped","needs-account"]);
+const ACCOUNTS = (() => {
+  try { return JSON.parse(document.getElementById("ds-upload-accounts").textContent || "[]"); }
+  catch (e) { return []; }
+})();
+const MAY_ASSIGN = (document.getElementById("ds-upload-accounts") || {}).dataset?.admin === "1";
+const BC_NAME = "docusort-upload";
+const MAX_CONCURRENT = 4;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE, { keyPath: "id", autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbAdd(record) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readwrite").objectStore(STORE).add(record);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbAll() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readonly").objectStore(STORE).get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbPatch(id, patch) {
+  const rec = await idbGet(id);
+  if (!rec) return;
+  Object.assign(rec, patch);
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readwrite").objectStore(STORE).put(rec);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbDelete(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function notifyDashboard() {
+  // Dashboard widget listens on this channel; ping it after every change.
+  try { new BroadcastChannel(BC_NAME).postMessage({ type: "update" }); } catch (e) {}
+}
+
+function uploader() {
+  return {
+    dragOver: false,
+    items: [],            // UI state (synced from IDB)
+    fileBlobs: new Map(), // id -> File (in-memory only)
+    polling: new Set(),
+    draining: false,
+
+    async init() {
+      // Make sure any old service worker stops claiming uploads — we run
+      // everything in-page now to avoid the IDB-blob bug.
+      if ("serviceWorker" in navigator) {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) {
+            if (r.scope.endsWith("/")) await r.unregister();
+          }
+        } catch (e) {}
+      }
+
+      const stored = await idbAll();
+      this.items = stored.map(this._toUiItem).sort((a, b) => a.id - b.id);
+
+      // Items left as pending-upload from a previous session can't be
+      // resumed (no file blob in memory). Flip them so the user knows.
+      for (const it of this.items) {
+        if (it.stage === "pending-upload" || it.stage === "uploading") {
+          it.stage = "needs-repick";
+          await idbPatch(it.id, { stage: "needs-repick" });
+        }
+      }
+
+      // Resume server-status polling for items the server already owns.
+      for (const it of this.items) {
+        if (it.inbox_name && !TERMINAL.has(it.stage)) {
+          this.pollStatus(it);
+        }
+      }
+
+      notifyDashboard();
+    },
+
+    _toUiItem(rec) {
+      return {
+        id: rec.id,
+        displayName: rec.displayName || rec.originalName,
+        stage: rec.stage,
+        inbox_name: rec.inbox_name || null,
+        doc_id: rec.doc_id || null,
+        category: rec.category || null,
+        confidence: rec.confidence || 0,
+        cost_usd: rec.cost_usd || 0,
+        message: rec.message || "",
+        ibanChoice: "", ibanManual: "",
+      };
+    },
+
+    handleDrop(e) {
+      this.dragOver = false;
+      this.handleFiles(e.dataTransfer.files);
+    },
+
+    async handleFiles(fileList) {
+      const files = Array.from(fileList || []);
+      for (const f of files) {
+        const ext = (f.name.split(".").pop() || "").toLowerCase();
+        if (!ALLOWED_EXT.includes(ext)) {
+          const sid = await idbAdd({
+            originalName: f.name,
+            displayName: f.webkitRelativePath || f.name,
+            stage: "skipped",
+            message: ext,
+            inbox_name: null,
+            ts: Date.now(),
+          });
+          this.items.push({
+            id: sid,
+            displayName: f.webkitRelativePath || f.name,
+            stage: "skipped",
+            inbox_name: null, doc_id: null, category: null,
+            confidence: 0, cost_usd: 0, message: ext,
+          });
+          continue;
+        }
+        const id = await idbAdd({
+          originalName: f.name,
+          displayName: f.webkitRelativePath || f.name,
+          stage: "pending-upload",
+          inbox_name: null,
+          ts: Date.now(),
+        });
+        this.fileBlobs.set(id, f);
+        this.items.push({
+          id,
+          displayName: f.webkitRelativePath || f.name,
+          stage: "pending-upload",
+          inbox_name: null, doc_id: null, category: null,
+          confidence: 0, cost_usd: 0, message: "", ibanChoice: "", ibanManual: "",
+        });
+      }
+      notifyDashboard();
+      this.drain();
+    },
+
+    chosenIban(it) {
+      const v = it.ibanChoice || "";
+      if (v === "__manual") return (it.ibanManual || "").replace(/\s+/g, "");
+      return v;
+    },
+
+    async retryWithAccount(it) {
+      const iban = this.chosenIban(it);
+      if (!iban) return;
+      if (!this.fileBlobs.has(it.id)) {
+        it.stage = "needs-repick";
+        await idbPatch(it.id, { stage: "needs-repick" });
+        notifyDashboard();
+        return;
+      }
+      await this.uploadOne(it, iban);
+    },
+
+    async drain() {
+      if (this.draining) return;
+      this.draining = true;
+      try {
+        while (true) {
+          const pending = this.items.filter(
+            it => it.stage === "pending-upload" && this.fileBlobs.has(it.id)
+          );
+          if (pending.length === 0) break;
+          const batch = pending.slice(0, MAX_CONCURRENT);
+          await Promise.all(batch.map(it => this.uploadOne(it)));
+        }
+      } finally {
+        this.draining = false;
+        notifyDashboard();
+      }
+    },
+
+    async uploadOne(it, ibanOverride) {
+      const blob = this.fileBlobs.get(it.id);
+      if (!blob) {
+        it.stage = "needs-repick";
+        await idbPatch(it.id, { stage: "needs-repick" });
+        notifyDashboard();
+        return;
+      }
+      it.stage = "uploading";
+      await idbPatch(it.id, { stage: "uploading" });
+      notifyDashboard();
+
+      try {
+        const form = new FormData();
+        form.append("files", blob, blob.name || it.displayName);
+        const iban = ibanOverride || "";
+        if (iban) form.append("account_iban", iban);
+        const r = await fetch("/upload", { method: "POST", body: form });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const res = await r.json();
+        if (res.rejected && res.rejected.includes(blob.name)) {
+          it.stage = "error"; it.message = "format";
+        } else if (res.imported && res.imported.length) {
+          // A bank CSV is imported on the spot — there is no inbox file to
+          // poll for, so the item is finished the moment the server answers.
+          const rep = res.imported.find(x => x.file_label === blob.name) || res.imported[0];
+          if (rep && rep.error && rep.hint_iban && MAY_ASSIGN) {
+            it.stage = "needs-account";
+            it.message = "";
+          } else if (rep && rep.error) {
+            it.stage = "error";
+            it.message = rep.hint_iban
+              ? (T['upload.csv_needs_admin'] || 'Diese Datei nennt kein Konto — bitte vom Administrator importieren lassen')
+              : rep.error;
+          } else {
+            it.stage = "csv-imported";
+            const dup = (rep && rep.rows_duplicate) || 0;
+            const ins = (rep && rep.rows_inserted) || 0;
+            it.message = (ins === 1
+                ? (T['upload.csv_done_one'] || '1 Buchung importiert')
+                : (T['upload.csv_done'] || '{n} Buchungen importiert').replace('{n}', ins))
+              + (dup ? " · " + (T['upload.csv_dup'] || '{n} schon vorhanden').replace('{n}', dup) : "");
+            this.fileBlobs.delete(it.id);
+          }
+        } else {
+          const entry = (res.saved || []).find(s => s.original_name === blob.name)
+            || (res.saved || [])[0];
+          if (entry && entry.inbox_name) {
+            it.inbox_name = entry.inbox_name;
+            it.stage = "server-queued";
+            this.fileBlobs.delete(it.id);  // free memory
+          } else {
+            it.stage = "error"; it.message = "unclear";
+          }
+        }
+      } catch (e) {
+        it.stage = "error";
+        it.message = String(e && e.message ? e.message : e);
+      }
+
+      await idbPatch(it.id, {
+        stage: it.stage,
+        inbox_name: it.inbox_name,
+        message: it.message,
+      });
+      notifyDashboard();
+
+      if (it.inbox_name && !TERMINAL.has(it.stage) && !this.polling.has(it.id)) {
+        this.pollStatus(it);
+      }
+    },
+
+    async pollStatus(item) {
+      this.polling.add(item.id);
+      try {
+        for (let i = 0; i < 300 && !TERMINAL.has(item.stage); i++) {
+          try {
+            const r = await fetch("/api/status/" + encodeURIComponent(item.inbox_name));
+            if (!r.ok) throw new Error("status " + r.status);
+            const data = await r.json();
+            item.stage = data.status;
+            if (data.doc_id != null)    item.doc_id    = data.doc_id;
+            if (data.category)          item.category  = data.category;
+            if (data.confidence != null) item.confidence = data.confidence;
+            if (data.cost_usd != null)   item.cost_usd   = data.cost_usd;
+            await idbPatch(item.id, {
+              stage: item.stage, doc_id: item.doc_id, category: item.category,
+              confidence: item.confidence, cost_usd: item.cost_usd,
+            });
+            notifyDashboard();
+            if (TERMINAL.has(item.stage)) return;
+          } catch (e) { /* keep polling */ }
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      } finally {
+        this.polling.delete(item.id);
+      }
+    },
+
+    async clearHistory() {
+      for (const it of this.items.slice()) {
+        if (TERMINAL.has(it.stage)) await idbDelete(it.id);
+      }
+      this.items = this.items.filter(it => !TERMINAL.has(it.stage));
+      notifyDashboard();
+    },
+
+    // ---- Display ----
+    stageColor(s) {
+      return {
+        "pending-upload": "text-ink-400",
+        "uploading":      "text-emerald-300",
+        "server-queued":  "text-ink-400",
+        "queued":         "text-ink-400",
+        "processing":     "text-emerald-300",
+        "filed":          "text-emerald-300",
+        "review":         "text-amber-300",
+        "failed":         "text-rose-300",
+        "error":          "text-rose-300",
+        "duplicate":      "text-indigo-300",
+        "csv-imported":   "text-emerald-300",
+        "skipped":        "text-ink-400",
+        "needs-account":  "text-amber-300",
+        "needs-repick":   "text-rose-300",
+      }[s] || "text-ink-400";
+    },
+    iconBg(s) {
+      return {
+        "pending-upload": "bg-ink-700/60",
+        "uploading":      "bg-ink-700/60",
+        "server-queued":  "bg-ink-700/60",
+        "queued":         "bg-ink-700/60",
+        "processing":     "bg-ink-700/60",
+        "filed":          "bg-emerald-500/15",
+        "review":         "bg-amber-500/15",
+        "failed":         "bg-rose-500/15",
+        "error":          "bg-rose-500/15",
+        "duplicate":      "bg-indigo-500/15",
+        "csv-imported":   "bg-emerald-500/15",
+        "skipped":        "bg-ink-700/60",
+        "needs-account":  "bg-amber-500/15",
+        "needs-repick":   "bg-rose-500/15",
+      }[s] || "bg-ink-700/60";
+    },
+    stageLabel(it) {
+      switch (it.stage) {
+        case "pending-upload": return tr("stage.pending_upload");
+        case "uploading":      return tr("stage.uploading_active");
+        case "server-queued":  return tr("stage.queued");
+        case "queued":         return tr("stage.queued");
+        case "processing":     return tr("stage.processing");
+        case "filed":          return tr("stage.filed",     { category: it.category, confidence: Math.round((it.confidence||0)*100), cost: (it.cost_usd||0).toFixed(4) });
+        case "review":         return tr("stage.review",    { category: it.category, confidence: Math.round((it.confidence||0)*100) });
+        case "csv-imported":   return it.message;
+        case "skipped":        return tr("stage.skipped", { ext: (it.message || "").toUpperCase() });
+        case "needs-account":  return tr("stage.needs_account");
+        case "failed":         return tr("stage.failed");
+        case "error":          return it.message === "format" ? tr("stage.error_format")
+                                    : it.message === "unclear" ? tr("stage.error_unclear")
+                                    : tr("stage.error") + (it.message ? " (" + it.message + ")" : "");
+        case "duplicate":      return tr("stage.duplicate", { category: it.category || "" });
+        case "needs-repick":   return tr("stage.needs_repick");
+        default:               return it.stage;
+      }
+    },
+    anyActive() {
+      // Spinner state only — a file waiting for an account answer is not
+      // "active" (nothing is running), but it is not finished either.
+      return this.items.some(it => !TERMINAL.has(it.stage));
+    },
+    summary() {
+      const done = this.items.filter(it => TERMINAL.has(it.stage) && it.stage !== "needs-account").length;
+      return tr("upload.summary_done_of_total", { done, total: this.items.length });
+    },
+    allDone() {
+      return this.items.length > 0
+        && this.items.every(it => TERMINAL.has(it.stage) && it.stage !== "needs-account");
+    },
+  };
+}
+</script>
+
+{% endblock %}

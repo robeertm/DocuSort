@@ -1,0 +1,898 @@
+{% extends "base.html" %}
+{% block title %}{{ t('spending.title') }} · DocuSort{% endblock %}
+{% block content %}
+
+{# Colours cycle through the validated data-viz palette; the theme toggle swaps
+   the whole set via html[data-theme="light"]. Categories get their colour by
+   rank (largest first), the rest share the grey. #}
+<style>
+  .viz { --viz-track: #2c2c2a;
+    --c0:#3987e5; --c1:#d95926; --c2:#199e70; --c3:#8f74e0; --c4:#ac764a; --c5:#c98500;
+    --c6:#d55181; --c7:#2fa6b8; --c8:#9aa83a; --c9:#b06ac4; --c10:#5d8ad6; --c11:#e0a04a; --cx:#898781; }
+  html[data-theme="light"] .viz { --viz-track: #e1e0d9;
+    --c0:#2a78d6; --c1:#eb6834; --c2:#1baf7a; --c3:#7c5cd4; --c4:#97633a; --c5:#eda100;
+    --c6:#e87ba4; --c7:#1f96a8; --c8:#7f8f2a; --c9:#9b55b5; --c10:#4a78c8; --c11:#d48f35; --cx:#898781; }
+</style>
+
+<script>window.__spendingData = {{ data | tojson }};
+window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
+<div class="viz" x-data="spendingPage(window.__spendingData)" x-init="init()">
+  <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('spending.title') }}</h1>
+      <p class="text-ink-400 mt-1 text-sm">{{ t('spending.subtitle') }}</p>
+      <p class="mt-2 text-sm" x-show="d.range_label" x-cloak>
+        <span class="text-[10px] uppercase tracking-wider text-ink-500 mr-2">{{ t('spending.range') }}</span>
+        <span class="font-semibold tabular-nums text-ink-100" x-text="d.range_label"></span>
+        <span class="text-ink-500 ml-2">{% if mode == 'salary' %}{{ t('spending.range_salary') }}{% else %}{{ t('spending.range_calendar') }}{% endif %}</span>
+      </p>
+    </div>
+    {% if data.accounts_filtered %}
+      <p class="w-full text-xs text-emerald-300 -mt-2">
+        {{ t('spending.accounts_active') | replace('{list}', data.accounts | selectattr('selected') | map(attribute='label') | join(', ')) }}
+      </p>
+    {% endif %}
+    {% if has_data and data.month_options %}
+      <form method="get" action="/ausgaben" class="w-full sm:w-auto shrink-0 flex items-end gap-2 flex-wrap">
+        <input type="hidden" name="mode" value="{{ mode }}">
+        <label class="block">
+          <span class="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">{% if mode == 'salary' %}{{ t('spending.mode_salary') }}{% else %}{{ t('spending.month') }}{% endif %}</span>
+          <select name="month" onchange="this.form.submit()" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm max-w-full">
+            {% for opt in data.month_options %}
+              <option value="{{ opt.key }}" {% if opt.key == data.month %}selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {# Kontenauswahl — steckt im selben Formular, damit ein Wechsel des
+           Zeitraums die Auswahl mitnimmt und umgekehrt. Leere Auswahl
+           (alle Haken) heißt „alle Konten". #}
+        {% if data.accounts and data.accounts|length > 1 %}
+          <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+            <button type="button" @click="open = !open"
+                    class="text-xs rounded-lg px-2.5 py-2 border flex items-center gap-1.5"
+                    :class="{{ 'true' if data.accounts_filtered else 'false' }}
+                              ? 'border-emerald-500/50 text-emerald-300'
+                              : 'border-ink-700 text-ink-300 hover:text-emerald-300 hover:border-emerald-500/50'">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+                <path d="M3 5h18M6 12h12M10 19h4"/>
+              </svg>
+              {% set picked = data.accounts | selectattr('selected') | list | length %}
+              {% if data.accounts_filtered %}
+                {{ t('spending.accounts_some') | replace('{n}', picked) | replace('{total}', data.accounts|length) }}
+              {% else %}
+                {{ t('spending.accounts_all') }}
+              {% endif %}
+            </button>
+            <div x-show="open" x-cloak
+                 class="absolute right-0 z-30 mt-1 w-64 rounded-xl border border-ink-700 bg-ink-900 p-3 shadow-xl">
+              <div class="text-[10px] uppercase tracking-wider text-ink-500 mb-2">{{ t('spending.accounts_title') }}</div>
+              <div class="space-y-1.5 max-h-60 overflow-y-auto">
+                {% for a in data.accounts %}
+                  <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" name="accounts" value="{{ a.id }}"
+                           {% if a.selected %}checked{% endif %}
+                           class="rounded border-ink-600">
+                    <span class="truncate">{{ a.label }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+              <div class="flex gap-2 mt-3">
+                <button type="submit" class="btn-primary text-xs flex-1 !py-1.5">{{ t('spending.accounts_apply') }}</button>
+                <a href="/ausgaben?mode={{ mode }}&month={{ data.month }}"
+                   class="btn-secondary text-xs !py-1.5">{{ t('spending.accounts_reset') }}</a>
+              </div>
+              <p class="text-[10px] text-ink-500 mt-2">{{ t('spending.accounts_hint') }}</p>
+            </div>
+          </div>
+        {% endif %}
+        <a href="/ausgaben?mode={% if mode == 'salary' %}calendar{% else %}salary{% endif %}"
+           class="text-xs rounded-lg px-2.5 py-2 border border-ink-700 text-ink-300 hover:text-emerald-300 hover:border-emerald-500/50"
+           title="{{ t('spending.mode_hint') }}">
+          ⇄ {% if mode == 'salary' %}{{ t('spending.mode_calendar') }}{% else %}{{ t('spending.mode_salary') }}{% endif %}
+        </a>
+      </form>
+    {% endif %}
+  </div>
+
+  {% if not has_data %}
+    <div class="card p-10 text-center">
+      <div class="inline-flex h-14 w-14 items-center justify-center rounded-full bg-ink-700/40 text-ink-400 mb-4">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-7 w-7">
+          <rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/>
+        </svg>
+      </div>
+      <h2 class="text-lg font-semibold mb-2">{{ t('spending.empty_title') }}</h2>
+      <p class="text-sm text-ink-400 max-w-md mx-auto">{{ t('spending.empty_hint') }}</p>
+      <a href="/finance" class="btn-primary mt-5 inline-flex">{{ t('spending.empty_cta') }}</a>
+    </div>
+  {% else %}
+
+  <div class="card p-10 text-center" x-show="d.total <= 0 && d.income_total <= 0" x-cloak>
+    <h2 class="text-lg font-semibold mb-2">{{ t('spending.no_month_title') }}</h2>
+    <p class="text-sm text-ink-400" x-text="T.no_month_hint.replace('{month}', d.month_label)"></p>
+  </div>
+
+  <div x-show="d.total > 0 || d.income_total > 0" x-cloak>
+    <div class="fixed top-4 right-4 z-50 rounded-lg px-3 py-2 text-sm shadow-lg" x-show="message" x-cloak
+         :class="messageOk ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'" x-text="message"></div>
+
+    {# ---------- Hero: donut + KPIs ---------- #}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <div class="card p-6 flex flex-col items-center justify-center text-center gap-4">
+        <div class="text-[10px] uppercase tracking-wider text-ink-500 self-start">{{ t('spending.donut_title') }} · <span x-text="d.month_label"></span></div>
+        <div class="relative" style="width:13rem;height:13rem;">
+          <div x-html="donutSvg" style="width:100%;height:100%;"></div>
+          <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <div class="text-3xl font-semibold tabular-nums leading-none" x-text="fmt0(d.total) + ' €'"></div>
+            <div class="text-[11px] text-ink-500 mt-1">{{ t('spending.total_spent') }}</div>
+          </div>
+        </div>
+        <div class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs" x-show="d.prev_month" x-cloak
+             :class="delta > 0 ? 'bg-rose-500/10 text-rose-300' : delta < 0 ? 'bg-emerald-500/10 text-emerald-300' : 'bg-ink-700/40 text-ink-400'">
+          <span x-text="(delta > 0 ? '▲ ' : delta < 0 ? '▼ ' : '± ') + fmt0(Math.abs(delta)) + ' €'"></span>
+          <span class="text-ink-500" x-text="T.vs_prev.replace('{month}', d.prev_month_label)"></span>
+        </div>
+      </div>
+
+      <div class="card p-5 lg:col-span-2">
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.income_total') }}</div>
+            <div class="mt-1 text-xl font-semibold tabular-nums text-emerald-300" x-text="fmt(d.income_total)"></div>
+            <div class="text-[11px] tabular-nums text-ink-500" x-show="d.prev_month" x-cloak
+                 x-text="(d.income_total - d.prev_income_total > 0 ? '+' : '') + fmt0(d.income_total - d.prev_income_total) + ' € {{ t('spending.vs_prev_short') }}'"></div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.total_spent') }}</div>
+            <div class="mt-1 text-xl font-semibold tabular-nums text-rose-300" x-text="fmt(d.total)"></div>
+            <div class="text-[11px] tabular-nums text-ink-500" x-show="d.prev_month" x-cloak
+                 x-text="(delta > 0 ? '+' : '') + fmt0(delta) + ' € {{ t('spending.vs_prev_short') }}'"></div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.net') }}</div>
+            <div class="mt-1 text-xl font-semibold tabular-nums" :class="d.net >= 0 ? 'text-emerald-300' : 'text-rose-300'"
+                 x-text="(d.net > 0 ? '+' : '') + fmt(d.net)"></div>
+            <div class="text-[11px] text-ink-500" x-text="d.net >= 0 ? '{{ t('spending.net_plus') }}' : '{{ t('spending.net_minus') }}'"></div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.fixed_part') }}</div>
+            <div class="mt-1 text-xl font-semibold tabular-nums text-ink-200" x-text="fmt(d.fixed_total)"></div>
+            <div class="text-[11px] text-ink-500" x-text="pct(d.fixed_total) + ' %'"></div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.variable_part') }}</div>
+            <div class="mt-1 text-xl font-semibold tabular-nums text-amber-200" x-text="fmt(d.variable_total)"></div>
+            <div class="text-[11px] text-ink-500" x-text="pct(d.variable_total) + ' %'"></div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-500" x-text="T.avg_label.replace('{n}', d.avg_months)"></div>
+            <div class="mt-1 text-xl font-semibold tabular-nums text-ink-200" x-text="d.avg_months ? fmt(d.avg_total) : '—'"></div>
+            <div class="text-[11px] tabular-nums" x-show="d.avg_months" x-cloak
+                 :class="d.total > d.avg_total ? 'text-rose-300' : 'text-emerald-300'"
+                 x-text="(d.total > d.avg_total ? '+' : '') + fmt0(d.total - d.avg_total) + ' € ' + T.vs_avg"></div>
+          </div>
+        </div>
+        <p class="mt-4 text-xs text-ink-500" x-show="d.open_count" x-cloak>
+          <a href="/transactions?category=sonstiges&direction=expense&start={{ data.range_start }}&end={{ data.range_end }}" class="underline hover:text-emerald-300"
+             x-text="T.open_hint.replace('{n}', d.open_count)"></a>
+        </p>
+        <p class="mt-3 text-xs text-ink-500">{{ t('spending.click_hint') }}</p>
+      </div>
+    </div>
+
+    {# ---------- Daily trend ----------
+       Ein einzelner großer Tag drückte früher alle anderen auf eine
+       Haarlinie. Die Skala endet deshalb bei einer robusten Grenze
+       (3× Median der Tage mit Ausgaben, auf einen runden Wert gehoben);
+       was darüber liegt, läuft oben aus — der Betrag darüber nennt den
+       ECHTEN Wert, gekappt wird nur das Bild, nie die Zahl. #}
+    <div class="card p-5 relative" x-show="d.days.length" x-cloak x-ref="trendCard" @mouseleave="hover = null">
+      <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 mb-4">
+        <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.trend_title') }}</div>
+        <div class="flex items-center gap-3 text-[11px]">
+          <span class="text-ink-400 whitespace-nowrap">
+            <span class="text-ink-500">{{ t('spending.trend_avg') }}</span>
+            <span class="text-ink-200 font-medium tabular-nums" x-text="fmt(trend.avg)"></span>
+          </span>
+          <span x-show="budget && budgetPerDay > 0" x-cloak class="text-ink-400 whitespace-nowrap">
+            <span class="text-ink-500">{{ t('game.per_day_allowed') }}</span>
+            <span class="text-amber-300 font-medium tabular-nums" x-text="fmt(budgetPerDay)"></span>
+          </span>
+          <span x-show="trend.clipped > 0" x-cloak class="text-amber-300/90"
+                x-text="(trend.clipped === 1 ? T.trend_clipped_one : T.trend_clipped)
+                          .replace('{n}', trend.clipped).replace('{cap}', fmt0(trend.cap) + ' €')"></span>
+        </div>
+      </div>
+
+      {# 🔴 Das Mouseover gehört NICHT in den Scroll-Container: `overflow-x`
+         schneidet ab, sobald das Kästchen über den sichtbaren Rand ragt.
+         Es hängt deshalb an der Karte und wird auf deren Breite begrenzt. #}
+      <div x-show="hover" x-cloak x-ref="tip"
+           class="absolute z-30 whitespace-nowrap rounded-lg bg-ink-950 border border-ink-700 px-2 py-1 text-[10px] pointer-events-none shadow-lg"
+           :style="'left: ' + hoverX + 'px; top: ' + hoverY + 'px;'"
+           x-text="hover ? dayLabel(hover) + ' · ' + (isPending(hover) ? T.game_pending_day : (isFuture(hover) ? T.game_future_day : (hover.spend > 0 ? fmt(hover.spend) : T.game_zero_day))) : ''"></div>
+
+      {# Am Handy scrollt die Karte — sie startet an den JÜNGSTEN Tagen,
+         die älteren liegen wie gewohnt links davon. #}
+      <div class="overflow-x-auto -mx-1 px-1" @scroll="hover = null"
+           x-init="$nextTick(() => { $el.scrollLeft = $el.scrollWidth; })">
+        {# Auf dem Handy bekommt jeder Tag eine Mindestbreite und die Karte
+           scrollt — sonst hätten weder Balken noch Betrag Platz. #}
+        <div :style="'min-width: ' + (d.days.length * 30) + 'px'">
+          <div class="relative" style="height: 11rem; padding-top: 1.1rem;">
+            {# Tagesbudget: so viel darf ein Tag im Schnitt noch kosten,
+               damit am Ende des Gehaltsmonats nichts fehlt. Gleiche Zahl
+               wie „pro Tag" im Budget-Wecker. #}
+            <div class="absolute inset-x-0 pointer-events-none z-0" x-show="budgetLinePct !== null" x-cloak
+                 :style="'bottom: calc(' + budgetLinePct + '% )'">
+              <div class="border-t border-dashed border-amber-400/60"></div>
+              <div class="absolute right-0 -top-2.5 text-[9px] leading-none text-amber-300 bg-ink-800/80 rounded px-1 whitespace-nowrap"
+                   x-text="T.game_per_day_max.replace('{v}', fmt0(budgetPerDay) + ' €')"></div>
+            </div>
+
+            {# Ø-Linie über den ganzen Zeitraum #}
+            <div class="absolute inset-x-0 pointer-events-none z-0"
+                 :style="'bottom: calc(' + trend.avgPct + '% )'" x-show="trend.avgPct > 4 && trend.avgPct < 97">
+              <div class="border-t border-dashed border-ink-600/70"></div>
+              <div class="absolute right-0 -top-2 text-[9px] leading-none text-ink-500 bg-ink-800/80 rounded px-1">Ø</div>
+            </div>
+
+            <div class="flex items-end gap-[2px] sm:gap-[3px] h-full">
+              <template x-for="day in d.days" :key="day.date">
+                <div class="relative flex-1 min-w-[20px] h-full group"
+                     @mouseenter="showTip(day, $event)" @click="showTip(day, $event)">
+                  {# Betrag über dem Balken.
+                     🔴 Ein Element verträgt nur EIN :class — ein zweites wird
+                     stillschweigend verworfen (hier hatte die Null-Färbung
+                     die Ausreißer-Färbung verdrängt). Darum ein Ausdruck.
+                     Der Abstand zur Grundlinie ist bei einem Nulltag größer,
+                     sonst sitzt die „0" auf ihrer eigenen Marke. #}
+                  <div class="absolute inset-x-0 text-center text-[9px] sm:text-[10px] leading-none tabular-nums pointer-events-none z-10"
+                       :class="day.spend <= 0 ? 'text-emerald-400/80'
+                                              : (dayClipped(day) ? 'text-amber-300 font-semibold' : 'text-ink-400')"
+                       :style="'bottom: calc(' + dayPct(day) + '% + ' + (day.spend > 0 ? 4 : 9) + 'px)'"
+                       x-show="!isFuture(day)"
+                       x-text="day.spend > 0 ? (dayClipped(day) ? '↑' : '') + fmt0(day.spend) : '0'"></div>
+
+                  {# der Balken selbst #}
+                  <div x-show="day.spend > 0" class="absolute bottom-0 inset-x-0 rounded-t-[3px] transition-colors"
+                       :class="dayClipped(day) ? 'bg-emerald-400/80 group-hover:bg-emerald-300'
+                                               : (isWeekend(day) ? 'bg-emerald-500/45 group-hover:bg-emerald-400'
+                                                                 : 'bg-emerald-500/60 group-hover:bg-emerald-400')"
+                       :style="'height: calc(' + dayPct(day) + '% + 2px);'
+                               + (dayClipped(day) ? ' -webkit-mask-image: linear-gradient(to top, #000 62%, transparent); mask-image: linear-gradient(to top, #000 62%, transparent);' : '')"></div>
+
+                  {# Ein Tag ohne Ausgaben ist kein Loch, sondern ein Ergebnis —
+                     und sieht aus wie das, was er ist: ein Balken der Höhe
+                     null. Ein Ring an dieser Stelle las sich zusammen mit der
+                     „0" darüber wie ein Symbol, nicht wie ein Messwert. #}
+                  <div x-show="day.spend <= 0 && !isFuture(day)"
+                       class="absolute bottom-0 inset-x-0 h-[3px] rounded-full bg-emerald-400/70 group-hover:bg-emerald-400 transition-colors"></div>
+
+                  {# Tage, die noch kommen oder noch nicht gebucht sind: nur
+                     ein blasser Punkt, damit sie nicht wie eine Null wirken. #}
+                  <div x-show="day.spend <= 0 && isFuture(day)" class="absolute bottom-0 inset-x-0 flex justify-center">
+                    <div class="h-[3px] w-[3px] rounded-full bg-ink-600/60"></div>
+                  </div>
+
+
+                </div>
+              </template>
+            </div>
+          </div>
+
+          {# Achse: Wochentag und Tageszahl, Monatswechsel bekommt den Monat dazu #}
+          <div class="flex gap-[2px] sm:gap-[3px] mt-1.5">
+            <template x-for="(day, i) in d.days" :key="'ax' + day.date">
+              <div class="flex-1 min-w-[20px] text-center leading-tight"
+                   :class="isFuture(day) ? 'text-ink-600' : (isWeekend(day) ? 'text-ink-500' : 'text-ink-400')">
+                <div class="text-[9px] tabular-nums" x-text="day.date.slice(8, 10)"></div>
+                <div class="text-[8px] uppercase tracking-wide text-ink-600"
+                     x-text="i === 0 || day.date.slice(8, 10) === '01' ? monthShort(day) : weekdayShort(day)"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# ---------- Spar-Spiel ----------
+       Direkt unter der Tageskurve, weil es dieselben Tage bewertet:
+       je weniger an einem Tag abgebucht wurde, desto mehr Punkte.
+       Messlatte ist der MEDIAN der Tage mit Ausgaben — am Durchschnitt
+       gemessen würde ein einziger teurer Tag das Spiel verschenken. #}
+    <div class="card p-5" x-show="d.days.length" x-cloak>
+      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-4">
+        <div class="flex items-baseline gap-2">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('game.title') }}</span>
+          <span class="text-[11px] text-ink-500" x-text="T.game_benchmark.replace('{v}', fmt(game.bar))"></span>
+        </div>
+        <div class="chip bg-emerald-500/15 text-emerald-300" x-show="game.rated" x-cloak>
+          <span x-text="game.rank.icon"></span>
+          <span x-text="game.rank.name"></span>
+        </div>
+        <div class="chip bg-ink-900/40 text-ink-400 border border-ink-700/60" x-show="!game.rated" x-cloak
+             x-text="T.game_too_early.replace('{n}', game.countedDays).replace('{total}', game.totalDays)"></div>
+      </div>
+
+      {# „Wieviel darf ich noch ausgeben" — DIESELBEN Zahlen wie der
+         Budget-Wecker auf /finance (Einnahmen des Gehaltsmonats bzw. das
+         eingestellte feste Budget minus Ausgaben), keine zweite Rechnung.
+         Nur sichtbar, wenn der gewählte Zeitraum der laufende ist. #}
+      <div x-show="budget" x-cloak class="rounded-xl border px-4 py-3 mb-4"
+           :class="budget && budget.remaining >= 0
+                     ? 'bg-emerald-500/10 border-emerald-500/25'
+                     : 'bg-rose-500/10 border-rose-500/25'">
+        <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.remaining') }}</div>
+            <div class="text-3xl font-semibold tabular-nums leading-tight"
+                 :class="budget && budget.remaining >= 0 ? 'text-emerald-300' : 'text-rose-300'"
+                 x-text="budget ? fmt(budget.remaining) : ''"></div>
+          </div>
+          <div class="flex gap-6">
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.per_day') }}</div>
+              <div class="text-lg font-semibold tabular-nums leading-tight"
+                   :class="budgetPerDay >= 0 ? 'text-ink-100' : 'text-rose-300'"
+                   x-text="fmt(budgetPerDay)"></div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.days_left') }}</div>
+              <div class="text-lg font-semibold tabular-nums leading-tight"
+                   x-text="budget ? budget.days_left : ''"></div>
+            </div>
+          </div>
+        </div>
+        <p class="text-[11px] text-ink-500 mt-2" x-show="budget && budget.fixed" x-cloak
+           x-text="T.budget_fixed_hint.replace('{budget}', budget ? fmt0(budget.budget) : '')"></p>
+        <p class="text-[11px] text-ink-500 mt-2" x-show="budget && !budget.fixed" x-cloak>{{ t('finance.budget.income_hint') }}</p>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-3 py-2.5">
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('game.points') }}</div>
+          <div class="text-2xl font-semibold text-emerald-300 tabular-nums leading-tight" x-text="game.points"></div>
+          <div class="text-[10px] text-ink-500" x-text="T.game_of_max.replace('{n}', game.maxPoints)"></div>
+        </div>
+        <div class="rounded-xl bg-ink-900/40 border border-ink-700/60 px-3 py-2.5">
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('game.zero_days') }}</div>
+          <div class="text-2xl font-semibold tabular-nums leading-tight" x-text="game.zeroDays"></div>
+          <div class="text-[10px] text-ink-500" x-text="T.game_of_days.replace('{n}', game.countedDays)"></div>
+        </div>
+        <div class="rounded-xl bg-ink-900/40 border border-ink-700/60 px-3 py-2.5">
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('game.streak') }}</div>
+          <div class="text-2xl font-semibold tabular-nums leading-tight">
+            <span x-text="game.streak"></span><span class="text-sm text-ink-500" x-show="game.streak > 0"> 🔥</span>
+          </div>
+          <div class="text-[10px] text-ink-500" x-text="T.game_streak_hint"></div>
+        </div>
+        <div class="rounded-xl bg-ink-900/40 border border-ink-700/60 px-3 py-2.5">
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('game.best_streak') }}</div>
+          <div class="text-2xl font-semibold tabular-nums leading-tight" x-text="game.bestStreak"></div>
+          <div class="text-[10px] text-ink-500" x-text="T.game_days.replace('{n}', game.bestStreak)"></div>
+        </div>
+      </div>
+
+      {# Monatsergebnis: der Bonus steckt in den Punkten oben, hier steht,
+         woher er kommt. Im laufenden Zeitraum ist er vorläufig. #}
+      <div class="mt-3 rounded-xl border px-3 py-2.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1"
+           :class="game.net > 0 ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-ink-900/40 border-ink-700/60'">
+        <div class="text-xs">
+          <span class="text-ink-500">{{ t('game.result_title') }}</span>
+          <span class="font-semibold tabular-nums ml-1"
+                :class="game.net > 0 ? 'text-emerald-300' : 'text-rose-300'"
+                x-text="(game.net > 0 ? '+' : '') + fmt(game.net)"></span>
+          <span class="text-ink-500 ml-1" x-show="game.net > 0" x-cloak
+                x-text="'· ' + T.game_result_rate.replace('{r}', game.savingsRate)"></span>
+        </div>
+        <div class="text-xs tabular-nums"
+             :class="game.bonus > 0 ? 'text-emerald-300' : 'text-ink-500'"
+             x-text="T.game_result_bonus.replace('{n}', game.bonus).replace('{max}', game.bonusMax)"></div>
+      </div>
+
+      {# Weg zum nächsten Rang #}
+      <div class="mt-4" x-show="game.next">
+        <div class="flex items-baseline justify-between text-[11px] mb-1">
+          <span class="text-ink-400" x-text="T.game_next.replace('{n}', game.next ? game.next.missing : 0).replace('{rank}', game.next ? game.next.name : '')"></span>
+          <span class="text-ink-500 tabular-nums" x-text="game.sharePct + ' %'"></span>
+        </div>
+        <div class="h-2 rounded-full bg-ink-800 overflow-hidden">
+          <div class="h-full rounded-full bg-emerald-500/70 transition-all" :style="'width: ' + game.sharePct + '%'"></div>
+        </div>
+      </div>
+      <div class="mt-4 text-[11px] text-emerald-300" x-show="game.rated && !game.next" x-text="T.game_rank_top"></div>
+
+      {# Abzeichen — erreichte in Farbe, offene gedämpft mit dem, was noch fehlt #}
+      <div class="flex flex-wrap gap-2 mt-4">
+        <template x-for="b in game.badges" :key="b.key">
+          <div class="chip border"
+               :class="b.done ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                              : 'bg-ink-900/40 text-ink-500 border-ink-700/60'">
+            <span x-text="b.icon" :class="b.done ? '' : 'opacity-50 grayscale'"></span>
+            <span x-text="b.label"></span>
+            <span class="text-[10px] opacity-70" x-show="b.note" x-text="b.note"></span>
+          </div>
+        </template>
+      </div>
+
+      <p class="text-[11px] text-ink-500 mt-4 leading-relaxed">
+        <span x-text="T.game_rule"></span>
+        <span class="block mt-1" x-text="T.game_footnote"></span>
+      </p>
+    </div>
+
+    {# ---------- Bestenliste ----------
+       Welcher Monat lief am besten? Verglichen wird die PUNKTEQUOTE, nicht
+       die Punktzahl: ein kurzer Zeitraum (und der laufende, der erst zur
+       Hälfte gelebt ist) hätte sonst nie eine Chance. Zeiträume mit
+       weniger als drei gewerteten Tagen stehen ohne Platz am Ende. #}
+    <div class="card p-5" x-show="ranking.length > 1" x-cloak x-data="{ boardOpen: false }">
+      <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 mb-4">
+        <span class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('game.board_title') }}</span>
+        <span class="text-[11px] text-ink-500">{{ t('game.board_hint') }}</span>
+      </div>
+
+      <div class="space-y-1.5">
+        <template x-for="r in (boardOpen ? ranking : boardTop)" :key="r.key">
+          <a :href="'/ausgaben?mode=' + d.mode + '&month=' + encodeURIComponent(r.key) + accountQuery()"
+             class="block rounded-xl border px-3 py-2 transition"
+             :class="r.key === d.month ? 'border-emerald-500/40 bg-emerald-500/10'
+                                       : 'border-ink-700/60 bg-ink-900/30 hover:bg-ink-800/50'">
+            <div class="flex items-center gap-3">
+              {# Platz oder Rangzeichen #}
+              <div class="w-7 shrink-0 text-center">
+                <span x-show="r.place > 0 && r.place <= 3" class="text-base"
+                      x-text="r.place === 1 ? '🥇' : (r.place === 2 ? '🥈' : '🥉')"></span>
+                <span x-show="r.place > 3" class="text-[11px] tabular-nums text-ink-500"
+                      x-text="r.place + '.'"></span>
+                <span x-show="r.place === 0" class="text-[11px] text-ink-600">–</span>
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <div class="flex items-baseline gap-2 flex-wrap">
+                  <span class="text-sm font-medium truncate" x-text="r.label"></span>
+                  <span x-show="r.is_current" class="chip bg-ink-800 text-ink-400 text-[10px] py-0"
+                        x-cloak>{{ t('game.board_running') }}</span>
+                  <span x-show="!r.rated" class="text-[10px] text-ink-600" x-cloak
+                        x-text="T.game_board_unrated"></span>
+                </div>
+                {# Quotenbalken — die Länge ist die Punktequote #}
+                <div class="mt-1.5 h-1.5 rounded-full bg-ink-800 overflow-hidden">
+                  <div class="h-full rounded-full transition-all"
+                       :class="r.place === 1 ? 'bg-emerald-400' : (r.rated ? 'bg-emerald-500/60' : 'bg-ink-600')"
+                       :style="'width: ' + Math.max(2, Math.round(r.share)) + '%'"></div>
+                </div>
+              </div>
+
+              <div class="shrink-0 text-right">
+                <div class="text-sm font-semibold tabular-nums leading-tight">
+                  <span x-text="Math.round(r.share)"></span><span class="text-[10px] text-ink-500"> %</span>
+                </div>
+                <div class="text-[10px] text-ink-500 tabular-nums"
+                     x-text="r.points + '/' + r.max_points"></div>
+              </div>
+
+              <div class="hidden sm:block shrink-0 w-28 text-right">
+                <div class="text-[11px] text-ink-400 tabular-nums" x-text="fmt(r.spend_total)"></div>
+                <div class="text-[10px] text-ink-500 tabular-nums"
+                     x-text="T.game_board_detail.replace('{z}', r.zero_days).replace('{s}', r.best_streak)"></div>
+              </div>
+
+              {# Rang: das Zeichen allein bleibt rätselhaft, ab lg steht der
+                 Name daneben. #}
+              <div class="shrink-0 flex items-center gap-1.5" x-show="r.rated" x-cloak
+                   :title="rankName(r.rank_key)">
+                <span class="text-base" x-text="r.rank_icon"></span>
+                <span class="hidden lg:inline text-[11px] text-ink-400 w-28 truncate"
+                      x-text="rankName(r.rank_key)"></span>
+              </div>
+            </div>
+          </a>
+        </template>
+      </div>
+
+      {# Standardmäßig stehen nur die drei Besten und der laufende Zeitraum
+         da — die ganze Liste auf Wunsch. #}
+      <button type="button" @click="boardOpen = !boardOpen"
+              x-show="ranking.length > boardTop.length"
+              class="mt-3 text-xs text-ink-400 hover:text-emerald-300 underline"
+              x-text="boardOpen ? T.game_board_less
+                                : T.game_board_more.replace('{n}', ranking.length)"></button>
+    </div>
+
+    {# ---------- Categories, each expandable into its bookings ---------- #}
+    <div class="card p-0 overflow-hidden mb-4">
+      <div class="px-5 py-3 border-b border-ink-800/60 text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.by_category') }}</div>
+      <div>
+        <template x-for="(c, i) in d.categories" :key="c.category">
+          <div class="border-b border-ink-800/40 last:border-b-0">
+            <button type="button" @click="toggle(c.category)"
+                    class="w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-ink-800/30"
+                    :class="open === c.category ? 'bg-ink-800/30' : ''">
+              <span class="inline-block h-3.5 w-3.5 rounded-full shrink-0" :style="'background:' + color(i)"></span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-baseline justify-between gap-3">
+                  <span class="font-medium text-sm">
+                    <span x-text="label(c.category)"></span>
+                    <span x-show="c.fixed > 0" x-cloak class="ml-1.5 text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border border-ink-600 text-ink-400"
+                          x-text="'{{ t('spending.fixed_pill') }}' + (c.fixed < c.total - 0.5 ? ' ' + fmt0(c.fixed) + ' €' : '')"></span>
+                  </span>
+                  <span class="text-sm font-semibold tabular-nums whitespace-nowrap" x-text="fmt(c.total)"></span>
+                </div>
+                <div class="mt-1.5 h-1.5 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full" :style="'width:' + Math.max(1, 100 * c.total / Math.max(1, ...d.categories.map(x => x.total))) + '%; background:' + color(i)"></div>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-ink-500 flex-wrap">
+                  <span x-text="c.count + ' {{ t('spending.bookings') }} · ' + c.share + ' %'"></span>
+                  <span class="tabular-nums whitespace-nowrap">
+                    <span x-show="d.prev_month" x-cloak :class="c.total - c.prev > 0 ? 'text-rose-300' : c.total - c.prev < 0 ? 'text-emerald-300' : ''"
+                          x-text="(c.total - c.prev > 0 ? '+' : '') + fmt0(c.total - c.prev) + ' € {{ t('spending.vs_prev_short') }}'"></span>
+                    <span x-show="d.avg_months" x-cloak class="ml-2" x-text="'Ø ' + fmt0(c.avg) + ' €'"></span>
+                  </span>
+                </div>
+              </div>
+              <span class="text-ink-500 text-xs shrink-0" x-text="open === c.category ? '▴' : '▾'"></span>
+            </button>
+
+            <div x-show="open === c.category" x-cloak class="px-5 pb-4">
+              <div class="flex flex-wrap gap-1.5 mb-3">
+                <template x-for="m in c.top_merchants" :key="m.name">
+                  <span class="text-[11px] rounded-full border border-ink-700 px-2 py-0.5 text-ink-300">
+                    <span x-text="m.name.slice(0, 32)"></span> · <span class="tabular-nums" x-text="fmt(m.total)"></span>
+                  </span>
+                </template>
+              </div>
+              <div class="overflow-x-auto rounded-lg border border-ink-800/60">
+                <table class="w-full text-sm">
+                  <tbody>
+                    <template x-for="r in c.rows" :key="r.id">
+                      <tr class="border-t border-ink-800/40 first:border-t-0">
+                        <td class="px-3 py-1.5 text-ink-400 tabular-nums whitespace-nowrap text-xs" x-text="r.booking_date"></td>
+                        <td class="px-3 py-1.5 text-ink-200 break-words max-w-[240px]">
+                          <span x-text="r.counterparty"></span>
+                          <span x-show="r.is_fixed" x-cloak class="ml-1 text-[9px] uppercase tracking-wide rounded px-1 py-0.5 border border-ink-700 text-ink-500">{{ t('spending.fixed_pill') }}</span>
+                          <span class="block text-[11px] text-ink-500 md:hidden" x-text="r.purpose.slice(0, 60)"></span>
+                        </td>
+                        <td class="px-3 py-1.5 text-ink-500 text-xs break-words max-w-[260px] hidden md:table-cell" x-text="r.purpose.slice(0, 90)"></td>
+                        <td class="px-3 py-1.5 text-ink-500 text-xs whitespace-nowrap hidden lg:table-cell" x-text="r.bank_name + (r.iban_last4 ? ' · …' + r.iban_last4 : '')"></td>
+                        <td class="px-3 py-1.5">
+                          <select x-effect="const v = r.category; $nextTick(() => { $el.value = v; })" :disabled="busy"
+                                  @change="recat(r, $event)"
+                                  class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs max-w-[11rem]">
+                            <template x-for="k in d.cats" :key="k"><option :value="k" x-text="label(k)"></option></template>
+                            <option value="__new__">{{ t('spending.new_category') }}</option>
+                          </select>
+                        </td>
+                        <td class="px-3 py-1.5 text-right tabular-nums text-rose-300 whitespace-nowrap" x-text="fmt(r.amount)"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <label class="mt-2 inline-flex items-center gap-1.5 text-[11px] text-ink-400 select-none">
+                <input type="checkbox" x-model="learn" @change="saveLearn()" class="accent-emerald-500">
+                {{ t('spending.learn') }}
+              </label>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    {# ---------- Income of the period, netted above; same drill-down as the spending ---------- #}
+    <div class="card p-0 overflow-hidden mb-4" x-show="d.income_categories.length" x-cloak>
+      <div class="px-5 py-3 border-b border-ink-800/60 flex items-baseline justify-between gap-3 flex-wrap">
+        <span class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.income_title') }}</span>
+        <span class="text-sm font-semibold tabular-nums text-emerald-300" x-text="fmt(d.income_total)"></span>
+      </div>
+      <div>
+        <template x-for="c in d.income_categories" :key="'in-' + c.category">
+          <div class="border-b border-ink-800/40 last:border-b-0">
+            <button type="button" @click="toggle('in-' + c.category)"
+                    class="w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-ink-800/30"
+                    :class="open === 'in-' + c.category ? 'bg-ink-800/30' : ''">
+              <span class="inline-block h-3.5 w-3.5 rounded-full shrink-0 bg-emerald-500/70"></span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-baseline justify-between gap-3">
+                  <span class="font-medium text-sm" x-text="label(c.category)"></span>
+                  <span class="text-sm font-semibold tabular-nums whitespace-nowrap text-emerald-300" x-text="fmt(c.total)"></span>
+                </div>
+                <div class="mt-1.5 h-1.5 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-emerald-500/70" :style="'width:' + Math.max(1, 100 * c.total / Math.max(1, ...d.income_categories.map(x => x.total))) + '%'"></div>
+                </div>
+                <div class="mt-1 text-[11px] text-ink-500" x-text="c.count + ' {{ t('spending.bookings') }} · ' + c.share + ' %'"></div>
+              </div>
+              <span class="text-ink-500 text-xs shrink-0" x-text="open === 'in-' + c.category ? '▴' : '▾'"></span>
+            </button>
+            <div x-show="open === 'in-' + c.category" x-cloak class="px-5 pb-4">
+              <div class="overflow-x-auto rounded-lg border border-ink-800/60">
+                <table class="w-full text-sm">
+                  <tbody>
+                    <template x-for="r in c.rows" :key="r.id">
+                      <tr class="border-t border-ink-800/40 first:border-t-0">
+                        <td class="px-3 py-1.5 text-ink-400 tabular-nums whitespace-nowrap text-xs" x-text="r.booking_date"></td>
+                        <td class="px-3 py-1.5 text-ink-200 break-words max-w-[240px]">
+                          <span x-text="r.counterparty"></span>
+                          <span class="block text-[11px] text-ink-500 md:hidden" x-text="r.purpose.slice(0, 60)"></span>
+                        </td>
+                        <td class="px-3 py-1.5 text-ink-500 text-xs break-words max-w-[260px] hidden md:table-cell" x-text="r.purpose.slice(0, 90)"></td>
+                        <td class="px-3 py-1.5">
+                          <select x-effect="const v = r.category; $nextTick(() => { $el.value = v; })" :disabled="busy"
+                                  @change="recat(r, $event)"
+                                  class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs max-w-[11rem]">
+                            <template x-for="k in d.cats" :key="k"><option :value="k" x-text="label(k)"></option></template>
+                            <option value="__new__">{{ t('spending.new_category') }}</option>
+                          </select>
+                        </td>
+                        <td class="px-3 py-1.5 text-right tabular-nums text-emerald-300 whitespace-nowrap" x-text="'+' + fmt(r.amount)"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <p class="text-xs text-ink-500 mt-4">{{ t('spending.footnote') }}</p>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+function spendingPage(initial) {
+  const PAL = ['--c0','--c1','--c2','--c3','--c4','--c5','--c6','--c7','--c8','--c9','--c10','--c11'];
+  return {
+    d: initial,
+    T: {{ {
+      'no_month_hint': t('spending.no_month_hint'), 'vs_prev': t('spending.vs_prev'), 'vs_avg': t('spending.vs_avg'),
+      'avg_label': t('spending.avg_label'), 'open_hint': t('spending.open_hint'), 'reassigned': t('spending.reassigned'),
+      'new_prompt': t('spending.new_prompt'), 'new_fixed': t('spending.new_fixed'), 'new_saving': t('spending.new_saving'),
+      'new_done': t('spending.new_done'), 'trend_clipped': t('spending.trend_clipped'), 'trend_clipped_one': t('spending.trend_clipped_one'),
+      'game_benchmark': t('game.benchmark'), 'game_of_max': t('game.of_max'), 'game_of_days': t('game.of_days'),
+      'game_streak_hint': t('game.streak_hint'), 'game_days': t('game.days'), 'game_next': t('game.next'),
+      'game_rank_top': t('game.rank_top'), 'game_rule': t('game.rule'), 'game_footnote': t('game.footnote'),
+      'game_zero_day': t('game.zero_day'), 'game_future_day': t('game.future_day'),
+      'game_pending_day': t('game.pending_day'), 'game_too_early': t('game.too_early'),
+      'game_board_unrated': t('game.board_unrated'), 'game_board_detail': t('game.board_detail'),
+      'game_result_title': t('game.result_title'), 'game_result_rate': t('game.result_rate'),
+      'game_result_bonus': t('game.result_bonus'), 'game_badge_plus': t('game.badge_plus'),
+      'game_badge_plus_hint': t('game.badge_plus_hint'),
+      'game_board_more': t('game.board_more'), 'game_board_less': t('game.board_less'),
+      'game_per_day_max': t('game.per_day_max'), 'budget_fixed_hint': t('finance.budget.fixed_hint'),
+      'game_rank_fox': t('game.rank_fox'), 'game_rank_hero': t('game.rank_hero'),
+      'game_rank_solid': t('game.rank_solid'), 'game_rank_room': t('game.rank_room'),
+      'game_rank_spend': t('game.rank_spend'),
+      'game_badge_zero': t('game.badge_zero'), 'game_badge_zero_hint': t('game.badge_zero_hint'),
+      'game_badge_three': t('game.badge_three'), 'game_badge_week': t('game.badge_week'),
+      'game_badge_half': t('game.badge_half'), 'game_badge_missing': t('game.badge_missing'),
+    } | tojson }},
+    open: '', busy: false, learn: true, message: '', messageOk: true,
+    init() { try { this.learn = localStorage.getItem('docusort-learn') !== '0'; } catch {} },
+    saveLearn() { try { localStorage.setItem('docusort-learn', this.learn ? '1' : '0'); } catch {} },
+    fmt(v) { return (Number(v) || 0).toLocaleString(DS_LOCALE, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }); },
+    fmt0(v) { return Math.round(Number(v) || 0).toLocaleString(DS_LOCALE); },
+    pct(v) { return this.d.total ? Math.round(v / this.d.total * 100) : 0; },
+    label(k) { return (this.d.labels && this.d.labels[k]) || k; },
+    color(i) { return 'var(' + (i < PAL.length ? PAL[i] : '--cx') + ')'; },
+    get delta() { return (this.d.total || 0) - (this.d.prev_total || 0); },
+    get maxDay() { return Math.max(0, ...this.d.days.map(x => x.spend)); },
+    /* Skala, Ø und Kappgrenze der Tagesansicht in EINER Rechnung — so
+       können Balken, Beschriftung und Ø-Linie nicht auseinanderlaufen. */
+    /* Tage, die schon stattgefunden haben. 🔴 Die noch leeren Tage des
+       laufenden Gehaltsmonats dürfen weder in den Durchschnitt noch in die
+       Skala noch ins Spiel — sonst sinkt der Ø mit jedem Monatsanfang und
+       jeder ungelebte Tag wäre eine „Nullrunde". */
+    get pastDays() { return this.d.days.filter(x => !this.isFuture(x)); },
+    /* „offen" = zählt nicht: entweder liegt der Tag noch vor uns, oder es
+       ist für ihn noch keine Buchung angekommen. Beides ist keine
+       Nullrunde. */
+    isFuture(day) {
+      if (!day) return false;
+      if (day.future || day.pending) return true;
+      if (typeof day.future === 'boolean') return false;
+      return day.date > new Date().toISOString().slice(0, 10);
+    },
+    isPending(day) { return !!(day && day.pending && !day.future); },
+    get trend() {
+      const vals = this.pastDays.map(x => Number(x.spend) || 0);
+      const nz = vals.filter(v => v > 0).sort((a, b) => a - b);
+      const max = nz.length ? nz[nz.length - 1] : 0;
+      const q = (f) => nz.length ? nz[Math.min(nz.length - 1, Math.floor(f * (nz.length - 1)))] : 0;
+      const q3 = q(0.75);
+      const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+      // Kappen nur gegen echte Ausreißer: Grenze ist das Dreifache des
+      // oberen Viertels. Am Median gemessen war sie zu scharf — fünf von
+      // 21 Tagen liefen oben aus und sahen dadurch alle gleich hoch aus.
+      let cap = max;
+      if (nz.length >= 5 && q3 > 0 && q3 * 3 < max) cap = this.niceUp(q3 * 3);
+      if (cap > max) cap = max;
+      const clipped = vals.filter(v => v > cap).length;
+      return { max, q3, avg, cap, clipped,
+               avgPct: cap > 0 ? Math.min(100, avg / cap * 100) : 0 };
+    },
+    /* nächstgrößerer „runder" Wert — eine Kappgrenze von 287,43 € liest
+       sich nicht, 300 € schon. */
+    niceUp(v) {
+      if (!(v > 0)) return 0;
+      const pow = Math.pow(10, Math.floor(Math.log10(v)));
+      for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10]) {
+        if (v <= m * pow) return m * pow;
+      }
+      return 10 * pow;
+    },
+    /* ---- „Wieviel darf ich noch ausgeben" ----------------------------
+       Kommt fertig gerechnet vom Server (derselbe Budget-Wecker wie auf
+       /finance) oder gar nicht — für abgelaufene Zeiträume gibt es keine
+       Restsumme mehr. */
+    budget: window.__spendingBudget || null,
+    get budgetPerDay() {
+      if (!this.budget) return 0;
+      const left = Number(this.budget.days_left) || 0;
+      const rest = Number(this.budget.remaining) || 0;
+      return left > 0 ? rest / left : rest;
+    },
+    /* Höhe der Tagesbudget-Linie in der Tageskurve; null = nicht zeigen
+       (kein Budget, nichts mehr übrig, oder außerhalb der Skala). */
+    get budgetLinePct() {
+      const v = this.budgetPerDay;
+      if (!this.budget || !(v > 0)) return null;
+      const cap = this.trend.cap;
+      if (!(cap > 0) || v > cap) return null;
+      const pct = v / cap * 100;
+      return pct > 3 && pct < 98 ? pct : null;
+    },
+
+    /* ---- Spar-Spiel ---------------------------------------------------
+       🔴 Gerechnet wird NICHT mehr hier: die Regeln stehen einmal in
+       `docusort/finance/game.py`, weil dieselbe Wertung auch die
+       Bestenliste über alle Monate füttert. Zwei Umsetzungen derselben
+       Regeln hätten bei der ersten Änderung zwei Wahrheiten auf einer
+       Seite ergeben. Hier werden nur noch Namen und Hinweise angehängt. */
+    get game() {
+      const g = this.d.game || {};
+      const T = this.T;
+      const badges = (g.badges || []).map(b => ({
+        key: b.key, icon: b.icon, done: !!b.done,
+        label: T['game_badge_' + b.key],
+        note: b.key === 'plus' ? (b.done ? Math.round(b.rate) + ' %' : T.game_badge_plus_hint)
+            : b.key === 'zero' ? (b.done ? '×' + b.count : T.game_badge_zero_hint)
+            : b.key === 'half' ? (b.of ? b.count + '/' + b.of : '')
+            : (b.done ? '' : T.game_badge_missing.replace('{n}', b.missing)),
+      }));
+      return {
+        bar: g.bar || 0, points: g.points || 0, maxPoints: g.max_points || 0,
+        zeroDays: g.zero_days || 0, countedDays: g.counted_days || 0,
+        totalDays: g.total_days || 0, streak: g.streak || 0, bestStreak: g.best_streak || 0,
+        sharePct: Math.round(g.share || 0), rated: !!g.rated,
+        bonus: g.bonus || 0, bonusMax: g.bonus_max || 0, net: g.net || 0,
+        savingsRate: Math.round(g.savings_rate || 0),
+        rank: { icon: g.rank_icon || '', name: T['game_' + (g.rank_key || 'rank_spend')] },
+        next: g.next_rank ? { name: T['game_' + g.next_rank.key], missing: g.next_rank.missing } : null,
+        badges,
+      };
+    },
+    /* Bestenliste: Zeiträume mit Wertung nach Punktequote, danach die
+       (noch) nicht gewerteten. Der längste Balken ist die beste Quote. */
+    get ranking() { return this.d.ranking || []; },
+    /* Die Kontenauswahl hängt an jedem Link und an jedem Nachladen —
+       sonst springt die Seite beim Monatswechsel zurück auf „alle". */
+    accountQuery() {
+      if (!this.d.accounts_filtered) return '';
+      return (this.d.accounts || []).filter(a => a.selected)
+        .map(a => '&accounts=' + a.id).join('');
+    },
+    rankName(key) { return this.T['game_' + key]; },
+    /* Die kurze Ansicht: die drei Besten und — falls er nicht ohnehin
+       darunter ist — der laufende Zeitraum, damit man sofort sieht, wo
+       man gerade steht. Reihenfolge bleibt die der Bestenliste. */
+    get boardTop() {
+      const list = this.ranking;
+      const keep = new Set(list.slice(0, 3).map(r => r.key));
+      const now = list.find(r => r.is_current);
+      if (now) keep.add(now.key);
+      const shown = this.d.month && list.find(r => r.key === this.d.month);
+      if (shown) keep.add(shown.key);
+      return list.filter(r => keep.has(r.key));
+    },
+
+    /* Mouseover der Tageskurve.
+       🔴 Das Kästchen darf NICHT im Scroll-Container hängen — `overflow-x`
+       schneidet alles ab, was über den sichtbaren Rand ragt. Es ist deshalb
+       ein Kind der Karte; die Position kommt aus der Spalte und wird auf
+       die Kartenbreite begrenzt. */
+    hover: null, hoverX: 0, hoverY: 0,
+    showTip(day, ev) {
+      const card = this.$refs.trendCard;
+      if (!card || !ev || !ev.currentTarget) return;
+      const col = ev.currentTarget.getBoundingClientRect();
+      const box = card.getBoundingClientRect();
+      this.hover = day;
+      this.hoverY = Math.max(4, col.top - box.top);
+      const mid = col.left + col.width / 2 - box.left;
+      this.$nextTick(() => {
+        const w = (this.$refs.tip && this.$refs.tip.offsetWidth) || 120;
+        const min = 8, max = Math.max(min, box.width - w - 8);
+        this.hoverX = Math.min(Math.max(mid - w / 2, min), max);
+      });
+    },
+
+    dayPct(day) {
+      const cap = this.trend.cap;
+      if (!(cap > 0)) return 0;
+      return Math.min(100, (Number(day.spend) || 0) / cap * 100);
+    },
+    dayClipped(day) { return (Number(day.spend) || 0) > this.trend.cap + 0.005; },
+    isWeekend(day) { const d = new Date(day.date + 'T12:00:00'); return d.getDay() === 0 || d.getDay() === 6; },
+    weekdayShort(day) {
+      return new Date(day.date + 'T12:00:00').toLocaleDateString(document.documentElement.lang || 'de', { weekday: 'short' }).slice(0, 2);
+    },
+    monthShort(day) {
+      return new Date(day.date + 'T12:00:00').toLocaleDateString(document.documentElement.lang || 'de', { month: 'short' });
+    },
+    dayLabel(day) {
+      return new Date(day.date + 'T12:00:00').toLocaleDateString(document.documentElement.lang || 'de',
+        { weekday: 'short', day: '2-digit', month: '2-digit' });
+    },
+    toggle(c) { this.open = this.open === c ? '' : c; },
+    // Donut as an SVG string: Alpine's x-for never renders inside <svg>.
+    get donutSvg() {
+      const C = 376.99; let off = 0, segs = '';
+      this.d.categories.forEach((c, i) => {
+        if (c.total <= 0) return;
+        const seg = c.share / 100 * C, draw = seg > 4 ? seg - 2 : seg;
+        segs += `<circle cx="80" cy="80" r="60" fill="none" stroke-linecap="round" style="stroke:${this.color(i)}" stroke-width="20"
+                   stroke-dasharray="${draw.toFixed(2)} ${(C - draw).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"><title>${this.label(c.category)}: ${this.fmt(c.total)} (${Math.round(c.share)} %)</title></circle>`;
+        off += seg;
+      });
+      return `<svg viewBox="0 0 160 160" style="width:100%;height:100%;transform:rotate(-90deg);"><circle cx="80" cy="80" r="60" fill="none" style="stroke:var(--viz-track)" stroke-width="20"/>${segs}</svg>`;
+    },
+    async reload() {
+      const u = new URL(location.href);
+      const r = await fetch('/api/ausgaben/data?month=' + encodeURIComponent(u.searchParams.get('month') || this.d.month)
+                            + '&mode=' + encodeURIComponent(this.d.mode) + this.accountQuery());
+      const j = await r.json(); if (r.ok) this.d = j;
+    },
+    // ---- eigene Kategorie anlegen (wie im Explorer: Name, Fixkosten?, Sparen?) ----
+    newCategory(then) {
+      const label = window.prompt(this.T.new_prompt);
+      if (!label || !label.trim()) return;
+      const fixed = window.confirm(this.T.new_fixed.replace('{label}', label.trim()));
+      const saving = window.confirm(this.T.new_saving.replace('{label}', label.trim()));
+      fetch('/api/finance/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: label.trim(), is_fixed: fixed, is_saving: saving }) })
+        .then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status)); return j; })
+        .then((j) => {
+          if (j.keys) this.d.cats = j.keys;
+          if (j.labels) this.d.labels = Object.assign({}, this.d.labels || {}, j.labels);
+          this.flash(true, this.T.new_done.replace('{label}', j.category.label));
+          this.$nextTick(() => then(j.category.key));
+        })
+        .catch((e) => this.flash(false, e.message || String(e)));
+    },
+    async recat(row, ev) {
+      const cat = ev.target.value;
+      if (cat === '__new__') {
+        ev.target.value = row.category;
+        this.newCategory((k) => { ev.target.value = k; this.recat(row, { target: ev.target }); });
+        return;
+      }
+      if (!cat || cat === row.category) return;
+      this.busy = true;
+      try {
+        const r = await fetch('/api/transactions/categorize', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [row.id], category: cat, learn: this.learn, scope: 'auto' }) });
+        const j = await r.json(); if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+        this.flash(true, this.T.reassigned.replace("{n}", (j.updated || 0) + (j.applied || 0)).replace('{cat}', this.label(cat)));
+        await this.reload();
+      } catch (e) { this.flash(false, e.message || String(e)); ev.target.value = row.category; }
+      finally { this.busy = false; }
+    },
+    flash(ok, msg) { this.message = msg; this.messageOk = ok; setTimeout(() => { this.message = ''; }, 3500); },
+  };
+}
+</script>
+{% endblock %}

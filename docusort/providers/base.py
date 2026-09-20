@@ -1,0 +1,59 @@
+"""Provider base class + shared response container."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+class ProviderError(RuntimeError):
+    """Raised when a provider call fails (network, auth, malformed response)."""
+
+
+class TransientProviderError(ProviderError):
+    """A provider failure that is expected to resolve on its own — the
+    remote is temporarily unavailable rather than the request being bad.
+
+    Examples: the local AI bridge has no client connected (Mac asleep),
+    a bridge call timed out, or the client disconnected mid-flight. The
+    pipeline treats these specially: instead of consuming the document
+    into the review queue (which strands it there until a human retries),
+    it leaves the file in the inbox so the next watcher pass reprocesses
+    it once the backend is back.
+    """
+
+
+@dataclass
+class ProviderResponse:
+    """Normalised result from any provider's classify call."""
+    raw_text: str               # the model's JSON reply (verbatim)
+    model: str                  # model id actually used
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0   # only Anthropic
+    cache_read_tokens: int = 0       # only Anthropic
+    cost_usd: float = 0.0
+
+
+class Provider:
+    """Abstract provider — concrete subclasses implement `classify`."""
+
+    name: str = "abstract"
+
+    def classify(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        max_output_tokens: int = 600,
+        timeout: float | None = None,
+    ) -> ProviderResponse:
+        """Run a single LLM call.
+
+        `timeout` is a per-request timeout in seconds. None falls back
+        to whatever the provider was constructed with — useful default
+        for the classifier's small responses, but second-pass
+        extractors that ask for many transactions in one go need a
+        much larger budget than the default 60 s.
+        """
+        raise NotImplementedError
