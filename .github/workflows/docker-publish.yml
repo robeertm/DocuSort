@@ -35,6 +35,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Repository name in lower case
+        id: repo
+        # GHCR refuses an upper-case path: "repository name must be lowercase".
+        run: echo "slug=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - name: Read version
         id: ver
         run: echo "version=$(python3 -c "import re;print(re.search(r'__version__ = \"([^\"]+)\"', open('docusort/__init__.py').read()).group(1))")" >> "$GITHUB_OUTPUT"
@@ -46,8 +51,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ steps.repo.outputs.slug }}:latest
+            ghcr.io/${{ steps.repo.outputs.slug }}:${{ steps.ver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
