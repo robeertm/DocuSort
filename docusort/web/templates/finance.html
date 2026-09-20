@@ -1,0 +1,699 @@
+{% extends "base.html" %}
+{% block title %}{{ t('finance.title') }} · DocuSort{% endblock %}
+{% block content %}
+
+<div x-data="financePage()">
+  <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('finance.title') }}</h1>
+      <p class="text-ink-400 mt-1 text-sm">{{ t('finance.subtitle') }}</p>
+    </div>
+  </div>
+
+  {# One way in, not two (v0.51.0): documents, Kontoauszug-PDFs and bank
+     CSVs all go through the upload page, which routes each file by its
+     type. This card only points there — the import form used to live here
+     and was the second place nobody should have to remember. #}
+  <a href="/upload"
+     class="card p-5 mb-6 border-emerald-500/30 bg-emerald-500/5 flex items-center gap-4 hover:bg-emerald-500/10 transition">
+    <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+        <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
+      </svg>
+    </div>
+    <div class="min-w-0">
+      <div class="font-medium">{{ t('finance.csv.central_title') }}</div>
+      <div class="text-xs text-ink-400 mt-0.5">{{ t('finance.csv.central_hint') }}</div>
+    </div>
+    <span class="ml-auto shrink-0 btn-secondary text-xs">{{ t('finance.csv.central_cta') }}</span>
+  </a>
+
+  {% if not has_data %}
+    {# No accounts yet → big call-to-action pointing at the one way in.
+       Stat cards / charts stay hidden until the first file has landed. #}
+    <div class="card p-10 text-center">
+      <div class="inline-flex h-14 w-14 items-center justify-center rounded-full bg-ink-700/40 text-ink-400 mb-4">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-7 w-7">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <h2 class="text-lg font-semibold mb-2">{{ t('finance.empty_title') }}</h2>
+      <p class="text-sm text-ink-400 max-w-md mx-auto">{{ t('finance.empty_hint') }}</p>
+      <a href="/upload" class="btn-primary mt-5 inline-flex">{{ t('finance.csv.central_cta') }}</a>
+    </div>
+  {% else %}
+
+  {# ============================================================= #}
+  {# BUDGET-WECKER — the headline of the tracker: how much of this  #}
+  {# salary period's money is still free to spend.                  #}
+  {# ============================================================= #}
+  {% if current_period %}
+    {% set cp = current_period %}
+    {% set spent_frac = (cp.expense / cp.budget) if cp.budget and cp.budget > 0 else 0 %}
+    {% set spent_pct = (spent_frac * 100) if spent_frac <= 1 else 100 %}
+    {% set over = cp.remaining < 0 %}
+    {% set per_day = (cp.remaining / cp.days_left) if cp.days_left and cp.days_left > 0 else cp.remaining %}
+    <div class="card p-5 mb-6 {% if over %}border-rose-500/40 bg-rose-500/5{% else %}border-emerald-500/30 bg-emerald-500/5{% endif %}">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h2 class="font-semibold text-sm uppercase tracking-wide {% if over %}text-rose-300{% else %}text-emerald-300{% endif %}">
+            {{ t('finance.budget.title') }}
+          </h2>
+          <p class="text-xs text-ink-400 mt-0.5">
+            {{ t('finance.budget.period_label') }}:
+            {{ cp.start[8:10] }}.{{ cp.start[5:7] }}. – {{ cp.end[8:10] }}.{{ cp.end[5:7] }}.{{ cp.end[2:4] }}
+            {% if cp.due_date %}· {{ t('finance.budget.next_salary') }} ~{{ cp.due_date[8:10] }}.{{ cp.due_date[5:7] }}.{% endif %}
+          </p>
+        </div>
+        <div class="text-right">
+          <div class="text-3xl sm:text-4xl font-semibold tabular-nums {% if over %}text-rose-300{% else %}text-emerald-300{% endif %}">
+            {{ "%.2f"|format(cp.remaining) }} €
+          </div>
+          <div class="text-xs text-ink-400">{{ t('finance.budget.remaining') }}</div>
+        </div>
+      </div>
+      {# progress bar: spent vs budget #}
+      <div class="h-3 rounded-full bg-ink-800 overflow-hidden">
+        <div class="h-full rounded-full {% if over %}bg-rose-500{% elif spent_pct > 80 %}bg-amber-400{% else %}bg-emerald-500{% endif %}"
+             style="width: {{ "%.1f"|format(spent_pct) }}%"></div>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center">
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.income_in') }}</div>
+          <div class="text-sm font-semibold tabular-nums text-emerald-300">{{ "%.0f"|format(cp.income) }} €</div>
+        </div>
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.spent') }}</div>
+          <div class="text-sm font-semibold tabular-nums text-rose-300">{{ "%.0f"|format(cp.expense) }} €</div>
+        </div>
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.days_left') }}</div>
+          <div class="text-sm font-semibold tabular-nums">{{ cp.days_left }}</div>
+        </div>
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.per_day') }}</div>
+          <div class="text-sm font-semibold tabular-nums {% if per_day < 0 %}text-rose-300{% else %}text-ink-200{% endif %}">{{ "%.2f"|format(per_day) }} €</div>
+        </div>
+      </div>
+      {% if cp.saved and cp.saved > 0 %}
+        <p class="text-xs text-ink-500 mt-3">{{ t('finance.budget.saved_note') | replace('{amt}', "%.0f"|format(cp.saved)) }}</p>
+      {% endif %}
+      {% if finance_cfg.monthly_budget and finance_cfg.monthly_budget > 0 %}
+        <p class="text-[11px] text-ink-600 mt-1">{{ t('finance.budget.fixed_hint') | replace('{budget}', "%.0f"|format(finance_cfg.monthly_budget)) }}</p>
+      {% else %}
+        <p class="text-[11px] text-ink-600 mt-1">{{ t('finance.budget.income_hint') }}</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {# ============================================================= #}
+  {# GESAMTVERMÖGEN — total wealth across all accounts, split into   #}
+  {# Giro (spending) and Sparen (savings). "Vermögen zu Zeit x".     #}
+  {# ============================================================= #}
+  <div class="card p-5 mb-6">
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div>
+        <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.wealth.title') }}</h2>
+        <p class="text-xs text-ink-500 mt-0.5">{{ t('finance.wealth.subtitle') }}</p>
+      </div>
+      <div class="text-right">
+        <div class="text-3xl sm:text-4xl font-semibold tabular-nums {% if net_worth.total >= 0 %}text-ink-100{% else %}text-rose-300{% endif %}">
+          {{ "%.2f"|format(net_worth.total) }} €
+        </div>
+        <div class="text-xs text-ink-400">{{ t('finance.wealth.total') }}</div>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="rounded-lg border border-ink-800 bg-ink-900/40 p-3">
+        <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.wealth.spending') }}</div>
+        <div class="text-lg font-semibold tabular-nums text-sky-300">{{ "%.2f"|format(net_worth.spending_total) }} €</div>
+      </div>
+      <div class="rounded-lg border border-ink-800 bg-ink-900/40 p-3">
+        <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.wealth.savings') }}</div>
+        <div class="text-lg font-semibold tabular-nums text-emerald-300">{{ "%.2f"|format(net_worth.savings_total) }} €</div>
+      </div>
+    </div>
+    {% if saved_external and saved_external.total > 0 %}
+      <div class="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 mb-3">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.wealth.external') }}</div>
+          <div class="text-lg font-semibold tabular-nums text-violet-200">{{ "%.2f"|format(saved_external.total) }} €</div>
+        </div>
+        <p class="text-[11px] text-ink-500 mt-1">{{ t('finance.wealth.external_hint') }}
+          {% for r in saved_external.by_category %}<span class="ml-2 text-ink-400">{{ cat_labels.get(r.category, r.category) }} {{ "%.0f"|format(r.paid) }} €</span>{% endfor %}
+        </p>
+        <p class="text-[11px] text-ink-400 mt-1">{{ t('finance.wealth.incl_external') }}: <span class="tabular-nums text-ink-200">{{ "%.2f"|format(net_worth.total + saved_external.total) }} €</span></p>
+      </div>
+    {% endif %}
+    {% if not net_worth.has_savings %}
+      <p class="text-[11px] text-amber-300/80">{{ t('finance.wealth.no_savings_hint') }}</p>
+    {% endif %}
+  </div>
+
+  {# ============================================================= #}
+  {# GEHALTSPERIODEN — income vs expense per salary month.          #}
+  {# ============================================================= #}
+  {% if salary_periods %}
+  <div class="card p-5 mb-6">
+    <div class="flex items-baseline justify-between mb-4">
+      <div>
+        <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.periods.title') }}</h2>
+        <p class="text-xs text-ink-500 mt-0.5">{{ t('finance.periods.subtitle') }}</p>
+      </div>
+    </div>
+    {% set pmax = (salary_periods | map(attribute='income') | list + salary_periods | map(attribute='expense') | list + [1]) | max %}
+    <div class="space-y-2.5">
+      {% for p in salary_periods %}
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 text-xs {% if p.is_current %}bg-emerald-500/5 -mx-2 px-2 py-1.5 rounded{% endif %}">
+          <div class="w-24 shrink-0 tabular-nums text-ink-300">
+            {{ p.start[8:10] }}.{{ p.start[5:7] }}.–{{ p.end[8:10] }}.{{ p.end[5:7] }}.
+            {% if p.is_current %}<span class="text-emerald-400 text-[9px] uppercase">{{ t('finance.periods.now') }}</span>{% endif %}
+          </div>
+          {# dual bar: income above, expense below #}
+          <div class="flex-1 min-w-[6rem] space-y-0.5">
+            <div class="h-2 rounded-full overflow-hidden">
+              <div class="h-full bg-emerald-500 rounded-full" style="width: {{ "%.1f"|format(100 * p.income / pmax) }}%"></div>
+            </div>
+            <div class="h-2 rounded-full overflow-hidden">
+              <div class="h-full bg-rose-500 rounded-full" style="width: {{ "%.1f"|format(100 * p.expense / pmax) }}%"></div>
+            </div>
+          </div>
+          <div class="flex gap-3 w-full sm:w-auto justify-end sm:justify-start">
+          <div class="w-20 shrink-0 text-right tabular-nums text-emerald-300">+{{ "%.0f"|format(p.income) }}</div>
+          <div class="w-20 shrink-0 text-right tabular-nums text-rose-300">−{{ "%.0f"|format(p.expense) }}</div>
+          <div class="w-20 shrink-0 text-right tabular-nums font-semibold {% if p.net >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
+            {% if p.net >= 0 %}+{% endif %}{{ "%.0f"|format(p.net) }}
+          </div>
+          <div class="w-16 shrink-0 text-right tabular-nums text-ink-500" title="{{ t('finance.periods.saved') }}">
+            {% if p.saved > 0 %}⇢{{ "%.0f"|format(p.saved) }}{% else %}—{% endif %}
+          </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="flex flex-wrap gap-4 text-[10px] text-ink-500 mt-4 justify-end">
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full"></span>{{ t('finance.periods.income') }}</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 bg-rose-500 rounded-full"></span>{{ t('finance.periods.expense') }}</span>
+      <span>⇢ {{ t('finance.periods.saved') }}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Stat tiles — only when there's data to show #}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+    <div class="card p-3 sm:p-4 min-w-0">
+      <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('finance.income') }}</div>
+      <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums text-emerald-300 break-all">
+        {{ "%.2f"|format(summary.income) }} €
+      </div>
+    </div>
+    <div class="card p-3 sm:p-4 min-w-0">
+      <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('finance.expense') }}</div>
+      <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums text-rose-300 break-all">
+        {{ "%.2f"|format(summary.expense) }} €
+      </div>
+    </div>
+    <div class="card p-3 sm:p-4 min-w-0">
+      <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('finance.net') }}</div>
+      <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums break-all {% if summary.net >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
+        {{ "%.2f"|format(summary.net) }} €
+      </div>
+    </div>
+    <div class="card p-3 sm:p-4 min-w-0">
+      <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('finance.transactions') }}</div>
+      <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums">{{ summary.tx_count }}</div>
+      <div class="text-xs text-ink-500 mt-1 truncate">
+        {{ summary.account_count }} {{ t('finance.accounts') }}
+      </div>
+    </div>
+  </div>
+
+  {# Monthly cashflow chart — full timeline with gap-fill #}
+  <div class="card p-5 mb-6">
+    <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.monthly_timeline') }}</h2>
+    {% if monthly %}
+      {% set n = monthly | length %}
+      {% set label_step = 1 if n <= 18 else (3 if n <= 36 else 6) %}
+      {% set max_in  = (monthly | map(attribute='income')  | max) or 0 %}
+      {% set max_out = -((monthly | map(attribute='expense') | min) or 0) %}
+      {% set vmax = [max_in, max_out, 1] | max %}
+      {% set W = 1000 %}
+      {% set H = 220 %}
+      {% set step = (W - 60) / ([n - 1, 1] | max) %}
+      {% set ns = namespace(in_pts=[], out_pts=[]) %}
+      {% for m in monthly %}
+        {% set x = 50 + loop.index0 * step %}
+        {% set y_in  = (H - 20) - (m.income / vmax) * (H - 40) %}
+        {% set y_out = (H - 20) - (-m.expense / vmax) * (H - 40) %}
+        {% set ns.in_pts  = ns.in_pts  + [(x, y_in)] %}
+        {% set ns.out_pts = ns.out_pts + [(x, y_out)] %}
+      {% endfor %}
+      <div class="overflow-x-auto -mx-2 px-2">
+        <svg viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none"
+             class="w-full h-64 sm:h-80" style="min-width: 600px;">
+          {% for frac in [0.0, 0.25, 0.5, 0.75, 1.0] %}
+            {% set y = 20 + frac * (H - 40) %}
+            <line x1="50" y1="{{ y }}" x2="{{ W - 10 }}" y2="{{ y }}"
+                  stroke="currentColor" class="text-ink-700" stroke-width="0.5" stroke-dasharray="2 4"/>
+          {% endfor %}
+          <text x="44" y="24" text-anchor="end" class="fill-ink-500" font-size="10">{{ "%.0f"|format(vmax) }}</text>
+          <text x="44" y="{{ H - 18 }}" text-anchor="end" class="fill-ink-500" font-size="10">0</text>
+          <path fill="rgb(16 185 129 / 0.15)" stroke="none"
+                d="M{{ ns.in_pts[0][0] }},{{ H - 20 }} {% for x,y in ns.in_pts %}L{{ x }},{{ y }} {% endfor %} L{{ ns.in_pts[-1][0] }},{{ H - 20 }} Z"/>
+          <path fill="rgb(244 63 94 / 0.12)" stroke="none"
+                d="M{{ ns.out_pts[0][0] }},{{ H - 20 }} {% for x,y in ns.out_pts %}L{{ x }},{{ y }} {% endfor %} L{{ ns.out_pts[-1][0] }},{{ H - 20 }} Z"/>
+          <path fill="none" stroke="rgb(16 185 129)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+                d="M{% for x,y in ns.in_pts %}{% if loop.first %}{{ x }},{{ y }}{% else %} L{{ x }},{{ y }}{% endif %}{% endfor %}"/>
+          <path fill="none" stroke="rgb(244 63 94)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+                d="M{% for x,y in ns.out_pts %}{% if loop.first %}{{ x }},{{ y }}{% else %} L{{ x }},{{ y }}{% endif %}{% endfor %}"/>
+          {% for m in monthly %}
+            {% set x = 50 + loop.index0 * step %}
+            {% set y_in  = (H - 20) - (m.income / vmax) * (H - 40) %}
+            {% set y_out = (H - 20) - (-m.expense / vmax) * (H - 40) %}
+            <circle cx="{{ x }}" cy="{{ y_in }}" r="3" fill="rgb(16 185 129)"><title>{{ m.month }} · {{ "%.0f"|format(m.income) }} € rein</title></circle>
+            <circle cx="{{ x }}" cy="{{ y_out }}" r="3" fill="rgb(244 63 94)"><title>{{ m.month }} · {{ "%.0f"|format(-m.expense) }} € raus</title></circle>
+            {% if loop.index0 % label_step == 0 or loop.last %}
+              <text x="{{ x }}" y="{{ H - 4 }}" text-anchor="middle" class="fill-ink-500" font-size="10">{{ m.month[5:] }}/{{ m.month[2:4] }}</text>
+            {% endif %}
+          {% endfor %}
+        </svg>
+      </div>
+      <div class="flex gap-4 text-xs text-ink-500 mt-3 justify-end">
+        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 bg-emerald-500 rounded-full"></span>{{ t('finance.income') }}</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 bg-rose-500 rounded-full"></span>{{ t('finance.expense') }}</span>
+      </div>
+    {% else %}
+      <p class="text-sm text-ink-500">{{ t('finance.no_monthly_data') }}</p>
+    {% endif %}
+  </div>
+
+  {# Accounts list — with savings flag + opening-balance editor #}
+  <div class="card p-5 mb-6" x-data="accountList()">
+    <h2 class="font-semibold mb-1 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.accounts_heading') }}</h2>
+    <p class="text-xs text-ink-500 mb-3">{{ t('finance.accounts_hint') }}</p>
+    {% if accounts %}
+      <ul class="space-y-3 text-sm">
+        {% for a in accounts %}
+          <li class="border-b border-ink-800/40 pb-3 last:border-0">
+            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span class="font-medium truncate min-w-0">{{ a.bank_name or '—' }}</span>
+              {% if a.is_savings %}
+                <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">{{ t('finance.savings_badge') }}</span>
+              {% endif %}
+              <span class="ml-auto tabular-nums whitespace-nowrap {% if a.balance >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
+                {{ "%.2f"|format(a.balance) }} €
+              </span>
+              <button type="button" @click="del({{ a.id }}, '{{ a.bank_name }} {{ a.iban_last4 }}')"
+                      :disabled="deleting === {{ a.id }}"
+                      class="text-[11px] text-ink-500 hover:text-rose-300 underline shrink-0">×</button>
+            </div>
+            <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-500">
+              <span class="font-mono">…{{ a.iban_last4 or '' }}</span>
+              <span>{{ a.tx_count or 0 }} {{ t('finance.transactions') }}</span>
+              <label class="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" {% if a.is_savings %}checked{% endif %}
+                       @change="setSavings({{ a.id }}, $event.target.checked)"
+                       class="accent-emerald-500"/>
+                {{ t('finance.mark_savings') }}
+              </label>
+              <span class="inline-flex items-center gap-1.5">
+                {{ t('finance.start_balance') }}:
+                <input type="text" inputmode="decimal"
+                       value="{{ "%.2f"|format(a.start_balance or 0) }}"
+                       @change="setStart({{ a.id }}, $event.target.value)"
+                       class="w-24 bg-ink-900 border border-ink-700 rounded px-1.5 py-0.5 tabular-nums text-right text-ink-200"/>
+                €
+              </span>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="text-[11px] text-ink-600 mt-3">{{ t('finance.start_balance_hint') }}</p>
+    {% else %}
+      <p class="text-xs text-ink-500">{{ t('finance.no_accounts') }}</p>
+    {% endif %}
+    <span x-show="saveMsg" x-cloak class="block mt-2 text-xs"
+          :class="saveOk ? 'text-emerald-300' : 'text-rose-300'" x-text="saveMsg"></span>
+  </div>
+
+  {# v0.43: Lücken zwischen den Konten + offene Kategorien #}
+  {% if transfer_check and (transfer_check.gaps or transfer_check.synthetic) %}
+  <div class="card p-5 mb-6 {% if transfer_check.gaps %}border-amber-500/40 bg-amber-500/5{% else %}border-sky-500/30 bg-sky-500/5{% endif %}">
+    <h2 class="font-semibold mb-1 text-sm uppercase tracking-wide {% if transfer_check.gaps %}text-amber-300{% else %}text-sky-300{% endif %}">{{ t('finance.gaps.title') }}</h2>
+    {% if transfer_check.gaps %}
+    <p class="text-xs text-ink-400 mb-3">{{ t('finance.gaps.hint') }}</p>
+    <ul class="space-y-1 text-sm">
+      {% for g in transfer_check.gaps %}
+        <li class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <span class="tabular-nums text-ink-400">{{ g.date[8:10] }}.{{ g.date[5:7] }}.{{ g.date[0:4] }}</span>
+          <span class="text-ink-200">{{ g.account }}</span>
+          <span class="tabular-nums {% if g.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">{{ "%+.2f"|format(g.amount) }} €</span>
+          <span class="text-ink-500">→ {{ t('finance.gaps.expected') | replace('{account}', g.other_account) | replace('{amount}', "%+.2f"|format(g.expected_amount)) }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if transfer_check.synthetic %}
+    <p class="text-xs text-ink-400 {% if transfer_check.gaps %}mt-3{% endif %} mb-2">{{ t('finance.gaps.filled_hint') | replace('{n}', transfer_check.synthetic|length|string) }}</p>
+    <ul class="space-y-1 text-sm">
+      {% for g in transfer_check.synthetic %}
+        <li class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <span class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border border-sky-500/50 text-sky-200 bg-sky-500/10">{{ t('finance.gaps.filled_badge') }}</span>
+          <span class="tabular-nums text-ink-400">{{ g.booking_date[8:10] }}.{{ g.booking_date[5:7] }}.{{ g.booking_date[0:4] }}</span>
+          <span class="text-ink-200">{{ g.bank_name }} …{{ g.iban_last4 }}</span>
+          <span class="tabular-nums {% if g.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">{{ "%+.2f"|format(g.amount) }} €</span>
+          <span class="text-ink-500 text-xs">{{ g.counterparty }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <p class="text-[11px] text-ink-500 mt-2">{{ t('finance.gaps.paired') | replace('{n}', transfer_check.pairs|string) }}</p>
+  </div>
+  {% endif %}
+  {# v0.47: Kontoauszüge (PDF) je Konto + Lücken in der Auszugskette #}
+  {% if statements_overview %}
+  {% set ns = namespace(gaps=0) %}
+  {% for a in statements_overview %}{% set ns.gaps = ns.gaps + (a.gaps | rejectattr('csv_covered') | rejectattr('acknowledged') | list | length) %}{% endfor %}
+  <div class="card p-5 mb-6 {% if ns.gaps %}border-amber-500/40 bg-amber-500/5{% else %}border-ink-700{% endif %}" x-data="{ busy: false, msg: '',
+                 async gapAck(accountId, after, before, ack) {
+                   this.busy = true; this.msg = '';
+                   try {
+                     const r = await fetch('/api/finance/gap-ack', {
+                       method: 'POST', headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify({ account_id: accountId, after, before, acknowledged: ack }),
+                     });
+                     if (r.ok) { location.reload(); }
+                     else { const d = await r.json().catch(() => ({})); this.msg = d.detail || 'Fehler'; }
+                   } catch (e) { this.msg = String(e); }
+                   finally { this.busy = false; }
+                 } }">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+      <h2 class="font-semibold text-sm uppercase tracking-wide {% if ns.gaps %}text-amber-300{% else %}text-ink-400{% endif %}">{{ t('finance.stmt.title') }}</h2>
+      <button type="button" class="btn-secondary text-xs" :disabled="busy"
+              @click="busy = true; msg = ''; fetch('/api/finance/import-statements', {method: 'POST'}).then(r => r.json()).then(o => { msg = (o.statements || 0) + ' {{ t('finance.stmt.read') }} · ' + (o.rows_inserted || 0) + ' {{ t('finance.stmt.new') }}'; busy = false; if (o.rows_inserted) setTimeout(() => location.reload(), 1200); }).catch(e => { msg = String(e); busy = false; })">
+        <span x-show="!busy">{{ t('finance.stmt.rescan') }}</span><span x-show="busy" x-cloak>…</span>
+      </button>
+    </div>
+    <p class="text-xs text-ink-400 mb-3">{{ t('finance.stmt.hint') }}</p>
+    <span x-show="msg" x-cloak class="block mb-2 text-xs text-emerald-300" x-text="msg"></span>
+    <ul class="space-y-2 text-sm">
+      {% for a in statements_overview %}
+        <li>
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <span class="text-ink-200">{{ a.bank_name }} …{{ a.iban_last4 }}</span>
+            <span class="text-ink-400 tabular-nums">{{ a.statements | length }} {{ t('finance.stmt.count') }}</span>
+            {% if a.first %}<span class="text-ink-500 tabular-nums">{{ a.first[8:10] }}.{{ a.first[5:7] }}.{{ a.first[0:4] }} – {{ a.last[8:10] }}.{{ a.last[5:7] }}.{{ a.last[0:4] }}</span>{% endif %}
+            {% if a.csv_from %}<span class="text-ink-500 tabular-nums">· CSV {{ a.csv_from[8:10] }}.{{ a.csv_from[5:7] }}.{{ a.csv_from[0:4] }} – {{ a.csv_to[8:10] }}.{{ a.csv_to[5:7] }}.{{ a.csv_to[0:4] }}</span>{% endif %}
+          </div>
+          {% for g in a.gaps %}
+            {# Three states: covered by the CSV export, ticked off as
+               "does not exist", or genuinely still missing. Only the last
+               one is a warning. #}
+            <div class="ml-3 mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs
+                        {% if g.csv_covered or g.acknowledged %}text-ink-500{% else %}text-amber-300{% endif %}">
+              <span>{% if g.csv_covered %}✓{% elif g.acknowledged %}○{% else %}⚠{% endif %}</span>
+              <span>{{ t('finance.stmt.gap') | replace('{from}', g.after[8:10] ~ '.' ~ g.after[5:7] ~ '.' ~ g.after[0:4]) | replace('{to}', g.before[8:10] ~ '.' ~ g.before[5:7] ~ '.' ~ g.before[0:4]) | replace('{a}', g.after_no) | replace('{b}', g.before_no) }}</span>
+              <span class="tabular-nums">{{ "%+.2f"|format(g.expected) }} €</span>
+              <span>
+                {%- if g.csv_covered %}{{ t('finance.stmt.gap_csv') }}
+                {%- elif g.acknowledged %}{{ t('finance.stmt.gap_acked') }}
+                {%- else %}{{ t('finance.stmt.gap_open') }}{% endif -%}
+              </span>
+              {% if not g.csv_covered %}
+                <button type="button"
+                        class="underline decoration-dotted hover:text-ink-200"
+                        @click="gapAck({{ a.account_id }}, '{{ g.after }}', '{{ g.before }}', {{ 'false' if g.acknowledged else 'true' }})">
+                  {% if g.acknowledged %}{{ t('finance.stmt.gap_unack_action') }}{% else %}{{ t('finance.stmt.gap_ack_action') }}{% endif %}
+                </button>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if open_categories and open_categories.count %}
+  <div class="card p-4 mb-6 flex flex-wrap items-center gap-3">
+    <span class="text-sm text-ink-300">
+      {{ t('finance.open.text') | replace('{n}', open_categories.count|string) | replace('{merchants}', open_categories.merchants|string) | replace('{amount}', "%.0f"|format(open_categories.amount)) }}
+    </span>
+    <a href="/transactions?open=sonstiges" class="ml-auto text-sm rounded-lg px-3 py-1.5 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30">
+      {{ t('finance.open.cta') }} →
+    </a>
+  </div>
+  {% endif %}
+
+  {# Tracker settings — salary detection + anchor day + budget #}
+  <div class="card p-5 mb-6" x-data="trackerSettings()">
+    <h2 class="font-semibold mb-1 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.tracker.title') }}</h2>
+    <p class="text-xs text-ink-500 mb-4">{{ t('finance.tracker.hint') }}</p>
+    <div class="grid sm:grid-cols-3 gap-4">
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('finance.tracker.salary_match') }}</span>
+        <input type="text" x-model="salaryMatch" placeholder="ACME GMBH"
+               class="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1.5 text-sm"/>
+        <span class="block text-[11px] text-ink-600 mt-1">{{ t('finance.tracker.salary_match_hint') }}</span>
+      </label>
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('finance.tracker.anchor_day') }}</span>
+        <input type="number" min="1" max="31" x-model.number="anchorDay"
+               class="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1.5 text-sm tabular-nums"/>
+        <span class="block text-[11px] text-ink-600 mt-1">{{ t('finance.tracker.anchor_day_hint') }}</span>
+      </label>
+      <label class="block">
+        <span class="block text-xs text-ink-400 mb-1">{{ t('finance.tracker.budget') }}</span>
+        <input type="text" inputmode="decimal" x-model="monthlyBudget" placeholder="0"
+               class="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1.5 text-sm tabular-nums text-right"/>
+        <span class="block text-[11px] text-ink-600 mt-1">{{ t('finance.tracker.budget_hint') }}</span>
+      </label>
+    </div>
+    <div class="mt-4 flex items-center gap-3">
+      <button type="button" @click="save()" :disabled="busy" class="btn-primary text-sm">
+        <span x-show="!busy">{{ t('finance.tracker.save') }}</span>
+        <span x-show="busy" x-cloak>{{ t('finance.tracker.saving') }}</span>
+      </button>
+      <span x-show="msg" x-cloak class="text-xs" :class="ok ? 'text-emerald-300' : 'text-rose-300'" x-text="msg"></span>
+    </div>
+  </div>
+
+  {# Top counterparties #}
+  <div class="grid md:grid-cols-2 gap-4 mb-6">
+    <div class="card p-5 min-w-0">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.top_outgoing') }}</h2>
+      {% if top_outgoing %}
+        <ul class="space-y-1 text-xs">
+          {% for r in top_outgoing %}
+            <li class="flex items-baseline gap-2">
+              <span class="truncate min-w-0 flex-1">{{ r.counterparty or '—' }}</span>
+              <span class="text-ink-500 tabular-nums">{{ r.times }}×</span>
+              <span class="text-rose-300 tabular-nums">{{ "%.2f"|format(r.total) }} €</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-xs text-ink-500">—</p>
+      {% endif %}
+    </div>
+    <div class="card p-5 min-w-0">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('finance.top_incoming') }}</h2>
+      {% if top_incoming %}
+        <ul class="space-y-1 text-xs">
+          {% for r in top_incoming %}
+            <li class="flex items-baseline gap-2">
+              <span class="truncate min-w-0 flex-1">{{ r.counterparty or '—' }}</span>
+              <span class="text-ink-500 tabular-nums">{{ r.times }}×</span>
+              <span class="text-emerald-300 tabular-nums">+{{ "%.2f"|format(r.total) }} €</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-xs text-ink-500">—</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Recent transactions table — read-only here; full editor on /transactions #}
+  {% if transactions %}
+  <div class="card p-5 mb-6">
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.transactions_heading') }}</h2>
+      <a href="/transactions" class="text-xs text-emerald-300 hover:text-emerald-200">{{ t('finance.see_all') }} →</a>
+    </div>
+    <div class="overflow-x-auto -mx-5 max-h-[60vh] overflow-y-auto">
+      <table class="w-full text-xs">
+        <thead class="text-[10px] uppercase tracking-wider text-ink-500 sticky top-0 bg-ink-900/95 backdrop-blur">
+          <tr>
+            <th class="text-left px-3 sm:px-5 py-1.5 font-medium">{{ t('document.date') }}</th>
+            <th class="text-left px-2 py-1.5 font-medium">{{ t('finance.counterparty') }}</th>
+            <th class="text-left px-2 py-1.5 font-medium hidden md:table-cell">{{ t('finance.purpose') }}</th>
+            <th class="text-left px-2 py-1.5 font-medium hidden sm:table-cell">{{ t('finance.category') }}</th>
+            <th class="text-right px-3 sm:px-5 py-1.5 font-medium">{{ t('finance.amount') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tx in transactions[:50] %}
+          <tr class="border-t border-ink-800/30">
+            <td class="px-3 sm:px-5 py-1 tabular-nums text-ink-300 whitespace-nowrap align-top">{{ tx.booking_date }}</td>
+            <td class="px-2 py-1 max-w-[200px] min-w-0 [overflow-wrap:anywhere]" title="{{ tx.purpose }}">{{ tx.counterparty }}
+              <span class="block text-[10px] text-ink-500 sm:hidden">{% if tx.category %}{{ cat_labels.get(tx.category, tx.category) }}{% endif %}</span></td>
+            <td class="px-2 py-1 truncate max-w-[300px] text-ink-400 hidden md:table-cell">{{ tx.purpose[:80] }}</td>
+            <td class="px-2 py-1 text-ink-400 hidden sm:table-cell">{% if tx.category %}{{ cat_labels.get(tx.category, tx.category) }}{% endif %}</td>
+            <td class="px-3 sm:px-5 py-1 text-right tabular-nums whitespace-nowrap align-top {% if tx.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
+              {% if tx.amount > 0 %}+{% endif %}{{ "%.2f"|format(tx.amount) }} €
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Maintenance: hard-reset all finance data #}
+  <details class="text-xs text-ink-500 mb-12">
+    <summary class="cursor-pointer hover:text-ink-300 select-none">{{ t('finance.maintenance.title') }}</summary>
+    <div class="mt-3 rounded border border-rose-500/30 bg-rose-500/5 p-3"
+         x-data="financeReset()">
+      <p class="mb-2">{{ t('finance.maintenance.hint') }}</p>
+      <button type="button" @click="reset()" :disabled="busy"
+              class="text-rose-300 hover:text-rose-200 underline">
+        <span x-show="!busy">{{ t('finance.maintenance.button') }}</span>
+        <span x-show="busy" x-cloak>{{ t('finance.maintenance.running') }}</span>
+      </button>
+      <span x-show="message" x-cloak class="ml-3"
+            :class="messageOk ? 'text-emerald-300' : 'text-rose-300'"
+            x-text="message"></span>
+    </div>
+  </details>
+
+  {% endif %}
+</div>
+
+<script>
+function financePage() { return {}; }
+
+
+function accountList() {
+  return {
+    deleting: null,
+    busy: false,
+    saveMsg: '',
+    saveOk: false,
+    async del(id, label) {
+      const msg = (T['finance.account_delete_confirm'] || 'Delete account {label}?')
+        .replace('{label}', label);
+      if (!confirm(msg)) return;
+      this.deleting = id;
+      try {
+        const r = await fetch('/api/finance/account/' + id, { method: 'DELETE' });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        location.reload();
+      } catch (e) {
+        alert(e.message || String(e));
+      } finally { this.deleting = null; }
+    },
+    async _patch(id, body) {
+      this.saveMsg = '';
+      try {
+        const r = await fetch('/api/finance/account/' + id + '/meta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.saveOk = true;
+        this.saveMsg = (T['finance.saved'] || 'Gespeichert.');
+        // Balances / net worth change → refresh so the wealth card and
+        // period cashflow reflect the new savings split.
+        setTimeout(() => location.reload(), 500);
+      } catch (e) {
+        this.saveOk = false;
+        this.saveMsg = e.message || String(e);
+      }
+    },
+    setSavings(id, checked) { this._patch(id, { is_savings: !!checked }); },
+    setStart(id, val) {
+      // Accept German '1.234,56' and plain '1234.56'; keep the sign so
+      // an account that starts in overdraft can carry a negative balance.
+      let s = String(val).trim().replace(/\s/g, '');
+      if (s.indexOf(',') > -1) s = s.replace(/\./g, '').replace(',', '.');
+      const num = parseFloat(s);
+      if (isNaN(num)) { this.saveOk = false; this.saveMsg = (T['finance.bad_number'] || 'Not a valid number.'); return; }
+      this._patch(id, { start_balance: num });
+    },
+  };
+}
+
+function trackerSettings() {
+  return {
+    salaryMatch: {{ finance_cfg.salary_match | tojson }},
+    anchorDay: {{ finance_cfg.period_anchor_day | tojson }},
+    monthlyBudget: {{ ("%.2f"|format(finance_cfg.monthly_budget)) | tojson }},
+    busy: false,
+    msg: '',
+    ok: false,
+    async save() {
+      this.busy = true; this.msg = '';
+      try {
+        const r = await fetch('/api/settings/finance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            salary_match: this.salaryMatch || '',
+            period_anchor_day: parseInt(this.anchorDay, 10) || 23,
+            // Send the raw string; the server parses German '1.234,56'
+            // and plain '1234.56' alike.
+            monthly_budget: String(this.monthlyBudget || '0'),
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.ok = true;
+        this.msg = (T['finance.tracker.saved'] || 'Gespeichert. Lade neu…');
+        setTimeout(() => location.reload(), 600);
+      } catch (e) {
+        this.ok = false;
+        this.msg = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+  };
+}
+
+function financeReset() {
+  return {
+    busy: false,
+    message: '',
+    messageOk: false,
+    async reset() {
+      const msg = T['finance.maintenance.confirm']
+        || 'Really delete ALL bookings, accounts and statements? This cannot be undone.';
+      if (!confirm(msg)) return;
+      this.busy = true; this.message = '';
+      try {
+        const r = await fetch('/api/finance/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.messageOk = true;
+        this.message = (T['finance.maintenance.done']
+          || '{n} rows deleted. Reloading.').replace('{n}', d.deleted || 0);
+        setTimeout(() => location.reload(), 800);
+      } catch (e) {
+        this.messageOk = false;
+        this.message = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+  };
+}
+</script>
+{% endblock %}

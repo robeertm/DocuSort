@@ -1,0 +1,34 @@
+{% extends "auth_base.html" %}
+{% block title %}{{ t('auth.login_title') }} · DocuSort{% endblock %}
+{% block content %}
+<div class="rounded-2xl border border-ink-800 bg-ink-900/60 p-6 shadow-xl">
+  <h1 class="text-lg font-semibold tracking-tight">{{ t('auth.login_title') }}</h1>
+  <p class="mt-1 text-sm text-ink-400">{{ t('auth.login_hint') }}</p>
+
+  {% if error %}
+    <div role="alert"
+         class="mt-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <form method="post" action="/login" class="mt-5 space-y-4">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div>
+      <label for="username" class="block text-sm text-ink-300 mb-1">{{ t('auth.username') }}</label>
+      <input id="username" name="username" type="text" required autofocus
+             autocomplete="username" value="{{ username or '' }}"
+             class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm
+                    focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+    </div>
+    <div>
+      <label for="password" class="block text-sm text-ink-300 mb-1">{{ t('auth.password') }}</label>
+      <input id="password" name="password" type="password" required
+             autocomplete="current-password"
+             class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm
+                    focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+    </div>
+    <button type="submit" class="btn-primary w-full justify-center">{{ t('auth.login_action') }}</button>
+  </form>
+</div>
+{% endblock %}

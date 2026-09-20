@@ -1,0 +1,105 @@
+# Category definitions for DocuSort.
+# Each top-level category has an optional list of subcategories. Files are
+# filed at library/<year>/<category>/<subcategory>/ when a subcategory is
+# present; otherwise just library/<year>/<category>/.
+#
+# Tags are free-form labels (lowercase, short) and are NOT part of the file
+# path — they live in the database for cross-cutting search like "every
+# reminder across all categories" or "everything tagged 'police'".
+#
+# Keep "Other" as a fallback. Rename, reorder, add or remove entries freely —
+# the descriptions are what the AI reads, so write them in your own language
+# if you prefer. A German taxonomy ships as config/categories.de.yaml.
+
+categories:
+  - name: "Invoices"
+    description: >
+      Invoices of any kind (electricity, water, phone, mobile, internet,
+      online shops, tradespeople). Hallmarks: invoice number, amount, due date.
+
+  - name: "Contracts"
+    description: >
+      Contracts and contract paperwork (tenancy, employment, purchase, service,
+      mobile, energy, maintenance). Cancellations and amendments too.
+
+  - name: "Authorities"
+    description: >
+      Documents from public authorities (registration office, vehicle
+      licensing, local government, immigration, registry office, job centre,
+      courts). Official notices and assessments.
+    subcategories: ["Registration", "Social security", "Courts", "Other"]
+
+  - name: "Health"
+    description: >
+      Doctor, dentist, hospital, therapy and pharmacy paperwork. Findings,
+      letters, prescriptions, certificates, vaccination records.
+    subcategories: ["Doctor", "Pharmacy", "Health insurance", "Therapy", "Other"]
+
+  - name: "Payroll"
+    description: >
+      Payslips, annual social-security statements, income tax certificates,
+      bonus statements.
+
+  - name: "Tax"
+    description: >
+      Tax returns, tax assessments, correspondence with the tax office,
+      receipts collected for the tax return.
+
+  - name: "Home"
+    description: >
+      Everything about the flat or house: tenancy, service charges, building
+      and renovation paperwork, land and property documents.
+    subcategories: ["Rent", "Building", "Service charges", "Renovation", "Land"]
+
+  - name: "Insurance"
+    description: >
+      Insurance policies, premium notices, claims and correspondence.
+    subcategories: ["Vehicle", "Contents", "Liability", "Health", "Life", "Travel", "Pet", "Legal", "Other"]
+
+  - name: "Bank"
+    description: >
+      Bank paperwork that is not a statement: loan agreements, securities,
+      account contracts, card paperwork.
+    subcategories: ["Loan", "Securities", "Contract", "Other"]
+
+  - name: "Vehicle"
+    description: >
+      Car, bike and motorbike paperwork: registration, service, inspection,
+      purchase and sale.
+    subcategories: ["Car", "Bicycle", "Motorbike", "Other"]
+
+  - name: "Education"
+    description: >
+      School, university and training paperwork, certificates and reports.
+    subcategories: ["School", "University", "Training", "Certificates"]
+
+  - name: "Family"
+    description: >
+      Family paperwork: children, inheritance, parents, personal documents.
+    subcategories: ["Children", "Inheritance", "Parents", "Other"]
+
+  - name: "Travel"
+    description: >
+      Bookings, hotels, tickets, visas and travel confirmations.
+    subcategories: ["Booking", "Hotel", "Ticket", "Visa"]
+
+  - name: "Hobby"
+    description: >
+      Club paperwork, sports, music, collections and hobby purchases.
+    subcategories: ["Sport", "Music", "Collecting", "Other"]
+
+  - name: "Receipts"
+    description: >
+      Till receipts and point-of-sale slips. These are read line by line, so
+      the Receipts page can show what was bought, where and for how much.
+    subcategories: ["Supermarket", "Drugstore", "Hardware store", "Restaurant", "Cafe", "Fuel station", "Pharmacy", "Clothing", "Electronics", "Books", "Furniture", "Mail order", "Other"]
+
+  - name: "Bank statement"
+    description: >
+      Account statements from a bank. Their bookings are read into the finance
+      pages automatically.
+    subcategories: ["Current account", "Savings", "Credit card", "Securities", "PayPal", "Other"]
+
+  - name: "Other"
+    description: >
+      Anything that does not fit elsewhere. The fallback category.

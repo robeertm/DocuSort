@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}{{ t('auth.account') }} · DocuSort{% endblock %}
+{% block content %}
+<div class="max-w-lg mx-auto" x-data="accountPage()">
+  <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('auth.account') }}</h1>
+
+  {% if me.must_change_password %}
+    <div role="alert"
+         class="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+      {{ t('auth.must_change') }}
+    </div>
+  {% endif %}
+
+  <div class="mt-6 rounded-2xl border border-ink-800 bg-ink-900/40 p-5">
+    <dl class="grid grid-cols-3 gap-y-2 text-sm">
+      <dt class="text-ink-400">{{ t('auth.username') }}</dt>
+      <dd class="col-span-2">{{ me.username }}</dd>
+      <dt class="text-ink-400">{{ t('auth.display_name') }}</dt>
+      <dd class="col-span-2">{{ me.display_name or '—' }}</dd>
+      <dt class="text-ink-400">{{ t('auth.role') }}</dt>
+      <dd class="col-span-2">
+        <span class="rounded-md px-1.5 py-0.5 text-xs
+                     {{ 'bg-emerald-500/15 text-emerald-300' if me.is_admin else 'bg-ink-700 text-ink-300' }}">
+          {{ t('auth.role_admin') if me.is_admin else t('auth.role_user') }}
+        </span>
+      </dd>
+    </dl>
+  </div>
+
+  <div class="mt-6 rounded-2xl border border-ink-800 bg-ink-900/40 p-5">
+    <h2 class="font-medium">{{ t('auth.change_password') }}</h2>
+    <p class="mt-1 text-sm text-ink-400">{{ t('auth.change_password_hint') }}</p>
+
+    <form class="mt-4 space-y-4" @submit.prevent="save()">
+      <div>
+        <label for="cur" class="block text-sm text-ink-300 mb-1">{{ t('auth.current_password') }}</label>
+        <input id="cur" type="password" x-model="current" required autocomplete="current-password"
+               class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+      </div>
+      <div>
+        <label for="new1" class="block text-sm text-ink-300 mb-1">{{ t('auth.new_password') }}</label>
+        <input id="new1" type="password" x-model="next1" required autocomplete="new-password"
+               class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+        <p class="mt-1 text-xs text-ink-500">{{ t('auth.password_rule') }}</p>
+      </div>
+      <div>
+        <label for="new2" class="block text-sm text-ink-300 mb-1">{{ t('auth.password_repeat') }}</label>
+        <input id="new2" type="password" x-model="next2" required autocomplete="new-password"
+               class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+      </div>
+
+      <template x-if="msg">
+        <div class="rounded-xl px-3 py-2 text-sm"
+             :class="ok ? 'border border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                        : 'border border-rose-500/40 bg-rose-500/10 text-rose-200'"
+             x-text="msg"></div>
+      </template>
+
+      <button type="submit" class="btn-primary" :disabled="busy"
+              x-text="busy ? T['auth.saving'] : T['auth.change_password']"></button>
+    </form>
+  </div>
+</div>
+
+<script>
+function accountPage() {
+  return {
+    current: '', next1: '', next2: '', msg: '', ok: false, busy: false,
+    get T() { return (typeof T !== 'undefined' && T) || {}; },
+    async save() {
+      this.msg = '';
+      if (this.next1 !== this.next2) {
+        this.ok = false; this.msg = this.T['auth.err.password_mismatch'] || 'Passwords do not match';
+        return;
+      }
+      this.busy = true;
+      try {
+        const r = await fetch('/api/me/password', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ current: this.current, new: this.next1 }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) {
+          this.ok = true;
+          this.msg = this.T['auth.password_changed'] || 'Password changed.';
+          this.current = this.next1 = this.next2 = '';
+          setTimeout(() => { window.location.href = '/'; }, 1200);
+        } else {
+          this.ok = false;
+          this.msg = d.detail || 'Fehler';
+        }
+      } catch (e) {
+        this.ok = false; this.msg = String(e);
+      } finally { this.busy = false; }
+    },
+  };
+}
+</script>
+{% endblock %}

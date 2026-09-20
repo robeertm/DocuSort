@@ -1,0 +1,1588 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.settings') }} · DocuSort{% endblock %}
+{% block content %}
+
+<div x-data="settingsPage()">
+  <div class="mb-6">
+    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('nav.settings') }}</h1>
+    <p class="text-ink-400 mt-1 text-sm">{{ t('settings.subtitle') }}</p>
+  </div>
+
+  <!-- Single column, full container width (matches Library/Dashboard) -->
+  <div class="space-y-6">
+
+  <!-- ===== AI provider ===== -->
+  <section class="card p-6">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.ai.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.ai.subtitle') }}</p>
+
+    <label class="block text-sm font-medium mb-2">{{ t('setup.step_ai.provider') }}</label>
+    <select x-model="ai.provider" @change="onProviderChange()"
+            class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-4">
+      <option value="anthropic">Anthropic Claude</option>
+      <option value="openai">OpenAI GPT</option>
+      <option value="gemini">Google Gemini</option>
+      <option value="openai_compat">{{ t('setup.provider.compat_label') }}</option>
+      <option value="bridge">Local AI Bridge (your computer)</option>
+    </select>
+
+    <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.model') }}</label>
+    <input x-model="ai.model" type="text"
+           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-1 font-mono"
+           :placeholder="ai.provider === 'bridge' ? 'qwen2.5:7b-instruct  · or whatever your bridge host has pulled' : ''">
+    <div x-show="ai.provider === 'bridge'" x-cloak class="text-xs text-ink-500 mb-4 flex items-center gap-2 flex-wrap">
+      <template x-if="bridgeClientModel()">
+        <span>
+          Bridge is currently running
+          <span class="font-mono text-cyan-300" x-text="bridgeClientModel()"></span>
+          <span x-show="bridgeClientPlatform()" class="text-ink-500">
+            on <span x-text="bridgeClientPlatform()"></span>
+          </span>.
+          <button type="button" @click="ai.model = bridgeClientModel()"
+                  x-show="ai.model !== bridgeClientModel()"
+                  class="underline hover:text-cyan-200 ml-1">use this</button>
+        </span>
+      </template>
+      <template x-if="!bridgeClientModel()">
+        <span class="text-ink-500">Connect a bridge client first to see what model it has loaded.</span>
+      </template>
+    </div>
+
+    <template x-if="ai.provider === 'openai_compat'">
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.base_url') }}</label>
+        <input x-model="ai.base_url" type="url" placeholder="http://localhost:11434/v1"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+    </template>
+
+    <template x-if="ai.provider !== 'openai_compat' && ai.provider !== 'bridge'">
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.api_key') }}</label>
+        <div class="text-xs text-ink-500 mb-1" x-text="storedHint"></div>
+        <input x-model="ai.api_key" type="password" autocomplete="off"
+               :placeholder="storedKey ? T['settings.ai.key_keep'] : T['settings.ai.key_paste']"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+    </template>
+
+    <template x-if="ai.provider === 'bridge'">
+      <div class="rounded-lg bg-cyan-500/5 border border-cyan-500/20 p-3 text-xs text-cyan-100/90 mb-4">
+        Inference runs on a computer you control (Mac, Linux, or Windows).
+        Configure the bridge in the next section — once a client is
+        connected, every classification and statement extraction goes
+        through it instead of a cloud API.
+      </div>
+    </template>
+
+    <div x-show="ai.message" x-cloak class="text-sm rounded-lg px-3 py-2 mb-3"
+         :class="ai.ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="ai.message"></div>
+
+    <div class="flex flex-wrap items-center gap-3">
+      <p class="text-xs text-ink-500 flex-1 min-w-0" x-show="ai.restartHint" x-cloak>
+        {{ t('settings.ai.restart_hint') }}
+      </p>
+      <div x-show="ai.restartMessage" x-cloak
+           class="text-xs rounded-lg px-3 py-2"
+           :class="ai.restartOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+           x-text="ai.restartMessage"></div>
+      <div class="ml-auto flex gap-2">
+        <button type="button" @click="restartService()"
+                :disabled="ai.restarting"
+                :class="ai.restartHint
+                    ? 'rounded-xl px-4 py-2 text-sm font-medium border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-50'
+                    : 'rounded-xl px-4 py-2 text-sm font-medium border border-ink-700 bg-ink-900/40 text-ink-300 hover:bg-ink-800 disabled:opacity-50'">
+          <span x-show="!ai.restarting">Restart service</span>
+          <span x-show="ai.restarting" x-cloak>Restarting…</span>
+        </button>
+        <button type="button" @click="saveAi()" :disabled="ai.saving" class="btn-primary"
+                :class="ai.saving ? 'opacity-50 cursor-not-allowed' : ''">
+          <span x-show="!ai.saving">{{ t('settings.save') }}</span>
+          <span x-show="ai.saving" x-cloak>{{ t('setup.saving') }}</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Local Ollama on this machine =====
+       Shortcut for direct installs: no bridge needed when DocuSort
+       runs on the same host as Ollama. Probes localhost on load and
+       offers a one-click "use this" button when it finds something. -->
+  <section class="card p-6" x-data="localOllama()" x-init="init()" x-show="visible" x-cloak>
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+      <h2 class="text-lg font-semibold">Local Ollama on this machine</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full"
+            :class="probe.reachable ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+            x-text="probe.reachable ? 'detected' : 'not running'"></span>
+    </div>
+    <p class="text-ink-400 text-sm mb-4">
+      DocuSort and Ollama appear to be on the same host — the simplest
+      setup. One click switches the AI provider to OpenAI-compatible
+      pointing at <span class="font-mono text-ink-300">localhost:11434</span>.
+      No bridge overhead, no token, no WebSocket.
+    </p>
+    <div class="flex items-center gap-3 flex-wrap mb-4">
+      <label class="text-sm text-ink-300">Model</label>
+      <select x-model="chosenModel"
+              :disabled="!probe.reachable || !probe.models?.length"
+              class="rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-1.5 text-sm font-mono">
+        <template x-for="m in (probe.models || [])" :key="m">
+          <option :value="m" x-text="m"></option>
+        </template>
+        <template x-if="!probe.models?.length">
+          <option value="" disabled>(no models pulled — run `ollama pull qwen2.5:7b-instruct`)</option>
+        </template>
+      </select>
+      <button type="button" @click="apply()"
+              :disabled="!chosenModel || applying"
+              class="rounded-xl px-4 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
+        <span x-show="!applying">Use this on this machine</span>
+        <span x-show="applying" x-cloak>Saving …</span>
+      </button>
+      <button type="button" @click="probeNow()" class="text-xs text-ink-400 hover:text-ink-200 underline">refresh</button>
+    </div>
+    <div x-show="message" x-cloak
+         class="text-xs rounded-lg px-3 py-2"
+         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="message"></div>
+  </section>
+
+  <!-- ===== Local AI Bridge ===== -->
+  <section class="card p-6" id="bridge" x-data="bridgeSettings()" x-init="init()">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+      <h2 class="text-lg font-semibold">Local AI Bridge</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full"
+            :class="status.connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+            x-text="status.connected ? 'connected' : 'offline'"></span>
+    </div>
+    <p class="text-ink-400 text-sm mb-5">
+      Run the AI on a computer you control (Mac, Linux, or Windows)
+      instead of a cloud API. The client connects to this server
+      outbound — no port forwarding, no firewall changes. Every
+      document classification and bank-statement extraction is then
+      processed locally.
+    </p>
+
+    <!-- Live status block -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5 text-sm">
+      <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3">
+        <div class="text-ink-500 text-xs uppercase tracking-wide mb-1">Client</div>
+        <div x-show="status.connected" class="font-mono text-xs leading-5 break-all">
+          <div><span class="text-ink-500">host:</span>     <span x-text="status.client.host || '—'"></span></div>
+          <div><span class="text-ink-500">platform:</span> <span x-text="status.client.platform || '—'"></span></div>
+          <div><span class="text-ink-500">model:</span>    <span x-text="status.client.model || '—'"></span></div>
+          <div><span class="text-ink-500">ollama:</span>   <span x-text="status.client.ollama || '—'"></span></div>
+        </div>
+        <template x-if="!status.connected">
+          <div class="text-xs">
+            <template x-if="(status.last_reject && status.last_reject.at)">
+              <div class="rounded bg-rose-500/10 text-rose-200 px-2 py-1.5 mb-2 leading-5">
+                Last connect rejected — wrong token (from
+                <span class="font-mono" x-text="status.last_reject.host"></span>,
+                token <span class="font-mono" x-text="status.last_reject.token_preview"></span>).
+                The bridge token may have been regenerated since you copied
+                the install command — copy it again from below.
+              </div>
+            </template>
+            <div class="text-ink-400">
+              No client connected yet. Run the one-liner below on the host you want to use as the bridge.
+            </div>
+          </div>
+        </template>
+      </div>
+      <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3 text-xs">
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-ink-500 uppercase tracking-wide">Activity</div>
+          <button type="button" @click="testConnection()"
+                  :disabled="!status.connected || testing"
+                  class="text-[11px] rounded-md px-2 py-0.5 border border-ink-700 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-not-allowed">
+            <span x-show="!testing">Test</span>
+            <span x-show="testing" x-cloak>…</span>
+          </button>
+        </div>
+        <div class="grid grid-cols-2 gap-y-1 font-mono">
+          <div class="text-ink-500">requests</div>
+          <div x-text="status.calls_total ?? 0" class="text-right tabular-nums"></div>
+          <div class="text-ink-500">failed</div>
+          <div :class="status.calls_failed > 0 ? 'text-rose-300' : ''"
+               x-text="status.calls_failed ?? 0" class="text-right tabular-nums"></div>
+          <div class="text-ink-500">tokens in</div>
+          <div x-text="status.tokens_in ?? 0" class="text-right tabular-nums"></div>
+          <div class="text-ink-500">tokens out</div>
+          <div x-text="status.tokens_out ?? 0" class="text-right tabular-nums"></div>
+          <div class="text-ink-500">pending</div>
+          <div x-text="status.pending ?? 0" class="text-right tabular-nums"></div>
+        </div>
+        <div x-show="testMessage" x-cloak
+             class="mt-2 rounded px-2 py-1.5 text-[11px] leading-4"
+             :class="testOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+             x-text="testMessage"></div>
+      </div>
+    </div>
+
+    <!-- Token + one-liner install -->
+    <div class="space-y-3">
+      <label class="block text-sm font-medium">Bridge token</label>
+      <div class="flex flex-wrap gap-2 items-stretch">
+        <input :value="status.token || ''" readonly
+               class="flex-1 min-w-0 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-xs font-mono"
+               :type="showToken ? 'text' : 'password'">
+        <button type="button" @click="showToken = !showToken" class="btn-secondary text-sm"
+                x-text="showToken ? 'Hide' : 'Show'"></button>
+        <button type="button" @click="copyToken()" class="btn-secondary text-sm"
+                x-text="copied ? 'Copied!' : 'Copy'"></button>
+        <button type="button" @click="regenerate()"
+                class="btn-secondary text-sm text-rose-300 hover:text-rose-200">Regenerate</button>
+      </div>
+      <p class="text-xs text-ink-500">
+        Paste this token into the bridge client on whichever host you
+        want to run the model on. Regenerating immediately disconnects
+        any client still using the old token.
+      </p>
+
+      <div class="mt-5">
+        <label class="block text-sm font-medium mb-2">Start on your computer</label>
+
+        <!-- One-click download path — most users land here. The file
+             carries the token + server URL embedded; double-clicking
+             starts the bridge in a terminal window. -->
+        <div class="rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">
+          <p class="text-sm text-ink-200 mb-3">
+            One-click setup — download the launcher for your OS,
+            double-click it, and the bridge starts.
+          </p>
+          <div class="flex flex-wrap gap-2 mb-2">
+            <a :href="'/api/bridge/installer?os=mac'" download
+               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-4 w-4">
+                <path d="M16 4c-1 1.5-2 2.5-3.5 2.5C13 5 14 4 16 4Zm0 4c-2 0-3 1.5-4 1.5s-2-1.5-3.5-1.5C6 8 4 10 4 13c0 4 3 7 4.5 7s2-1 3.5-1 2.5 1 3.5 1c2 0 4-3 4-7 0-2-1-3-2.5-3"/>
+              </svg>
+              macOS
+            </a>
+            <a :href="'/api/bridge/installer?os=windows'" download
+               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" class="h-4 w-4">
+                <path d="M3 5.5 11 4v8H3zM12 4l9-1.5V12h-9zM3 13h8v8L3 19.5zM12 13h9v8.5L12 21z"/>
+              </svg>
+              Windows
+            </a>
+            <a :href="'/api/bridge/installer?os=linux'" download
+               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-4 w-4">
+                <path d="M12 3a4 4 0 0 0-4 4c0 2 1 3 1 5s-3 4-3 6 1 3 6 3 6-1 6-3-3-4-3-6 1-3 1-5a4 4 0 0 0-4-4Z"/>
+                <circle cx="10.5" cy="7.5" r=".7" fill="currentColor"/>
+                <circle cx="13.5" cy="7.5" r=".7" fill="currentColor"/>
+              </svg>
+              Linux
+            </a>
+          </div>
+          <details class="text-xs text-ink-500 mt-2">
+            <summary class="cursor-pointer hover:text-ink-300">First-run hints (zip, Gatekeeper, dependencies)</summary>
+            <ul class="mt-2 space-y-1 list-disc pl-5">
+              <li><b>macOS:</b> the download is a <code>.zip</code> — double-click it once to extract the <code>.command</code> file (preserves the executable bit; without zip wrapping, browsers strip it and macOS refuses with "you don't have permission"). Then double-click the extracted <code>.command</code>. First launch may show "cannot be opened because it is from an unidentified developer" → right-click → Open → Open. Python 3 is preinstalled on modern macOS; Ollama is auto-installed via Homebrew.</li>
+              <li><b>Windows:</b> double-click the <code>.bat</code> directly — no extraction needed. SmartScreen may show "Windows protected your PC" → click "More info" → "Run anyway". Needs Python 3 from python.org or the Microsoft Store. Ollama is auto-installed via winget.</li>
+              <li><b>Linux:</b> the download is a <code>.zip</code> — extract it, then double-click the extracted <code>.sh</code> (or run from a terminal). Ollama is installed via the official <code>curl | sh</code> after a Y/N prompt.</li>
+            </ul>
+          </details>
+        </div>
+
+        <!-- Power-user fallback: paste the same command into a terminal. -->
+        <details class="mt-4">
+          <summary class="cursor-pointer text-xs text-ink-400 hover:text-ink-200 select-none">
+            Or run in a terminal yourself
+          </summary>
+          <div class="mt-2">
+            <div class="flex justify-end mb-2">
+              <div class="inline-flex rounded-md overflow-hidden border border-ink-700 text-[11px]">
+                <button type="button" @click="osChoice='unix'"
+                        :class="osChoice==='unix' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
+                        class="px-2 py-1">macOS / Linux</button>
+                <button type="button" @click="osChoice='windows'"
+                        :class="osChoice==='windows' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
+                        class="px-2 py-1 border-l border-ink-700">Windows</button>
+              </div>
+            </div>
+            <div class="rounded-xl bg-ink-950/80 border border-ink-700 p-3 font-mono text-[11px] leading-5 overflow-x-auto whitespace-pre-wrap break-all"
+                 x-text="installCmd()"></div>
+            <div class="flex justify-end mt-2">
+              <button type="button" @click="copyInstall()" class="btn-secondary text-xs"
+                      x-text="installCopied ? 'Copied!' : 'Copy command'"></button>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Web server (host + port) ===== -->
+  <section class="card p-6" x-data="webSettings()">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.web.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.web.subtitle') }}</p>
+
+    <div class="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3 mb-2">
+      <div>
+        <label class="block text-sm font-medium mb-1">{{ t('settings.web.host') }}</label>
+        <input x-model="host" type="text" placeholder="0.0.0.0"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">{{ t('settings.web.port') }}</label>
+        <input x-model.number="port" type="number" min="1" max="65535"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      </div>
+    </div>
+    <p class="text-xs text-ink-500 mb-3">{{ t('settings.web.hint') }}</p>
+
+    {% if web_ssl_enabled %}
+      <p class="text-xs text-emerald-300/80 mb-3">{{ t('settings.web.https_active') }}</p>
+    {% endif %}
+
+    <div x-show="message" x-cloak class="text-sm rounded-lg px-3 py-2 mb-3"
+         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="message"></div>
+
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-ink-500" x-show="restartHint" x-cloak>
+        {{ t('settings.web.restart_hint') }}
+      </p>
+      <button type="button" @click="save()" :disabled="saving" class="ml-auto btn-primary"
+              :class="saving ? 'opacity-50 cursor-not-allowed' : ''">
+        {{ t('settings.save') }}
+      </button>
+    </div>
+  </section>
+
+  <!-- ===== Finance privacy ===== -->
+  <section class="card p-6" id="finance" x-data="financeSettings()">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.finance.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.finance.subtitle') }}</p>
+
+    <div class="space-y-3 mb-4">
+      <label class="flex items-start gap-3 cursor-pointer p-3 rounded-xl border"
+             :class="!localOnly ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-ink-700 hover:border-ink-600'">
+        <input type="radio" :checked="!localOnly" @change="localOnly = false"
+               class="mt-1 accent-emerald-500">
+        <div class="min-w-0">
+          <div class="font-medium text-sm">{{ t('settings.finance.cloud_label') }}</div>
+          <div class="text-xs text-ink-400 mt-0.5">{{ t('settings.finance.cloud_hint') }}</div>
+          <label class="flex items-center gap-2 mt-2 text-xs text-ink-300" x-show="!localOnly" x-cloak>
+            <input type="checkbox" x-model="pseudonymize" class="accent-emerald-500">
+            <span>{{ t('settings.finance.pseudo_label') }}</span>
+          </label>
+        </div>
+      </label>
+
+      <label class="flex items-start gap-3 cursor-pointer p-3 rounded-xl border"
+             :class="localOnly ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-ink-700 hover:border-ink-600'">
+        <input type="radio" :checked="localOnly" @change="localOnly = true"
+               class="mt-1 accent-emerald-500">
+        <div class="min-w-0">
+          <div class="font-medium text-sm">{{ t('settings.finance.local_label') }}</div>
+          <div class="text-xs text-ink-400 mt-0.5">{{ t('settings.finance.local_hint') }}</div>
+          {% if not has_local_provider %}
+            <div class="text-xs text-amber-300 mt-2" x-show="localOnly" x-cloak>
+              {{ t('settings.finance.no_local_provider') }}
+            </div>
+          {% endif %}
+        </div>
+      </label>
+    </div>
+
+    <!-- Per-statement review queue toggle: when on, every newly
+         classified Kontoauszug pauses before the second-pass LLM call
+         and waits for the user to inspect the pseudonymised text on
+         /finance and click "send". -->
+    <div class="mb-4" x-show="!localOnly" x-cloak>
+      <label class="flex items-start gap-3 text-sm cursor-pointer p-3 rounded-xl border border-ink-700 hover:border-ink-600">
+        <input type="checkbox" x-model="reviewBeforeSend" class="mt-0.5 accent-emerald-500">
+        <div class="min-w-0">
+          <div class="font-medium">{{ t('settings.finance.review_label') }}</div>
+          <div class="text-xs text-ink-400 mt-0.5">{{ t('settings.finance.review_hint') }}</div>
+        </div>
+      </label>
+    </div>
+
+    <!-- Household names — always masked, even if no structured cue
+         in the document picks them up. One name per line. -->
+    <div class="mb-4" x-show="!localOnly && pseudonymize" x-cloak>
+      <label class="block text-sm font-medium mb-1">{{ t('settings.finance.holder_names_label') }}</label>
+      <p class="text-xs text-ink-500 mb-2">{{ t('settings.finance.holder_names_hint') }}</p>
+      <textarea x-model="holderNamesText" rows="3"
+                placeholder="Max Mustermann&#10;Erika Mustermann&#10;Mustermann"
+                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono"></textarea>
+    </div>
+
+    <div x-show="message" x-cloak class="text-sm rounded-lg px-3 py-2 mb-3"
+         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="message"></div>
+
+    <div class="flex items-center justify-end">
+      <button type="button" @click="save()" :disabled="saving" class="btn-primary"
+              :class="saving ? 'opacity-50 cursor-not-allowed' : ''">
+        {{ t('settings.save') }}
+      </button>
+    </div>
+  </section>
+
+  <!-- ===== Notifications ===== -->
+  <section class="card p-6" id="notifications" x-data="notificationsSettings()" x-init="init()">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+      <h2 class="text-lg font-semibold">{{ t('settings.notif.heading') }}</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full"
+            :class="channels.length ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+            x-text="channels.length ? channels.join(' + ') : (T['settings.notif.off'] || 'off')"></span>
+    </div>
+    <p class="text-ink-400 text-sm mb-5">
+      {{ t('settings.notif.subtitle') }}
+    </p>
+
+    <label class="inline-flex items-center gap-2 mb-4">
+      <input type="checkbox" x-model="form.enabled" class="accent-cyan-400">
+      <span class="text-sm">{{ t('settings.notif.enable') }}</span>
+    </label>
+
+    <div x-show="form.enabled" x-cloak class="space-y-5">
+      <!-- Event toggles -->
+      <div>
+        <div class="text-sm font-medium mb-2">{{ t('settings.notif.when') }}</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_doc_review" class="accent-cyan-400"> {{ t('settings.notif.ev.doc_review') }}</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_doc_failed" class="accent-cyan-400"> {{ t('settings.notif.ev.doc_failed') }}</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_bulk_done"  class="accent-cyan-400"> {{ t('settings.notif.ev.bulk_done') }}</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_sync_failed" class="accent-cyan-400"> {{ t('settings.notif.ev.sync_failed') }}</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_deadline"   class="accent-cyan-400"> {{ t('settings.notif.ev.deadline') }}</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_doc_filed"  class="accent-cyan-400"> {{ t('settings.notif.ev.doc_filed') }}</label>
+        </div>
+      </div>
+
+      <!-- Telegram -->
+      <div class="rounded-xl bg-ink-900/40 border border-ink-700 p-4">
+        <label class="inline-flex items-center gap-2 mb-3">
+          <input type="checkbox" x-model="form.telegram_enabled" class="accent-cyan-400">
+          <span class="font-medium">Telegram</span>
+        </label>
+        <div x-show="form.telegram_enabled" x-cloak class="space-y-2 text-sm">
+          <p class="text-xs text-ink-500">
+            {{ t('settings.notif.telegram.help') | safe }}
+          </p>
+          <label class="block">
+            <span class="text-xs text-ink-400">{{ t('settings.notif.telegram.bot_token') }}</span>
+            <input x-model="form.telegram_bot_token" type="password" autocomplete="off"
+                   :placeholder="status.telegram_bot_token_set ? T['settings.notif.token_stored'] : T['settings.notif.telegram.token_paste']"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">{{ t('settings.notif.telegram.chat_id') }}</span>
+            <input x-model="form.telegram_chat_id" type="text"
+                   placeholder="123456789"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+        </div>
+      </div>
+
+      <!-- Email -->
+      <div class="rounded-xl bg-ink-900/40 border border-ink-700 p-4">
+        <label class="inline-flex items-center gap-2 mb-3">
+          <input type="checkbox" x-model="form.email_enabled" class="accent-cyan-400">
+          <span class="font-medium">Email</span>
+        </label>
+        <div x-show="form.email_enabled" x-cloak class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+          <label class="block">
+            <span class="text-xs text-ink-400">{{ t('settings.notif.email.smtp_host') }}</span>
+            <input x-model="form.smtp_host" type="text" placeholder="smtp.gmail.com"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">{{ t('settings.notif.email.smtp_port') }}</span>
+            <input x-model.number="form.smtp_port" type="number" placeholder="587"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">{{ t('settings.notif.email.username') }}</span>
+            <input x-model="form.smtp_user" type="text" autocomplete="off"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">{{ t('settings.notif.email.password') }}</span>
+            <input x-model="form.smtp_password" type="password" autocomplete="off"
+                   :placeholder="status.smtp_password_set ? T['settings.notif.token_stored'] : T['settings.notif.email.password_ph']"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">{{ t('settings.notif.email.from') }}</span>
+            <input x-model="form.smtp_from" type="email" placeholder="docusort@home.lan"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="block">
+            <span class="text-xs text-ink-400">{{ t('settings.notif.email.to') }}</span>
+            <input x-model="form.smtp_to" type="text" placeholder="me@example.com"
+                   class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          </label>
+          <label class="inline-flex items-center gap-2 sm:col-span-2 text-sm">
+            <input type="checkbox" x-model="form.smtp_starttls" class="accent-cyan-400">
+            <span>{{ t('settings.notif.email.starttls') }}</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div x-show="message" x-cloak class="mt-4 text-sm rounded-lg px-3 py-2"
+         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+         x-text="message"></div>
+    <div class="mt-4 flex flex-wrap gap-2 justify-end">
+      <button type="button" @click="testNow()" :disabled="testing || !channels.length"
+              class="rounded-xl px-4 py-2 text-sm font-medium border border-ink-700 bg-ink-900/40 text-ink-300 hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed">
+        <span x-show="!testing">{{ t('settings.notif.test') }}</span>
+        <span x-show="testing" x-cloak>{{ t('settings.notif.testing') }}</span>
+      </button>
+      <button type="button" @click="save()" :disabled="saving" class="btn-primary">
+        <span x-show="!saving">{{ t('settings.save') }}</span>
+        <span x-show="saving" x-cloak>{{ t('setup.saving') }}</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ===== Backup ===== -->
+  <section class="card p-6" x-data="syncSettings()">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.sync.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.sync.subtitle_v2') }}</p>
+
+    <!-- Big tile chooser: local vs cloud -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+      <button type="button" @click="targetType = 'local'"
+              :class="targetType === 'local' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+              class="rounded-xl border p-4 text-left transition">
+        <div class="flex items-center gap-2 mb-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5 text-emerald-300">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="font-medium">{{ t('settings.sync.local_title') }}</span>
+          <span class="ml-auto text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
+            {{ t('settings.sync.recommended') }}
+          </span>
+        </div>
+        <p class="text-xs text-ink-400">{{ t('settings.sync.local_hint') }}</p>
+      </button>
+
+      <button type="button" @click="targetType = 'rclone'"
+              :class="targetType === 'rclone' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+              class="rounded-xl border p-4 text-left transition">
+        <div class="flex items-center gap-2 mb-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5 text-sky-300">
+            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+          </svg>
+          <span class="font-medium">{{ t('settings.sync.cloud_title') }}</span>
+          <span class="ml-auto text-[10px] uppercase tracking-wider bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">
+            {{ t('settings.sync.advanced') }}
+          </span>
+        </div>
+        <p class="text-xs text-ink-400">{{ t('settings.sync.cloud_hint') }}</p>
+      </button>
+    </div>
+
+    <!-- ===== LOCAL target ===== -->
+    <template x-if="targetType === 'local'">
+      <div>
+        <label class="block text-sm font-medium mb-1">{{ t('settings.sync.local_path') }}</label>
+        <div class="flex flex-wrap gap-2 mb-2">
+          <input x-model="localPath" type="text"
+                 @input.debounce.500ms="checkPath()"
+                 placeholder="/mnt/backup/docusort"
+                 class="flex-1 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+          <button type="button" @click="openPicker()"
+                  class="btn-secondary whitespace-nowrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            {{ t('settings.sync.browse') }}
+          </button>
+        </div>
+        <div class="text-xs text-ink-500 mb-2">{{ t('settings.sync.local_path_hint') }}</div>
+
+        <div x-show="pathFeedback.shown" x-cloak class="text-xs rounded-lg px-3 py-2 mb-3"
+             :class="pathFeedback.ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+             x-text="pathFeedback.text"></div>
+
+        <label class="flex items-center gap-2 mb-3 text-sm">
+          <input x-model="enabled" type="checkbox" class="rounded">
+          {{ t('settings.sync.enabled') }}
+        </label>
+
+        <label class="flex items-center gap-2 mb-3 text-sm">
+          <input x-model="includeTrash" type="checkbox" class="rounded">
+          {{ t('settings.sync.include_trash') }}
+        </label>
+
+        <div class="flex gap-2">
+          <button type="button" @click="saveTarget()" :disabled="savingTarget" class="btn-primary"
+                  :class="savingTarget ? 'opacity-50 cursor-not-allowed' : ''">
+            {{ t('settings.save') }}
+          </button>
+          <button type="button" @click="runNow()" :disabled="!enabled || !localPath"
+                  class="btn-secondary"
+                  :class="(!enabled || !localPath) ? 'opacity-50 cursor-not-allowed' : ''">
+            {{ t('settings.sync.run_now') }}
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <!-- ===== CLOUD target ===== -->
+    <template x-if="targetType === 'rclone'">
+      <div>
+        {% if not rclone_installed %}
+          <div class="rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 mb-4 text-sm">
+            <strong class="text-amber-200">{{ t('setup.step_sync.no_rclone_title') }}</strong>
+            <p class="text-amber-100/80 mt-1">{{ t('setup.step_sync.no_rclone_hint') }}</p>
+            <code class="block mt-2 bg-ink-900/60 rounded px-2 py-1 text-xs">sudo apt install rclone</code>
+          </div>
+        {% else %}
+          <div class="text-xs text-ink-500 mb-4">rclone {{ rclone_version }}</div>
+
+          <h3 class="text-sm font-medium mb-2">{{ t('settings.sync.remotes') }}</h3>
+          {% if rclone_remotes %}
+          <div class="space-y-2 mb-4">
+            {% for r in rclone_remotes %}
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="font-mono truncate">{{ r.name }}</span>
+                <span class="text-ink-500">({{ r.type }})</span>
+                {% if not r.healthy %}
+                  <span class="text-[10px] uppercase tracking-wider bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded">
+                    {{ t('settings.sync.broken') }}
+                  </span>
+                {% endif %}
+              </div>
+              <div class="flex gap-1 flex-wrap">
+                {% if not r.healthy and r.type in oauth_backends %}
+                  <button type="button" @click="reconnectRemote('{{ r.name }}', '{{ r.type }}')"
+                          class="btn-ghost text-xs text-amber-300 hover:bg-amber-500/10">
+                    {{ t('settings.sync.reconnect') }}
+                  </button>
+                {% endif %}
+                <button type="button" @click="testRemote('{{ r.name }}')" class="btn-ghost text-xs">
+                  {{ t('settings.sync.test') }}
+                </button>
+                <button type="button" @click="deleteRemote('{{ r.name }}')"
+                        class="btn-ghost text-xs text-rose-300 hover:bg-rose-500/10">
+                  {{ t('settings.sync.delete') }}
+                </button>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+            <p class="text-sm text-ink-500 mb-4">{{ t('settings.sync.no_remotes') }}</p>
+          {% endif %}
+
+          <details class="mb-5" x-bind:open="reconnectName !== ''">
+            <summary class="cursor-pointer text-sm text-emerald-300 hover:text-emerald-200">
+              <span x-show="!reconnectName">+ {{ t('settings.sync.add_remote') }}</span>
+              <span x-show="reconnectName" x-cloak x-text="T['settings.sync.reconnect_heading'].replace('{name}', reconnectName)"></span>
+            </summary>
+            <div class="mt-3 rounded-xl bg-ink-900/40 border border-ink-700 p-4">
+              <template x-if="!reconnectName">
+                <div>
+                  <p class="text-xs text-ink-400 mb-2">{{ t('settings.sync.simple_first') }}</p>
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+                    <button type="button" @click="newBackend = 'webdav'"
+                            :class="newBackend === 'webdav' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                            class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+                      <div class="font-medium">WebDAV / Nextcloud</div>
+                      <div class="text-xs text-ink-400">{{ t('settings.sync.webdav_hint') }}</div>
+                    </button>
+                    <button type="button" @click="newBackend = 'sftp'"
+                            :class="newBackend === 'sftp' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                            class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+                      <div class="font-medium">SFTP</div>
+                      <div class="text-xs text-ink-400">{{ t('settings.sync.sftp_hint') }}</div>
+                    </button>
+                    <button type="button" @click="newBackend = 's3'"
+                            :class="newBackend === 's3' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                            class="rounded-xl border px-3 py-2.5 text-left text-sm transition">
+                      <div class="font-medium">S3 / R2 / MinIO</div>
+                      <div class="text-xs text-ink-400">{{ t('settings.sync.s3_hint') }}</div>
+                    </button>
+                  </div>
+
+                  <details>
+                    <summary class="cursor-pointer text-xs text-ink-400 hover:text-ink-200">
+                      {{ t('settings.sync.show_oauth') }}
+                    </summary>
+                    <div class="mt-3 rounded-lg bg-amber-500/5 border border-amber-500/20 p-3">
+                      <p class="text-xs text-amber-200/80 mb-2">{{ t('settings.sync.oauth_warning') }}</p>
+                      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button type="button" @click="newBackend = 'drive'"
+                                :class="newBackend === 'drive' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                                class="rounded-xl border px-3 py-2.5 text-left text-sm transition">Google Drive</button>
+                        <button type="button" @click="newBackend = 'dropbox'"
+                                :class="newBackend === 'dropbox' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                                class="rounded-xl border px-3 py-2.5 text-left text-sm transition">Dropbox</button>
+                        <button type="button" @click="newBackend = 'onedrive'"
+                                :class="newBackend === 'onedrive' ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-ink-700 hover:border-ink-600'"
+                                class="rounded-xl border px-3 py-2.5 text-left text-sm transition">OneDrive</button>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </template>
+
+              <template x-if="newBackend">
+                <div class="space-y-3">
+                  <template x-if="!reconnectName">
+                    <input x-model="newName" placeholder="remote name"
+                           class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                  </template>
+
+                  <template x-if="['drive','dropbox','onedrive'].includes(newBackend)">
+                    <div>
+                      <div class="text-xs text-ink-400 mb-2">{{ t('setup.step_sync.oauth_intro') }}</div>
+                      <code class="block bg-ink-950 rounded px-2 py-1 text-xs font-mono select-all mb-2"
+                            x-text="'rclone authorize \"' + newBackend + '\"'"></code>
+                      <textarea x-model="newToken" rows="3" placeholder='{"access_token":"...","refresh_token":"..."}'
+                                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-xs font-mono"></textarea>
+                    </div>
+                  </template>
+
+                  <template x-if="newBackend === 's3'">
+                    <div class="grid grid-cols-2 gap-2">
+                      <input x-model="s3.access_key_id"     placeholder="Access key ID" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      <input x-model="s3.secret_access_key" type="password" placeholder="Secret" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      <input x-model="s3.region"            placeholder="Region" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      <input x-model="s3.endpoint"          placeholder="Endpoint" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                    </div>
+                  </template>
+
+                  <template x-if="newBackend === 'webdav'">
+                    <div class="space-y-2">
+                      <input x-model="webdav.url"      placeholder="URL" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      <div class="grid grid-cols-2 gap-2">
+                        <input x-model="webdav.user"     placeholder="user"     class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                        <input x-model="webdav.password" type="password" placeholder="password" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      </div>
+                    </div>
+                  </template>
+
+                  <template x-if="newBackend === 'sftp'">
+                    <div class="space-y-2">
+                      <div class="grid grid-cols-2 gap-2">
+                        <input x-model="sftp.host" placeholder="host" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                        <input x-model.number="sftp.port" type="number" placeholder="22" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                        <input x-model="sftp.user" placeholder="user" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                        <input x-model="sftp.password" type="password" placeholder="password (or blank for key)" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                      </div>
+                      <input x-model="sftp.key_file" placeholder="path to private key (optional)" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+                    </div>
+                  </template>
+
+                  <div class="flex gap-2">
+                    <button type="button" @click="addRemote()" :disabled="adding" class="btn-primary"
+                            :class="adding ? 'opacity-50 cursor-not-allowed' : ''">
+                      <span x-show="!reconnectName">{{ t('settings.sync.add_button') }}</span>
+                      <span x-show="reconnectName" x-cloak>{{ t('settings.sync.reconnect_button') }}</span>
+                    </button>
+                    <button type="button" x-show="reconnectName" @click="cancelReconnect()" class="btn-ghost">
+                      {{ t('setup.back') }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+
+              <div x-show="message" x-cloak class="mt-3 text-sm rounded-lg px-3 py-2"
+                   :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+                   x-text="message"></div>
+            </div>
+          </details>
+
+          <div class="border-t border-ink-700/50 pt-4">
+            <h3 class="text-sm font-medium mb-2">{{ t('settings.sync.target') }}</h3>
+            <label class="flex items-center gap-2 mb-3 text-sm">
+              <input x-model="enabled" type="checkbox" class="rounded">
+              {{ t('settings.sync.enabled') }}
+            </label>
+            <input x-model="remote" placeholder="remote-name:path"
+                   class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono mb-2">
+            <p class="text-xs text-ink-500 mb-3">{{ t('settings.sync.remote_hint') }}</p>
+            <div class="flex gap-2">
+              <button type="button" @click="saveTarget()" :disabled="savingTarget" class="btn-primary"
+                      :class="savingTarget ? 'opacity-50 cursor-not-allowed' : ''">
+                {{ t('settings.save') }}
+              </button>
+              <button type="button" @click="runNow()" :disabled="!enabled || !remote"
+                      class="btn-secondary"
+                      :class="(!enabled || !remote) ? 'opacity-50 cursor-not-allowed' : ''">
+                {{ t('settings.sync.run_now') }}
+              </button>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </template>
+
+    <!-- Folder picker modal — teleported to <body> so it escapes the
+         backup card's `.card` stacking context (backdrop-blur creates one,
+         which means later sibling cards would otherwise paint over the
+         modal). The Alpine state still binds to syncSettings() because
+         x-teleport keeps the original scope. Capped at viewport height
+         with a scrollable list region so the action bar is always
+         reachable. -->
+    <template x-teleport="body">
+    <div x-show="picker.open" x-cloak
+         @keydown.escape.window="picker.open = false"
+         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+      <div class="w-full max-w-xl max-h-[calc(100vh-2rem)] flex flex-col rounded-2xl bg-ink-900 border border-ink-700 shadow-2xl overflow-hidden"
+           @click.outside="picker.open = false">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-ink-700 shrink-0">
+          <div class="font-medium text-sm">{{ t('settings.sync.picker_title') }}</div>
+          <button type="button" @click="picker.open = false" class="btn-ghost text-xs">✕</button>
+        </div>
+
+        <div class="px-4 py-3 border-b border-ink-700 shrink-0">
+          <div class="text-xs text-ink-400 mb-1">{{ t('settings.sync.current_path') }}</div>
+          <div class="font-mono text-xs text-emerald-300 truncate" x-text="picker.path || '/'"></div>
+        </div>
+
+        <div class="px-4 py-2 border-b border-ink-700 flex flex-wrap gap-1 shrink-0">
+          <template x-for="s in picker.shortcuts" :key="s.path">
+            <button type="button" @click="loadPicker(s.path)"
+                    class="text-xs px-2 py-1 rounded-md bg-ink-800 hover:bg-ink-700"
+                    x-text="s.label"></button>
+          </template>
+        </div>
+
+        <div class="flex-1 overflow-y-auto min-h-0">
+          <button type="button" x-show="picker.parent" @click="loadPicker(picker.parent)"
+                  class="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-ink-800/50 text-ink-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+              <path d="m9 18-6-6 6-6"/>
+            </svg>
+            ..
+          </button>
+          <template x-if="picker.error">
+            <div class="px-4 py-3 text-xs text-rose-300" x-text="picker.error"></div>
+          </template>
+          <template x-for="d in picker.entries" :key="d.path">
+            <button type="button" @click="loadPicker(d.path)"
+                    class="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-ink-800/50">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4 text-emerald-300">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span x-text="d.name"></span>
+            </button>
+          </template>
+          <template x-if="!picker.entries.length && !picker.error">
+            <div class="px-4 py-6 text-center text-xs text-ink-500">{{ t('settings.sync.empty_dir') }}</div>
+          </template>
+        </div>
+
+        <div class="px-4 py-3 border-t border-ink-700 flex justify-end gap-2 shrink-0 bg-ink-900">
+          <button type="button" @click="picker.open = false" class="btn-ghost text-sm">{{ t('setup.back') }}</button>
+          <button type="button" @click="pickCurrent()" class="btn-primary text-sm">
+            {{ t('settings.sync.pick_this') }}
+          </button>
+        </div>
+      </div>
+    </div>
+    </template>
+  </section>
+
+  <!-- ===== Library paths (read-only display) ===== -->
+  <section class="card p-6">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.paths.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-4">{{ t('settings.paths.subtitle') }}</p>
+    <div class="space-y-2 text-sm">
+      <div class="flex items-center justify-between gap-3 flex-wrap rounded-lg bg-ink-900/60 px-3 py-2">
+        <span class="text-ink-400 shrink-0">{{ t('settings.paths.library') }}</span>
+        <code class="font-mono text-emerald-300 break-all text-right text-xs sm:text-sm">{{ library_path }}</code>
+      </div>
+      <div class="flex items-center justify-between gap-3 flex-wrap rounded-lg bg-ink-900/60 px-3 py-2">
+        <span class="text-ink-400 shrink-0">{{ t('settings.paths.inbox') }}</span>
+        <code class="font-mono text-emerald-300 break-all text-right text-xs sm:text-sm">{{ inbox_path }}</code>
+      </div>
+    </div>
+    <p class="text-xs text-ink-500 mt-3">{{ t('settings.paths.hint') }}</p>
+  </section>
+
+  </div><!-- /grid -->
+</div>
+
+<script>
+function settingsPage() {
+  return {
+    storedKey: '{{ stored_secrets.get(current_provider + "_api_key", "") }}',
+    storedHint: '',
+    ai: {
+      provider:  '{{ current_provider }}',
+      model:     '{{ current_model }}',
+      base_url:  '{{ current_base_url }}',
+      api_key:   '',
+      saving:    false,
+      message:   '',
+      ok:        false,
+      restartHint:    false,
+      restarting:     false,
+      restartMessage: '',
+      restartOk:      false,
+    },
+    bridgeStatus: { connected: false, client: {} },
+    init() {
+      this.updateStoredHint();
+      // Poll bridge status so the "model on your bridge host" hint stays
+      // fresh and so the model field can auto-fill when a client connects.
+      this.refreshBridgeStatus();
+      setInterval(() => this.refreshBridgeStatus(), 4000);
+    },
+    async refreshBridgeStatus() {
+      try {
+        const r = await fetch('/api/bridge/status');
+        if (r.ok) this.bridgeStatus = await r.json();
+      } catch (e) {}
+    },
+    bridgeClientModel() {
+      return (this.bridgeStatus && this.bridgeStatus.client &&
+              this.bridgeStatus.client.model) || '';
+    },
+    bridgeClientPlatform() {
+      const p = (this.bridgeStatus && this.bridgeStatus.client &&
+                 this.bridgeStatus.client.platform) || '';
+      // Squash the long python-platform string into something readable.
+      if (/macOS|Darwin/i.test(p)) return 'macOS';
+      if (/Linux/i.test(p))        return 'Linux';
+      if (/Windows/i.test(p))      return 'Windows';
+      return p;
+    },
+    // Backwards-compat alias for any cached page that references the
+    // old name. Safe to remove once everyone has hard-refreshed.
+    bridgeMacModel() { return this.bridgeClientModel(); },
+    updateStoredHint() {
+      this.storedHint = this.storedKey
+        ? T['settings.ai.key_stored'].replace('{key}', this.storedKey)
+        : T['settings.ai.key_none'];
+    },
+    onProviderChange() {
+      // Refetch the masked stored key for the newly chosen provider.
+      const stored = {{ stored_secrets | tojson }};
+      this.storedKey = stored[this.ai.provider + '_api_key'] || '';
+      this.updateStoredHint();
+      // When switching to bridge: auto-fill the model field with what
+      // the connected client is actually running, so the user does not
+      // accidentally save a cloud-style model id like "claude-…" and
+      // then wonder why nothing works. Cloud-style ids are also
+      // ignored on the bridge side now, but a clean default is
+      // friendlier.
+      if (this.ai.provider === 'bridge') {
+        const localModel  = this.bridgeClientModel();
+        const looksCloudy = /^(claude-|gpt-|gpt4|gemini-|o1-|o3-|command-)/i.test(this.ai.model || '');
+        if (localModel && (!this.ai.model || looksCloudy)) {
+          this.ai.model = localModel;
+        } else if (!this.ai.model) {
+          this.ai.model = 'qwen2.5:7b-instruct';
+        }
+      }
+    },
+    async saveAi() {
+      this.ai.message = '';
+      this.ai.saving  = true;
+      try {
+        const r = await fetch('/api/settings/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: this.ai.provider,
+            model: this.ai.model,
+            base_url: this.ai.base_url,
+            api_key: this.ai.api_key,
+          }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        const d = await r.json();
+        this.ai.ok = true;
+        this.ai.message = T['settings.ai.saved'];
+        this.ai.restartHint = !!d.restart_required;
+        this.ai.api_key = '';
+      } catch (e) {
+        this.ai.ok = false;
+        this.ai.message = e.message || String(e);
+      } finally {
+        this.ai.saving = false;
+      }
+    },
+    async restartService() {
+      if (!confirm('Restart the DocuSort service now? Active uploads or in-flight extractions will be cut off.')) return;
+      this.ai.restartMessage = '';
+      this.ai.restarting = true;
+      try {
+        const r = await fetch('/api/setup/restart', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.restarted) {
+          this.ai.restartOk = true;
+          this.ai.restartMessage = 'Restart scheduled — page will reload in a few seconds.';
+          setTimeout(() => window.location.reload(), 6000);
+        } else {
+          this.ai.restartOk = false;
+          this.ai.restartMessage = (d.reason || d.detail || 'Restart failed.');
+        }
+      } catch (e) {
+        this.ai.restartOk = false;
+        this.ai.restartMessage = e.message || String(e);
+      } finally {
+        // Keep "Restarting…" visible until the reload swaps the page —
+        // unsetting now would briefly show "Restart service now" again
+        // and look like the click did nothing.
+      }
+    },
+  };
+}
+
+function notificationsSettings() {
+  return {
+    status:   {},
+    form:     {
+      enabled:           false,
+      event_doc_review:  true,
+      event_doc_failed:  true,
+      event_doc_filed:   false,
+      event_bulk_done:   true,
+      event_sync_failed: true,
+      event_deadline:    true,
+      telegram_enabled:  false,
+      telegram_chat_id:  '',
+      telegram_bot_token:'',
+      email_enabled:     false,
+      smtp_host:         '',
+      smtp_port:         587,
+      smtp_user:         '',
+      smtp_from:         '',
+      smtp_to:           '',
+      smtp_starttls:     true,
+      smtp_password:     '',
+    },
+    channels: [],
+    saving:   false,
+    testing:  false,
+    message:  '',
+    ok:       false,
+    async init() {
+      try {
+        const r = await fetch('/api/settings/notifications');
+        if (r.ok) {
+          const d = await r.json();
+          this.status = d;
+          // Pull every field that exists in form, but never the
+          // password placeholders — those stay empty so an accidental
+          // save without typing doesn't blank them.
+          for (const k of Object.keys(this.form)) {
+            if (k === 'telegram_bot_token' || k === 'smtp_password') continue;
+            if (d[k] !== undefined) this.form[k] = d[k];
+          }
+          this.channels = d.channels_active || [];
+        }
+      } catch (e) { /* ignore */ }
+    },
+    async save() {
+      this.saving = true; this.message = '';
+      try {
+        const body = {...this.form};
+        // Send empty token/password as null so the server keeps the
+        // existing value.
+        if (!body.telegram_bot_token) body.telegram_bot_token = null;
+        if (!body.smtp_password)      body.smtp_password      = null;
+        const r = await fetch('/api/settings/notifications', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.ok = true;
+        this.channels = d.channels_active || [];
+        this.message = `Saved. Active channels: ${this.channels.join(', ') || 'none'}`;
+        // Clear sensitive fields so a follow-up save doesn't resend them.
+        this.form.telegram_bot_token = '';
+        this.form.smtp_password      = '';
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally { this.saving = false; }
+    },
+    async testNow() {
+      this.testing = true; this.message = '';
+      try {
+        const r = await fetch('/api/notifications/test', {method: 'POST'});
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        // The send is synchronous now — d.channels are the ones that
+        // actually accepted the message. Warn about any that didn't.
+        const failed = (d.results || []).filter(x => !x.ok);
+        if (failed.length) {
+          this.ok = false;
+          this.message = '{{ t('settings.notif.test_partial') }}: '
+            + failed.map(x => `${x.channel} — ${x.error}`).join(' · ');
+        } else {
+          this.ok = true;
+          this.message = '{{ t('settings.notif.test_ok') }} '
+            + (d.channels || []).join(', ');
+        }
+      } catch (e) {
+        this.ok = false;
+        this.message = '{{ t('settings.notif.test_failed') }}: ' + (e.message || String(e));
+      } finally { this.testing = false; }
+    },
+  };
+}
+
+function localOllama() {
+  return {
+    probe: { reachable: false, url: '', models: [] },
+    chosenModel: '',
+    applying:    false,
+    visible:     false,   // hide the card if no Ollama detected and current
+                          //   provider is already a local one — no point
+                          //   nagging an existing happy install.
+    message:     '',
+    ok:          false,
+    async init() {
+      await this.probeNow();
+      // Show the card if Ollama is reachable OR the user is currently
+      // on a cloud provider (so we can offer a switch). If they are
+      // already on openai_compat / bridge and Ollama isn't reachable
+      // here, hide it — they likely have something else set up.
+      const onCloud = ['anthropic','openai','gemini'].includes('{{ current_provider }}');
+      this.visible = this.probe.reachable || onCloud;
+    },
+    async probeNow() {
+      try {
+        const r = await fetch('/api/local-ai/probe');
+        if (r.ok) {
+          this.probe = await r.json();
+          if (!this.chosenModel && this.probe.models?.length) {
+            // Prefer a small instruction-tuned model when present.
+            const preferred = ['qwen2.5:7b-instruct', 'qwen2.5:14b-instruct',
+                               'llama3.2:3b-instruct', 'llama3.1:8b-instruct'];
+            this.chosenModel = preferred.find(m => this.probe.models.includes(m))
+                              || this.probe.models[0];
+          }
+        }
+      } catch (e) { /* ignore */ }
+    },
+    async apply() {
+      if (!this.chosenModel) return;
+      this.applying = true;
+      this.message = '';
+      try {
+        const r = await fetch('/api/local-ai/apply', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({url: this.probe.url, model: this.chosenModel}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.ok = true;
+        this.message = `Saved — provider switched to openai_compat (${d.base_url}, model=${d.model}). Restart required, see top of page.`;
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally {
+        this.applying = false;
+      }
+    },
+  };
+}
+
+function bridgeSettings() {
+  return {
+    status:        { connected: false, client: {}, token: '',
+                     calls_total: 0, calls_failed: 0,
+                     tokens_in: 0, tokens_out: 0, pending: 0 },
+    showToken:     false,
+    copied:        false,
+    installCopied: false,
+    testing:       false,
+    testMessage:   '',
+    testOk:        false,
+    osChoice:      (navigator.userAgent.toLowerCase().includes('windows') ? 'windows' : 'unix'),
+    _timer:        null,
+
+    init() {
+      this.refresh();
+      this._timer = setInterval(() => this.refresh(), 4000);
+    },
+    async refresh() {
+      try {
+        const r = await fetch('/api/bridge/status');
+        if (!r.ok) return;
+        this.status = await r.json();
+      } catch (e) { /* keep last known state */ }
+    },
+    serverOrigin() {
+      return window.location.origin;
+    },
+    installCmd() {
+      const tokRaw = this.status.token || '<token>';
+      const srv    = this.serverOrigin();
+      // Tailscale + locally-trusted CAs work without --insecure; for
+      // a fresh install pointing at a self-signed local DocuSort, the
+      // bridge needs --insecure to skip TLS verification.
+      const insecure = window.location.protocol === 'https:' ? '--insecure' : '';
+      // The script is fetched from the server itself so the user does
+      // not need to know about GitHub. The same file ships with the
+      // running version, served at /static/scripts/.
+      const url = `${srv}/static/scripts/docusort_mac_bridge.py`;
+      if (this.osChoice === 'windows') {
+        // PowerShell: download via Invoke-WebRequest to a temp path,
+        // run with `python` (Windows uses `python`, not `python3`).
+        // Backtick-escape the apostrophes inside the token; on
+        // PowerShell single-quoted strings don't expand variables but
+        // also don't allow embedded single quotes — escape via doubling.
+        const tok = tokRaw.replace(/'/g, "''");
+        return [
+          `$dst = "$env:TEMP\\docusort_bridge.py"`,
+          `Invoke-WebRequest "${url}" -OutFile $dst`,
+          `python $dst \``,
+          `  --server "${srv}" \``,
+          `  --token  '${tok}'${insecure ? ' `\n  ' + insecure : ''}`,
+        ].join('\n');
+      }
+      // macOS / Linux: bash/zsh single-line script, escape apostrophes.
+      const tok = tokRaw.replace(/'/g, "'\\''");
+      return [
+        `curl -fsSL ${url} -o /tmp/docusort_bridge.py && \\`,
+        `python3 /tmp/docusort_bridge.py \\`,
+        `  --server ${srv} \\`,
+        `  --token  '${tok}'${insecure ? ' \\\n  ' + insecure : ''}`,
+      ].join('\n');
+    },
+    async copyToken() {
+      try { await navigator.clipboard.writeText(this.status.token || ''); }
+      catch (e) {}
+      this.copied = true;
+      setTimeout(() => this.copied = false, 1500);
+    },
+    async copyInstall() {
+      try { await navigator.clipboard.writeText(this.installCmd()); }
+      catch (e) {}
+      this.installCopied = true;
+      setTimeout(() => this.installCopied = false, 1500);
+    },
+    async regenerate() {
+      if (!confirm('Generate a new token? The currently-running client will be disconnected and will need the new token to reconnect.')) return;
+      try {
+        const r = await fetch('/api/bridge/regenerate-token', { method: 'POST' });
+        if (r.ok) { await this.refresh(); }
+      } catch (e) {}
+    },
+    async testConnection() {
+      this.testMessage = '';
+      this.testing = true;
+      const t0 = performance.now();
+      try {
+        const r = await fetch('/api/bridge/test', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        const dt = ((performance.now() - t0) / 1000).toFixed(1);
+        if (r.ok && d.ok) {
+          this.testOk = true;
+          const tin  = d.input_tokens  ?? 0;
+          const tout = d.output_tokens ?? 0;
+          this.testMessage = `OK · ${d.model || 'model'} · ${tin}→${tout} tok · ${dt}s`;
+        } else {
+          this.testOk = false;
+          this.testMessage = (d.detail || `HTTP ${r.status}`) + ` (${dt}s)`;
+        }
+        await this.refresh();
+      } catch (e) {
+        this.testOk = false;
+        this.testMessage = e.message || String(e);
+      } finally {
+        this.testing = false;
+      }
+    },
+  };
+}
+
+function webSettings() {
+  return {
+    host: '{{ web_host }}',
+    port: {{ web_port }},
+    saving: false,
+    message: '',
+    ok: false,
+    restartHint: false,
+    async save() {
+      this.message = '';
+      this.saving = true;
+      try {
+        const r = await fetch('/api/settings/web', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ host: this.host, port: this.port }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        const d = await r.json();
+        this.ok = true;
+        this.message = T['settings.web.saved'];
+        this.restartHint = !!d.restart_required;
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally {
+        this.saving = false;
+      }
+    },
+  };
+}
+
+function financeSettings() {
+  return {
+    localOnly:        {{ finance_local_only | tojson }},
+    pseudonymize:     {{ finance_pseudonymize | tojson }},
+    reviewBeforeSend: {{ finance_review_before_send | tojson }},
+    holderNamesText:  ({{ finance_holder_names | tojson }}).join('\n'),
+    saving: false, message: '', ok: false,
+    async save() {
+      this.message = ''; this.saving = true;
+      try {
+        const r = await fetch('/api/settings/finance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            local_only:   this.localOnly,
+            pseudonymize: this.pseudonymize,
+            review_before_send: this.reviewBeforeSend,
+            holder_names: this.holderNamesText
+              .split(/[\n,;]+/)
+              .map(s => s.trim())
+              .filter(Boolean),
+          }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        this.ok = true;
+        this.message = T['settings.finance.saved'] || T['settings.web.saved'];
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally {
+        this.saving = false;
+      }
+    },
+  };
+}
+
+function syncSettings() {
+  return {
+    targetType:  '{{ sync_target_type }}' || 'local',
+    enabled:     {{ sync_enabled | tojson }},
+    localPath:   '{{ sync_local_path }}',
+    remote:      '{{ sync_remote }}',
+    includeTrash: ('{{ sync_source }}' === 'library_and_trash'),
+    pathFeedback: { shown: false, ok: false, text: '' },
+    savingTarget: false,
+
+    // Cloud — add new / reconnect
+    newBackend: '',
+    newName:    'cloud',
+    newToken:   '',
+    reconnectName: '',  // when set, we're updating an existing OAuth remote
+    s3:     { access_key_id: '', secret_access_key: '', region: '', endpoint: '' },
+    webdav: { url: '', user: '', password: '' },
+    sftp:   { host: '', port: 22, user: '', password: '', key_file: '' },
+    adding: false,
+    message: '',
+    ok: false,
+
+    // Folder picker state
+    picker: { open: false, path: '/', parent: '', entries: [], shortcuts: [], error: '' },
+
+    init() {
+      if (this.localPath) this.checkPath();
+    },
+
+    async openPicker() {
+      // Empty string → backend defaults to user's home directory.
+      this.picker.open = true;
+      await this.loadPicker(this.localPath || '');
+    },
+    async loadPicker(path) {
+      try {
+        const r = await fetch('/api/fs/list?path=' + encodeURIComponent(path));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.picker.error = d.detail || ('HTTP ' + r.status);
+          return;
+        }
+        this.picker.path      = d.path;
+        this.picker.parent    = d.parent;
+        this.picker.entries   = d.entries || [];
+        this.picker.shortcuts = d.shortcuts || [];
+        this.picker.error     = d.error || '';
+      } catch (e) {
+        this.picker.error = String(e);
+      }
+    },
+    pickCurrent() {
+      this.localPath = this.picker.path;
+      this.picker.open = false;
+      this.checkPath();
+    },
+
+    async checkPath() {
+      if (!this.localPath) { this.pathFeedback.shown = false; return; }
+      try {
+        const r = await fetch('/api/sync/check-path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: this.localPath }),
+        });
+        const d = await r.json().catch(() => ({}));
+        this.pathFeedback.shown = true;
+        if (d.ok) {
+          this.pathFeedback.ok = true;
+          if (d.free_bytes != null) {
+            const gb = (d.free_bytes / 1024 / 1024 / 1024).toFixed(1);
+            this.pathFeedback.text = T['settings.sync.path_ok'].replace('{free}', gb);
+          } else {
+            this.pathFeedback.text = T['settings.sync.path_ok_short'];
+          }
+        } else {
+          this.pathFeedback.ok = false;
+          this.pathFeedback.text = T['settings.sync.path_bad'] + ' ' + (d.error || '');
+        }
+      } catch (e) {
+        this.pathFeedback.shown = true;
+        this.pathFeedback.ok = false;
+        this.pathFeedback.text = String(e);
+      }
+    },
+
+    reconnectRemote(name, type) {
+      this.reconnectName = name;
+      this.newName = name;
+      this.newBackend = type;
+      this.newToken = '';
+      this.message = '';
+      // Auto-scroll to the form so the user sees the textarea.
+      setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50);
+    },
+
+    cancelReconnect() {
+      this.reconnectName = '';
+      this.newBackend = '';
+      this.newToken = '';
+    },
+
+    async addRemote() {
+      this.message = '';
+      this.adding = true;
+      try {
+        let r;
+        if (['drive','dropbox','onedrive'].includes(this.newBackend)) {
+          r = await fetch('/api/sync/remote/oauth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newName, backend: this.newBackend, token: this.newToken }),
+          });
+        } else if (this.newBackend === 's3') {
+          r = await fetch('/api/sync/remote/s3', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newName, ...this.s3 }),
+          });
+        } else if (this.newBackend === 'webdav') {
+          r = await fetch('/api/sync/remote/webdav', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newName, ...this.webdav }),
+          });
+        } else if (this.newBackend === 'sftp') {
+          r = await fetch('/api/sync/remote/sftp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newName, ...this.sftp }),
+          });
+        } else {
+          throw new Error('Choose a backend first');
+        }
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        this.ok = true;
+        const tplKey = this.reconnectName
+          ? 'settings.sync.reconnected'
+          : 'settings.sync.added';
+        this.message = T[tplKey].replace('{name}', this.newName);
+        setTimeout(() => location.reload(), 800);
+      } catch (e) {
+        this.ok = false;
+        this.message = e.message || String(e);
+      } finally {
+        this.adding = false;
+      }
+    },
+
+    async testRemote(name) {
+      const r = await fetch('/api/sync/test/' + encodeURIComponent(name), { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      alert(d.ok
+        ? T['settings.sync.test_ok'].replace('{name}', name)
+        : T['settings.sync.test_fail'].replace('{name}', name) + '\n' + (d.error || ''));
+    },
+
+    async deleteRemote(name) {
+      if (!confirm(T['settings.sync.confirm_delete'].replace('{name}', name))) return;
+      const r = await fetch('/api/sync/remote/' + encodeURIComponent(name), { method: 'DELETE' });
+      if (r.ok) location.reload();
+      else alert('HTTP ' + r.status);
+    },
+
+    async saveTarget() {
+      this.savingTarget = true;
+      try {
+        const body = {
+          enabled: this.enabled,
+          target_type: this.targetType,
+          local_path: this.localPath,
+          remote: this.remote,
+          source: this.includeTrash ? 'library_and_trash' : 'library',
+        };
+        const r = await fetch('/api/settings/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || ('HTTP ' + r.status));
+        }
+        alert(T['settings.sync.target_saved']);
+      } catch (e) {
+        alert(e.message || String(e));
+      } finally {
+        this.savingTarget = false;
+      }
+    },
+
+    async runNow() {
+      try {
+        const r = await fetch('/api/sync/run', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        alert(T['settings.sync.started']);
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    },
+  };
+}
+</script>
+
+{% endblock %}

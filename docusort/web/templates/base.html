@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="{{ lang }}" class="h-full">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>{% block title %}DocuSort{% endblock %}</title>
+<script>
+  // Resolve theme before paint to avoid a dark→light flash on light-mode loads.
+  // Persisted in localStorage; falls back to the system preference; defaults to dark
+  // (the original DocuSort look) when neither is available.
+  (function () {
+    try {
+      var saved = localStorage.getItem('docusort-theme');
+      var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      var theme = saved || (prefers ? 'light' : 'dark');
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]').setAttribute(
+        'content', theme === 'light' ? '#f1f5f9' : '#0f172a'
+      );
+    } catch (e) { /* dark default */ }
+  })();
+</script>
+<style>
+  [x-cloak] { display: none !important; }
+
+  /* iPhone safety net: keep the viewport from ever scrolling
+     horizontally. Inner regions that legitimately scroll (wide
+     tables, the cashflow chart, the mobile tab bar) use
+     `overflow-x-auto` themselves — this rule only stops *runaway*
+     overflow from pushing the page past 100vw. */
+  html, body { max-width: 100%; overflow-x: clip; }
+
+  /* Negative margins on scroll wrappers (`-mx-5` etc.) inside
+     cards can push their content past the card edge on narrow
+     screens. Clip horizontally at the card so it never leaks into
+     the page; vertical overflow stays visible so dropdowns / popups
+     aren't cut off. */
+  .card { overflow-x: clip; }
+
+  /* Light/dark palette lives in tailwind.css (CSS variables, see scripts/build/input.css). */
+</style>
+<link rel="stylesheet" href="/static/tailwind.css?v={{ version }}">
+<script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+<script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full bg-gradient-to-b from-ink-950 via-ink-900 to-ink-950 text-ink-100 antialiased">
+
+<header class="sticky top-0 z-20 backdrop-blur bg-ink-900/70 border-b border-ink-800">
+  {# One list feeds both menus so the order is the same on every device.
+     Desktop shows the links from lg upwards; below that the scroll strip
+     under the header carries the same items in the same order. #}
+  {% set nav_items = [
+    ('/library', t('nav.library')), ('/library?status=review', t('nav.review')), ('/analytics', t('nav.analytics')),
+    ('/finance', t('nav.finance')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')),
+  ] %}
+  <nav class="mx-auto max-w-screen-2xl px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center gap-1.5 sm:gap-x-2.5 2xl:gap-x-4 sm:gap-y-1">
+    <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg shrink-0">
+      <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
+          <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>
+          <path d="M14 4v6h6"/>
+          <path d="M7 14h10M7 18h7"/>
+        </svg>
+      </span>
+      <span class="hidden sm:inline">DocuSort</span>
+      <span class="hidden 2xl:inline text-xs text-ink-400 font-normal ml-1">v{{ version }}</span>
+    </a>
+    <div class="flex-1"></div>
+    {% for href, label in nav_items %}
+      <a href="{{ href }}" class="hidden xl:inline-flex btn-ghost">{{ label }}</a>
+    {% endfor %}
+    {% if me and me.is_admin %}
+    <a href="/settings" class="hidden xl:inline-flex btn-ghost" :aria-label="'{{ t('nav.settings') }}'">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      {# "Einstellungen" is ~110px of label. Below 2xl that width is what
+         pushed the Upload button into a second row, so the gear carries
+         the meaning alone there. #}
+      <span class="hidden 2xl:inline">{{ t('nav.settings') }}</span>
+    </a>
+    {% endif %}
+
+    <!-- AI activity indicator — pulses while an LLM call is in flight or a
+         bulk job is running, idle dot when nothing is happening. Polls every
+         3 s while idle, every 1.5 s while active so users never wonder "is
+         the model still working?". -->
+    <div x-data="aiActivity()" x-init="start()" @click.outside="open = false"
+         class="relative">
+      <button type="button" @click="open = !open"
+              class="btn-ghost !px-2"
+              :title="active ? (T['nav.ai_active'] || 'AI is processing') : (T['nav.ai_idle'] || 'AI idle')">
+        <span class="relative inline-flex h-3 w-3 items-center justify-center">
+          <span x-show="active" x-cloak
+                class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping"></span>
+          <span class="relative inline-flex h-2 w-2 rounded-full"
+                :class="active ? 'bg-emerald-400' : 'bg-ink-600'"></span>
+        </span>
+        <span x-show="active" x-cloak class="hidden sm:inline text-[11px] tabular-nums text-emerald-200/80"
+              x-text="(T['nav.ai_label_short'] || '{n} active').replace('{n}', total)"></span>
+      </button>
+      <div x-show="open" x-cloak x-transition.opacity
+           class="absolute right-0 mt-2 w-72 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30 p-3 text-xs">
+        <div class="font-medium text-sm mb-1"
+             x-text="active ? (T['nav.ai_active'] || 'AI is processing') : (T['nav.ai_idle'] || 'AI idle')"></div>
+        <div class="text-ink-400 space-y-1">
+          <div>
+            <span class="text-ink-500">{{ t('nav.ai_in_flight') }}:</span>
+            <span x-text="snap.in_flight || 0" class="tabular-nums"></span>
+          </div>
+          <div>
+            <span class="text-ink-500">{{ t('nav.ai_pending') }}:</span>
+            <span x-text="snap.pending_or_processing || 0" class="tabular-nums"></span>
+          </div>
+          <div x-show="approveJob && approveJob.running" x-cloak>
+            <span class="text-ink-500">{{ t('nav.ai_bulk_job') }}:</span>
+            <span class="tabular-nums"
+                  x-text="(approveJob?.done || 0) + ' / ' + (approveJob?.total || 0)"></span>
+          </div>
+          <div x-show="snap.last_call_at" x-cloak>
+            <span class="text-ink-500">{{ t('nav.ai_last_call') }}:</span>
+            <span x-text="lastCallLabel"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- theme toggle -->
+    <button type="button"
+            x-data="{
+              theme: document.documentElement.dataset.theme || 'dark',
+              toggle() {
+                this.theme = this.theme === 'light' ? 'dark' : 'light';
+                document.documentElement.dataset.theme = this.theme;
+                try { localStorage.setItem('docusort-theme', this.theme); } catch(e) {}
+                document.querySelector('meta[name=\'theme-color\']').setAttribute(
+                  'content', this.theme === 'light' ? '#f1f5f9' : '#0f172a'
+                );
+              }
+            }"
+            @click="toggle()"
+            class="btn-ghost !px-2"
+            :aria-label="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'"
+            :title="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'">
+      {# Sun for light mode (click → goes dark), moon for dark mode (click → goes light) #}
+      <svg x-show="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+      </svg>
+      <svg x-show="theme === 'light'" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
+
+    <!-- language picker -->
+    <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+      <button type="button" @click="open = !open"
+              class="btn-ghost !px-2" :aria-label="'{{ t('nav.language') }}'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>
+        </svg>
+        <span class="hidden sm:inline text-xs uppercase tracking-wider">{{ lang }}</span>
+      </button>
+      <div x-show="open" x-cloak x-transition.opacity
+           class="absolute right-0 mt-2 w-40 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30">
+        {% for code, name in supported_langs %}
+          <button type="button" @click="switchLang('{{ code }}')"
+                  class="block w-full text-left px-3 py-2 text-sm hover:bg-ink-700/60 {% if code == lang %}bg-emerald-500/10 text-emerald-200{% endif %}">
+            <span class="uppercase text-ink-400 text-xs mr-2">{{ code }}</span>
+            <span>{{ name }}</span>
+          </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if me %}
+    {# Who am I / sign out. Only the initial rides in the bar: spelling the
+       display name out here cost ~150px and pushed the Upload button onto a
+       second row. The full name and role sit in the open menu instead. #}
+    <div class="relative shrink-0" x-data="{ open: false }" @click.outside="open = false">
+      <button type="button" @click="open = !open"
+              class="btn-ghost !px-1.5 flex items-center"
+              :aria-expanded="open" aria-haspopup="menu"
+              :aria-label="'{{ t('auth.account') }}'" title="{{ me.label }}">
+        <span class="inline-flex h-6 w-6 items-center justify-center rounded-full
+                     bg-emerald-500/15 text-emerald-300 text-xs font-semibold uppercase">
+          {{ me.label[0] }}
+        </span>
+      </button>
+      <div x-show="open" x-cloak x-transition.opacity role="menu"
+           class="absolute right-0 mt-2 w-52 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30">
+        <div class="px-3 py-2 border-b border-ink-700">
+          <div class="text-sm font-medium truncate">{{ me.label }}</div>
+          <div class="text-xs text-ink-400">
+            {{ t('auth.role_admin') if me.is_admin else t('auth.role_user') }}
+          </div>
+        </div>
+        <a href="/konto" role="menuitem"
+           class="block px-3 py-2 text-sm hover:bg-ink-700/60">{{ t('auth.account') }}</a>
+        {% if me.is_admin %}
+        <a href="/users" role="menuitem"
+           class="block px-3 py-2 text-sm hover:bg-ink-700/60">{{ t('auth.users') }}</a>
+        {% endif %}
+        <a href="/logout" role="menuitem"
+           class="block px-3 py-2 text-sm text-rose-300 hover:bg-ink-700/60">{{ t('auth.logout') }}</a>
+      </div>
+    </div>
+    {% endif %}
+
+    <a href="/upload" class="btn-primary !px-2 sm:!px-3 shrink-0"
+       :aria-label="'{{ t('nav.upload') }}'">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
+      </svg>
+      <span class="hidden sm:inline">{{ t('nav.upload') }}</span>
+    </a>
+  </nav>
+  <!-- mobile nav -->
+  <nav class="xl:hidden mx-auto max-w-screen-2xl px-4 pb-2 flex gap-1 text-sm overflow-x-auto">
+    <a href="/" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('nav.dashboard') }}</a>
+    {% for href, label in nav_items %}
+      <a href="{{ href }}" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ label }}</a>
+    {% endfor %}
+    {% if me and me.is_admin %}
+    <a href="/settings" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('nav.settings') }}</a>
+    {% endif %}
+    {% if me %}
+    <a href="/konto" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('auth.account') }}</a>
+    {% endif %}
+  </nav>
+</header>
+
+<!-- Update banner -->
+<div
+  x-data="updateBanner()"
+  x-init="check()"
+  x-cloak
+  x-show="state !== 'idle'"
+  class="mx-auto max-w-screen-2xl px-4 mt-4"
+>
+  <template x-if="state === 'available'">
+    <div class="card p-4 flex flex-wrap items-center gap-3 border-emerald-500/30 bg-emerald-500/5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-emerald-300 shrink-0">
+        <path d="M21 12a9 9 0 1 1-3.51-7.13L21 8"/><path d="M21 3v5h-5"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm">
+          {{ t('update.available') }}
+          <span class="font-semibold text-emerald-300" x-text="info.current"></span>
+          → <span class="font-semibold text-emerald-300" x-text="info.latest"></span>
+        </div>
+        <a :href="info.html_url" target="_blank" rel="noopener" class="text-xs text-ink-400 hover:text-ink-200 underline">
+          {{ t('update.release_notes') }}
+        </a>
+      </div>
+      <button type="button" @click="install()" class="btn-primary">
+        {{ t('update.install_now') }}
+      </button>
+    </div>
+  </template>
+
+  <template x-if="state === 'installing'">
+    <div class="card p-4 flex items-center gap-3">
+      <svg class="h-5 w-5 animate-spin text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 12a9 9 0 1 1-6.2-8.55" stroke-linecap="round"/>
+      </svg>
+      <div class="text-sm">{{ t('update.installing') }}</div>
+    </div>
+  </template>
+
+  <template x-if="state === 'done-restarted'">
+    <div class="card p-4 flex items-center gap-3 border-emerald-500/30 bg-emerald-500/5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-5 w-5 text-emerald-300">
+        <path d="M20 6 9 17l-5-5"/>
+      </svg>
+      <div class="flex-1 text-sm" x-text="T['update.installed_restarted'].replace('{to}', result.to || '')"></div>
+      <button type="button" @click="reloadAfter()" class="btn-secondary">{{ t('update.reload_page') }}</button>
+    </div>
+  </template>
+
+  <template x-if="state === 'done-manual'">
+    <div class="card p-4 flex items-start gap-3 border-amber-500/30 bg-amber-500/5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-amber-300 shrink-0 mt-0.5">
+        <path d="M12 2 L22 20 L2 20 Z"/><path d="M12 9v5M12 17v.01"/>
+      </svg>
+      <div class="text-sm">
+        {{ t('update.installed_manual') }}
+        <code class="bg-ink-900/60 rounded px-2 py-0.5 text-xs">sudo systemctl restart docusort</code>
+      </div>
+    </div>
+  </template>
+
+  <template x-if="state === 'error'">
+    <div class="card p-4 flex items-start gap-3 border-rose-500/30 bg-rose-500/5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 text-rose-300 shrink-0 mt-0.5">
+        <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>
+      </svg>
+      <div class="flex-1 text-sm">
+        {{ t('update.failed') }} <span x-text="error" class="text-rose-300"></span>
+      </div>
+      <button type="button" @click="state='idle'" class="btn-ghost">{{ t('update.close') }}</button>
+    </div>
+  </template>
+</div>
+
+<main class="{% block main_class %}mx-auto max-w-screen-2xl px-4 py-6 sm:py-10{% endblock %}">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="mx-auto max-w-screen-2xl px-4 py-10 text-center text-xs text-ink-500">
+  {{ t('app.footer', version=version) }}
+</footer>
+
+<script>
+// Zahlen und Datumsangaben folgen der Oberflächensprache. Vorher stand in
+// neun Stellen fest „de-DE" — in der englischen Fassung las sich jeder
+// Betrag deutsch (50,16 € statt €50.16).
+const DS_LOCALE = {{ (lang ~ ('-US' if lang == 'en' else '-' ~ lang.upper())) | tojson }};
+const T = {{ js_translations | tojson }};
+const CAT_LABELS = {{ cat_labels | tojson }};
+function catLabel(key) { return CAT_LABELS[key] || T['finance.cat.' + key] || key; }
+function tr(key, vars) {
+  let s = T[key] || key;
+  if (vars) for (const k in vars) s = s.replaceAll('{' + k + '}', vars[k]);
+  return s;
+}
+async function switchLang(code) {
+  await fetch('/api/language/' + encodeURIComponent(code), { method: 'POST' });
+  location.reload();
+}
+
+function aiActivity() {
+  return {
+    open: false,
+    snap: { in_flight: 0, last_call_at: 0, pending_or_processing: 0, jobs: {} },
+    handle: null,
+    start() {
+      this.tick();
+      // Poll cadence: tighter while something is in flight, looser
+      // while idle so we don't hit the API every second for nothing.
+      this.handle = setInterval(() => this.tick(), 3000);
+    },
+    async tick() {
+      try {
+        const r = await fetch('/api/activity');
+        if (!r.ok) return;
+        this.snap = await r.json();
+      } catch (e) { /* swallow */ }
+    },
+    get active() {
+      return (this.snap.in_flight || 0) > 0
+          || (this.approveJob && this.approveJob.running);
+    },
+    get total() {
+      const inflight = this.snap.in_flight || 0;
+      const job = this.approveJob;
+      const remaining = (job && job.running) ? Math.max(0, job.total - job.done) : 0;
+      return inflight + remaining;
+    },
+    get approveJob() { return (this.snap.jobs || {})['approve-pending']; },
+    get lastCallLabel() {
+      const t = this.snap.last_call_at;
+      if (!t) return '—';
+      const now = Date.now() / 1000;
+      const ds = Math.max(0, Math.round(now - t));
+      if (ds < 60)   return ds + ' s';
+      if (ds < 3600) return Math.round(ds / 60) + ' min';
+      return Math.round(ds / 3600) + ' h';
+    },
+  };
+}
+
+function updateBanner() {
+  return {
+    state: 'idle', info: {}, result: {}, error: '',
+    async check() {
+      try {
+        const r = await fetch('/api/version');
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d.has_update) { this.info = d; this.state = 'available'; }
+      } catch (e) {}
+    },
+    async install() {
+      this.state = 'installing';
+      try {
+        const r = await fetch('/api/update', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+        this.result = d;
+        this.state = d.restart && d.restart.restarted ? 'done-restarted' : 'done-manual';
+      } catch (e) {
+        this.error = e.message || String(e);
+        this.state = 'error';
+      }
+    },
+    reloadAfter() { setTimeout(() => location.reload(), 6000); },
+  };
+}
+</script>
+
+</body>
+</html>

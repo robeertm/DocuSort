@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}{{ t('auth.users') }} · DocuSort{% endblock %}
+{% block content %}
+{# The list is handed over as a JSON script block rather than inlined in
+   the x-data attribute: a display name containing an apostrophe would
+   otherwise terminate the attribute and silently break the whole page. #}
+<script type="application/json" id="users-data">{{ users | tojson }}</script>
+
+<div x-data="usersPage()" x-init="init()">
+  <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('auth.users') }}</h1>
+      <p class="text-ink-400 mt-1 text-sm max-w-2xl">{{ t('auth.users_hint') }}</p>
+    </div>
+    <button class="btn-primary" @click="openNew()">{{ t('auth.add_user') }}</button>
+  </div>
+
+  <template x-if="msg">
+    <div class="mb-4 rounded-xl px-3 py-2 text-sm"
+         :class="ok ? 'border border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                    : 'border border-rose-500/40 bg-rose-500/10 text-rose-200'"
+         x-text="msg"></div>
+  </template>
+
+  <div class="overflow-x-auto rounded-2xl border border-ink-800">
+    <table class="w-full text-sm">
+      <thead class="bg-ink-900/60 text-ink-400">
+        <tr>
+          <th class="text-left font-medium px-4 py-2.5">{{ t('auth.username') }}</th>
+          <th class="text-left font-medium px-4 py-2.5">{{ t('auth.role') }}</th>
+          <th class="text-left font-medium px-4 py-2.5">{{ t('auth.status') }}</th>
+          <th class="text-left font-medium px-4 py-2.5 hidden sm:table-cell">{{ t('auth.last_login') }}</th>
+          <th class="px-4 py-2.5"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="u in users" :key="u.id">
+          <tr class="border-t border-ink-800">
+            <td class="px-4 py-2.5">
+              <div class="font-medium" x-text="u.display_name || u.username"></div>
+              <div class="text-xs text-ink-500" x-text="u.username"></div>
+            </td>
+            <td class="px-4 py-2.5">
+              <span class="rounded-md px-1.5 py-0.5 text-xs"
+                    :class="u.role === 'admin' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-700 text-ink-300'"
+                    x-text="u.role === 'admin' ? T['auth.role_admin'] : T['auth.role_user']"></span>
+            </td>
+            <td class="px-4 py-2.5">
+              <span x-show="u.is_active" class="text-ink-300">{{ t('auth.active') }}</span>
+              <span x-show="!u.is_active" class="text-amber-300">{{ t('auth.disabled') }}</span>
+              <span x-show="u.must_change_password"
+                    class="ml-1 text-xs text-ink-500">{{ t('auth.pending_password') }}</span>
+            </td>
+            <td class="px-4 py-2.5 hidden sm:table-cell text-ink-400"
+                x-text="u.last_login ? u.last_login.replace('T', ' ') : '—'"></td>
+            <td class="px-4 py-2.5 text-right whitespace-nowrap">
+              <button class="btn-ghost !px-2 text-xs" @click="openEdit(u)">{{ t('auth.edit') }}</button>
+              <button class="btn-ghost !px-2 text-xs text-rose-300"
+                      @click="remove(u)" x-show="u.id !== meId">{{ t('auth.delete') }}</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- editor -->
+  <div x-show="form" x-cloak
+       class="fixed inset-0 z-40 grid place-items-center bg-black/60 p-4"
+       @click.self="form = null">
+    <div class="w-full max-w-sm rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-2xl" x-show="form">
+      <h2 class="font-medium mb-4"
+          x-text="form && form.id ? T['auth.edit_user'] : T['auth.add_user']"></h2>
+      <template x-if="form">
+        <form class="space-y-4" @submit.prevent="save()">
+          <div x-show="!form.id">
+            <label class="block text-sm text-ink-300 mb-1">{{ t('auth.username') }}</label>
+            <input type="text" x-model="form.username"
+                   class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm">
+            <p class="mt-1 text-xs text-ink-500">{{ t('auth.username_rule') }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-ink-300 mb-1">{{ t('auth.display_name') }}</label>
+            <input type="text" x-model="form.display_name"
+                   class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-sm text-ink-300 mb-1">{{ t('auth.role') }}</label>
+            <select x-model="form.role"
+                    class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm">
+              <option value="user">{{ t('auth.role_user') }}</option>
+              <option value="admin">{{ t('auth.role_admin') }}</option>
+            </select>
+            <p class="mt-1 text-xs text-ink-500">{{ t('auth.role_hint') }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-ink-300 mb-1"
+                   x-text="form.id ? T['auth.new_password_optional'] : T['auth.password']"></label>
+            <input type="password" x-model="form.password" autocomplete="new-password"
+                   class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm">
+            <p class="mt-1 text-xs text-ink-500">{{ t('auth.password_rule') }}</p>
+          </div>
+          <label class="flex items-center gap-2 text-sm" x-show="form.id">
+            <input type="checkbox" x-model="form.is_active" class="rounded">
+            <span>{{ t('auth.active') }}</span>
+          </label>
+          <div class="flex gap-2 justify-end pt-2">
+            <button type="button" class="btn-ghost" @click="form = null">{{ t('auth.cancel') }}</button>
+            <button type="submit" class="btn-primary" :disabled="busy"
+                    x-text="busy ? T['auth.saving'] : T['auth.save']"></button>
+          </div>
+        </form>
+      </template>
+    </div>
+  </div>
+</div>
+
+<script>
+function usersPage() {
+  return {
+    users: [], form: null, busy: false, msg: '', ok: false,
+    meId: {{ me.id }},
+    get T() { return (typeof T !== 'undefined' && T) || {}; },
+    init() {
+      try {
+        this.users = JSON.parse(document.getElementById('users-data').textContent) || [];
+      } catch (e) { this.users = []; }
+    },
+    async reload() {
+      const r = await fetch('/api/users', { headers: { 'Accept': 'application/json' } });
+      if (r.ok) { const d = await r.json(); this.users = d.users || []; }
+    },
+    openNew() {
+      this.form = { id: 0, username: '', display_name: '', role: 'user', password: '', is_active: true };
+    },
+    openEdit(u) {
+      this.form = { id: u.id, username: u.username, display_name: u.display_name || '',
+                    role: u.role, password: '', is_active: !!u.is_active };
+    },
+    flash(ok, text) { this.ok = ok; this.msg = text; setTimeout(() => { this.msg = ''; }, 5000); },
+    async save() {
+      this.busy = true;
+      try {
+        const f = this.form;
+        let r;
+        if (f.id) {
+          const body = { display_name: f.display_name, role: f.role, is_active: f.is_active };
+          if (f.password) body.password = f.password;
+          r = await fetch('/api/users/' + f.id, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body) });
+        } else {
+          r = await fetch('/api/users', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: f.username, display_name: f.display_name,
+                                   role: f.role, password: f.password }) });
+        }
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) { this.form = null; await this.reload(); this.flash(true, this.T['auth.saved'] || 'Gespeichert.'); }
+        else { this.flash(false, d.detail || 'Fehler'); }
+      } finally { this.busy = false; }
+    },
+    async remove(u) {
+      const q = (this.T['auth.confirm_delete'] || 'Really delete the user “{name}”?')
+                  .replace('{name}', u.display_name || u.username);
+      if (!confirm(q)) return;
+      const r = await fetch('/api/users/' + u.id, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { await this.reload(); this.flash(true, this.T['auth.deleted'] || 'Deleted.'); }
+      else { this.flash(false, d.detail || 'Fehler'); }
+    },
+  };
+}
+</script>
+{% endblock %}

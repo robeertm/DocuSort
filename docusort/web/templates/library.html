@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+{% block title %}{{ t('library.title') }} · DocuSort{% endblock %}
+{% block content %}
+
+<div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
+  <div>
+    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">
+      {% if trash %}{{ t('trash.title') }}{% else %}{{ t('library.title') }}{% endif %}
+    </h1>
+    <p class="text-ink-400 mt-1 text-sm">
+      {% if trash %}{{ t('trash.subtitle') }}
+      {% elif filter.status == 'review' %}{{ t('library.subtitle_review') }}
+      {% else %}{{ t('library.subtitle_default') }}{% endif %}
+    </p>
+  </div>
+  <div class="flex items-center gap-2">
+    {% if not trash and filter.status == 'review' %}
+      <button type="button" x-data="{ running: false, done: 0, total: 0 }"
+              x-init="
+                const tick = async () => {
+                  try {
+                    const r = await fetch('/api/library/retry-progress');
+                    if (r.ok) { const d = await r.json(); running = d.running; done = d.done; total = d.total; }
+                  } catch(e) {}
+                };
+                tick(); setInterval(tick, 2000);
+              "
+              @click="
+                if (running) return;
+                if (!confirm('Re-classify every document currently in review?')) return;
+                fetch('/api/library/retry-all-review', { method: 'POST' })
+                  .then(r => r.json())
+                  .then(d => { if (d.started === false && d.reason !== 'queue empty') alert('Already running.'); });
+              "
+              :disabled="running"
+              class="btn-ghost text-amber-300 hover:bg-amber-500/10 disabled:opacity-60 disabled:cursor-not-allowed">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M3 12a9 9 0 1 0 3-6.708"/><path d="M3 4v5h5"/>
+        </svg>
+        <span x-show="!running">Re-queue all review</span>
+        <span x-show="running" x-cloak x-text="`Re-classifying… ${done}/${total}`"></span>
+      </button>
+    {% endif %}
+    {% if trash %}
+      <button type="button" x-data
+              @click="if (confirm('{{ t('trash.confirm_empty') }}')) {
+                fetch('/api/trash/empty', { method: 'POST' })
+                  .then(r => r.ok ? location.reload() : r.json().then(d => alert(d.detail || ('HTTP '+r.status))));
+              }"
+              class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+        </svg>
+        {{ t('trash.empty_all') }}
+      </button>
+    {% elif me and me.is_admin %}
+      {# Exporting the whole library is a way to carry every document out
+         of the house, so it stays with the administrator — same rule as
+         /api/export.zip enforces on the server. #}
+      <a href="/api/export.zip{% if filter.year %}?year={{ filter.year }}{% if filter.category %}&category={{ filter.category }}{% endif %}{% elif filter.category %}?category={{ filter.category }}{% endif %}"
+         class="btn-secondary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+        </svg>
+        {{ t('library.export') }}
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Filter bar -->
+<form
+  class="card p-4 mb-6 space-y-3"
+  hx-get="/library?partial=1{% if trash %}&trash=1{% endif %}"
+  hx-trigger="change, keyup delay:400ms from:input[name=q]"
+  hx-target="#grid"
+  hx-push-url="true"
+  hx-include="this"
+>
+  <!-- Row 1: search + status + reset -->
+  <div class="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+    <label class="relative block">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400">
+        <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input type="search" name="q" value="{{ filter.q or '' }}"
+             placeholder="{{ t('library.search_placeholder') }}"
+             class="w-full rounded-xl bg-ink-900/60 border border-ink-700 pl-10 pr-3 py-2.5 text-sm placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+    </label>
+    <input type="hidden" name="category" value="{{ filter.category or '' }}">
+    <input type="hidden" name="year"     value="{{ filter.year or '' }}">
+    <select name="status" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+      <option value="">{{ t('library.all_statuses') }}</option>
+      <option value="filed"     {% if filter.status == 'filed' %}selected{% endif %}>{{ t('library.status_filed') }}</option>
+      <option value="review"    {% if filter.status == 'review' %}selected{% endif %}>{{ t('library.status_review') }}</option>
+      <option value="failed"    {% if filter.status == 'failed' %}selected{% endif %}>{{ t('library.status_failed') }}</option>
+      <option value="duplicate" {% if filter.status == 'duplicate' %}selected{% endif %}>{{ t('library.status_duplicate') }}</option>
+    </select>
+    <a href="/library" class="btn-secondary">{{ t('library.reset') }}</a>
+  </div>
+
+  <!-- Row 2: sort + direction + date ranges + quick filters -->
+  <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4 items-end border-t border-ink-700/50 pt-3">
+    <label class="block">
+      <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.sort_by') }}</span>
+      <select name="sort" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+        <option value="doc_date"   {% if filter.sort == 'doc_date' %}selected{% endif %}>{{ t('library.sort_doc_date') }}</option>
+        <option value="created_at" {% if filter.sort == 'created_at' %}selected{% endif %}>{{ t('library.sort_created_at') }}</option>
+        <option value="sender"     {% if filter.sort == 'sender' %}selected{% endif %}>{{ t('library.sort_sender') }}</option>
+        <option value="subject"    {% if filter.sort == 'subject' %}selected{% endif %}>{{ t('library.sort_subject') }}</option>
+        <option value="category"   {% if filter.sort == 'category' %}selected{% endif %}>{{ t('library.sort_category') }}</option>
+        <option value="file_size"  {% if filter.sort == 'file_size' %}selected{% endif %}>{{ t('library.sort_file_size') }}</option>
+        <option value="page_count" {% if filter.sort == 'page_count' %}selected{% endif %}>{{ t('library.sort_page_count') }}</option>
+        <option value="confidence" {% if filter.sort == 'confidence' %}selected{% endif %}>{{ t('library.sort_confidence') }}</option>
+        {% if filter.q %}<option value="relevance" {% if filter.sort == 'relevance' %}selected{% endif %}>{{ t('library.sort_relevance') }}</option>{% endif %}
+      </select>
+    </label>
+    <label class="block">
+      <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.sort_dir') }}</span>
+      <select name="dir" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+        <option value="desc" {% if filter.dir != 'asc' %}selected{% endif %}>{{ t('library.sort_desc') }}</option>
+        <option value="asc"  {% if filter.dir == 'asc' %}selected{% endif %}>{{ t('library.sort_asc') }}</option>
+      </select>
+    </label>
+    <label class="block">
+      <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.doc_date_range') }}</span>
+      <div class="flex items-center gap-1">
+        <input type="date" name="doc_from" value="{{ filter.doc_from or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2 text-xs tabular-nums">
+        <span class="text-ink-500 text-xs">–</span>
+        <input type="date" name="doc_to" value="{{ filter.doc_to or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2 text-xs tabular-nums">
+      </div>
+    </label>
+    <label class="block">
+      <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.scan_date_range') }}</span>
+      <div class="flex items-center gap-1">
+        <input type="date" name="scan_from" value="{{ filter.scan_from or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2 text-xs tabular-nums">
+        <span class="text-ink-500 text-xs">–</span>
+        <input type="date" name="scan_to" value="{{ filter.scan_to or '' }}"
+               class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-2 py-2 text-xs tabular-nums">
+      </div>
+    </label>
+  </div>
+
+  <!-- Quick scan-date filters -->
+  <div class="flex flex-wrap items-center gap-2 text-xs">
+    <span class="text-ink-500 uppercase tracking-wider text-[11px]">{{ t('library.quick_scan') }}</span>
+    <button type="button" onclick="libQuickScan(this,7)"
+            class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1">{{ t('library.quick_7') }}</button>
+    <button type="button" onclick="libQuickScan(this,30)"
+            class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1">{{ t('library.quick_30') }}</button>
+    <button type="button" onclick="libQuickScan(this,365)"
+            class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1">{{ t('library.quick_365') }}</button>
+    <button type="button" onclick="libClearDates(this)"
+            class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1 text-ink-400">{{ t('library.quick_clear') }}</button>
+  </div>
+</form>
+<script>
+function libQuickScan(btn, days) {
+  const form = btn.closest('form');
+  const pad = n => String(n).padStart(2, '0');
+  const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const to = new Date();
+  const from = new Date(); from.setDate(from.getDate() - days);
+  form.querySelector('[name=scan_from]').value = iso(from);
+  form.querySelector('[name=scan_to]').value = iso(to);
+  form.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function libClearDates(btn) {
+  const form = btn.closest('form');
+  ['doc_from','doc_to','scan_from','scan_to'].forEach(n => {
+    const el = form.querySelector('[name=' + n + ']'); if (el) el.value = '';
+  });
+  form.dispatchEvent(new Event('change', { bubbles: true }));
+}
+</script>
+
+<!-- Active-filter breadcrumb -->
+{% if filter.year or filter.category or filter.status or filter.q %}
+<div class="flex flex-wrap items-center gap-2 mb-4 text-sm">
+  <span class="text-ink-400">{{ t('library.filter_label') }}</span>
+  {% if filter.year %}
+    <a href="/library?{% if filter.category %}category={{ filter.category }}&{% endif %}{% if filter.status %}status={{ filter.status }}&{% endif %}{% if filter.q %}q={{ filter.q }}{% endif %}"
+       class="chip bg-ink-700/60 text-ink-100 hover:bg-ink-600">
+      {% if filter.year == 'unknown' %}—{% else %}{{ filter.year }}{% endif %} <span class="text-ink-400 ml-1">✕</span>
+    </a>
+  {% endif %}
+  {% if filter.category %}
+    <a href="/library?{% if filter.year %}year={{ filter.year }}&{% endif %}{% if filter.status %}status={{ filter.status }}&{% endif %}{% if filter.q %}q={{ filter.q }}{% endif %}"
+       class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20 hover:bg-emerald-500/20">
+      {{ filter.category }} <span class="ml-1 opacity-70">✕</span>
+    </a>
+  {% endif %}
+  {% if filter.q %}
+    <span class="chip bg-ink-700/60 text-ink-100">„{{ filter.q }}"</span>
+  {% endif %}
+</div>
+{% endif %}
+
+<div x-data="library({ trash: {{ trash | tojson }} })" class="lg:grid lg:grid-cols-[260px_1fr] lg:gap-6">
+
+  <aside class="card p-3 mb-4 lg:mb-0 lg:sticky lg:top-24 lg:self-start lg:max-h-[calc(100vh-7rem)] lg:overflow-auto"
+         x-data='{
+           currentYear: {{ (filter.year or "") | tojson }},
+           currentCategory: {{ (filter.category or "") | tojson }}
+         }'>
+
+    <a href="/library" class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm font-medium hover:bg-ink-700/40"
+       :class="(!currentYear && !currentCategory) ? 'bg-emerald-500/15 text-emerald-200' : ''">
+      <span class="flex items-center gap-2">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4 text-ink-400">
+          <path d="M3 7h18M3 12h18M3 17h18"/>
+        </svg>
+        {{ t('library.tree_all') }}
+      </span>
+      <span class="tabular-nums text-xs text-ink-400">{{ tree.total.n }}</span>
+    </a>
+
+    <div class="mt-2 mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-ink-500">
+      {{ t('library.tree_by_year') }}
+    </div>
+
+    {% for y in tree.years %}
+      {% set y_open = (filter.year == y.key) %}
+      <div x-data="{ open: {{ y_open | tojson }} }" class="mb-0.5">
+        <div class="flex items-center rounded-lg hover:bg-ink-700/30"
+             :class="'{{ y.key }}' === currentYear && !currentCategory ? 'bg-emerald-500/15 text-emerald-200' : ''">
+          <button type="button" @click="open = !open"
+                  class="p-1.5 text-ink-500 hover:text-ink-200 shrink-0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 class="h-3.5 w-3.5 transition-transform"
+                 :class="open ? 'rotate-90' : ''"
+                 {% if y_open %}style="transform: rotate(90deg)"{% endif %}>
+              <path d="m9 18 6-6-6-6"/>
+            </svg>
+          </button>
+          <a href="/library?year={{ y.key }}" class="flex-1 flex items-center justify-between py-1.5 pr-2 text-sm">
+            <span class="font-medium">{{ y.year }}</span>
+            <span class="tabular-nums text-xs text-ink-400">{{ y.count }}</span>
+          </a>
+        </div>
+        <div x-show="open" class="pl-7 pr-1 space-y-0.5"
+             {% if not y_open %}style="display: none"{% endif %}>
+          {% for c in y.categories %}
+            <a href="/library?year={{ y.key }}&category={{ c.name }}"
+               class="flex items-center justify-between rounded-md px-2 py-1 text-sm hover:bg-ink-700/30"
+               :class="'{{ y.key }}' === currentYear && '{{ c.name }}' === currentCategory ? 'bg-emerald-500/15 text-emerald-200' : 'text-ink-300'">
+              <span class="truncate">{{ cat(c.name) }}</span>
+              <span class="tabular-nums text-xs text-ink-500">{{ c.count }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    {% else %}
+      <p class="text-xs text-ink-500 px-2.5 py-2">{{ t('library.no_docs') }}</p>
+    {% endfor %}
+
+    {% if tree.statuses.review or tree.statuses.failed or tree.trash %}
+    <div class="mt-3 pt-3 border-t border-ink-700/50">
+      <div class="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-ink-500">
+        {{ t('library.tree_status') }}
+      </div>
+      {% if tree.statuses.review %}
+        <a href="/library?status=review"
+           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if filter.status == 'review' and not trash %}bg-amber-500/15 text-amber-200{% endif %}">
+          <span class="flex items-center gap-2">
+            <span class="h-2 w-2 rounded-full bg-amber-400"></span>
+            {{ t('card.review') }}
+          </span>
+          <span class="tabular-nums text-xs text-ink-400">{{ tree.statuses.review }}</span>
+        </a>
+      {% endif %}
+      {% if tree.statuses.failed %}
+        <a href="/library?status=failed"
+           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if filter.status == 'failed' and not trash %}bg-rose-500/15 text-rose-200{% endif %}">
+          <span class="flex items-center gap-2">
+            <span class="h-2 w-2 rounded-full bg-rose-400"></span>
+            {{ t('card.failed') }}
+          </span>
+          <span class="tabular-nums text-xs text-ink-400">{{ tree.statuses.failed }}</span>
+        </a>
+      {% endif %}
+      {% if tree.statuses.duplicate %}
+        <a href="/library?status=duplicate"
+           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if filter.status == 'duplicate' %}bg-indigo-500/15 text-indigo-200{% endif %}">
+          <span class="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5 text-ink-400">
+              <rect x="8" y="8" width="13" height="13" rx="2"/><path d="M3 14V5a2 2 0 0 1 2-2h9"/>
+            </svg>
+            {{ t('library.duplicates_uploaded') }}
+          </span>
+          <span class="tabular-nums text-xs text-ink-400">{{ tree.statuses.duplicate }}</span>
+        </a>
+      {% endif %}
+      {% if tree.trash and me and me.is_admin %}
+        <a href="/library?trash=1"
+           class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-ink-700/30 {% if trash %}bg-ink-700/60 text-ink-100{% endif %}">
+          <span class="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5 text-ink-400">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+            </svg>
+            {{ t('trash.title') }}
+          </span>
+          <span class="tabular-nums text-xs text-ink-400">{{ tree.trash }}</span>
+        </a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </aside>
+
+  <div id="grid" class="min-w-0">
+    {% include "_card_grid.html" %}
+  </div>
+</div>
+
+<!-- Sticky bulk-action bar -->
+<div x-data x-cloak
+     class="fixed inset-x-0 bottom-4 z-30 flex justify-center pointer-events-none px-4">
+  <div x-show="$store.libBulk.size > 0"
+       x-transition.opacity
+       class="card pointer-events-auto p-3 flex flex-wrap items-center gap-2 shadow-2xl border-emerald-500/40 bg-ink-900/95">
+    <span class="text-sm font-medium px-2"
+          x-text="tr('library.selected_count', { n: $store.libBulk.size })"></span>
+
+    <button type="button" @click="$store.libBulk.clear()"
+            class="btn-ghost text-xs">
+      {{ t('library.bulk_clear') }}
+    </button>
+
+    {% if not trash %}
+    <select @change="$store.libBulk.recategorize($event.target.value); $event.target.value=''"
+            class="rounded-xl bg-ink-800 border border-ink-700 px-3 py-2 text-sm">
+      <option value="">{{ t('library.bulk_recategorize') }}</option>
+      {% for c in categories %}
+        <option value="{{ c }}">{{ cat(c) }}</option>
+      {% endfor %}
+    </select>
+
+    {% if me and me.is_admin %}
+    <button type="button" @click="$store.libBulk.exportZip()" class="btn-secondary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+      </svg>
+      {{ t('library.bulk_export') }}
+    </button>
+
+    <button type="button" @click="$store.libBulk.trash()" class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/>
+      </svg>
+      {{ t('library.bulk_trash') }}
+    </button>
+    {% endif %}
+    {% else %}
+    <button type="button" @click="$store.libBulk.restore()" class="btn-secondary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 5v4h4"/>
+      </svg>
+      {{ t('trash.restore_button') }}
+    </button>
+    <button type="button" @click="$store.libBulk.purge()" class="btn-ghost text-rose-300 hover:bg-rose-500/10">
+      {{ t('trash.purge_button') }}
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.addEventListener('alpine:init', () => {
+  // Shared selection store, accessible from cards inside _card_grid.html
+  // (which gets HTMX-swapped — local component state would die on swap).
+  Alpine.store('libBulk', {
+    ids: new Set(),
+    trashMode: false,
+    get size() { return this.ids.size; },
+    has(id) { return this.ids.has(id); },
+    toggle(id) {
+      if (this.ids.has(id)) this.ids.delete(id);
+      else this.ids.add(id);
+    },
+    clear() { this.ids.clear(); },
+
+    async _bulkPost(path, extra = {}) {
+      const ids = [...this.ids];
+      const r = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, ...extra }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        alert(d.detail || ('HTTP ' + r.status));
+        return null;
+      }
+      this.clear();
+      location.reload();
+      return r.json();
+    },
+    trash()      { return this._bulkPost('/api/bulk/delete'); },
+    restore()    { return this._bulkPost('/api/bulk/restore'); },
+    async purge() {
+      if (!confirm(tr('trash.confirm_purge'))) return;
+      return this._bulkPost('/api/bulk/purge');
+    },
+    async recategorize(category) {
+      if (!category) return;
+      return this._bulkPost('/api/bulk/recategorize', { category });
+    },
+    exportZip() {
+      const ids = [...this.ids].join(',');
+      window.open('/api/export.zip?ids=' + ids, '_blank');
+    },
+  });
+});
+
+function library({ trash }) {
+  return {
+    trash,
+    get selected() { return this.$store.libBulk.ids; },
+    has(id) { return this.$store.libBulk.has(id); },
+    toggle(id) { this.$store.libBulk.toggle(id); },
+  };
+}
+</script>
+
+{% endblock %}
