@@ -1,5 +1,11 @@
 # DocuSort
 
+[![Licence: source-available](https://img.shields.io/badge/licence-source--available-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/robeertm/DocuSort?logo=github)](https://github.com/robeertm/DocuSort/releases/latest)
+[![Container image](https://img.shields.io/badge/ghcr.io-docusort-2496ED?logo=docker&logoColor=white)](https://github.com/robeertm/DocuSort/pkgs/container/docusort)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Languages](https://img.shields.io/badge/i18n-5%20languages-brightgreen)](#everything-else)
+
 **Self-hosted document organiser and household finance tracker.** Drop a scan
 in — it is read, renamed, dated, filed and searchable seconds later. Feed it
 your bank exports or statement PDFs and the same documents line up with the
@@ -271,4 +277,10 @@ identical by design and a test checks that.
 
 ## Licence
 
-See [LICENSE](LICENSE).
+**Source-available, not open source.** Read the code, run it for yourself,
+change it for your own use — that is expressly allowed and always free. What
+is not allowed is selling it, offering it as a service, or shipping it as part
+of someone else's product. All rights stay with the authors.
+
+GitHub does not recognise this as one of its standard licences, so the
+sidebar shows none; the full terms are in [LICENSE](LICENSE).
