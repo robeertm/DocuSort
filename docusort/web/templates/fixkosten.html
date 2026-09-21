@@ -7,14 +7,14 @@
   <div class="flex items-start justify-between gap-3 flex-wrap">
     <div>
       <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('fixed.title') }}</h1>
-      <p class="text-ink-400 mt-1 text-sm max-w-3xl">
+      <p class="text-ink-400 mt-1 text-sm max-w-3xl hidden sm:block">
         {{ t('fixed.intro') }} <b class="text-ink-200">{{ t('fixed.per_month_word') }}</b> {{ t('fixed.and') }} <b class="text-ink-200">{{ t('fixed.per_year_word') }}</b>?
         {{ t('fixed.intro2') }}
       </p>
     </div>
     <p class="w-full text-xs text-emerald-300 -mt-1" x-show="accFiltered" x-cloak
        x-text="'{{ t('spending.accounts_active') | replace("'", "\\'") }}'.replace('{list}', accounts.filter(a => a.selected).map(a => a.label).join(', '))"></p>
-    <div class="flex items-center gap-3 text-xs text-ink-500">
+    <div class="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-ink-500 w-full sm:w-auto">
       {# Kontenauswahl — dieselbe wie auf /ausgaben (db.account_picks liefert
          beide Seiten), nur hier per Alpine statt per GET-Formular, weil die
          Seite ihre Zahlen ohnehin nachlädt. Leere Auswahl = alle Konten. #}
@@ -61,42 +61,42 @@
         </select>
       </label>
       <span x-show="months < 12" x-cloak class="text-amber-300/80" title="{{ t('fixed.window_short_hint') }}">{{ t('fixed.window_short') }}</span>
-      <a href="/transactions" class="hover:text-emerald-300 underline">{{ t('fixed.bookings_link') }}</a>
-      <a href="/finance" class="hover:text-emerald-300 underline">Finance Dashboard →</a>
+      <a href="/transactions" class="hidden sm:inline hover:text-emerald-300 underline">{{ t('fixed.bookings_link') }}</a>
+      <a href="/finance" class="hidden sm:inline hover:text-emerald-300 underline">Finance Dashboard →</a>
     </div>
   </div>
 
   <!-- KPIs -->
-  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-    <div class="card p-4 border-rose-500/30 bg-rose-500/5">
+  <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-5">
+    <div class="card p-3 sm:p-4 border-rose-500/30 bg-rose-500/5 col-span-2 lg:col-span-1">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('fixed.per_month') }}</div>
-      <div class="mt-1 text-3xl font-semibold tabular-nums text-rose-300" x-text="fmtEur(data.total_monthly)"></div>
+      <div class="mt-1 text-2xl sm:text-3xl font-semibold tabular-nums text-rose-300 leading-tight" x-text="fmtEur(data.total_monthly)"></div>
       <div class="text-[11px] text-ink-500 mt-0.5">{{ t('fixed.all_to_month') }}</div>
     </div>
-    <div class="card p-4">
+    <div class="card p-3 sm:p-4">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('fixed.per_year') }}</div>
-      <div class="mt-1 text-3xl font-semibold tabular-nums text-rose-300" x-text="fmtEur(data.total_yearly)"></div>
+      <div class="mt-1 text-2xl sm:text-3xl font-semibold tabular-nums text-rose-300 leading-tight" x-text="fmtEur(data.total_yearly)"></div>
       <div class="text-[11px] text-ink-500 mt-0.5" x-text="data.items.length + ' {{ t('fixed.items') }}'"></div>
     </div>
-    <div class="card p-4">
+    <div class="card p-3 sm:p-4">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('fixed.of_monthly') }}</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="fmtEur(sumBy(i => i.per_year === 12))"></div>
+      <div class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums leading-tight" x-text="fmtEur(sumBy(i => i.per_year === 12))"></div>
       <div class="text-[11px] text-ink-500 mt-0.5" x-text="countBy(i => i.per_year === 12) + ' {{ t('fixed.items_per_month') }}'"></div>
     </div>
-    <div class="card p-4 border-violet-500/30 bg-violet-500/5" title="{{ t('fixed.saving_hint') }}">
+    <div class="card p-3 sm:p-4 border-violet-500/30 bg-violet-500/5" title="{{ t('fixed.saving_hint') }}">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('fixed.of_saving') }}</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums text-violet-200" x-text="fmtEur(data.saving_monthly || 0)"></div>
+      <div class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums text-violet-200 leading-tight" x-text="fmtEur(data.saving_monthly || 0)"></div>
       <div class="text-[11px] text-ink-500 mt-0.5" x-text="'{{ t('fixed.real_without_saving') }} ' + fmtEur(data.total_monthly - (data.saving_monthly || 0)) + '/{{ t('fixed.month_abbr') }}'"></div>
     </div>
-    <div class="card p-4">
+    <div class="card p-3 sm:p-4">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('fixed.of_rarer') }}</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="fmtEur(sumBy(i => i.per_year < 12))"></div>
+      <div class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums leading-tight" x-text="fmtEur(sumBy(i => i.per_year < 12))"></div>
       <div class="text-[11px] text-ink-500 mt-0.5" x-text="countBy(i => i.per_year < 12) + ' {{ t('fixed.items_rarer') }}'"></div>
     </div>
   </div>
 
   <!-- what counts as a fixed cost -->
-  <div class="card p-4">
+  <div class="card p-3 sm:p-4">
     <button type="button" @click="showDef = !showDef" class="w-full flex items-center justify-between gap-3 text-left">
       <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400">{{ t('fixed.what_counts') }}</h2>
       <span class="text-xs text-ink-500" x-text="showDef ? '{{ t('fixed.collapse') }}' : (fixedCats.length + ' {{ t('fixed.categories_n') }}')"></span>
@@ -115,7 +115,7 @@
   </div>
 
   <!-- Nach Kategorie -->
-  <div class="card p-4" x-show="data.by_category.length" x-cloak>
+  <div class="card p-3 sm:p-4" x-show="data.by_category.length" x-cloak>
     <div class="flex items-baseline justify-between gap-3 flex-wrap mb-3">
       <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400">{{ t('fixed.by_category') }}</h2>
       <p class="text-[11px] text-ink-500">{{ t('fixed.by_category_hint') }}</p>
@@ -152,7 +152,51 @@
       <span class="text-xs text-ink-500" x-show="loading">{{ t('fixed.loading') }}</span>
       <span class="text-xs text-ink-500" x-show="!loading" x-text="'{{ t('fixed.since_date') | replace("'", "\\'")  }}'.replace('{date}', data.since)"></span>
     </div>
-    <div class="overflow-x-auto">
+    {# ---------- Handy: Liste statt Tabelle ----------
+       Zehn Spalten auf 386 px sind keine Tabelle mehr, sondern ein Gedränge.
+       Auf dem Telefon bekommt jeder Posten eine Zeile mit drei Ebenen:
+       Name, wofür/wie oft, und rechts der Monatsbetrag. Die Kategorie
+       liegt darunter als volle Zeile — ein Auswahlfeld in einer
+       Tabellenzelle trifft man nicht. #}
+    <div class="sm:hidden px-4 m-list">
+      <template x-for="i in visibleItems" :key="'m-' + i.uid">
+        <div class="py-3">
+          <div class="flex items-start gap-3">
+            <input type="checkbox" checked :disabled="busy" @change="toggleItem(i, $event.target.checked)"
+                   class="mt-1 shrink-0 rounded border-ink-600 bg-ink-900 accent-emerald-500"
+                   :aria-label="dispName(i)">
+            <div class="min-w-0 flex-1">
+              <a :href="txLink(i)" class="m-title block hover:text-emerald-300"
+                 x-text="i.is_avg ? catLabel(i.category) + ' {{ t('fixed.all_but_contracts') }}' : i.name"></a>
+              <div class="m-sub mt-0.5" x-text="catLabel(i.category) + ' · ' + rhythmLabel(i)"></div>
+              <div class="m-sub text-ink-500"
+                   x-text="(i.is_avg ? '' : fmtEur(i.amount) + ' · ') + i.hits + '× · ' + fmtEur(i.yearly) + ' {{ t('fixed.per_year_abbr') }}' + ' · ' + i.last"></div>
+              <div class="mt-1 flex flex-wrap gap-1.5">
+                <span x-show="i.is_saving" x-cloak class="chip border border-violet-500/50 text-violet-200 bg-violet-500/10">{{ t('fixed.saving_badge') }}</span>
+                <span x-show="i.forced === 'in'" x-cloak class="chip bg-emerald-500/10 text-emerald-300">{{ t('fixed.marked_by_you') }}</span>
+                <span x-show="i.hits < 2" x-cloak class="chip bg-amber-500/10 text-amber-300">{{ t('fixed.single_booking_year') }}</span>
+              </div>
+            </div>
+            <div class="shrink-0 text-right">
+              <div class="m-amount text-rose-300" x-text="fmtEur(i.monthly)"></div>
+              <div class="text-[11px] text-ink-500">/{{ t('fixed.month_abbr') }}</div>
+            </div>
+          </div>
+          <select x-show="!i.is_avg" x-cloak
+                  x-effect="const v = i.category; $nextTick(() => { $el.value = v; })"
+                  @change="recategorize(i, $event)" :disabled="busy"
+                  class="mt-2 w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 text-sm">
+            <template x-for="c in cats" :key="'mc-' + c"><option :value="c" x-text="catLabel(c)"></option></template>
+            <option value="__new__">{{ t('fixed.new_category') }}</option>
+          </select>
+        </div>
+      </template>
+      <div x-show="!loading && visibleItems.length === 0" x-cloak class="py-8 text-center text-ink-500 text-sm">
+        {{ t('fixed.none_yet') }}
+      </div>
+    </div>
+
+    <div class="overflow-x-auto hidden sm:block">
       <table class="w-full text-sm table-fixed sm:table-auto">
         <thead class="text-xs uppercase tracking-wider text-ink-500 bg-ink-900/40">
           <tr>
@@ -190,7 +234,7 @@
                   <option value="__new__">{{ t('fixed.new_category') }}</option>
                 </select>
                 <span x-show="i.forced === 'in'" x-cloak class="block text-[10px] text-emerald-400">{{ t('fixed.marked_by_you') }}
-                  · <button type="button" @click="override(i, '')" class="underline hover:text-emerald-200" title="Markierung entfernen — DocuSort entscheidet wieder selbst">{{ t('fixed.reset') }}</button></span>
+                  · <button type="button" @click="override(i, '')" class="underline hover:text-emerald-200" title="{{ t('fixed.clear_mark_hint') }}">{{ t('fixed.reset') }}</button></span>
                 <span x-show="i.hits < 2" x-cloak class="block text-[10px] text-amber-300/80">{{ t('fixed.single_booking_year') }}</span>
               </td>
               <td class="px-3 py-2 hidden sm:table-cell">
@@ -213,7 +257,7 @@
           </template>
           <tr x-show="!loading && visibleItems.length === 0" x-cloak>
             <td colspan="12" class="px-3 py-10 text-center text-ink-500 text-sm">
-              <span x-show="!catFilter">{{ t('fixed.none_yet') }} sie hier.</span>
+              <span x-show="!catFilter">{{ t('fixed.none_yet') }}</span>
               <span x-show="catFilter" x-cloak>{{ t('fixed.no_items_in_cat') }}</span>
             </td>
           </tr>
@@ -242,7 +286,23 @@
         {{ t('fixed.not_in_sum') }}
       </p>
     </div>
-    <div class="overflow-x-auto">
+    <div class="sm:hidden px-4 m-list">
+      <template x-for="i in data.expired" :key="'m-' + i.uid">
+        <div class="flex items-start gap-3 py-3">
+          <input type="checkbox" :disabled="busy" @change="toggleItem(i, $event.target.checked)"
+                 class="mt-1 shrink-0 rounded border-ink-600 bg-ink-900 accent-emerald-500" :aria-label="i.name">
+          <div class="min-w-0 flex-1">
+            <a :href="txLink(i)" class="m-title block hover:text-emerald-300" x-text="i.name"></a>
+            <div class="m-sub mt-0.5" x-text="catLabel(i.category) + ' · ' + rhythmLabel(i)"></div>
+            <div class="m-sub text-amber-300/80"
+                 x-text="i.hits + '× · {{ t('fixed.last') | replace("'", "\\'") }} ' + i.last + ' ' + '{{ t('fixed.days_ago') | replace("'", "\\'") }}'.replace('{n}', i.days_since)"></div>
+          </div>
+          <div class="shrink-0 text-right m-sub" x-text="'{{ t('fixed.would_be') }} ' + fmtEur(i.monthly) + '/{{ t('fixed.month_abbr') }}'"></div>
+        </div>
+      </template>
+    </div>
+
+    <div class="overflow-x-auto hidden sm:block">
       <table class="w-full text-sm table-fixed sm:table-auto">
         <tbody>
           <template x-for="i in data.expired" :key="i.uid">
@@ -275,7 +335,7 @@
       <div class="flex-1 min-w-[16rem]">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400">{{ t('fixed.not_counted') }}</h2>
         <p class="text-xs text-ink-500 mt-1">
-          Wiederkehrend, aber der Art nach variabel (Supermarkt, Kantine, Bargeld …) — oder von dir herausgenommen.
+          {{ t('fixed.not_counted_hint') }}
           {{ t('fixed.search_hint') }}
         </p>
       </div>
@@ -284,10 +344,33 @@
         <input type="search" x-model.debounce.200ms="search" placeholder="{{ t('fixed.search_payee_ph') }}"
                class="w-full rounded bg-ink-900/60 border border-ink-800 px-2 py-1.5 text-sm">
         <span class="block text-[11px] text-ink-500 mt-1" x-show="search.trim().length >= 2" x-cloak
-              x-text="searchHits.length + ' Treffer' + (searchHits.length >= 60 ? ' {{ t('fixed.first_n') }}' : '')"></span>
+              x-text="searchHits.length + ' {{ t('fixed.hits_found') }}' + (searchHits.length >= 60 ? ' {{ t('fixed.first_n') }}' : '')"></span>
       </label>
     </div>
-    <div class="overflow-x-auto">
+    <div class="sm:hidden px-4 m-list">
+      <template x-for="i in listedCandidates" :key="'m-' + i.uid">
+        <div class="flex items-start gap-3 py-3">
+          <input type="checkbox" :disabled="busy" @change="toggleItem(i, $event.target.checked)"
+                 class="mt-1 shrink-0 rounded border-ink-600 bg-ink-900 accent-emerald-500" :aria-label="dispName(i)">
+          <div class="min-w-0 flex-1">
+            <a :href="txLink(i)" class="m-title block hover:text-emerald-300"
+               x-text="i.is_avg ? catLabel(i.category) + ' {{ t('fixed.all_but_contracts_avg') }}' : i.name"></a>
+            <div class="m-sub mt-0.5" x-text="catLabel(i.category) + ' · ' + rhythmLabel(i)"></div>
+            <div class="m-sub text-ink-500"
+                 x-text="i.hits + '× · {{ t('fixed.last') | replace("'", "\\'") }} ' + i.last"></div>
+            <span x-show="i.forced === 'out'" x-cloak class="chip bg-rose-500/10 text-rose-300 mt-1">{{ t('fixed.taken_out') }}</span>
+          </div>
+          <div class="shrink-0 text-right">
+            <div class="m-amount text-ink-300" x-text="fmtEur(i.monthly)"></div>
+            <div class="text-[11px] text-ink-500">/{{ t('fixed.month_abbr') }}</div>
+          </div>
+        </div>
+      </template>
+      <div x-show="search.trim().length >= 2 && listedCandidates.length === 0" x-cloak
+           class="py-6 text-center text-ink-500 text-sm">{{ t('fixed.no_payee_match') }}<span x-text="search.trim()"></span>“.</div>
+    </div>
+
+    <div class="overflow-x-auto hidden sm:block">
       <table class="w-full text-sm table-fixed sm:table-auto">
         <tbody>
           <template x-for="i in listedCandidates" :key="i.uid">
@@ -300,8 +383,8 @@
               <td class="px-2 sm:px-3 py-2 font-medium max-w-[320px] min-w-0 [overflow-wrap:anywhere]">
                 <a :href="txLink(i)" class="block break-words hover:text-emerald-300" x-text="i.is_avg ? catLabel(i.category) + ' {{ t('fixed.all_but_contracts_avg') }}' : i.name"></a>
                 <span x-show="i.clusters > 1" x-cloak class="block text-[10px] text-ink-500" x-text="'{{ t('fixed.contract_n') | replace("'", "\\'")  }}'.replace('{n}', i.cluster + 1).replace('{total}', i.clusters) + ' {{ t('fixed.at_this_payee') | replace("'", "\\'")  }}'"></span>
-                <span x-show="i.forced === 'out'" x-cloak class="text-[10px] text-rose-400">von dir herausgenommen
-                  · <button type="button" @click="override(i, '')" class="underline hover:text-rose-200" title="Markierung entfernen — DocuSort entscheidet wieder selbst">{{ t('fixed.reset') }}</button></span>
+                <span x-show="i.forced === 'out'" x-cloak class="text-[10px] text-rose-400">{{ t('fixed.taken_out') }}
+                  · <button type="button" @click="override(i, '')" class="underline hover:text-rose-200" title="{{ t('fixed.clear_mark_hint') }}">{{ t('fixed.reset') }}</button></span>
                 <span x-show="i.hits < 2" x-cloak class="text-[10px] text-ink-500">{{ t('fixed.single_booking_would') }}</span>
                 <span class="block text-[11px] text-ink-500 sm:hidden" x-text="catLabel(i.category) + ' · ' + rhythmLabel(i) + ' · ' + i.hits + '× · {{ t('fixed.last') | replace("'", "\\'")  }} ' + i.last"></span>
               </td>
@@ -403,7 +486,10 @@ function fixkosten() {
             ? { kind: 'merchant_amount', value: i.amount_rule, category: cat, name: i.name }
             : { kind: 'merchant', value: i.key, category: cat, name: i.name }) });
         const d = await r.json(); if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.flash(true, `„${i.name}“${i.clusters > 1 ? ' (' + this.fmtEur(i.amount) + ')' : ''} → ${this.catLabel(cat)}: ${d.applied} Buchung(en) umgesetzt, Regel gemerkt.`);
+        this.flash(true, ('{{ t('fixed.recat_done') | replace("'", "\\'") }}')
+          .replace('{name}', i.name)
+          .replace('{amt}', i.clusters > 1 ? ' (' + this.fmtEur(i.amount) + ')' : '')
+          .replace('{cat}', this.catLabel(cat)));
         await this.load();
       } catch (e) { this.flash(false, e.message || String(e)); }
       finally { this.busy = false; }

@@ -20,7 +20,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
   <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
     <div>
       <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('spending.title') }}</h1>
-      <p class="text-ink-400 mt-1 text-sm">{{ t('spending.subtitle') }}</p>
+      <p class="text-ink-400 mt-1 text-sm hidden sm:block">{{ t('spending.subtitle') }}</p>
       <p class="mt-2 text-sm" x-show="d.range_label" x-cloak>
         <span class="text-[10px] uppercase tracking-wider text-ink-500 mr-2">{{ t('spending.range') }}</span>
         <span class="font-semibold tabular-nums text-ink-100" x-text="d.range_label"></span>
@@ -198,7 +198,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
             <span class="text-ink-500">{{ t('game.per_day_allowed') }}</span>
             <span class="text-amber-300 font-medium tabular-nums" x-text="fmt(budgetPerDay)"></span>
           </span>
-          <span x-show="trend.clipped > 0" x-cloak class="text-amber-300/90"
+          <span x-show="trend.clipped > 0" x-cloak class="hidden sm:inline text-amber-300/90"
                 x-text="(trend.clipped === 1 ? T.trend_clipped_one : T.trend_clipped)
                           .replace('{n}', trend.clipped).replace('{cap}', fmt0(trend.cap) + ' €')"></span>
         </div>
@@ -214,7 +214,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
 
       {# Am Handy scrollt die Karte — sie startet an den JÜNGSTEN Tagen,
          die älteren liegen wie gewohnt links davon. #}
-      <div class="overflow-x-auto -mx-1 px-1" @scroll="hover = null"
+      <div class="overflow-x-auto -mx-1 px-1" data-tiny @scroll="hover = null"
            x-init="$nextTick(() => {
              // 🔴 Nicht ans ENDE scrollen, sondern an den letzten gelebten
              // Tag: seit die Kurve den ganzen Gehaltsmonat zeigt, wäre das
@@ -227,7 +227,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
         {# Auf dem Handy bekommt jeder Tag eine Mindestbreite und die Karte
            scrollt — sonst hätten weder Balken noch Betrag Platz. #}
         <div :style="'min-width: ' + (d.days.length * 30) + 'px'">
-          <div class="relative" style="height: 11rem; padding-top: 1.1rem;">
+          <div class="relative h-56 sm:h-44" style="padding-top: 1.1rem;">
             {# Tagesbudget: so viel darf ein Tag im Schnitt noch kosten,
                damit am Ende des Gehaltsmonats nichts fehlt. Gleiche Zahl
                wie „pro Tag" im Budget-Wecker. #}

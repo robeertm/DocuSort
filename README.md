@@ -105,13 +105,23 @@ months so you can see which one actually went best.
 
 ![Leaderboard of all months](docs/screenshots/17-leaderboard.png)
 
-It works on a phone, where the chart scrolls and starts at the most recent
-day that has actually happened:
+### On a phone
+
+The phone view is built for the phone, not squeezed down from the desktop:
+a tab bar within thumb reach, tables turned into readable rows, every
+control at least 44 pixels tall, and filters that fold away instead of
+standing in front of your data.
 
 <table>
   <tr>
-    <td width="50%"><a href="docs/screenshots/20-mobile-daily.png"><img src="docs/screenshots/20-mobile-daily.png" alt="Daily chart on a phone" /></a></td>
-    <td width="50%"><a href="docs/screenshots/21-mobile-game.png"><img src="docs/screenshots/21-mobile-game.png" alt="Saving game on a phone" /></a></td>
+    <td width="33%"><a href="docs/screenshots/12-mobile-dashboard.png"><img src="docs/screenshots/12-mobile-dashboard.png" alt="Dashboard on a phone" /></a></td>
+    <td width="33%"><a href="docs/screenshots/25-mobile-menu.png"><img src="docs/screenshots/25-mobile-menu.png" alt="The More sheet with every section" /></a></td>
+    <td width="33%"><a href="docs/screenshots/22-mobile-bookings.png"><img src="docs/screenshots/22-mobile-bookings.png" alt="Bookings as rows instead of a table" /></a></td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/20-mobile-daily.png"><img src="docs/screenshots/20-mobile-daily.png" alt="Daily chart on a phone" /></a></td>
+    <td><a href="docs/screenshots/21-mobile-game.png"><img src="docs/screenshots/21-mobile-game.png" alt="Saving game on a phone" /></a></td>
+    <td><a href="docs/screenshots/23-mobile-fixed.png"><img src="docs/screenshots/23-mobile-fixed.png" alt="Fixed costs on a phone" /></a></td>
   </tr>
 </table>
 

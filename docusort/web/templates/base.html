@@ -55,7 +55,7 @@
     ('/finance', t('nav.finance')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')),
   ] %}
   <nav class="mx-auto max-w-screen-2xl px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center gap-1.5 sm:gap-x-2.5 2xl:gap-x-4 sm:gap-y-1">
-    <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg shrink-0">
+    <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg shrink-0 min-h-[44px]">
       <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
           <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>
@@ -127,8 +127,8 @@
       </div>
     </div>
 
-    <!-- theme toggle -->
-    <button type="button"
+    <!-- theme toggle (Handy: im „Mehr"-Blatt) -->
+    <button type="button" class="hidden md:inline-flex"
             x-data="{
               theme: document.documentElement.dataset.theme || 'dark',
               toggle() {
@@ -141,7 +141,7 @@
               }
             }"
             @click="toggle()"
-            class="btn-ghost !px-2"
+            class="btn-ghost !px-2 !min-w-[44px]"
             :aria-label="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'"
             :title="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'">
       {# Sun for light mode (click → goes dark), moon for dark mode (click → goes light) #}
@@ -154,8 +154,8 @@
       </svg>
     </button>
 
-    <!-- language picker -->
-    <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+    <!-- language picker (Handy: im „Mehr"-Blatt) -->
+    <div class="relative hidden md:block" x-data="{ open: false }" @click.outside="open = false">
       <button type="button" @click="open = !open"
               class="btn-ghost !px-2" :aria-label="'{{ t('nav.language') }}'">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
@@ -180,7 +180,7 @@
     {# Who am I / sign out. Only the initial rides in the bar: spelling the
        display name out here cost ~150px and pushed the Upload button onto a
        second row. The full name and role sit in the open menu instead. #}
-    <div class="relative shrink-0" x-data="{ open: false }" @click.outside="open = false">
+    <div class="relative shrink-0 hidden md:block" x-data="{ open: false }" @click.outside="open = false">
       <button type="button" @click="open = !open"
               class="btn-ghost !px-1.5 flex items-center"
               :aria-expanded="open" aria-haspopup="menu"
@@ -210,7 +210,7 @@
     </div>
     {% endif %}
 
-    <a href="/upload" class="btn-primary !px-2 sm:!px-3 shrink-0"
+    <a href="/upload" class="btn-primary !px-2 sm:!px-3 shrink-0 hidden md:inline-flex"
        :aria-label="'{{ t('nav.upload') }}'">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
         <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
@@ -218,17 +218,17 @@
       <span class="hidden sm:inline">{{ t('nav.upload') }}</span>
     </a>
   </nav>
-  <!-- mobile nav -->
-  <nav class="xl:hidden mx-auto max-w-screen-2xl px-4 pb-2 flex gap-1 text-sm overflow-x-auto">
+  {# Der frühere Scrollstreifen unter der Kopfzeile ist weg: er zeigte je
+     nach Sprache drei bis vier Ziele, der Rest lag hinter einer Wischgeste,
+     die niemand vermutet. Auf dem Handy führt jetzt die Tab-Leiste am
+     unteren Rand (Daumenreichweite), zwischen md und xl der Streifen. #}
+  <nav class="hidden md:flex xl:hidden mx-auto max-w-screen-2xl px-4 pb-2 gap-1 text-sm overflow-x-auto">
     <a href="/" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('nav.dashboard') }}</a>
     {% for href, label in nav_items %}
       <a href="{{ href }}" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ label }}</a>
     {% endfor %}
     {% if me and me.is_admin %}
     <a href="/settings" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('nav.settings') }}</a>
-    {% endif %}
-    {% if me %}
-    <a href="/konto" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('auth.account') }}</a>
     {% endif %}
   </nav>
 </header>
@@ -401,6 +401,116 @@ function updateBanner() {
   };
 }
 </script>
+
+
+{% if me %}
+{# ==========================================================
+   Tab-Leiste am unteren Rand — nur Handy (< md).
+   Fünf Ziele, die man mit dem Daumen erreicht; alles Übrige liegt
+   im „Mehr"-Blatt. Der Upload sitzt in der Mitte, weil er die
+   zentrale Anlaufstelle ist: alles kommt hier herein.
+   ========================================================== #}
+{% set path = request.url.path if request else '/' %}
+<div x-data="{ more: false }" class="md:hidden">
+
+  <nav class="tabbar" aria-label="{{ t('nav.menu_title') }}">
+    <a href="/" class="tab" {% if path == '/' %}aria-current="page"{% endif %}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+        <path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>
+      </svg>
+      {{ t('nav.home') }}
+    </a>
+    <a href="/library" class="tab" {% if path == '/library' %}aria-current="page"{% endif %}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+        <path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4Z"/><path d="M20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6Z"/>
+      </svg>
+      {{ t('nav.library') }}
+    </a>
+    <a href="/upload" class="tab !text-ink-100" aria-label="{{ t('nav.upload') }}">
+      <span class="tab-plus">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="h-6 w-6">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </span>
+    </a>
+    <a href="/finance" class="tab" {% if path == '/finance' %}aria-current="page"{% endif %}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+        <path d="M3 17V9M9 17V5M15 17v-6M21 17V8"/><path d="M3 21h18"/>
+      </svg>
+      {{ t('nav.finance') }}
+    </a>
+    <button type="button" class="tab" @click="more = true" :aria-expanded="more">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+        <circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>
+      </svg>
+      {{ t('nav.more') }}
+    </button>
+  </nav>
+
+  {# „Mehr"-Blatt: fährt von unten ein, jede Zeile 56 px hoch. #}
+  <div x-show="more" x-cloak class="fixed inset-0 z-50" @keydown.escape.window="more = false">
+    <div class="absolute inset-0 bg-black/60" @click="more = false"></div>
+    <div class="absolute inset-x-0 bottom-0 rounded-t-3xl bg-ink-900 border-t border-ink-700 max-h-[85dvh] overflow-y-auto"
+         style="padding-bottom: calc(16px + env(safe-area-inset-bottom));"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="translate-y-full" x-transition:enter-end="translate-y-0"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="translate-y-0" x-transition:leave-end="translate-y-full">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-ink-700/60">
+        <span class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('nav.menu_title') }}</span>
+        <button type="button" @click="more = false" class="btn-ghost !px-3 !py-1.5 text-sm">{{ t('nav.close') }}</button>
+      </div>
+
+      <div class="py-1">
+        <a href="/ausgaben" class="sheet-row" {% if path == '/ausgaben' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">📊</span>{{ t('nav.spending') }}</a>
+        <a href="/analytics" class="sheet-row" {% if path == '/analytics' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">🧾</span>{{ t('nav.analytics') }}</a>
+        <a href="/transactions" class="sheet-row" {% if path == '/transactions' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">📒</span>{{ t('nav.transactions') }}</a>
+        <a href="/fixkosten" class="sheet-row" {% if path == '/fixkosten' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">🔁</span>{{ t('nav.fixed') }}</a>
+        <a href="/library?status=review" class="sheet-row">
+          <span class="w-6 text-center">👀</span>{{ t('nav.review') }}</a>
+        {% if me.is_admin %}
+        <a href="/settings" class="sheet-row" {% if path == '/settings' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">⚙️</span>{{ t('nav.settings') }}</a>
+        <a href="/users" class="sheet-row" {% if path == '/users' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">👥</span>{{ t('auth.users') }}</a>
+        {% endif %}
+        <a href="/konto" class="sheet-row" {% if path == '/konto' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">🙋</span>{{ t('auth.account') }}</a>
+      </div>
+
+      <div class="border-t border-ink-700/60 mt-1 pt-2">
+        <div class="px-4 pb-1 text-[11px] uppercase tracking-wider text-ink-500">{{ t('nav.appearance') }}</div>
+        <div class="px-4 pb-2 flex flex-wrap gap-2">
+          {# Der Knopf nennt das ZIEL, nicht beide Möglichkeiten —
+             „Hell / Dunkel" sagt niemandem, was ein Tipp bewirkt. #}
+          <button type="button" class="btn-secondary text-sm"
+                  x-data="{ theme: document.documentElement.dataset.theme || 'dark' }"
+                  @click="const d = document.documentElement;
+                                 const next = d.dataset.theme === 'light' ? 'dark' : 'light';
+                                 d.dataset.theme = next;
+                                 try { localStorage.setItem('docusort-theme', next); } catch (e) {}
+                                 document.querySelector('meta[name=theme-color]').setAttribute('content', next === 'light' ? '#f1f5f9' : '#0f172a');
+                                 theme = next;">
+            <span x-text="theme === 'light' ? '🌙' : '☀️'"></span>
+            <span x-text="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'"></span>
+          </button>
+          {% for code, name in supported_langs %}
+            <button type="button" @click="switchLang('{{ code }}')"
+                    class="btn-secondary text-sm {% if code == lang %}!bg-emerald-500/20 !text-emerald-200{% endif %}">
+              {{ code | upper }}
+            </button>
+          {% endfor %}
+        </div>
+        <a href="/logout" class="sheet-row text-rose-300"><span class="w-6 text-center">⏻</span>{{ t('auth.logout') }}</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 </body>
 </html>

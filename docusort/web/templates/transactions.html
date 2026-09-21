@@ -6,14 +6,14 @@
 
   <div class="flex items-start justify-between gap-3 flex-wrap">
     <div>
-      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Buchungen durchsuchen</h1>
-      <p class="text-ink-400 mt-1 text-sm">
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('tx.title_explore') }}</h1>
+      <p class="text-ink-400 mt-1 text-sm hidden sm:block">
         {{ t('tx.multi_payees') }} <code class="text-ink-200">rossmann, dm, müller</code>),
         {{ t('tx.intro2') }}
       </p>
     </div>
     <div class="flex items-center gap-3 text-xs text-ink-500">
-      <a href="/fixkosten" class="hover:text-emerald-300 underline">Fixkosten →</a>
+      <a href="/fixkosten" class="hover:text-emerald-300 underline">{{ t('tx.fixed_link') }}</a>
       <a href="/finance" class="hover:text-emerald-300 underline">Finance Dashboard →</a>
     </div>
   </div>
@@ -23,12 +23,26 @@
      picks) and WHAT (search, account, category, direction, amount). Every
      control shares one height and one label style; on phones the grid
      folds to two columns. #}
-  <div class="card p-4 sm:p-5 space-y-4">
+  {# Auf dem Handy ist die Filterkarte zugeklappt: sie ist zwei Bildschirme
+     hoch und steht sonst vor jeder Buchung. Ein Tipp öffnet sie, die Zahl
+     der gesetzten Filter steht am Knopf. #}
+  <button type="button" class="sm:hidden w-full card p-3 flex items-center justify-between gap-3"
+          @click="mFilters = !mFilters" :aria-expanded="mFilters">
+    <span class="flex items-center gap-2 text-sm font-medium">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5 text-ink-400">
+        <path d="M3 5h18M6 12h12M10 19h4"/>
+      </svg>
+      {{ t('tx.filters_open') }}
+    </span>
+    <span class="text-xs text-ink-400 tabular-nums" x-text="(agg.count || 0).toLocaleString(DS_LOCALE) + ' ×'"></span>
+  </button>
+
+  <div class="card p-4 sm:p-5 space-y-4" :class="mFilters ? '' : 'hidden sm:block'">
 
     <!-- Zeitraum -->
     <div>
       <div class="flex items-center gap-3 mb-2">
-        <span class="text-[10px] uppercase tracking-[0.2em] text-ink-500">Zeitraum</span>
+        <span class="text-[10px] uppercase tracking-[0.2em] text-ink-500">{{ t('tx.band_period') }}</span>
         <span class="h-px flex-1 bg-ink-800"></span>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-12 gap-x-3 gap-y-3 items-end">
@@ -43,22 +57,22 @@
           </select>
         </label>
         <label class="block md:col-span-1" title="{{ t('tx.salary_month_hint') }}">
-          <span class="flt-label">Monatsanfang</span>
+          <span class="flt-label">{{ t('tx.anchor_day') }}</span>
           <span class="relative block">
             <input type="number" min="1" max="31" x-model.number="anchorDay" @change="saveAnchorDay()" class="flt-input tabular-nums pr-6">
             <span class="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 text-sm pointer-events-none">.</span>
           </span>
         </label>
         <label class="block md:col-span-2">
-          <span class="flt-label">Von</span>
+          <span class="flt-label">{{ t('tx.from') }}</span>
           <input type="date" x-model="filter.start" @change="reload()" class="flt-input">
         </label>
         <label class="block md:col-span-2">
-          <span class="flt-label">Bis</span>
+          <span class="flt-label">{{ t('tx.to') }}</span>
           <input type="date" x-model="filter.end" @change="reload()" class="flt-input">
         </label>
-        <label class="block md:col-span-3" title="Setzt Von und Bis auf diesen Tag — zeigt alle Buchungen dieses Tages.">
-          <span class="flt-label">Bestimmter Tag</span>
+        <label class="block md:col-span-3" title="{{ t('tx.set_day_hint') }}">
+          <span class="flt-label">{{ t('tx.specific_day') }}</span>
           <input type="date" :value="oneDay" @change="setOneDay($event.target.value)" class="flt-input">
         </label>
       </div>
@@ -79,28 +93,28 @@
       </div>
       <div class="grid grid-cols-2 md:grid-cols-12 gap-x-3 gap-y-3 items-end">
         <label class="col-span-2 md:col-span-5 block">
-          <span class="flt-label">Suche <span class="text-ink-500/60 normal-case tracking-normal ml-1">— Teilstring, Komma trennt mehrere</span></span>
+          <span class="flt-label">{{ t('tx.search_label') }} <span class="text-ink-500/60 normal-case tracking-normal ml-1">{{ t('tx.search_sub') }}</span></span>
           <!-- Wildcard substring match against counterparty + purpose. -->
           <input type="search" x-model="filter.q" @input.debounce.300ms="reload()" placeholder="rossmann, dm, amazon …" class="flt-input">
         </label>
         <label class="block md:col-span-2">
           <span class="flt-label">Konto</span>
           <select x-model="filter.account_id" @change="reload()" class="flt-input">
-            <option value="">Alle Konten</option>
+            <option value="">{{ t('tx.all_accounts') }}</option>
             {% for a in accounts %}
               <option value="{{ a.id }}">{{ a.bank_name }}{% if a.iban_last4 %} · …{{ a.iban_last4 }}{% endif %}</option>
             {% endfor %}
           </select>
         </label>
         <label class="block md:col-span-2">
-          <span class="flt-label">Kategorie</span>
+          <span class="flt-label">{{ t('tx.category') }}</span>
           <select x-model="filter.category" @change="reload()" class="flt-input">
             <option value="">Alle</option>
             <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
           </select>
         </label>
         <label class="block md:col-span-1">
-          <span class="flt-label">Richtung</span>
+          <span class="flt-label">{{ t('tx.direction') }}</span>
           <select x-model="filter.direction" @change="reload()" class="flt-input">
             <option value="">+/−</option>
             <option value="expense">Aus</option>
@@ -134,10 +148,10 @@
   </div>
 
   <!-- ============================ KPIS ============================ -->
-  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-    <div class="card p-4">
+  <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 xl:grid-cols-6">
+    <div class="card p-3 sm:p-4">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.counted') }}</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="agg.count.toLocaleString(DS_LOCALE)"></div>
+      <div class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums leading-tight" x-text="agg.count.toLocaleString(DS_LOCALE)"></div>
       <div class="text-[11px] text-ink-500 mt-0.5" x-text="agg.first_date ? (agg.first_date + ' … ' + agg.last_date) : '—'"></div>
     </div>
     <div class="card p-4" :class="agg.transfer_count > 0 ? '' : 'opacity-60'"
@@ -145,24 +159,24 @@
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.transfers') }}</div>
       <div class="mt-1 text-2xl font-semibold tabular-nums text-sky-300" x-text="(agg.transfer_count || 0).toLocaleString(DS_LOCALE)"></div>
       <div class="text-[11px] text-ink-500 mt-0.5"
-           x-text="agg.transfer_count ? (fmtEur(agg.transfer_in || 0) + ' rein · ' + fmtEur(agg.transfer_out || 0) + ' raus') : 'keine im Filter'"></div>
+           x-text="agg.transfer_count ? (fmtEur(agg.transfer_in || 0) + ' ' + '{{ t('tx.in_out_short') | replace("'", "\\'")  }}'.replace('{out}', fmtEur(agg.transfer_out || 0))) : '{{ t('tx.none_in_filter') | replace("'", "\\'")  }}'"></div>
     </div>
-    <div class="card p-4">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">Eingang</div>
+    <div class="card p-3 sm:p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.income_col') }}</div>
       <div class="mt-1 text-2xl font-semibold text-emerald-300 tabular-nums" x-text="fmtEur(agg.sum_in)"></div>
     </div>
-    <div class="card p-4">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">Ausgang</div>
+    <div class="card p-3 sm:p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.expense_col') }}</div>
       <div class="mt-1 text-2xl font-semibold text-rose-300 tabular-nums" x-text="fmtEur(agg.sum_out)"></div>
     </div>
     <div class="card p-4" :class="agg.saved ? '' : 'opacity-60'"
          title="{{ t('tx.saving_hint') }}">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">Gespart / angelegt</div>
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.saved_col') }}</div>
       <div class="mt-1 text-2xl font-semibold text-violet-200 tabular-nums" x-text="fmtEur(agg.saved || 0)"></div>
     </div>
-    <div class="card p-4">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">Netto</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums"
+    <div class="card p-3 sm:p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.net_col') }}</div>
+      <div class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums leading-tight"
            :class="agg.sum_net >= 0 ? 'text-emerald-300' : 'text-rose-300'"
            x-text="fmtEur(agg.sum_net)"></div>
     </div>
@@ -175,7 +189,7 @@
         {{ t('tx.per_month_filter') }}
       </h2>
       <p class="text-[11px] text-ink-500">
-        Klick auf einen Balken, um auf diesen Monat zu zoomen.
+        {{ t('tx.zoom_hint') }}
       </p>
     </div>
     <!-- The SVG is built as a string: an Alpine <template x-for> inside <svg>
@@ -188,7 +202,7 @@
   <!-- ============================ TOPS + CATEGORY BREAKDOWN ============================ -->
   <div class="grid gap-3 lg:grid-cols-3" x-show="agg.count > 0" x-cloak>
     <div class="card p-4 min-w-0">
-      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">Top Ausgaben</h2>
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">{{ t('tx.top_spending') }}</h2>
       <ul class="space-y-1.5">
         <template x-for="r in agg.top_expense" :key="r.counterparty">
           <li class="flex items-center justify-between gap-2 text-sm hover:bg-ink-800/40 -mx-1 px-1 rounded">
@@ -222,7 +236,7 @@
       </ul>
     </div>
     <div class="card p-4 min-w-0">
-      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">Nach Kategorie</h2>
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400 mb-3">{{ t('tx.by_category') }}</h2>
       <ul class="space-y-1.5">
         <template x-for="r in agg.by_category" :key="r.cat">
           <li class="flex items-center justify-between gap-2 text-sm">
@@ -283,9 +297,9 @@
             <tr>
               <th class="text-left px-2 sm:px-3 py-2 font-medium">{{ t('tx.payee_col') }}</th>
               <th class="text-left px-3 py-2 font-medium hidden md:table-cell">Beispiel-Zweck</th>
-              <th class="text-right px-3 py-2 font-medium hidden sm:table-cell">Anzahl</th>
-              <th class="text-right px-2 sm:px-3 py-2 font-medium w-24 sm:w-auto">Ausgang</th>
-              <th class="text-right px-3 py-2 font-medium hidden sm:table-cell">Eingang</th>
+              <th class="text-right px-3 py-2 font-medium hidden sm:table-cell">{{ t('tx.count_col') }}</th>
+              <th class="text-right px-2 sm:px-3 py-2 font-medium w-24 sm:w-auto">{{ t('tx.expense_col') }}</th>
+              <th class="text-right px-3 py-2 font-medium hidden sm:table-cell">{{ t('tx.income_col') }}</th>
               <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">Zuletzt</th>
               <th class="text-left px-2 sm:px-3 py-2 font-medium w-32 sm:w-auto">{{ t('tx.category') }}</th>
             </tr>
@@ -309,14 +323,14 @@
                           class="w-full rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs">
                     <option value="">{{ t('tx.choose') }}</option>
                     <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
-                    <option value="__new__">+ Neue Kategorie …</option>
+                    <option value="__new__">{{ t('tx.new_category') }}</option>
                   </select></div>
                 </td>
               </tr>
             </template>
             <tr x-show="unresolvedLoaded && unresolved.length === 0" x-cloak>
               <td colspan="7" class="px-3 py-6 text-center text-ink-500 text-sm">
-                Nichts mehr offen in dieser Kategorie. 🎉
+                {{ t('tx.nothing_open_cat') }}
               </td>
             </tr>
           </tbody>
@@ -328,10 +342,10 @@
                 x-text="showRules ? 'Regeln ausblenden' : 'Regeln anzeigen'"></button>
         <span class="text-ink-600">·</span>
         <button type="button" @click="showCats = !showCats" class="underline hover:text-emerald-300"
-                x-text="showCats ? 'Kategorien ausblenden' : ('Eigene Kategorien (' + customCats.length + ')')"></button>
+                x-text="showCats ? '{{ t('tx.hide_cats') | replace("'", "\\'")  }}' : '{{ t('tx.own_cats') | replace("'", "\\'")  }}'.replace('{n}', customCats.length)"></button>
         <div x-show="showCats" x-cloak class="w-full mt-1 space-y-2">
           <form @submit.prevent="addCategory()" class="flex items-center gap-2 flex-wrap">
-            <input type="text" x-model="newCatLabel" placeholder="Neue Kategorie, z. B. Hund, Garten, Hobby-Elektronik"
+            <input type="text" x-model="newCatLabel" placeholder="{{ t('tx.new_cat_ph') }}"
                    class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-xs w-64 max-w-full">
             <label class="flex items-center gap-1"><input type="checkbox" x-model="newCatFixed" class="rounded border-ink-700 bg-ink-900">{{ t('tx.counts_fixed') }}</label>
             <label class="flex items-center gap-1" title="{{ t('tx.saving_cat_hint') }}"><input type="checkbox" x-model="newCatSaving" class="rounded border-ink-700 bg-ink-900"> zählt als Sparen/Anlage</label>
@@ -382,11 +396,11 @@
         <span class="text-ink-200 font-medium" x-text="pending.length + ' {{ t('tx.pending_n') }}'"></span>
         <span class="text-ink-500" x-text="'· ' + fmtEur(pendingSum) + ' — {{ t('tx.count_nowhere') }}'"></span>
       </div>
-      <span class="text-xs text-ink-500" x-text="showPending ? 'einklappen' : 'anzeigen'"></span>
+      <span class="text-xs text-ink-500" x-text="showPending ? '{{ t('tx.collapse_word') }}' : '{{ t('tx.expand_word') }}'"></span>
     </button>
     <div x-show="showPending" x-cloak>
       <p class="px-4 pt-3 text-xs text-ink-500">
-        Kartenzahlungen erscheinen bei der Sparkasse erst als „SONSTIGER EINZUG“ mit einer Terminalnummer, die DKB meldet
+        {{ t('tx.card_note') }}
         {{ t('tx.pending_hint') }}
       </p>
       <div class="overflow-x-auto">
@@ -435,7 +449,7 @@
                 class="rounded bg-ink-900/60 border border-ink-700 px-2 py-1 text-xs">
           <option value="">{{ t('tx.pick_category') }}</option>
           <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
-          <option value="__new__">+ Neue Kategorie …</option>
+          <option value="__new__">{{ t('tx.new_category') }}</option>
         </select>
         <button type="button" @click="bulkApply()" :disabled="!bulkCategory || busy"
                 class="text-xs rounded px-2 py-1 bg-emerald-500/30 text-emerald-100 hover:bg-emerald-500/50 disabled:opacity-50">
@@ -448,7 +462,65 @@
       </div>
     </div>
 
-    <div class="overflow-x-auto">
+    {# ---------- Handy: Liste statt Tabelle ----------
+       Neun Spalten auf 386 px hießen: Empfänger dreizeilig umgebrochen,
+       Datum, Abzeichen und Kategorie-Auswahl darunter zusammengequetscht.
+       Hier bekommt jede Buchung eine Zeile: Empfänger und Betrag oben in
+       einer Zeile, darunter Datum und Konto, darunter der Zweck, und
+       ganz unten die Kategorie über die volle Breite. #}
+    <div class="sm:hidden px-4 m-list">
+      <template x-for="tx in rows.slice(0, mShown)" :key="'m-' + tx.id">
+        <div class="py-3 -mx-2 px-2 rounded-lg"
+             :class="(selected.has(tx.id) ? 'bg-emerald-500/5 ' : '') + (tx.category === 'uebertrag' ? 'opacity-70' : '')">
+          <div class="flex items-start gap-2.5">
+            <input type="checkbox" :checked="selected.has(tx.id)" @change="toggleRow(tx.id)"
+                   class="mt-1 shrink-0 rounded border-ink-700 bg-ink-900 accent-emerald-500"
+                   :aria-label="tx.counterparty || ''">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-start justify-between gap-2">
+                <template x-if="tx.has_doc">
+                  <a :href="'/document/' + tx.doc_id" class="m-title hover:text-emerald-300" x-text="tx.counterparty || '—'"></a>
+                </template>
+                <template x-if="!tx.has_doc">
+                  <span class="m-title" x-text="tx.counterparty || '—'"></span>
+                </template>
+                <span class="m-amount"
+                      :class="tx.category === 'uebertrag' ? 'text-sky-300' : (tx.amount < 0 ? 'text-rose-300' : 'text-emerald-300')"
+                      x-text="(tx.amount > 0 ? '+' : '') + fmtEur(tx.amount)"></span>
+              </div>
+              <div class="m-sub mt-0.5">
+                <span class="tabular-nums" x-text="tx.booking_date || '—'"></span>
+                <template x-if="tx.bank_name"><span> · <span x-text="tx.bank_name"></span></span></template>
+                <template x-if="tx.iban_last4"><span> ···<span x-text="tx.iban_last4"></span></span></template>
+              </div>
+              <div class="m-sub text-ink-500 line-clamp-2" x-show="tx.purpose" x-cloak
+                   x-text="(tx.purpose || '').slice(0, 120)"></div>
+              <div class="mt-2 flex items-center gap-2">
+                <select x-effect="const v = tx.category || ''; $nextTick(() => { $el.value = v; })"
+                        @change="pickCategory($event, (k) => setRowCategory(tx, k), tx.category)"
+                        class="flex-1 min-w-0 rounded-xl bg-ink-900/60 border border-ink-700 px-3 text-sm">
+                  <option value="">—</option>
+                  <template x-for="c in cats" :key="'mc-' + c"><option :value="c" x-text="catLabel(c)"></option></template>
+                  <option value="__new__">{{ t('tx.new_category') }}</option>
+                </select>
+                <button type="button" @click="explain(tx)"
+                        class="shrink-0 text-[11px] uppercase tracking-wide rounded-lg px-2.5 py-2 border"
+                        :class="badgeClass(tx.category_source)" x-text="badgeLabel(tx.category_source)"></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+      <div x-show="!loading && rows.length === 0" x-cloak class="py-10 text-center text-ink-500 text-sm">
+        {{ t('tx.no_bookings') }}
+      </div>
+      <button type="button" x-show="rows.length > mShown" x-cloak @click="mShown += 40"
+              class="btn-secondary w-full my-3"
+              x-text="'{{ t('tx.load_more') }}'.replace('{n}', Math.min(40, rows.length - mShown))
+                      + ' (' + mShown + '/' + rows.length + ')'"></button>
+    </div>
+
+    <div class="overflow-x-auto hidden sm:block">
       <table class="w-full text-sm table-fixed sm:table-auto">
         <thead class="text-xs uppercase tracking-wider text-ink-500 bg-ink-900/40">
           <tr>
@@ -459,7 +531,7 @@
             </th>
             <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">{{ t('tx.date') }}</th>
             <th class="text-left px-2 sm:px-3 py-2 font-medium">{{ t('tx.payee_col') }}</th>
-            <th class="text-left px-3 py-2 font-medium hidden md:table-cell">Verwendungszweck</th>
+            <th class="text-left px-3 py-2 font-medium hidden md:table-cell">{{ t('tx.purpose_col') }}</th>
             <th class="text-left px-3 py-2 font-medium hidden lg:table-cell">{{ t('tx.account') }}</th>
             <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">{{ t('tx.category') }}</th>
             <th class="text-left px-3 py-2 font-medium hidden sm:table-cell" title="{{ t('tx.why_hint') }}">{{ t('tx.why_col') }}</th>
@@ -494,7 +566,7 @@
                           class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-0.5 text-xs max-w-[9rem]">
                     <option value="">—</option>
                     <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
-                    <option value="__new__">+ Neue Kategorie …</option>
+                    <option value="__new__">{{ t('tx.new_category') }}</option>
                   </select>
                 </div>
               </td>
@@ -508,7 +580,7 @@
                         class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs max-w-[11rem]">
                   <option value="">—</option>
                   <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
-                  <option value="__new__">+ Neue Kategorie …</option>
+                  <option value="__new__">{{ t('tx.new_category') }}</option>
                 </select>
               </td>
               <td class="px-3 py-2 whitespace-nowrap hidden sm:table-cell">
@@ -559,7 +631,7 @@
        class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
     <div class="card p-5 max-w-lg w-full space-y-2" x-show="explainTx">
       <div class="flex items-start justify-between gap-3">
-        <h3 class="font-semibold">Warum diese Kategorie?</h3>
+        <h3 class="font-semibold">{{ t('tx.why_title') }}</h3>
         <button type="button" @click="explainTx = null" class="text-ink-500 hover:text-ink-200">✕</button>
       </div>
       <template x-if="explainTx">
@@ -574,10 +646,10 @@
           <p class="text-ink-200" x-text="explainTx.category_reason || '{{ t('tx.no_reason_long') }}'"></p>
           <p class="text-ink-500 text-xs">
             {{ t('tx.counts_as') }}
-            <b class="text-ink-300" x-text="explainTx.category === 'uebertrag' ? 'Umbuchung (weder Einnahme noch Ausgabe)' : (explainTx.amount < 0 ? 'Ausgabe' : 'Einnahme')"></b>
+            <b class="text-ink-300" x-text="explainTx.category === 'uebertrag' ? '{{ t('tx.transfer_note') | replace("'", "\\'")  }}' : (explainTx.amount < 0 ? '{{ t('tx.expense_word') | replace("'", "\\'")  }}' : '{{ t('tx.income_word2') }}')"></b>
             <span x-show="explainTx.is_savings" x-cloak>{{ t('tx.on_savings_account') }}</span>
           </p>
-          <p class="text-ink-500 text-xs">Rangfolge: Hand › Umbuchung (IBAN) › gelernte Regel › KI-Vorschlag › eingebaute Erkennung › Buchungstyp der Bank › offen.</p>
+          <p class="text-ink-500 text-xs">{{ t('tx.rank_order') }} › Buchungstyp der Bank › offen.</p>
         </div>
       </template>
     </div>
@@ -597,6 +669,8 @@ function txExplorer() {
            first_date: '', last_date: '' },
     selected: new Set(),
     bulkCategory: '',
+    mFilters: false,   // Filterkarte auf dem Handy
+    mShown: 40,        // sichtbare Zeilen auf dem Handy
     loading: false,
     busy: false,
     message: '',
@@ -717,7 +791,7 @@ function txExplorer() {
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
         this.applyCategoryList(d);
-        this.flash(true, `Kategorie „${d.category.label}“ angelegt.`);
+        this.flash(true, ('{{ t('tx.cat_created') | replace("'", "\\'")  }}').replace('{name}', d.category.label));
         return d.category;
       } catch (e) { this.flash(false, e.message || String(e)); return null; }
     },
@@ -825,7 +899,7 @@ function txExplorer() {
         const r = await fetch('/api/settings/finance', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ period_anchor_day: day }) });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        this.flash(true, `Monatsanfang auf den ${day}. gesetzt — Gehaltsmonate neu berechnet.`);
+        this.flash(true, ('{{ t('tx.anchor_saved') | replace("'", "\\'")  }}').replace('{d}', day));
         await this.loadPeriods();
       } catch (e) { this.flash(false, e.message || String(e)); }
     },
@@ -862,7 +936,7 @@ function txExplorer() {
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
         m._done = true;
-        this.flash(true, `„${m.name}“ → ${this.catLabel(cat)}: ${d.applied} Buchung(en) zugeordnet, Regel gemerkt.`);
+        this.flash(true, ('{{ t('tx.rule_learned') | replace("'", "\\'")  }}').replace('{name}', m.name).replace('{cat}', this.catLabel(cat)).replace('{n}', d.applied));
         this.loadRules();
         this.reload();
         setTimeout(() => this.loadUnresolved(), 300);
@@ -1108,8 +1182,11 @@ function txExplorer() {
         }
         this.selected = new Set();
         this.bulkCategory = '';
-        this.flash(true, `${d.updated} Buchung(en) auf "${this.catLabel(cat)}" gesetzt` +
-          (this.learn && d.rules ? `, ${d.rules} Regel(n) gelernt, ${d.applied} weitere angepasst.` : '.'));
+        this.flash(true, ('{{ t('tx.bulk_done') | replace("'", "\\'") }}')
+            .replace('{n}', d.updated).replace('{cat}', this.catLabel(cat))
+          + (this.learn && d.rules
+              ? ('{{ t('tx.bulk_rules') | replace("'", "\\'") }}').replace('{r}', d.rules).replace('{a}', d.applied)
+              : '.'));
         if (this.learn && d.rules) { this.loadRules(); this.reload(); } else { this.reloadAggOnly(); }
         if (this.unresolvedLoaded) this.loadUnresolved();
       } catch (e) {
