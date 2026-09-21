@@ -7,7 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # System dependencies for OCR: Tesseract + German/English language packs,
 # ocrmypdf and its prerequisites, ghostscript for PDF handling.
+# poppler-utils carries pdftoppm, which renders the page images for the
+# document preview (iOS ignores PDF view parameters inside an iframe).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        poppler-utils \
         tesseract-ocr \
         tesseract-ocr-deu \
         tesseract-ocr-eng \

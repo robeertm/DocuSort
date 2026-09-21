@@ -96,6 +96,8 @@
   "document.confidence": "Confidenza",
   "document.status": "Stato",
   "document.pages": "Pagine",
+  "document.page_of": "Pagina {n} di {total}",
+  "document.show_all_pages": "Mostra tutte le {n} pagine",
   "document.size": "Dimensione",
   "document.original": "Originale",
   "document.processed": "Elaborato",

@@ -7,6 +7,22 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.58.1] – 2026-09-21
+
+### Fixed
+- 🔴 **The PDF preview did not fit its window on a phone.** It was an
+  embedded viewer (`iframe`), and **iOS Safari ignores the fit-to-window
+  parameter there**, showing the page at its original size — you saw the
+  top left corner and nothing else. On a phone the preview is now a
+  **page image rendered on the server** (Poppler / `pdftoppm`) that always
+  fits the width; multi-page documents unfold below each other. The
+  embedded viewer stays on the desktop and steps back in whenever the
+  rendering is not possible (no Poppler, an encrypted file).
+- Page images live next to the database in `preview-cache/` and carry the
+  source file's modification time in their name, so the preview never
+  shows a stale page after a re-run of OCR. Backups skip the folder.
+- `poppler-utils` is now installed explicitly in the Docker image.
+
 ## [0.58.0] – 2026-09-21
 
 ### Changed

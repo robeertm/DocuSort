@@ -96,6 +96,8 @@
   "document.confidence": "Confiance",
   "document.status": "Statut",
   "document.pages": "Pages",
+  "document.page_of": "Page {n} sur {total}",
+  "document.show_all_pages": "Afficher les {n} pages",
   "document.size": "Taille",
   "document.original": "Original",
   "document.processed": "Traité",
