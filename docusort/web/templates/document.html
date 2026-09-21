@@ -92,14 +92,34 @@
   <!-- Preview -->
   <div class="card overflow-hidden lg:sticky lg:top-4">
     {% if doc.library_path.lower().endswith('.pdf') %}
-      <div class="relative group">
-        <iframe src="/document/{{ doc.id }}/file#toolbar=0&view=Fit"
+      {# 🔴 Auf dem Telefon KEIN iframe: iOS-Safari ignoriert
+         `#view=Fit` und zeigt die Seite in Originalgröße — sichtbar war
+         die linke obere Ecke, der Rest abgeschnitten. Ein serverseitig
+         gerendertes Seitenbild (`/page.png`, Poppler) passt dagegen
+         immer in die Breite. Schlägt das Rendern fehl (kein Poppler,
+         verschlüsselte Datei), springt der iframe wieder ein. #}
+      <div class="relative group"
+           x-data="{ imgOk: true, shown: 1, pages: {{ doc.page_count or 1 }} }">
+
+        <div class="sm:hidden" x-show="imgOk">
+          <template x-for="i in Math.min(shown, pages)" :key="'pg-' + i">
+            <a :href="'/document/{{ doc.id }}/file'" target="_blank" rel="noopener" class="block">
+              <img :src="'/document/{{ doc.id }}/page.png?p=' + i"
+                   :alt="'{{ t('document.page_of') | replace("'", "\'") }}'.replace('{n}', i).replace('{total}', pages)"
+                   loading="lazy" decoding="async"
+                   class="w-full h-auto bg-white block border-b border-ink-700/40"
+                   @error="if (i === 1) imgOk = false">
+            </a>
+          </template>
+          <button type="button" x-show="pages > shown" x-cloak @click="shown = pages"
+                  class="btn-ghost w-full !justify-center text-sm border-t border-ink-700/40"
+                  x-text="'{{ t('document.show_all_pages') | replace("'", "\'") }}'.replace('{n}', pages)"></button>
+        </div>
+
+        <iframe src="/document/{{ doc.id }}/file#toolbar=0&view=FitH"
                 class="w-full bg-white h-[40vh] sm:h-[55vh] lg:h-[calc(100vh-6rem)]"
+                :class="imgOk ? 'hidden sm:block' : 'block'"
                 title="PDF Preview"></iframe>
-        <!-- tap overlay: mobile only. Desktop users have the button below. -->
-        <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
-           class="absolute inset-0 sm:hidden"
-           aria-label="{{ t('document.fullscreen') }}"></a>
         <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
            class="absolute top-2 right-2 btn-secondary !py-1.5 !px-2.5 text-xs opacity-0 group-hover:opacity-100 transition shadow-lg">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">

@@ -944,6 +944,32 @@ def create_app(
         media = "application/pdf" if path.suffix.lower() == ".pdf" else "application/octet-stream"
         return FileResponse(path, media_type=media, headers=headers)
 
+    @app.get("/document/{doc_id}/page.png")
+    def document_page_png(doc_id: int, p: int = 1, w: int = 0):
+        """Eine Seite des Dokuments als Bild.
+
+        🔴 Der Grund: iOS-Safari ignoriert `#view=Fit` in einem iframe und
+        zeigt die Seite in Originalgröße — sichtbar war die linke obere
+        Ecke. Ein Bild mit `width: 100%` passt dagegen immer. Siehe
+        `docusort/preview.py`.
+        """
+        from ..preview import render_page, DEFAULT_WIDTH
+        doc = db.get(doc_id)
+        if not doc:
+            raise HTTPException(404, "Document not found")
+        if not doc.get("library_path") or not path_is_file(doc["library_path"]):
+            raise HTTPException(404, "File missing on disk")
+        # Die Datenbank kennt ihren wirklichen Ort; `settings.paths.db`
+        # kann auf ein Verzeichnis zeigen, das es hier gar nicht gibt.
+        img = render_page(Path(doc["library_path"]), Path(getattr(db, "path", settings.paths.db)),
+                          page=p, width=w or DEFAULT_WIDTH)
+        if not img:
+            # Kein Poppler, verschlüsselt oder kaputt — die Seite fällt
+            # dann auf den eingebetteten Betrachter zurück.
+            raise HTTPException(404, "No preview available")
+        return FileResponse(img, media_type="image/png",
+                            headers={"Cache-Control": "private, max-age=86400"})
+
     @app.post("/document/{doc_id}/edit")
     def edit_document(
         doc_id: int,

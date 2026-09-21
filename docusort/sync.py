@@ -100,7 +100,10 @@ def _include_trash(cfg) -> bool:
 # together with a mismatched -wal is exactly what SQLite later rejects as
 # "malformed". We never mirror the volatile sidecars and instead ship a
 # clean snapshot (see _snapshot_db).
-_DB_SIDECAR_GLOBS = ("*.db-wal", "*.db-shm", "*.db-journal")
+# 🔴 `preview-cache/**` gehört dazu: die Seitenbilder der Vorschau liegen
+# neben der Datenbank — also innerhalb der Bibliothek — und wären sonst
+# in jeder Sicherung. Sie sind jederzeit aus dem PDF neu zu rendern.
+_DB_SIDECAR_GLOBS = ("*.db-wal", "*.db-shm", "*.db-journal", "preview-cache/**")
 
 
 def _snapshot_db(settings: AppSettings) -> Path | None:
@@ -429,7 +432,12 @@ def _run_local_sync(cfg, src) -> dict[str, Any]:
             rel = entry.relative_to(src)
             if not include_trash and "_Trash" in rel.parts:
                 continue
-            if any(entry.match(g) for g in _DB_SIDECAR_GLOBS):
+            # 🔴 `Path.match` versteht „**" nicht wie rclone — der
+            # Vorschau-Zwischenspeicher wird deshalb über die Pfadteile
+            # ausgeschlossen, nicht über das Muster.
+            if "preview-cache" in rel.parts:
+                continue
+            if any(entry.match(g) for g in _DB_SIDECAR_GLOBS if "**" not in g):
                 continue
             dest = target_path / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
