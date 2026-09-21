@@ -7,7 +7,7 @@
     <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">
       {% if trash %}{{ t('trash.title') }}{% else %}{{ t('library.title') }}{% endif %}
     </h1>
-    <p class="text-ink-400 mt-1 text-sm">
+    <p class="text-ink-400 mt-1 text-sm hidden sm:block">
       {% if trash %}{{ t('trash.subtitle') }}
       {% elif filter.status == 'review' %}{{ t('library.subtitle_review') }}
       {% else %}{{ t('library.subtitle_default') }}{% endif %}
@@ -69,7 +69,10 @@
 </div>
 
 <!-- Filter bar -->
+{# Auf dem Handy standen 1 300 px Filter VOR dem ersten Dokument. Jetzt
+   bleibt die Suchzeile sichtbar und der Rest klappt auf Tipp auf. #}
 <form
+  x-data="{ mFilters: false }"
   class="card p-4 mb-6 space-y-3"
   hx-get="/library?partial=1{% if trash %}&trash=1{% endif %}"
   hx-trigger="change, keyup delay:400ms from:input[name=q]"
@@ -100,8 +103,15 @@
     <a href="/library" class="btn-secondary">{{ t('library.reset') }}</a>
   </div>
 
+  <button type="button" class="sm:hidden w-full btn-ghost !justify-between border border-ink-700/60"
+          @click="mFilters = !mFilters" :aria-expanded="mFilters">
+    <span>{{ t('library.more_filters') }}</span>
+    <span x-text="mFilters ? '▲' : '▼'" class="text-ink-500"></span>
+  </button>
+
   <!-- Row 2: sort + direction + date ranges + quick filters -->
-  <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4 items-end border-t border-ink-700/50 pt-3">
+  <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4 items-end border-t border-ink-700/50 pt-3"
+       :class="mFilters ? '' : 'hidden sm:grid'">
     <label class="block">
       <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.sort_by') }}</span>
       <select name="sort" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
@@ -146,7 +156,7 @@
   </div>
 
   <!-- Quick scan-date filters -->
-  <div class="flex flex-wrap items-center gap-2 text-xs">
+  <div class="flex flex-wrap items-center gap-2 text-xs" :class="mFilters ? '' : 'hidden sm:flex'">
     <span class="text-ink-500 uppercase tracking-wider text-[11px]">{{ t('library.quick_scan') }}</span>
     <button type="button" onclick="libQuickScan(this,7)"
             class="rounded-lg bg-ink-800 hover:bg-ink-700 px-2.5 py-1">{{ t('library.quick_7') }}</button>
@@ -202,11 +212,27 @@ function libClearDates(btn) {
 
 <div x-data="library({ trash: {{ trash | tojson }} })" class="lg:grid lg:grid-cols-[260px_1fr] lg:gap-6">
 
+  {# Auf dem Handy ist der Jahres-/Kategorienbaum zugeklappt: er steht
+     sonst zwischen der Suche und dem ersten Dokument. #}
   <aside class="card p-3 mb-4 lg:mb-0 lg:sticky lg:top-24 lg:self-start lg:max-h-[calc(100vh-7rem)] lg:overflow-auto"
          x-data='{
            currentYear: {{ (filter.year or "") | tojson }},
-           currentCategory: {{ (filter.category or "") | tojson }}
+           currentCategory: {{ (filter.category or "") | tojson }},
+           mTree: false
          }'>
+
+    <button type="button" class="lg:hidden w-full flex items-center justify-between px-2.5 py-2 text-sm"
+            @click="mTree = !mTree" :aria-expanded="mTree">
+      <span class="flex items-center gap-2 font-medium">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4 text-ink-400">
+          <path d="M3 7h18M3 12h18M3 17h18"/>
+        </svg>
+        {{ t('library.browse_tree') }}
+      </span>
+      <span class="text-ink-500" x-text="mTree ? '▲' : '▼'"></span>
+    </button>
+
+    <div :class="mTree ? '' : 'hidden lg:block'">
 
     <a href="/library" class="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm font-medium hover:bg-ink-700/40"
        :class="(!currentYear && !currentCategory) ? 'bg-emerald-500/15 text-emerald-200' : ''">
@@ -309,6 +335,7 @@ function libClearDates(btn) {
       {% endif %}
     </div>
     {% endif %}
+    </div>
   </aside>
 
   <div id="grid" class="min-w-0">

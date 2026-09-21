@@ -6,7 +6,7 @@
   <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
     <div>
       <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('analytics.title') }}</h1>
-      <p class="text-ink-400 mt-1 text-sm">{{ t('analytics.subtitle') }}</p>
+      <p class="text-ink-400 mt-1 text-sm hidden sm:block">{{ t('analytics.subtitle') }}</p>
     </div>
     {% if summary.receipt_count > 0 %}
     <div>
@@ -244,7 +244,20 @@
   <div class="card p-5 mb-6">
     <h2 class="font-semibold mb-4 text-sm uppercase tracking-wide text-ink-400">{{ t('analytics.top_items') }}</h2>
     {% if top_items %}
-    <div class="overflow-x-auto -mx-5">
+    {# Handy: Liste statt Tabelle. #}
+    <div class="sm:hidden m-list">
+      {% for it in top_items %}
+        <div class="flex items-center justify-between gap-3 py-2.5">
+          <div class="min-w-0">
+            <div class="m-title">{{ it.name }}</div>
+            <div class="m-sub">{{ it.times }} × · Ø {{ "%.2f"|format(it.avg_unit) if it.avg_unit is defined else "" }}</div>
+          </div>
+          <div class="m-amount text-emerald-300">{{ "%.2f"|format(it.spent) }} €</div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="overflow-x-auto -mx-5 hidden sm:block">
       <table class="w-full text-sm">
         <thead class="text-xs uppercase tracking-wider text-ink-500">
           <tr>
@@ -298,7 +311,22 @@
     </form>
 
     {% if items %}
-    <div class="overflow-x-auto -mx-5">
+    <div class="sm:hidden m-list">
+      {% for it in items %}
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0">
+            <a href="/document/{{ it.doc_id }}" class="m-title block hover:text-emerald-300">{{ it.name }}</a>
+            <div class="m-sub">
+              {{ it.shop_name or '—' }} · <span class="tabular-nums">{{ it.receipt_date or '' }}</span>
+              {% if it.quantity and it.quantity != 1 %} · {{ it.quantity }} ×{% endif %}
+            </div>
+          </div>
+          <div class="m-amount text-emerald-300">{{ "%.2f"|format(it.total_price) }} €</div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="overflow-x-auto -mx-5 hidden sm:block">
       <table class="w-full text-sm">
         <thead class="text-xs uppercase tracking-wider text-ink-500">
           <tr>
@@ -393,7 +421,54 @@
   <div class="card p-5">
     <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('analytics.recent_receipts') }}</h2>
     {% if receipts %}
-    <div class="overflow-x-auto -mx-5">
+    <div class="sm:hidden m-list">
+      {% for r in receipts %}
+        <div class="py-3">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <a href="/document/{{ r.doc_id }}" class="m-title block hover:text-emerald-300">
+                {{ r.shop_name or r.doc_subject or '—' }}</a>
+              <div class="m-sub">
+                <span class="tabular-nums">{{ r.receipt_date or '—' }}</span>
+                {% if r.shop_type %} · {{ t('receipt.shop.' + r.shop_type) }}{% endif %}
+              </div>
+            </div>
+            <div class="m-amount text-emerald-300">
+              {% if r.total_amount is not none %}{{ "%.2f"|format(r.total_amount) }} €{% else %}—{% endif %}
+            </div>
+          </div>
+          <div class="mt-2">
+            {% if r.pay_state == 'matched' %}
+              <span class="chip bg-emerald-500/15 text-emerald-300">✓ {{ t('receipt.pay.on_account') }}</span>
+              <span class="m-sub text-ink-500 tabular-nums ml-1">{{ r.booking_date or '' }}</span>
+            {% elif r.pay_state == 'cash' %}
+              <div x-data="{ cat: '{{ r.cash_category or '' }}', busy: false, done: false }"
+                   class="flex items-center gap-2">
+                <span class="chip bg-amber-500/15 text-amber-300 shrink-0">💶 {{ t('receipt.pay.cash_short') }}</span>
+                <select x-model="cat" :disabled="busy"
+                        @change="busy = true; done = false;
+                                 fetch('/api/receipts/{{ r.id }}/cash-category', {
+                                   method: 'POST', headers: {'Content-Type': 'application/json'},
+                                   body: JSON.stringify({category: cat})
+                                 }).then(r => r.json()).then(() => { busy = false; done = true; })
+                                   .catch(() => { busy = false; })"
+                        class="flex-1 min-w-0 rounded-xl bg-ink-900/60 border border-ink-700 px-3 text-sm">
+                  <option value="">{{ t('receipt.pay.pick_category') }}</option>
+                  {% for k in tx_categories %}
+                    <option value="{{ k }}">{{ cat_labels.get(k, k) }}</option>
+                  {% endfor %}
+                </select>
+                <span x-show="done" x-cloak class="text-emerald-300 shrink-0">✓</span>
+              </div>
+            {% else %}
+              <span class="chip bg-ink-800 text-ink-400">… {{ t('receipt.pay.open_short') }}</span>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="overflow-x-auto -mx-5 hidden sm:block">
       <table class="w-full text-sm">
         <thead class="text-xs uppercase tracking-wider text-ink-500">
           <tr>

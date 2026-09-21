@@ -7,6 +7,45 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.58.0] – 2026-09-21
+
+### Changed
+- **The phone view was rebuilt, not patched.** Until now the desktop
+  layout was simply squeezed: ten table columns on 386 pixels, controls
+  26 pixels tall, nearly a thousand pieces of text below 12.5 pixels. The
+  phone now has a shape of its own.
+- **A tab bar at the bottom** replaces the scrolling strip under the
+  header: Home, Library, Upload (in the middle, because everything comes
+  in there), Finance and “More”. Behind *More* sits a sheet with every
+  other section plus language, appearance and sign-out. The old strip
+  showed three entries; the rest hid behind a swipe nobody expects.
+- **Tables become lists.** Fixed costs, bookings, receipts, line items
+  and the recent bookings on the finance page each show one row per
+  entry: name and amount on top, the essentials below, the category
+  across the full width. From tablet width upwards the tables are
+  unchanged.
+- **Everything you tap is at least 44 pixels tall** (Apple's guideline)
+  and input fields carry 16-pixel text — below that iOS zooms in on
+  focus, unasked.
+- **Readable type**: the smallest steps are one notch larger on a phone.
+  Chart axes are excluded, where the text decides the column width.
+- **Filters fold away.** Bookings put a two-screen filter card in front
+  of the first booking; the library put 1,300 pixels of filters in front
+  of the first document. Both now open on tap.
+- **Bookings load forty at a time**: the page was 16,000 pixels long, now
+  8,000 with a button for more.
+- The daily chart is taller on a phone and starts at the last day that
+  actually happened; long introductions appear from tablet width upwards.
+
+### Fixed
+- **More than 30 German strings** still showed in every language — the
+  “Explore bookings” heading, the key figures (incoming, outgoing, net,
+  saved/invested), the filter labels, “Top spending”, “By category”, “Why
+  this category?”, several messages after saving, and the note above the
+  costs that are not counted. 0.56.0 translated the templates but not the
+  strings inside the JavaScript.
+- A checkbox shrank to 13 pixels wide inside a flex row.
+
 ## [0.57.0] – 2026-09-20
 
 ### Added

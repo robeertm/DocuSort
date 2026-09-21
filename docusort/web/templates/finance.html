@@ -6,7 +6,7 @@
   <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
     <div>
       <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('finance.title') }}</h1>
-      <p class="text-ink-400 mt-1 text-sm">{{ t('finance.subtitle') }}</p>
+      <p class="text-ink-400 mt-1 text-sm hidden sm:block">{{ t('finance.subtitle') }}</p>
     </div>
   </div>
 
@@ -250,9 +250,9 @@
         {% set ns.in_pts  = ns.in_pts  + [(x, y_in)] %}
         {% set ns.out_pts = ns.out_pts + [(x, y_out)] %}
       {% endfor %}
-      <div class="overflow-x-auto -mx-2 px-2">
+      <div class="overflow-x-auto -mx-2 px-2" data-tiny>
         <svg viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none"
-             class="w-full h-64 sm:h-80" style="min-width: 600px;">
+             class="w-full h-72 sm:h-80" style="min-width: 600px;">
           {% for frac in [0.0, 0.25, 0.5, 0.75, 1.0] %}
             {% set y = 20 + frac * (H - 40) %}
             <line x1="50" y1="{{ y }}" x2="{{ W - 10 }}" y2="{{ y }}"
@@ -522,7 +522,26 @@
       <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('finance.transactions_heading') }}</h2>
       <a href="/transactions" class="text-xs text-emerald-300 hover:text-emerald-200">{{ t('finance.see_all') }} →</a>
     </div>
-    <div class="overflow-x-auto -mx-5 max-h-[60vh] overflow-y-auto">
+    {# Handy: Liste statt Tabelle — fünf Spalten mit Zweck und Kategorie
+       passen nicht auf ein Telefon, ohne dass alles dreizeilig umbricht. #}
+    <div class="sm:hidden -mx-2 m-list max-h-[70vh] overflow-y-auto">
+      {% for tx in transactions[:50] %}
+        <div class="flex items-start justify-between gap-3 py-2.5 px-2">
+          <div class="min-w-0">
+            <div class="m-title">{{ tx.counterparty }}</div>
+            <div class="m-sub">
+              <span class="tabular-nums">{{ tx.booking_date }}</span>
+              {% if tx.category %} · {{ cat_labels.get(tx.category, tx.category) }}{% endif %}
+            </div>
+          </div>
+          <div class="m-amount {% if tx.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
+            {% if tx.amount > 0 %}+{% endif %}{{ "%.2f"|format(tx.amount) }} €
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="overflow-x-auto -mx-5 max-h-[60vh] overflow-y-auto hidden sm:block">
       <table class="w-full text-xs">
         <thead class="text-[10px] uppercase tracking-wider text-ink-500 sticky top-0 bg-ink-900/95 backdrop-blur">
           <tr>
