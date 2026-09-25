@@ -2611,6 +2611,21 @@ def create_app(
         db.meta_set("finance.statement_backfill", "2")
         return out
 
+    @app.post("/api/finance/match-deadlines")
+    def api_finance_match_deadlines():
+        """Read the invoice amounts and re-check which booking settled which
+        bill — the same pass that runs at start-up, after an import and a
+        few seconds after a document is filed, here on demand.
+
+        Safe to repeat: an existing link stays, a link whose booking is gone
+        is dropped, a bill nothing settles stays open.
+        """
+        from .. import deadline_match
+        try:
+            return {"ok": True, **deadline_match.run_now(db)}
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"Abgleich mit den Finanzen: {exc}") from exc
+
     @app.post("/api/finance/gap-ack")
     def api_finance_gap_ack(payload: dict = Body(...)):
         """Tick off a hole in the statement chain that cannot be filled.

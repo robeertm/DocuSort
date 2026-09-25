@@ -7,6 +7,42 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.59.0] – 2026-09-25
+
+### Added
+- **"Match against the finances" on the *Due soon* card.** The pass reads
+  the invoice amount out of each document's own text and looks for the
+  booking that settled it. It used to run at start-up, after an import and
+  every twelve hours — now it also runs on demand, right where the word
+  *overdue* is printed. The result is stated ("27 bill(s) linked to a
+  booking") and the card reloads. New route
+  `POST /api/finance/match-deadlines`.
+- **A freshly filed document asks by itself.** At the end of the pipeline
+  the pass is scheduled and runs about twenty seconds later.
+
+### Changed
+- 🔴 **A bill could wait up to twelve hours for its booking.** The amount
+  is not a field in the document, it is *read* out of the text — and it was
+  read on a twelve-hour cycle only. Without an amount there is nothing to
+  compare, so a bill dropped in at noon sat on the dashboard as **overdue**
+  until midnight although the direct debit had gone out long before.
+- **All four callers now use one place** (new module `deadline_match`):
+  start-up, the twelve-hour reminder watchdog, the button, and the
+  pipeline. 🔴 Two passes must never overlap —
+  `finance_match_due_payments` reads the set of already-linked bookings
+  **once** at the start, so two concurrent runs could have handed the same
+  booking to two different bills. A process-wide lock rules that out.
+- **A burst costs one pass.** When forty-five invoices arrive at once the
+  timer is restarted per document and the pass runs **once** after the last
+  one — with a two-minute ceiling, so a steady trickle (one document every
+  few seconds) cannot postpone it for ever.
+- The CSV import now reads the amounts before matching. A bill whose amount
+  had never been read could not be linked even when the matching booking
+  had just been imported.
+- A user, not only an admin, may trigger the pass. They can already link a
+  booking to a document by hand (`POST /api/document/<id>/paid`); the pass
+  asks the same question for every open bill at once.
+
 ## [0.58.1] – 2026-09-21
 
 ### Fixed

@@ -184,6 +184,11 @@ USER_ALLOW: tuple[tuple[str, str], ...] = (
     ("GET", r"^/api/finance/fixed-costs$"),
     ("GET", r"^/api/finance/fixed-costs/categories$"),
     ("POST", r"^/api/finance/categories$"),
+    # Re-checking which booking settled which bill is strictly less than a
+    # user may already do by hand: `/api/document/<id>/paid` above lets them
+    # link a booking themselves. This only asks the same question for every
+    # open bill at once, and writes nothing a person could not write here.
+    ("POST", r"^/api/finance/match-deadlines$"),
     # --- own account -------------------------------------------------
     ("GET", r"^/api/me$"),
     ("POST", r"^/api/me/password$"),

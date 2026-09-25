@@ -325,6 +325,18 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         except Exception as exc:  # noqa: BLE001
             log.warning("Kontoauszug import failed for %s: %s", target.name, exc)
 
+        # v0.59.0: ask right away whether the bookings already settled this
+        # bill, instead of leaving it to the next twelve-hour tick. A bill
+        # filed at noon used to sit on the dashboard as "overdue" until
+        # midnight although the direct debit had gone out years before.
+        # `schedule` coalesces a whole batch into a single pass — see
+        # deadline_match.
+        try:
+            from . import deadline_match
+            deadline_match.schedule(db)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Fristen: Abgleich konnte nicht angemeldet werden: %s", exc)
+
     return process
 
 
@@ -373,11 +385,11 @@ def _deadline_payments_once(db) -> None:
     and a link whose booking vanished is dropped."""
     log = logging.getLogger("docusort.pipeline")
     try:
-        filled = db.backfill_due_amounts()
-        stats = db.finance_match_due_payments()
+        from . import deadline_match
+        out = deadline_match.run_now(db)
         log.info("Fristen: %d Betr\u00e4ge gelesen, %d von %d offenen Zahlungen "
                  "einer Buchung zugeordnet, %d verwaiste Verkn\u00fcpfungen gel\u00f6st.",
-                 filled, stats["matched"], stats["checked"], stats["cleared"])
+                 out["filled"], out["matched"], out["checked"], out["cleared"])
     except Exception:
         log.exception("Fristen: Zahlungsabgleich beim Start fehlgeschlagen")
 
@@ -491,8 +503,8 @@ def _deadline_watchdog_forever(settings: AppSettings, db: Database,
             # bookings have settled — BEFORE deciding what to remind about,
             # so a bill paid since the last run stays quiet.
             try:
-                db.backfill_due_amounts()
-                db.finance_match_due_payments()
+                from . import deadline_match
+                deadline_match.run_now(db)
             except Exception:
                 log.exception("Fristen: Zahlungsabgleich fehlgeschlagen")
             due = db.deadlines_needing_notice(within_days=within_days)

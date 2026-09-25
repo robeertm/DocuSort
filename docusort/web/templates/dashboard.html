@@ -175,10 +175,23 @@
       <h2 class="font-semibold flex items-center gap-2">
         <span>⏰</span> {{ t('dashboard.deadlines.title') }}
       </h2>
-      <div class="text-xs text-ink-500">
-        <span x-text="(state.deadlines || []).length"></span> {{ t('dashboard.deadlines.count_suffix') }}
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="text-xs text-ink-500">
+          <span x-text="(state.deadlines || []).length"></span> {{ t('dashboard.deadlines.count_suffix') }}
+        </div>
+        {# Asking the bookings again, on demand. It runs by itself seconds
+           after a document is filed, but a bill can also become payable
+           later — a statement read in, a CSV imported — and then the answer
+           is one click away instead of a twelve-hour wait. #}
+        <button type="button" class="btn-secondary text-xs" :disabled="matching"
+                @click="matchDeadlines()"
+                :title="'{{ t('dashboard.deadlines.match_hint') }}'">
+          <span x-show="!matching">{{ t('dashboard.deadlines.match') }}</span>
+          <span x-show="matching" x-cloak>{{ t('dashboard.deadlines.match_running') }}</span>
+        </button>
       </div>
     </div>
+    <p x-show="matchMsg" x-cloak class="-mt-1 mb-3 text-xs text-emerald-300" x-text="matchMsg"></p>
     <ul class="space-y-1">
       <template x-for="d in (state.deadlines || [])" :key="d.id">
         <li class="rounded-xl border p-3"
@@ -377,6 +390,8 @@ function dashboard() {
     problemsTab: 'all',
     busyDoc: null,
     doneDeadline: null,
+    matching: false,
+    matchMsg: '',
     get bulk() { return this.state.bulk_job; },
     get anyActivity() {
       return (this.state.in_flight > 0)
@@ -486,6 +501,26 @@ function dashboard() {
         alert(e.message || String(e));
       } finally {
         this.doneDeadline = null;
+      }
+    },
+    async matchDeadlines() {
+      // The server owns the rule for what counts as settled — this only
+      // asks and then shows the card the server sends back. Deciding here
+      // as well would be a second opinion on the same question.
+      this.matching = true;
+      this.matchMsg = '';
+      try {
+        const r = await fetch('/api/finance/match-deadlines', { method: 'POST' });
+        if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+        const o = await r.json();
+        this.matchMsg = (o.matched
+          ? (T['dashboard.deadlines.match_done'] || '{n} settled').replace('{n}', o.matched)
+          : (T['dashboard.deadlines.match_empty'] || 'No new payment found.'));
+        await this.refresh();
+      } catch (e) {
+        this.matchMsg = e.message || String(e);
+      } finally {
+        this.matching = false;
       }
     },
     dueKindLabel(k) {
