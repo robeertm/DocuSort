@@ -13,6 +13,7 @@
   "update.available": "Update verfügbar:",
   "update.release_notes": "Release Notes ansehen →",
   "update.install_now": "Jetzt aktualisieren",
+  "update.docker_hint": "Läuft im Container — hier wird das Abbild getauscht, nicht die Dateien:",
   "update.installing": "Update wird installiert — kann 1–2 Minuten dauern…",
   "update.installed_restarted": "Update auf {to} installiert — Service startet neu.",
   "update.reload_page": "Seite neu laden",

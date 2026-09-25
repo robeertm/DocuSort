@@ -13,6 +13,7 @@
   "update.available": "Aggiornamento disponibile:",
   "update.release_notes": "Note di rilascio →",
   "update.install_now": "Aggiorna ora",
+  "update.docker_hint": "Gira in un container — qui si sostituisce l'immagine, non i file:",
   "update.installing": "Aggiornamento in corso — può durare 1–2 minuti…",
   "update.installed_restarted": "Aggiornato a {to} — il servizio si sta riavviando.",
   "update.reload_page": "Ricarica la pagina",

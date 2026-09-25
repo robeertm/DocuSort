@@ -221,14 +221,25 @@
                 <span class="text-xs leading-none">✓</span>
               </button>
             </template>
-            <span class="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider"
-                  :class="d.paid_at ? 'bg-emerald-500/20 text-emerald-300' : dueClass(d.due_date)"
-                  x-text="d.paid_at ? (T['dashboard.deadlines.paid'] || 'Bezahlt') : dueWhen(d.due_date)"></span>
+            {# Chip and title share ONE line and wrap together. They used to be
+               siblings of the text column, and on a phone the chip's fixed
+               width left ~120 px for the subject: every title came out as
+               "Elect…" and the line below ran one word per line. Inside the
+               column the chip simply moves onto its own line when it has to. #}
             <div class="flex-1 min-w-0">
-              <a :href="'/document/' + d.id"
-                 class="block font-medium hover:text-emerald-300 truncate"
-                 :class="d.paid_at ? 'text-ink-300' : 'text-ink-100'"
-                 x-text="d.subject || d.filename || ('Dok ' + d.id)"></a>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider"
+                      :class="d.paid_at ? 'bg-emerald-500/20 text-emerald-300' : dueClass(d.due_date)"
+                      x-text="d.paid_at ? (T['dashboard.deadlines.paid'] || 'Bezahlt') : dueWhen(d.due_date)"></span>
+                <a :href="'/document/' + d.id"
+                   {# NOT `truncate`: in a flex row a nowrap child shrinks instead
+                      of wrapping, so on a phone the subject came out as "Elect…"
+                      however much room the row had. Wrapping costs one line and
+                      says what the document is. #}
+                   class="font-medium hover:text-emerald-300 break-words"
+                   :class="d.paid_at ? 'text-ink-300' : 'text-ink-100'"
+                   x-text="d.subject || d.filename || ('Dok ' + d.id)"></a>
+              </div>
               <div class="text-[11px] text-ink-500 mt-0.5">
                 <span x-text="dueKindLabel(d.due_kind)"></span>
                 <span> · </span><span x-text="d.due_date"></span>

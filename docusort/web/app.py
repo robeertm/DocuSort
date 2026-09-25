@@ -3983,6 +3983,10 @@ def create_app(
         from .. import updater
         try:
             result = updater.install_latest(tag=tag)
+        except updater.ContainerUpdateError as exc:
+            # Not a failure — the wrong door. 409 so the interface can show
+            # the command that does work here instead of an error.
+            raise HTTPException(409, str(exc)) from None
         except Exception as exc:
             logger.exception("Update failed")
             raise HTTPException(500, f"Update failed: {exc}")

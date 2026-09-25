@@ -256,9 +256,22 @@
           {{ t('update.release_notes') }}
         </a>
       </div>
-      <button type="button" @click="install()" class="btn-primary">
-        {{ t('update.install_now') }}
-      </button>
+      {# In a container the in-app updater cannot work: the code comes from
+         the image, so a file swap is undone by the next restart. Show the
+         command that does work instead of a button that cannot. #}
+      <template x-if="!info.container">
+        <button type="button" @click="install()" class="btn-primary">
+          {{ t('update.install_now') }}
+        </button>
+      </template>
+      <template x-if="info.container">
+        <div class="w-full sm:w-auto">
+          <div class="text-xs text-ink-400 mb-1">{{ t('update.docker_hint') }}</div>
+          <code class="block rounded-lg bg-ink-900/70 border border-ink-700 px-3 py-2
+                       text-xs text-ink-200 break-words"
+                x-text="info.update_command || 'docker compose pull && docker compose up -d'"></code>
+        </div>
+      </template>
     </div>
   </template>
 

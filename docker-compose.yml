@@ -15,3 +15,20 @@ services:
       - ./data/library:/data/library
       - ./config:/app/config
       - ./logs:/app/logs
+
+  # ── Optional: keep the image up to date by itself ────────────────────
+  # Docker never re-pulls a running container, so with the block below
+  # commented out DocuSort stays on the image you pulled until you run
+  #     docker compose pull && docker compose up -d
+  # Uncomment to let Watchtower do it. Two things to know before you do:
+  #   * it needs the Docker socket, which is effectively root on the host —
+  #     a real privilege, granted read-only here but still a privilege;
+  #   * it updates on ITS schedule, so a new version can arrive while you
+  #     are mid-upload. The poll below is daily at 04:00, not hourly.
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: docusort-watchtower
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   command: --cleanup --schedule "0 0 4 * * *" docusort
