@@ -1396,5 +1396,21 @@
   "fixed.rhythm.jährlich": "yearly",
   "fixed.rhythm.einmalig": "one-off",
   "fixed.panel_hint": "Only bookings from these categories count. Contracts (same amount on a steady rhythm) appear as their own item; everything else inside a ticked category counts as a monthly average. Categories that are not ticked stay variable, however regular they are.",
-  "fixed.per_year_abbr": "/yr"
+  "fixed.per_year_abbr": "/yr",
+  "settings.local_ai.heading": "A local model, in one click",
+  "settings.local_ai.subtitle": "A model on a machine of your own — nothing leaves your house, and nothing costs anything per document. If you already run Ollama, DocuSort finds it by itself.",
+  "settings.local_ai.found_badge": "found",
+  "settings.local_ai.none_badge": "none found",
+  "settings.local_ai.search": "Find a model",
+  "settings.local_ai.searching": "looking …",
+  "settings.local_ai.nothing": "No model found — neither where DocuSort runs nor on your machine.",
+  "settings.local_ai.found": "Found {n} model(s), at {where}.",
+  "settings.local_ai.address": "Address",
+  "settings.local_ai.model": "Model",
+  "settings.local_ai.use": "Use this one",
+  "settings.local_ai.works": "It works — DocuSort asked {model} and got: {answer}. The running classifier switches over on the next restart.",
+  "settings.local_ai.saved_not_working": "Saved, but DocuSort cannot use the model yet: {answer}",
+  "settings.local_ai.setup_help": "No Ollama yet? Download the setup, double-click it on the machine the model should run on — not here — and it installs Ollama, pulls a model and fills the address in for you.",
+  "settings.local_ai.hints": "On first launch macOS asks first (right-click → Open) and Windows shows SmartScreen (“More info” → “Run anyway”). The setup speaks English.",
+  "settings.local_ai.warning": "If the model runs on a different machine than DocuSort, Ollama has to listen on the network — anyone on that network can then use it, Ollama has no password. The setup asks before it does that."
 }

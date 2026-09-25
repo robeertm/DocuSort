@@ -1396,5 +1396,21 @@
   "fixed.rhythm.jährlich": "annuel",
   "fixed.rhythm.einmalig": "ponctuel",
   "fixed.panel_hint": "Seules les écritures de ces catégories comptent. Les contrats (même montant à rythme fixe) forment un poste à part ; le reste d'une catégorie cochée compte comme moyenne mensuelle. Les catégories non cochées restent variables, aussi régulières soient-elles.",
-  "fixed.per_year_abbr": "/an"
+  "fixed.per_year_abbr": "/an",
+  "settings.local_ai.heading": "Un modèle local, en un clic",
+  "settings.local_ai.subtitle": "Un modèle sur une de tes machines : rien ne quitte la maison, et cela ne coûte rien par document. Si Ollama tourne déjà, DocuSort le trouve tout seul.",
+  "settings.local_ai.found_badge": "trouvé",
+  "settings.local_ai.none_badge": "rien trouvé",
+  "settings.local_ai.search": "Chercher un modèle",
+  "settings.local_ai.searching": "recherche …",
+  "settings.local_ai.nothing": "Aucun modèle trouvé, ni là où tourne DocuSort ni sur ta machine.",
+  "settings.local_ai.found": "{n} modèle(s) trouvé(s), à {where}.",
+  "settings.local_ai.address": "Adresse",
+  "settings.local_ai.model": "Modèle",
+  "settings.local_ai.use": "Prendre celui-ci",
+  "settings.local_ai.works": "Cela marche : DocuSort a interrogé {model} et a obtenu : {answer}. Le classement en cours bascule au prochain redémarrage.",
+  "settings.local_ai.saved_not_working": "Enregistré, mais DocuSort ne peut pas encore utiliser le modèle : {answer}",
+  "settings.local_ai.setup_help": "Pas encore d'Ollama ? Télécharge l'installateur et double-clique dessus sur la machine où le modèle doit tourner, pas ici. Il installe Ollama, télécharge un modèle et inscrit l'adresse.",
+  "settings.local_ai.hints": "Au premier lancement macOS demande confirmation (clic droit → Ouvrir) et Windows affiche SmartScreen («Informations complémentaires» → «Exécuter quand même»). L'installateur parle anglais.",
+  "settings.local_ai.warning": "Si le modèle tourne sur une autre machine que DocuSort, Ollama doit écouter sur le réseau : n'importe qui sur ce réseau peut alors l'utiliser, Ollama n'a pas de mot de passe. L'installateur demande avant."
 }

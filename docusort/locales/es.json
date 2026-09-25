@@ -1396,5 +1396,21 @@
   "fixed.rhythm.jährlich": "anual",
   "fixed.rhythm.einmalig": "puntual",
   "fixed.panel_hint": "Solo cuentan los apuntes de estas categorías. Los contratos (mismo importe con ritmo fijo) aparecen como concepto propio; el resto de una categoría marcada cuenta como media mensual. Las categorías sin marcar siguen siendo variables, por regulares que sean.",
-  "fixed.per_year_abbr": "/año"
+  "fixed.per_year_abbr": "/año",
+  "settings.local_ai.heading": "Un modelo local, en un clic",
+  "settings.local_ai.subtitle": "Un modelo en un ordenador tuyo: nada sale de casa y no cuesta nada por documento. Si ya tienes Ollama, DocuSort lo encuentra solo.",
+  "settings.local_ai.found_badge": "encontrado",
+  "settings.local_ai.none_badge": "no encontrado",
+  "settings.local_ai.search": "Buscar un modelo",
+  "settings.local_ai.searching": "buscando …",
+  "settings.local_ai.nothing": "No se encontró ningún modelo, ni donde corre DocuSort ni en tu ordenador.",
+  "settings.local_ai.found": "{n} modelo(s) encontrado(s), en {where}.",
+  "settings.local_ai.address": "Dirección",
+  "settings.local_ai.model": "Modelo",
+  "settings.local_ai.use": "Usar este",
+  "settings.local_ai.works": "Funciona: DocuSort preguntó a {model} y obtuvo: {answer}. La clasificación en curso cambia en el próximo reinicio.",
+  "settings.local_ai.saved_not_working": "Guardado, pero DocuSort todavía no puede usar el modelo: {answer}",
+  "settings.local_ai.setup_help": "¿Todavía no tienes Ollama? Descarga el instalador y haz doble clic en el ordenador donde debe correr el modelo, no aquí. Instala Ollama, descarga un modelo y anota la dirección.",
+  "settings.local_ai.hints": "En el primer arranque macOS pregunta (clic derecho → Abrir) y Windows muestra SmartScreen («Más información» → «Ejecutar de todas formas»). El instalador habla inglés.",
+  "settings.local_ai.warning": "Si el modelo corre en otro ordenador que DocuSort, Ollama tiene que escuchar en la red: entonces cualquiera en esa red puede usarlo, Ollama no tiene contraseña. El instalador pregunta antes."
 }

@@ -1396,5 +1396,21 @@
   "fixed.rhythm.jährlich": "jährlich",
   "fixed.rhythm.einmalig": "einmalig",
   "fixed.panel_hint": "Nur Buchungen aus diesen Kategorien zählen. Verträge (gleicher Betrag im festen Rhythmus) stehen als eigener Posten; alles Übrige in einer angehakten Kategorie zählt als Monatsdurchschnitt. Kategorien, die nicht angehakt sind, bleiben variabel, egal wie regelmäßig.",
-  "fixed.per_year_abbr": "/Jahr"
+  "fixed.per_year_abbr": "/Jahr",
+  "settings.local_ai.heading": "Ein lokales Modell, in einem Klick",
+  "settings.local_ai.subtitle": "Ein Modell auf einem Rechner bei dir — nichts verlässt das Haus, und es kostet nichts je Dokument. Läuft schon eine Ollama, findet DocuSort sie selbst.",
+  "settings.local_ai.found_badge": "gefunden",
+  "settings.local_ai.none_badge": "nichts gefunden",
+  "settings.local_ai.search": "Modell suchen",
+  "settings.local_ai.searching": "sucht …",
+  "settings.local_ai.nothing": "Kein Modell gefunden — weder dort, wo DocuSort läuft, noch auf deinem Rechner.",
+  "settings.local_ai.found": "{n} Modell(e) gefunden, unter {where}.",
+  "settings.local_ai.address": "Adresse",
+  "settings.local_ai.model": "Modell",
+  "settings.local_ai.use": "Dieses nehmen",
+  "settings.local_ai.works": "Es läuft — DocuSort hat {model} gefragt und bekam: {answer}. Die laufende Einordnung wechselt beim nächsten Neustart.",
+  "settings.local_ai.saved_not_working": "Gespeichert, aber DocuSort kann das Modell noch nicht nutzen: {answer}",
+  "settings.local_ai.setup_help": "Noch keine Ollama? Einrichter herunterladen und auf dem Rechner doppelklicken, auf dem das Modell laufen soll — nicht hier. Er installiert Ollama, holt ein Modell und trägt die Adresse ein.",
+  "settings.local_ai.hints": "Beim ersten Start fragt macOS nach (Rechtsklick → Öffnen), Windows zeigt SmartScreen („Weitere Informationen“ → „Trotzdem ausführen“). Der Einrichter spricht Englisch.",
+  "settings.local_ai.warning": "Läuft das Modell auf einem anderen Rechner als DocuSort, muss Ollama im Netz lauschen — dann kann es jeder im selben Netz benutzen, Ollama hat kein Passwort. Der Einrichter fragt vorher."
 }

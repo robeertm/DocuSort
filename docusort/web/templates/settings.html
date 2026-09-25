@@ -105,47 +105,80 @@
     </div>
   </section>
 
-  <!-- ===== Local Ollama on this machine =====
-       Shortcut for direct installs: no bridge needed when DocuSort
-       runs on the same host as Ollama. Probes localhost on load and
-       offers a one-click "use this" button when it finds something. -->
-  <section class="card p-6" x-data="localOllama()" x-init="init()" x-show="visible" x-cloak>
+  <!-- ===== A local model, in one click =====
+       Two ways in, and both end in the same place: "find it" for the
+       install that already has an Ollama, "set it up" for the one that
+       doesn't. 🔴 The search runs on the SERVER's side — see
+       docusort/local_ai.py for why that is the only useful side. -->
+  <section class="card p-6" x-data="localAI()" x-init="init()">
     <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
-      <h2 class="text-lg font-semibold">Local Ollama on this machine</h2>
+      <h2 class="text-lg font-semibold">🖥 {{ t('settings.local_ai.heading') }}</h2>
       <span class="text-xs px-2 py-0.5 rounded-full"
-            :class="probe.reachable ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
-            x-text="probe.reachable ? 'detected' : 'not running'"></span>
+            :class="finds.length ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+            x-text="finds.length ? tr('settings.local_ai.found_badge')
+                                : tr('settings.local_ai.none_badge')"></span>
     </div>
-    <p class="text-ink-400 text-sm mb-4">
-      DocuSort and Ollama appear to be on the same host — the simplest
-      setup. One click switches the AI provider to OpenAI-compatible
-      pointing at <span class="font-mono text-ink-300">localhost:11434</span>.
-      No bridge overhead, no token, no WebSocket.
-    </p>
-    <div class="flex items-center gap-3 flex-wrap mb-4">
-      <label class="text-sm text-ink-300">Model</label>
-      <select x-model="chosenModel"
-              :disabled="!probe.reachable || !probe.models?.length"
-              class="rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-1.5 text-sm font-mono">
-        <template x-for="m in (probe.models || [])" :key="m">
-          <option :value="m" x-text="m"></option>
-        </template>
-        <template x-if="!probe.models?.length">
-          <option value="" disabled>(no models pulled — run `ollama pull qwen2.5:7b-instruct`)</option>
-        </template>
-      </select>
-      <button type="button" @click="apply()"
-              :disabled="!chosenModel || applying"
-              class="rounded-xl px-4 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
-        <span x-show="!applying">Use this on this machine</span>
-        <span x-show="applying" x-cloak>Saving …</span>
+    <p class="text-ink-400 text-sm mb-4">{{ t('settings.local_ai.subtitle') }}</p>
+
+    <div class="flex items-center gap-3 flex-wrap mb-1">
+      <button type="button" @click="search()" :disabled="searching"
+              class="rounded-xl px-4 py-2 text-sm font-medium border border-ink-700
+                     hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed">
+        <span x-show="!searching">🔍 {{ t('settings.local_ai.search') }}</span>
+        <span x-show="searching" x-cloak>{{ t('settings.local_ai.searching') }}</span>
       </button>
-      <button type="button" @click="probeNow()" class="text-xs text-ink-400 hover:text-ink-200 underline">refresh</button>
+      <span class="text-xs text-ink-500" x-show="searched && !finds.length" x-cloak
+            x-text="tr('settings.local_ai.nothing')"></span>
     </div>
-    <div x-show="message" x-cloak
-         class="text-xs rounded-lg px-3 py-2"
+
+    <!-- Every place DocuSort can reach one. Usually exactly one. -->
+    <template x-for="(f, i) in finds" :key="f.url">
+      <div class="mt-4 rounded-xl bg-ink-900/40 border border-ink-700 p-3
+                  flex items-end gap-3 flex-wrap">
+        <div class="grow min-w-[12rem]">
+          <label class="block text-xs text-ink-500 mb-1">{{ t('settings.local_ai.address') }}</label>
+          <div class="font-mono text-sm break-all" x-text="f.url"></div>
+        </div>
+        <div>
+          <label class="block text-xs text-ink-500 mb-1">{{ t('settings.local_ai.model') }}</label>
+          <select x-model="f.chosen"
+                  class="rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-1.5 text-sm font-mono">
+            <template x-for="m in f.models" :key="m">
+              <option :value="m" x-text="m"></option>
+            </template>
+          </select>
+        </div>
+        <button type="button" @click="use(f)" :disabled="applying || !f.chosen"
+                class="rounded-xl px-4 py-2 text-sm font-medium border border-cyan-500/40
+                       bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20
+                       disabled:opacity-50 disabled:cursor-not-allowed">
+          <span x-show="!applying">{{ t('settings.local_ai.use') }}</span>
+          <span x-show="applying" x-cloak>{{ t('setup.saving') }}</span>
+        </button>
+      </div>
+    </template>
+
+    <div x-show="message" x-cloak class="mt-4 text-xs rounded-lg px-3 py-2"
          :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
          x-text="message"></div>
+
+    <!-- For the install that has no Ollama at all. -->
+    <div class="mt-6 rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">
+      <p class="text-sm text-ink-200 mb-3">{{ t('settings.local_ai.setup_help') }}</p>
+      <div class="flex flex-wrap gap-2 mb-2">
+        <a href="/api/local-ai/installer?os=mac" download
+           class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
+                  bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ macOS</a>
+        <a href="/api/local-ai/installer?os=windows" download
+           class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
+                  bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ Windows</a>
+        <a href="/api/local-ai/installer?os=linux" download
+           class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
+                  bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ Linux</a>
+      </div>
+      <p class="text-xs text-ink-500 mt-2">{{ t('settings.local_ai.hints') }}</p>
+      <p class="text-xs text-amber-300/80 mt-2">⚠ {{ t('settings.local_ai.warning') }}</p>
+    </div>
   </section>
 
   <!-- ===== Local AI Bridge ===== -->
@@ -1135,54 +1168,62 @@ function notificationsSettings() {
   };
 }
 
-function localOllama() {
+function localAI() {
   return {
-    probe: { reachable: false, url: '', models: [] },
-    chosenModel: '',
-    applying:    false,
-    visible:     false,   // hide the card if no Ollama detected and current
-                          //   provider is already a local one — no point
-                          //   nagging an existing happy install.
-    message:     '',
-    ok:          false,
-    async init() {
-      await this.probeNow();
-      // Show the card if Ollama is reachable OR the user is currently
-      // on a cloud provider (so we can offer a switch). If they are
-      // already on openai_compat / bridge and Ollama isn't reachable
-      // here, hide it — they likely have something else set up.
-      const onCloud = ['anthropic','openai','gemini'].includes('{{ current_provider }}');
-      this.visible = this.probe.reachable || onCloud;
+    finds:     [],
+    searched:  false,
+    searching: false,
+    applying:  false,
+    message:   '',
+    ok:        false,
+
+    init() {
+      // Look once on load: an install that already has Ollama should see
+      // the offer without pressing anything. Quietly — no message.
+      this.search(true);
     },
-    async probeNow() {
+
+    async search(quiet) {
+      this.searching = true;
+      if (!quiet) this.message = '';
       try {
         const r = await fetch('/api/local-ai/probe');
-        if (r.ok) {
-          this.probe = await r.json();
-          if (!this.chosenModel && this.probe.models?.length) {
-            // Prefer a small instruction-tuned model when present.
-            const preferred = ['qwen2.5:7b-instruct', 'qwen2.5:14b-instruct',
-                               'llama3.2:3b-instruct', 'llama3.1:8b-instruct'];
-            this.chosenModel = preferred.find(m => this.probe.models.includes(m))
-                              || this.probe.models[0];
-          }
+        const d = r.ok ? await r.json() : {};
+        this.finds = (d.finds || []).map(f => ({...f, chosen: f.suggested || f.models[0]}));
+        if (!quiet) {
+          this.ok = this.finds.length > 0;
+          this.message = this.finds.length
+            ? tr('settings.local_ai.found', {
+                n: this.finds.reduce((a, f) => a + f.models.length, 0),
+                where: this.finds[0].url})
+            : tr('settings.local_ai.nothing');
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        if (!quiet) { this.ok = false; this.message = String(e); }
+      } finally {
+        this.searching = false;
+        this.searched  = true;
+      }
     },
-    async apply() {
-      if (!this.chosenModel) return;
+
+    async use(f) {
+      if (!f.chosen) return;
       this.applying = true;
-      this.message = '';
+      this.message  = '';
       try {
         const r = await fetch('/api/local-ai/apply', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({url: this.probe.url, model: this.chosenModel}),
+          body: JSON.stringify({url: f.url, model: f.chosen}),
         });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-        this.ok = true;
-        this.message = `Saved — provider switched to openai_compat (${d.base_url}, model=${d.model}). Restart required, see top of page.`;
+        // 🔴 "Saved" is not "works" — the server asked the model before
+        // answering, and that verdict is what gets shown.
+        this.ok = !!d.verified;
+        this.message = d.verified
+          ? tr('settings.local_ai.works', {answer: d.answer, model: d.model})
+          : tr('settings.local_ai.saved_not_working', {answer: d.answer || '?'});
       } catch (e) {
         this.ok = false;
         this.message = e.message || String(e);

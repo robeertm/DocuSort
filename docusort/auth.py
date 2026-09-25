@@ -140,6 +140,12 @@ PUBLIC_PATHS = (
     "/login", "/logout", "/setup/admin",
     "/static/", "/upload-sw.js", "/favicon.ico",
     "/api/version",
+    # The one-click Ollama setup runs on the user's own machine and has no
+    # session cookie. 🔴 These three exact paths only — never the prefix
+    # `/api/local-ai/`, or the search and the apply would be open to anyone
+    # who knows the address. They are guarded by a short-lived ticket that
+    # the administrator downloads inside the launcher.
+    "/api/local-ai/setup-script", "/api/local-ai/adopt", "/api/local-ai/finish",
 )
 
 # What a non-admin may reach. Anything not listed is admin-only.

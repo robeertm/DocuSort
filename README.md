@@ -153,7 +153,9 @@ data — fictional shops, fictional employer, fictional bank.)*
   S3, …), scheduled or on demand.
 - **Your choice of AI**: Anthropic Claude, OpenAI, Google Gemini, or anything
   that speaks the OpenAI API — including Ollama or LM Studio on your own
-  machine, in which case nothing leaves your network at all.
+  machine, in which case nothing leaves your network at all. Setting that up
+  is **one click**: DocuSort finds a local model by itself, and downloads a
+  setup for the machine that hasn't got one. See below.
 
 ---
 
@@ -288,7 +290,8 @@ command instead of a button.
 1. **Create the admin account** — the first visit asks for it; nothing is
    reachable before that.
 2. **Choose an AI provider** in *Settings*. Anthropic, OpenAI and Gemini need
-   an API key; a local Ollama needs nothing but its address.
+   an API key; a local Ollama needs nothing at all — press *Find a model* and
+   DocuSort looks for one (see *A local model, in one click* below).
 3. **Check the categories.** `config/categories.yaml` is a plain list — rename,
    add and remove as you like. The descriptions are what the model reads, so
    write them in your own words. An English and a German taxonomy ship with the
@@ -297,6 +300,48 @@ command instead of a button.
    whole folder at once is fine, mixed types included.
 5. **Add your bank data** through the same upload page: a CSV export, a
    statement PDF, or both.
+
+---
+
+## A local model, in one click
+
+A local model is the only setting where **nothing at all** leaves your house,
+so DocuSort makes it the easy one. Two ways in, and both end in the same place.
+
+**If you already run Ollama** — open *Settings* and press **Find a model**.
+DocuSort looks where it can actually reach one: its own machine, its container
+host, and the computer you have the settings page open on. Then it offers what
+it found, with a usable model already picked — it skips embedding and vision
+models, which cannot classify a document.
+
+🔴 **It looks from the server's side, not from your browser's.** Your browser
+sits on the machine where Ollama is installed; it would happily report
+"reachable" while DocuSort — on a VM, in a container, on a NAS — cannot get
+there at all. The question is never whether *you* can reach it.
+
+There is no network scan here, and there never will be. Only addresses that
+are already known get asked.
+
+**If you haven't got Ollama yet** — download the setup for your system and
+double-click it **on the machine the model should run on**, not on the one
+running DocuSort. It installs Ollama (Homebrew / the official script /
+winget), makes it listen where DocuSort can reach it, pulls a model, writes
+the setting — and then asks **DocuSort** whether it works, rather than
+reporting success from the machine it runs on. Finally it offers to restart
+DocuSort so the classifier picks the model up.
+
+The setup carries a **ticket** that is good for thirty minutes and for exactly
+two things: writing that one setting and restarting the service. It is held in
+memory, so it does not outlive the setup it belongs to.
+
+⚠️ If the model ends up on a different machine than DocuSort, Ollama has to
+listen on the network — and Ollama has no password, so anyone on that network
+can then use it. The setup says so in plain words and asks first. On a single
+machine none of this comes up.
+
+`probe_local_ai.py` runs the whole path against a throwaway config and refuses
+to pass if the ticket-guarded routes are anything other than exactly three, if
+a missing or spent ticket is accepted, or if the generated launcher is wrong.
 
 ---
 
