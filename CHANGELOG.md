@@ -7,6 +7,49 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.61.0] – 2026-09-25
+
+### Added
+- **A local model in one click.** Press *Find a model* in Settings and DocuSort
+  looks where it can actually reach one: its own machine, its container host,
+  and the computer that has the settings page open — side by side, with a
+  ceiling. It then offers what it found with a usable model already picked
+  (embedding and vision models are skipped; they cannot classify a document).
+- 🔴 **It looks from the server's side, not the browser's.** The browser runs
+  on the machine where Ollama sits and would report "reachable" while DocuSort
+  — on a VM, in a container — cannot get there at all. No network scan: only
+  addresses that are already known get asked.
+- **A setup you download and double-click** (macOS, Windows, Linux) with this
+  install's address baked in. It installs Ollama (Homebrew / the official
+  script / winget), makes it listen where DocuSort can reach it, pulls a
+  model, writes the setting — then asks **DocuSort** whether it works, and
+  offers to restart the service so the classifier picks it up.
+- **`probe_local_ai.py`** — DocuSort's first probe. Runs the whole app against
+  a throwaway config and database, presses no button that acts outward.
+
+### Changed
+- 🔴 **"Saved" is no longer reported as "works".** `/api/local-ai/apply` now
+  puts one real, tiny question to the model and reports the answer. The check
+  goes straight at the address, so it holds even before the service restarts.
+- The *Local Ollama on this machine* card was **hard-coded English** while the
+  rest of DocuSort speaks five languages. Rebuilt and translated.
+
+### Security
+- The setup script has no session, so it carries a **ticket**: thirty minutes,
+  held in memory, good for exactly two things — writing that one setting and
+  restarting the service.
+- 🔴 **Three exact paths are public, never the prefix.** Opening
+  `/api/local-ai/` would let anyone on the network make DocuSort probe
+  addresses. The probe demonstrates it: with the prefix open,
+  `/api/local-ai/probe` answers **HTTP 200 with no session at all**.
+
+### Fixed
+- A translation rendered into a **JavaScript string literal**
+  (`x-text="'{{ t('…') }}'"`) tears the script apart the moment a language
+  contains an apostrophe — "Pas encore d'Ollama". In that language only, in
+  the browser only. Now `tr()` instead of Jinja inside the script, and the
+  probe looks for it.
+
 ## [0.60.0] – 2026-09-25
 
 ### Fixed

@@ -3336,40 +3336,46 @@ def create_app(
     # path is the openai_compat provider pointing at localhost:11434.
     # These two endpoints (probe + apply) make that a one-click setup.
     @app.get("/api/local-ai/probe")
-    def api_local_ai_probe(url: str = "http://127.0.0.1:11434"):
-        """Check whether an Ollama (or other openai_compat) server is
-        reachable on the same machine and report its model list. The
-        UI uses this to decide whether the "Use local Ollama on this
-        machine" button should be enabled or grayed out."""
-        import urllib.request as _ur
-        import urllib.error  as _ue
-        base = url.rstrip("/")
-        try:
-            with _ur.urlopen(base + "/api/tags", timeout=2) as r:
-                data = json.loads(r.read().decode("utf-8"))
-            models = [m.get("name", "") for m in (data.get("models") or [])]
-            return {"reachable": True, "url": base,
-                    "models": [m for m in models if m]}
-        except _ue.URLError as exc:
-            return {"reachable": False, "url": base, "error": str(exc.reason)}
-        except Exception as exc:
-            return {"reachable": False, "url": base, "error": str(exc)}
+    def api_local_ai_probe(request: Request, url: str = ""):
+        """Where can DOCUSORT reach an Ollama?
 
-    @app.post("/api/local-ai/apply")
-    def api_local_ai_apply(payload: dict):
-        """Switch the AI provider to openai_compat targeting a same-host
-        Ollama. Saves config + flips settings.ai in place so the next
-        request sees the change. The classifier still references the
-        old provider until the user restarts the service — same as
-        the regular /api/settings/ai handler."""
-        from .. import settings_writer
-        url   = (payload.get("url") or "http://127.0.0.1:11434").rstrip("/")
-        model = (payload.get("model") or "").strip()
-        if not model:
-            raise HTTPException(400, "model required")
-        # The openai_compat provider expects an OpenAI-style /v1 base
-        # URL; Ollama exposes that at /v1.
-        base_url = url + "/v1" if not url.endswith("/v1") else url
+        🔴 Asked from the server's side, never from the browser's. The browser
+        runs on the machine where Ollama is installed and would report
+        "reachable" while DocuSort — on a VM, in a container — cannot get
+        there at all. Addresses asked: the configured one, localhost, the
+        container host, and the machine that has this page open. No scan.
+        """
+        from .. import local_ai
+        client = request.client.host if request.client else ""
+        configured = url.strip() or (settings.ai.base_url or "")
+        finds = local_ai.discover(configured, client)
+        best = finds[0] if finds else None
+        return {
+            "finds": finds,
+            # Kept for anything still reading the old shape.
+            "reachable": bool(best),
+            "url": best["url"] if best else (configured or
+                                             "http://127.0.0.1:%d" % local_ai.OLLAMA_PORT),
+            "models": best["models"] if best else [],
+            "suggested": best["suggested"] if best else "",
+        }
+
+    def _local_ai_apply(url: str, model: str) -> dict:
+        """Write the setting AND ask the model whether it actually answers.
+
+        🔴 "Saved" is not "works" — the same separation the upload path uses.
+        The check goes straight at the address, so it holds even though the
+        running classifier still references the old provider until a restart.
+        """
+        from .. import local_ai, settings_writer
+        url = (url or "").strip().rstrip("/")
+        model = (model or "").strip()
+        if not url or not model:
+            raise HTTPException(400, "url and model required")
+        # The openai_compat provider expects an OpenAI-style /v1 base URL;
+        # Ollama exposes that at /v1.
+        base_url = url if url.endswith("/v1") else url + "/v1"
+        ok, said = local_ai.ask(base_url, model)
         settings_writer.update_ai(
             provider="openai_compat", model=model, base_url=base_url,
             api_key=None, config_dir=settings.config_dir,
@@ -3377,8 +3383,157 @@ def create_app(
         settings.ai.provider = "openai_compat"
         settings.ai.model    = model
         settings.ai.base_url = base_url
-        return {"ok": True, "restart_required": True,
-                "provider": "openai_compat", "base_url": base_url, "model": model}
+        return {"ok": True, "restart_required": True, "verified": ok,
+                "answer": said, "provider": "openai_compat",
+                "base_url": base_url, "model": model}
+
+    @app.post("/api/local-ai/apply")
+    def api_local_ai_apply(payload: dict):
+        return _local_ai_apply(payload.get("url") or "", payload.get("model") or "")
+
+    # ------------------------------------------------- one-click setup script
+    # For the install that has no Ollama yet. The administrator downloads a
+    # launcher with this server's address and a short-lived ticket baked in,
+    # double-clicks it ON THE MACHINE THE MODEL SHOULD RUN ON, and the script
+    # installs Ollama, binds it where DocuSort can reach it, pulls a model,
+    # writes the setting — and then asks DOCUSORT whether it works.
+    SETUP_SCRIPT = "docusort_ollama_setup.py"
+
+    def _zipped(inner: str, body: str) -> bytes:
+        """🔴 A browser drops the executable bit when it saves a download, and
+        macOS then refuses the double-click with "you don't have permission".
+        Inside a zip the Unix mode survives."""
+        import io as _io, zipfile as _zip
+        buf = _io.BytesIO()
+        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+            zi = _zip.ZipInfo(inner, date_time=(2026, 1, 1, 0, 0, 0))
+            zi.create_system = 3               # Unix
+            zi.external_attr = (0o755 << 16)   # rwxr-xr-x
+            zf.writestr(zi, body)
+        return buf.getvalue()
+
+    @app.get("/api/local-ai/setup-script")
+    def api_local_ai_setup_script():
+        """The setup script itself. No secret in here — it is the same file
+        that ships in the public repository; the ticket travels in the
+        launcher, not in this."""
+        from fastapi.responses import PlainTextResponse
+        path = Path(__file__).resolve().parent / "static" / "scripts" / SETUP_SCRIPT
+        try:
+            return PlainTextResponse(path.read_text(encoding="utf-8"),
+                                     media_type="text/x-python; charset=utf-8")
+        except OSError as exc:
+            raise HTTPException(404, f"setup script missing: {exc}")
+
+    @app.get("/api/local-ai/installer")
+    def api_local_ai_installer(request: Request, os: str = "mac"):
+        """A ready-to-run launcher: fetch the script, run it, hand it this
+        server's address and a ticket. Three lines — the work is in the
+        script, one file for all three systems instead of three that drift."""
+        from .. import local_ai
+        from fastapi.responses import Response
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+        host   = request.headers.get("host") or request.url.netloc
+        origin = f"{scheme}://{host}".rstrip("/")
+        script = f"{origin}/api/local-ai/setup-script"
+        ticket = local_ai.new_setup_ticket()
+        short  = host.split(":")[0]
+        # DocuSort's own certificate is usually self-signed — the script has
+        # to be told, it never skips verification on its own.
+        extra = " --insecure" if scheme == "https" else ""
+        os_norm = (os or "").lower()
+
+        # 🔴 Never skip certificate checking silently. Try it properly first
+        # and say out loud when falling back — a self-signed DocuSort is the
+        # normal case, an unnoticed man in the middle is not.
+        hol = (f'curl -fsSL "{script}" -o "$DIR/setup.py" || {{\n'
+               f'  echo "  Certificate not trusted - retrying without verification"\n'
+               f'  echo "  (normal for a self-signed DocuSort on your own network)."\n'
+               f'  curl -fsSLk "{script}" -o "$DIR/setup.py"\n'
+               f'}}')
+
+        if os_norm in ("mac", "macos", "darwin"):
+            body = "\n".join([
+                "#!/bin/bash",
+                "# DocuSort - set up a local model (Ollama). Double-click me.",
+                "# If macOS blocks the first start: right-click -> Open.",
+                "set -e",
+                'echo "DocuSort - local model setup"',
+                'DIR="$(mktemp -d -t docusort_ollama)"',
+                "trap 'rm -rf \"$DIR\"' EXIT",
+                hol,
+                f'/usr/bin/env python3 "$DIR/setup.py" --docusort "{origin}" '
+                f'--ticket "{ticket}"{extra}',
+                "",
+            ])
+            name, media = f"docusort-ollama-{short}-mac.zip", "application/zip"
+            content = _zipped(f"docusort-ollama-{short}.command", body)
+        elif os_norm == "linux":
+            body = "\n".join([
+                "#!/bin/bash",
+                "# DocuSort - set up a local model (Ollama).",
+                "set -e",
+                'DIR="$(mktemp -d -t docusort_ollama.XXXXXX)"',
+                "trap 'rm -rf \"$DIR\"' EXIT",
+                hol,
+                f'python3 "$DIR/setup.py" --docusort "{origin}" --ticket "{ticket}"{extra}',
+                "",
+            ])
+            name, media = f"docusort-ollama-{short}-linux.zip", "application/zip"
+            content = _zipped(f"docusort-ollama-{short}.sh", body)
+        elif os_norm in ("win", "windows"):
+            # 🔴 ONE percent sign. `%%TEMP%%` is taken literally by a .bat —
+            # visible only in the generated file, never in this source.
+            # curl.exe ships with Windows 10 1803 and later, so the fetch
+            # looks exactly like the one on the other two systems.
+            content = "\r\n".join([
+                "@echo off",
+                "REM DocuSort -- set up a local model (Ollama). Double-click me.",
+                "set DEST=%TEMP%\\docusort_ollama_setup.py",
+                f'curl -fsSL "{script}" -o "%DEST%"',
+                "if errorlevel 1 (",
+                "  echo   Certificate not trusted - retrying without verification",
+                "  echo   ^(normal for a self-signed DocuSort on your own network^).",
+                f'  curl -fsSLk "{script}" -o "%DEST%"',
+                ")",
+                "if errorlevel 1 (echo Download failed.& pause & exit /b 1)",
+                f'python "%DEST%" --docusort "{origin}" --ticket "{ticket}"{extra}',
+                'del "%DEST%" >nul 2>&1',
+                "pause",
+                "",
+            ]).encode("utf-8")
+            name, media = f"docusort-ollama-{short}.bat", "application/x-bat"
+        else:
+            raise HTTPException(400, f"unknown os: {os!r}")
+
+        return Response(
+            content=content, media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{name}"',
+                     # The ticket is in the body — nothing may cache this.
+                     "Cache-Control": "no-store, max-age=0"},
+        )
+
+    @app.post("/api/local-ai/adopt")
+    def api_local_ai_adopt(payload: dict):
+        """Called by the setup script, which has no session — it carries a
+        ticket instead. Same work as /apply, same verification."""
+        from .. import local_ai
+        ticket = str(payload.get("ticket") or "")
+        if not local_ai.check_setup_ticket(ticket):
+            raise HTTPException(401, "setup ticket invalid or expired — "
+                                     "download the setup again")
+        return _local_ai_apply(payload.get("url") or "", payload.get("model") or "")
+
+    @app.post("/api/local-ai/finish")
+    def api_local_ai_finish(payload: dict):
+        """Restart the service so the classifier picks up the new provider,
+        then burn the ticket. The script asks before calling this."""
+        from .. import local_ai, updater
+        ticket = str(payload.get("ticket") or "")
+        if not local_ai.check_setup_ticket(ticket):
+            raise HTTPException(401, "setup ticket invalid or expired")
+        local_ai.spend_setup_ticket(ticket)
+        return updater.restart_service()
 
     @app.post("/api/settings/ai")
     def api_settings_ai(payload: dict):

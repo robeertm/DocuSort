@@ -1396,5 +1396,21 @@
   "fixed.rhythm.jährlich": "annuale",
   "fixed.rhythm.einmalig": "una tantum",
   "fixed.panel_hint": "Contano solo i movimenti di queste categorie. I contratti (stesso importo a ritmo fisso) sono una voce a sé; il resto di una categoria spuntata conta come media mensile. Le categorie non spuntate restano variabili, per quanto regolari.",
-  "fixed.per_year_abbr": "/anno"
+  "fixed.per_year_abbr": "/anno",
+  "settings.local_ai.heading": "Un modello locale, in un clic",
+  "settings.local_ai.subtitle": "Un modello su un computer tuo: niente esce di casa e non costa nulla per documento. Se hai già Ollama, DocuSort la trova da sola.",
+  "settings.local_ai.found_badge": "trovato",
+  "settings.local_ai.none_badge": "niente trovato",
+  "settings.local_ai.search": "Cerca un modello",
+  "settings.local_ai.searching": "sto cercando …",
+  "settings.local_ai.nothing": "Nessun modello trovato, né dove gira DocuSort né sul tuo computer.",
+  "settings.local_ai.found": "Trovati {n} modello/i, su {where}.",
+  "settings.local_ai.address": "Indirizzo",
+  "settings.local_ai.model": "Modello",
+  "settings.local_ai.use": "Usa questo",
+  "settings.local_ai.works": "Funziona: DocuSort ha chiesto a {model} e ha ottenuto: {answer}. La classificazione in corso passa al prossimo riavvio.",
+  "settings.local_ai.saved_not_working": "Salvato, ma DocuSort non può ancora usare il modello: {answer}",
+  "settings.local_ai.setup_help": "Non hai ancora Ollama? Scarica l'installatore e fai doppio clic sul computer su cui deve girare il modello, non qui. Installa Ollama, scarica un modello e scrive l'indirizzo.",
+  "settings.local_ai.hints": "Al primo avvio macOS chiede conferma (clic destro → Apri) e Windows mostra SmartScreen («Ulteriori informazioni» → «Esegui comunque»). L'installatore parla inglese.",
+  "settings.local_ai.warning": "Se il modello gira su un computer diverso da DocuSort, Ollama deve ascoltare in rete: chiunque sia in quella rete può allora usarlo, Ollama non ha password. L'installatore chiede prima di farlo."
 }
