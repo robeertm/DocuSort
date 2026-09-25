@@ -980,8 +980,12 @@ def finalize_import(db, report: ImportReport | None = None) -> None:
         logger.warning("import: statement reconcile failed: %s", exc)
     # Fresh bookings are exactly what an open bill was waiting for, so the
     # deadline card learns about a payment in the same pass that imported it.
+    # Through deadline_match, so the amounts are read first (a bill whose
+    # amount nobody ever read cannot be matched, no matter how many bookings
+    # arrive) and so this cannot run beside another pass.
     try:
-        matched = db.finance_match_due_payments().get("matched", 0)
+        from .. import deadline_match
+        matched = deadline_match.run_now(db).get("matched", 0)
         if matched:
             logger.info("import: %d open deadline(s) settled by the new bookings", matched)
     except Exception as exc:  # noqa: BLE001
