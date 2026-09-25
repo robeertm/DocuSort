@@ -24,6 +24,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Tells the in-app updater which world it is in. Inside the image the code
+# is part of the image, so the file-swapping self-update must not run — the
+# next restart would hand the old code back without a word.
+ENV DOCUSORT_IN_DOCKER=1
+
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 

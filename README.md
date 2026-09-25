@@ -206,6 +206,43 @@ poppler`).
 
 ---
 
+## Updating
+
+**Docker never re-pulls a running container.** `:latest` is a label, not a
+subscription — pointing at it does not mean your container follows it. Until
+you say so, DocuSort stays on the image you pulled.
+
+```bash
+cd <your docusort directory>
+docker compose pull && docker compose up -d
+```
+
+Your documents, database and config live in the mounted volumes, so replacing
+the image leaves them untouched.
+
+### Having it done for you
+
+`docker-compose.yml` ships a commented **Watchtower** block. Uncomment it and
+new images are pulled on a daily schedule. Two things to weigh first:
+
+* Watchtower needs the **Docker socket**, which is effectively root on the
+  host. It is mounted read-only here, but it is still a privilege you are
+  handing to a container.
+* It updates on *its* schedule, which may be while you are mid-upload. The
+  shipped schedule is nightly at 04:00 rather than hourly for that reason.
+
+### Running from source
+
+There the in-app updater applies: when a release is out, a banner offers
+**Update now**, which fetches the release, swaps the code in place and
+restarts the systemd service if one is installed.
+
+🔴 **In a container that same button is refused, on purpose.** The code is part
+of the image, so swapping files inside the container would be undone by the
+next restart — you would see "updated", restart, and silently be back on the
+old version. In a container the banner therefore shows the `docker compose`
+command instead of a button.
+
 ## First run
 
 1. **Create the admin account** — the first visit asks for it; nothing is

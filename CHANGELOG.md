@@ -7,6 +7,43 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.60.0] – 2026-09-25
+
+### Fixed
+- 🔴 **In a container, "Update now" did the wrong thing — silently.** The
+  in-app updater downloads a release, swaps the code directories and
+  restarts the systemd unit. That is the right move on a source install and
+  the wrong one in a container, where the code is part of the image: the
+  swap succeeded, there was no systemd to restart, and the next
+  `docker compose up` handed the old code back without a word. You would
+  see "updated", restart, and be on the old version. There was no container
+  check anywhere. Now `updater.in_container()` decides (our own image sets
+  `DOCUSORT_IN_DOCKER=1`; otherwise `/.dockerenv`, `/run/.containerenv`, and
+  the cgroup line as a last resort), `install_latest()` refuses with a
+  `ContainerUpdateError`, and `POST /api/update` answers **409** with the
+  command that does work — not a 500, because this is the wrong door, not a
+  failure.
+- 🔴 **On a phone the deadline card was unreadable.** The overdue chip sat
+  next to the subject as a `shrink-0` sibling, so at 320–430 px the title
+  was cut to "Elect…" and the line below ran up to **seven** lines, one word
+  each. The chip now lives inside the text column and wraps with the title,
+  and the title wraps instead of truncating (in a flex row a `nowrap` child
+  shrinks rather than wrapping — that was the actual trap). Measured at
+  320/360/375/390/430/500/644/1277 px: nothing truncated, no sideways scroll.
+
+### Added
+- **The update banner now shows the right path for the install it is in.**
+  From source: the **Update now** button as before. In a container: the
+  `docker compose pull && docker compose up -d` command, with a line saying
+  why. `GET /api/version` carries `container` and `update_command`.
+- **Watchtower as an opt-in**, commented out in `docker-compose.yml` and in
+  the installer's generated file — nightly at 04:00, not hourly. The comment
+  says what it costs: Watchtower needs the Docker socket, which is
+  effectively root on the host.
+- **A README chapter "Updating"** that opens with the sentence people miss:
+  Docker never re-pulls a running container — `:latest` is a label, not a
+  subscription.
+
 ## [0.59.0] – 2026-09-25
 
 ### Added

@@ -39,6 +39,44 @@ REPO = os.environ.get("DOCUSORT_UPDATE_REPO", "robeertm/DocuSort")
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 TARBALL = "https://codeload.github.com/{repo}/tar.gz/refs/tags/{tag}"
 
+# The command a container install uses instead of the in-app updater.
+CONTAINER_UPDATE_COMMAND = "docker compose pull && docker compose up -d"
+
+
+class ContainerUpdateError(RuntimeError):
+    """Raised when the in-app updater is asked to run inside a container.
+
+    It has to refuse, and the reason is not squeamishness. This updater
+    swaps the code directories under the project root and then restarts the
+    systemd unit. In a container the code comes from the IMAGE: the swap
+    would succeed, there is no systemd to restart, and the next
+    `docker compose up` would quietly hand the old code back. The user
+    would see "updated", restart, and be on the old version again — the
+    worst kind of failure, the silent one.
+    """
+
+
+def in_container() -> bool:
+    """True when this process runs inside a container image.
+
+    Checked in order of trustworthiness: our own image sets the variable,
+    Docker writes /.dockerenv, Podman writes /run/.containerenv, and the
+    cgroup line is the last resort (on cgroup v2 it is often just "0::/",
+    so it cannot be the only test).
+    """
+    flag = os.environ.get("DOCUSORT_IN_DOCKER", "").strip().lower()
+    if flag in {"1", "true", "yes", "on"}:
+        return True
+    if flag in {"0", "false", "no", "off"}:
+        return False
+    if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists():
+        return True
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(m in cgroup for m in ("docker", "containerd", "kubepods", "libpod"))
+
 # Relative paths inside the install that survive an update. Everything else
 # under the project root gets replaced with whatever the tarball contains.
 PRESERVE: tuple[str, ...] = (".env", "config", ".venv", "logs")
@@ -93,6 +131,7 @@ def version_info() -> dict[str, Any]:
     Never raises — on network errors returns `has_update=False` with an
     `error` string the UI can show.
     """
+    container = in_container()
     try:
         rel = fetch_latest_release()
     except Exception as exc:
@@ -101,6 +140,8 @@ def version_info() -> dict[str, Any]:
             "latest": None,
             "has_update": False,
             "error": str(exc),
+            "container": container,
+            "update_command": CONTAINER_UPDATE_COMMAND if container else "",
         }
     tag = (rel.get("tag_name") or "").strip()
     latest = tag.lstrip("v")
@@ -112,6 +153,10 @@ def version_info() -> dict[str, Any]:
         "html_url": rel.get("html_url"),
         "body": (rel.get("body") or "")[:4000],
         "published_at": rel.get("published_at"),
+        # The interface needs to know WHICH update path applies before it
+        # offers a button that cannot work here.
+        "container": container,
+        "update_command": CONTAINER_UPDATE_COMMAND if container else "",
     }
 
 
@@ -191,6 +236,12 @@ def install_latest(force: bool = False, tag: str | None = None) -> dict[str, Any
     codeload.github.com — useful when the (unauthenticated) GitHub
     REST API is rate-limited but the codeload CDN still serves
     tarballs."""
+    if in_container():
+        raise ContainerUpdateError(
+            "This DocuSort runs in a container — the image carries the code, "
+            "so swapping files here would be undone by the next restart. "
+            "Update the image instead: " + CONTAINER_UPDATE_COMMAND
+        )
     if tag:
         # Manual override path: trust the caller, skip the API check.
         latest = tag.lstrip("v")

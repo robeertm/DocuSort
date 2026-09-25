@@ -51,6 +51,17 @@ services:
       - ./data:/data
       - ./config:/app/config
       - ./logs:/app/logs
+
+  # Optional: let Watchtower pull new images by itself (daily at 04:00).
+  # It needs the Docker socket — effectively root on the host. Without it,
+  # update by hand: docker compose pull && docker compose up -d
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: docusort-watchtower
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   command: --cleanup --schedule "0 0 4 * * *" docusort
 YAML
   say "Wrote $DIR/docker-compose.yml"
 fi
@@ -84,6 +95,8 @@ cat <<DONE
   Then open Settings and choose your AI provider.
 
   Update later:  cd $DIR && $COMPOSE pull && $COMPOSE up -d
+                 (or uncomment the watchtower block in docker-compose.yml
+                  to have it done for you)
   Logs:          cd $DIR && $COMPOSE logs -f
 
 DONE

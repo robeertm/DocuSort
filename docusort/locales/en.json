@@ -13,6 +13,7 @@
   "update.available": "Update available:",
   "update.release_notes": "View release notes →",
   "update.install_now": "Update now",
+  "update.docker_hint": "Running in a container — here you replace the image, not the files:",
   "update.installing": "Update is being installed — this can take 1–2 minutes…",
   "update.installed_restarted": "Updated to {to} — service is restarting.",
   "update.reload_page": "Reload page",
