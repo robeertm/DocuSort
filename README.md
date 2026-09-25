@@ -157,6 +157,46 @@ data — fictional shops, fictional employer, fictional bank.)*
 
 ---
 
+## Works with Postwache
+
+<table>
+<tr><td width="62%">
+
+[**Postwache**](https://github.com/robeertm/Postwache) is the other half of the
+same idea. It watches your **mailbox**: it sorts the noise out — newsletters,
+adverts, delivery notices — and leaves what matters where you already look.
+
+Most paper does not arrive on paper any more, it arrives as an attachment. So
+the Postwache hands those straight to DocuSort: when mail comes in with a PDF,
+the attachment goes through the ordinary `POST /upload` — the same front door a
+browser uses, with its own service account you can switch off at any time.
+Photos, calendar invitations and signature images stay out; anything that looks
+like phishing is never handed on.
+
+It can also search **backwards** through years of filed mail — *"every message
+with a PDF from the tax office"* — and send the lot over in one go. Documents
+already handed over are marked, so the same paper is never sent twice.
+
+</td><td>
+
+**Together**
+
+```
+  mailbox
+     │
+     ▼
+ Postwache   ← noise out,
+     │         documents found
+     ▼
+ DocuSort    ← filed, amount read,
+     │         booking matched
+     ▼
+  answered
+```
+
+</td></tr>
+</table>
+
 ## Install
 
 ### One command
