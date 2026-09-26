@@ -23,28 +23,31 @@
       <option value="openai">OpenAI GPT</option>
       <option value="gemini">Google Gemini</option>
       <option value="openai_compat">{{ t('setup.provider.compat_label') }}</option>
-      <option value="bridge">Local AI Bridge (your computer)</option>
+      <option value="bridge">{{ t('settings.ai.provider_bridge') }}</option>
     </select>
 
     <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.model') }}</label>
     <input x-model="ai.model" type="text"
            class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm mb-1 font-mono"
-           :placeholder="ai.provider === 'bridge' ? 'qwen2.5:7b-instruct  · or whatever your bridge host has pulled' : ''">
+           :placeholder="ai.provider === 'bridge' ? tr('settings.ai.bridge_model_ph') : ''">
     <div x-show="ai.provider === 'bridge'" x-cloak class="text-xs text-ink-500 mb-4 flex items-center gap-2 flex-wrap">
+      {# Der GANZE Satz steht in EINEM Schluessel — „laeuft gerade" plus
+         „unter <System>" getrennt zu uebersetzen zwingt jede Sprache in die
+         englische Wortstellung. Deshalb zwei volle Saetze statt Fragmenten. #}
       <template x-if="bridgeClientModel()">
         <span>
-          Bridge is currently running
-          <span class="font-mono text-cyan-300" x-text="bridgeClientModel()"></span>
-          <span x-show="bridgeClientPlatform()" class="text-ink-500">
-            on <span x-text="bridgeClientPlatform()"></span>
-          </span>.
+          <span class="text-cyan-100/90" x-text="bridgeClientPlatform()
+              ? tr('settings.ai.bridge_running_on', {model: bridgeClientModel(),
+                                                     platform: bridgeClientPlatform()})
+              : tr('settings.ai.bridge_running', {model: bridgeClientModel()})"></span>
           <button type="button" @click="ai.model = bridgeClientModel()"
                   x-show="ai.model !== bridgeClientModel()"
-                  class="underline hover:text-cyan-200 ml-1">use this</button>
+                  class="underline hover:text-cyan-200 ml-1"
+                  x-text="tr('settings.ai.bridge_use_this')"></button>
         </span>
       </template>
       <template x-if="!bridgeClientModel()">
-        <span class="text-ink-500">Connect a bridge client first to see what model it has loaded.</span>
+        <span class="text-ink-500" x-text="tr('settings.ai.bridge_connect_first')"></span>
       </template>
     </div>
 
@@ -68,10 +71,7 @@
 
     <template x-if="ai.provider === 'bridge'">
       <div class="rounded-lg bg-cyan-500/5 border border-cyan-500/20 p-3 text-xs text-cyan-100/90 mb-4">
-        Inference runs on a computer you control (Mac, Linux, or Windows).
-        Configure the bridge in the next section — once a client is
-        connected, every classification and statement extraction goes
-        through it instead of a cloud API.
+        {{ t('settings.ai.bridge_note') }}
       </div>
     </template>
 
@@ -93,8 +93,8 @@
                 :class="ai.restartHint
                     ? 'rounded-xl px-4 py-2 text-sm font-medium border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-50'
                     : 'rounded-xl px-4 py-2 text-sm font-medium border border-ink-700 bg-ink-900/40 text-ink-300 hover:bg-ink-800 disabled:opacity-50'">
-          <span x-show="!ai.restarting">Restart service</span>
-          <span x-show="ai.restarting" x-cloak>Restarting…</span>
+          <span x-show="!ai.restarting">{{ t('settings.ai.restart_service') }}</span>
+          <span x-show="ai.restarting" x-cloak>{{ t('settings.ai.restarting') }}</span>
         </button>
         <button type="button" @click="saveAi()" :disabled="ai.saving" class="btn-primary"
                 :class="ai.saving ? 'opacity-50 cursor-not-allowed' : ''">
@@ -184,67 +184,59 @@
   <!-- ===== Local AI Bridge ===== -->
   <section class="card p-6" id="bridge" x-data="bridgeSettings()" x-init="init()">
     <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
-      <h2 class="text-lg font-semibold">Local AI Bridge</h2>
+      <h2 class="text-lg font-semibold">{{ t('settings.bridge.heading') }}</h2>
       <span class="text-xs px-2 py-0.5 rounded-full"
             :class="status.connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
-            x-text="status.connected ? 'connected' : 'offline'"></span>
+            x-text="status.connected ? tr('settings.bridge.connected')
+                                    : tr('settings.bridge.offline')"></span>
     </div>
     <p class="text-ink-400 text-sm mb-5">
-      Run the AI on a computer you control (Mac, Linux, or Windows)
-      instead of a cloud API. The client connects to this server
-      outbound — no port forwarding, no firewall changes. Every
-      document classification and bank-statement extraction is then
-      processed locally.
+      {{ t('settings.bridge.intro') }}
     </p>
 
     <!-- Live status block -->
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5 text-sm">
       <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3">
-        <div class="text-ink-500 text-xs uppercase tracking-wide mb-1">Client</div>
+        <div class="text-ink-500 text-xs uppercase tracking-wide mb-1">{{ t('settings.bridge.client') }}</div>
         <div x-show="status.connected" class="font-mono text-xs leading-5 break-all">
-          <div><span class="text-ink-500">host:</span>     <span x-text="status.client.host || '—'"></span></div>
-          <div><span class="text-ink-500">platform:</span> <span x-text="status.client.platform || '—'"></span></div>
-          <div><span class="text-ink-500">model:</span>    <span x-text="status.client.model || '—'"></span></div>
-          <div><span class="text-ink-500">ollama:</span>   <span x-text="status.client.ollama || '—'"></span></div>
+          <div><span class="text-ink-500">{{ t('settings.bridge.field_host') }}:</span> <span x-text="status.client.host || '—'"></span></div>
+          <div><span class="text-ink-500">{{ t('settings.bridge.field_platform') }}:</span> <span x-text="status.client.platform || '—'"></span></div>
+          <div><span class="text-ink-500">{{ t('settings.bridge.field_model') }}:</span> <span x-text="status.client.model || '—'"></span></div>
+          <div><span class="text-ink-500">{{ t('settings.bridge.field_ollama') }}:</span> <span x-text="status.client.ollama || '—'"></span></div>
         </div>
         <template x-if="!status.connected">
           <div class="text-xs">
             <template x-if="(status.last_reject && status.last_reject.at)">
-              <div class="rounded bg-rose-500/10 text-rose-200 px-2 py-1.5 mb-2 leading-5">
-                Last connect rejected — wrong token (from
-                <span class="font-mono" x-text="status.last_reject.host"></span>,
-                token <span class="font-mono" x-text="status.last_reject.token_preview"></span>).
-                The bridge token may have been regenerated since you copied
-                the install command — copy it again from below.
-              </div>
+              <div class="rounded bg-rose-500/10 text-rose-200 px-2 py-1.5 mb-2 leading-5"
+                   x-text="tr('settings.bridge.rejected', {
+                       host: status.last_reject.host,
+                       token: status.last_reject.token_preview})"></div>
             </template>
-            <div class="text-ink-400">
-              No client connected yet. Run the one-liner below on the host you want to use as the bridge.
-            </div>
+            <div class="text-ink-400" x-text="tr('settings.bridge.no_client')"></div>
           </div>
         </template>
       </div>
       <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3 text-xs">
         <div class="flex items-center justify-between mb-1">
-          <div class="text-ink-500 uppercase tracking-wide">Activity</div>
+          <div class="text-ink-500 uppercase tracking-wide">{{ t('settings.bridge.activity') }}</div>
           <button type="button" @click="testConnection()"
                   :disabled="!status.connected || testing"
                   class="text-[11px] rounded-md px-2 py-0.5 border border-ink-700 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-not-allowed">
-            <span x-show="!testing">Test</span>
+            <span x-show="!testing">{{ t('settings.bridge.test') }}</span>
             <span x-show="testing" x-cloak>…</span>
           </button>
         </div>
         <div class="grid grid-cols-2 gap-y-1 font-mono">
-          <div class="text-ink-500">requests</div>
+          <div class="text-ink-500">{{ t('settings.bridge.calls_total') }}</div>
           <div x-text="status.calls_total ?? 0" class="text-right tabular-nums"></div>
-          <div class="text-ink-500">failed</div>
+          <div class="text-ink-500">{{ t('settings.bridge.calls_failed') }}</div>
           <div :class="status.calls_failed > 0 ? 'text-rose-300' : ''"
                x-text="status.calls_failed ?? 0" class="text-right tabular-nums"></div>
-          <div class="text-ink-500">tokens in</div>
+          <div class="text-ink-500">{{ t('settings.bridge.tokens_in') }}</div>
           <div x-text="status.tokens_in ?? 0" class="text-right tabular-nums"></div>
-          <div class="text-ink-500">tokens out</div>
+          <div class="text-ink-500">{{ t('settings.bridge.tokens_out') }}</div>
           <div x-text="status.tokens_out ?? 0" class="text-right tabular-nums"></div>
-          <div class="text-ink-500">pending</div>
+          <div class="text-ink-500">{{ t('settings.bridge.pending') }}</div>
           <div x-text="status.pending ?? 0" class="text-right tabular-nums"></div>
         </div>
         <div x-show="testMessage" x-cloak
@@ -256,35 +248,30 @@
 
     <!-- Token + one-liner install -->
     <div class="space-y-3">
-      <label class="block text-sm font-medium">Bridge token</label>
+      <label class="block text-sm font-medium">{{ t('settings.bridge.token_label') }}</label>
       <div class="flex flex-wrap gap-2 items-stretch">
         <input :value="status.token || ''" readonly
                class="flex-1 min-w-0 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-xs font-mono"
                :type="showToken ? 'text' : 'password'">
         <button type="button" @click="showToken = !showToken" class="btn-secondary text-sm"
-                x-text="showToken ? 'Hide' : 'Show'"></button>
+                x-text="showToken ? tr('settings.bridge.hide')
+                                  : tr('settings.bridge.show')"></button>
         <button type="button" @click="copyToken()" class="btn-secondary text-sm"
-                x-text="copied ? 'Copied!' : 'Copy'"></button>
+                x-text="copied ? tr('settings.bridge.copied')
+                                : tr('settings.bridge.copy')"></button>
         <button type="button" @click="regenerate()"
-                class="btn-secondary text-sm text-rose-300 hover:text-rose-200">Regenerate</button>
+                class="btn-secondary text-sm text-rose-300 hover:text-rose-200">{{ t('settings.bridge.regenerate') }}</button>
       </div>
-      <p class="text-xs text-ink-500">
-        Paste this token into the bridge client on whichever host you
-        want to run the model on. Regenerating immediately disconnects
-        any client still using the old token.
-      </p>
+      <p class="text-xs text-ink-500">{{ t('settings.bridge.token_hint') }}</p>
 
       <div class="mt-5">
-        <label class="block text-sm font-medium mb-2">Start on your computer</label>
+        <label class="block text-sm font-medium mb-2">{{ t('settings.bridge.start_label') }}</label>
 
         <!-- One-click download path — most users land here. The file
              carries the token + server URL embedded; double-clicking
              starts the bridge in a terminal window. -->
         <div class="rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">
-          <p class="text-sm text-ink-200 mb-3">
-            One-click setup — download the launcher for your OS,
-            double-click it, and the bridge starts.
-          </p>
+          <p class="text-sm text-ink-200 mb-3">{{ t('settings.bridge.oneclick') }}</p>
           <div class="flex flex-wrap gap-2 mb-2">
             <a :href="'/api/bridge/installer?os=mac'" download
                class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
@@ -311,11 +298,11 @@
             </a>
           </div>
           <details class="text-xs text-ink-500 mt-2">
-            <summary class="cursor-pointer hover:text-ink-300">First-run hints (zip, Gatekeeper, dependencies)</summary>
+            <summary class="cursor-pointer hover:text-ink-300">{{ t('settings.bridge.hints_summary') }}</summary>
             <ul class="mt-2 space-y-1 list-disc pl-5">
-              <li><b>macOS:</b> the download is a <code>.zip</code> — double-click it once to extract the <code>.command</code> file (preserves the executable bit; without zip wrapping, browsers strip it and macOS refuses with "you don't have permission"). Then double-click the extracted <code>.command</code>. First launch may show "cannot be opened because it is from an unidentified developer" → right-click → Open → Open. Python 3 is preinstalled on modern macOS; Ollama is auto-installed via Homebrew.</li>
-              <li><b>Windows:</b> double-click the <code>.bat</code> directly — no extraction needed. SmartScreen may show "Windows protected your PC" → click "More info" → "Run anyway". Needs Python 3 from python.org or the Microsoft Store. Ollama is auto-installed via winget.</li>
-              <li><b>Linux:</b> the download is a <code>.zip</code> — extract it, then double-click the extracted <code>.sh</code> (or run from a terminal). Ollama is installed via the official <code>curl | sh</code> after a Y/N prompt.</li>
+              <li>{{ t('settings.bridge.hint_mac') }}</li>
+              <li>{{ t('settings.bridge.hint_windows') }}</li>
+              <li>{{ t('settings.bridge.hint_linux') }}</li>
             </ul>
           </details>
         </div>
@@ -323,7 +310,7 @@
         <!-- Power-user fallback: paste the same command into a terminal. -->
         <details class="mt-4">
           <summary class="cursor-pointer text-xs text-ink-400 hover:text-ink-200 select-none">
-            Or run in a terminal yourself
+            {{ t('settings.bridge.terminal_summary') }}
           </summary>
           <div class="mt-2">
             <div class="flex justify-end mb-2">
@@ -340,7 +327,8 @@
                  x-text="installCmd()"></div>
             <div class="flex justify-end mt-2">
               <button type="button" @click="copyInstall()" class="btn-secondary text-xs"
-                      x-text="installCopied ? 'Copied!' : 'Copy command'"></button>
+                      x-text="installCopied ? tr('settings.bridge.copied')
+                                            : tr('settings.bridge.copy_command')"></button>
             </div>
           </div>
         </details>
@@ -497,7 +485,7 @@
         </label>
         <div x-show="form.telegram_enabled" x-cloak class="space-y-2 text-sm">
           <p class="text-xs text-ink-500">
-            {{ t('settings.notif.telegram.help') | safe }}
+            {{ t('settings.notif.telegram.help') }}
           </p>
           <label class="block">
             <span class="text-xs text-ink-400">{{ t('settings.notif.telegram.bot_token') }}</span>
@@ -1045,7 +1033,7 @@ function settingsPage() {
       }
     },
     async restartService() {
-      if (!confirm('Restart the DocuSort service now? Active uploads or in-flight extractions will be cut off.')) return;
+      if (!confirm(tr('settings.ai.restart_confirm'))) return;
       this.ai.restartMessage = '';
       this.ai.restarting = true;
       try {
@@ -1053,11 +1041,11 @@ function settingsPage() {
         const d = await r.json().catch(() => ({}));
         if (r.ok && d.restarted) {
           this.ai.restartOk = true;
-          this.ai.restartMessage = 'Restart scheduled — page will reload in a few seconds.';
+          this.ai.restartMessage = tr('settings.ai.restart_scheduled');
           setTimeout(() => window.location.reload(), 6000);
         } else {
           this.ai.restartOk = false;
-          this.ai.restartMessage = (d.reason || d.detail || 'Restart failed.');
+          this.ai.restartMessage = (d.reason || d.detail || tr('settings.ai.restart_failed'));
         }
       } catch (e) {
         this.ai.restartOk = false;
@@ -1153,16 +1141,16 @@ function notificationsSettings() {
         const failed = (d.results || []).filter(x => !x.ok);
         if (failed.length) {
           this.ok = false;
-          this.message = '{{ t('settings.notif.test_partial') }}: '
+          this.message = (tr('settings.notif.test_partial') + ': ')
             + failed.map(x => `${x.channel} — ${x.error}`).join(' · ');
         } else {
           this.ok = true;
-          this.message = '{{ t('settings.notif.test_ok') }} '
+          this.message = (tr('settings.notif.test_ok') + ' ')
             + (d.channels || []).join(', ');
         }
       } catch (e) {
         this.ok = false;
-        this.message = '{{ t('settings.notif.test_failed') }}: ' + (e.message || String(e));
+        this.message = (tr('settings.notif.test_failed') + ': ') + (e.message || String(e));
       } finally { this.testing = false; }
     },
   };
@@ -1310,7 +1298,7 @@ function bridgeSettings() {
       setTimeout(() => this.installCopied = false, 1500);
     },
     async regenerate() {
-      if (!confirm('Generate a new token? The currently-running client will be disconnected and will need the new token to reconnect.')) return;
+      if (!confirm(tr('settings.bridge.regenerate_confirm'))) return;
       try {
         const r = await fetch('/api/bridge/regenerate-token', { method: 'POST' });
         if (r.ok) { await this.refresh(); }
@@ -1550,7 +1538,7 @@ function syncSettings() {
             body: JSON.stringify({ name: this.newName, ...this.sftp }),
           });
         } else {
-          throw new Error('Choose a backend first');
+          throw new Error(tr('settings.sync.no_backend_chosen'));
         }
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));

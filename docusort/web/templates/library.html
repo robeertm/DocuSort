@@ -43,7 +43,7 @@
     {% endif %}
     {% if trash %}
       <button type="button" x-data
-              @click="if (confirm('{{ t('trash.confirm_empty') }}')) {
+              @click="if (confirm(tr('trash.confirm_empty'))) {
                 fetch('/api/trash/empty', { method: 'POST' })
                   .then(r => r.ok ? location.reload() : r.json().then(d => alert(d.detail || ('HTTP '+r.status))));
               }"

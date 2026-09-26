@@ -392,7 +392,7 @@
     <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
       <h2 class="font-semibold text-sm uppercase tracking-wide {% if ns.gaps %}text-amber-300{% else %}text-ink-400{% endif %}">{{ t('finance.stmt.title') }}</h2>
       <button type="button" class="btn-secondary text-xs" :disabled="busy"
-              @click="busy = true; msg = ''; fetch('/api/finance/import-statements', {method: 'POST'}).then(r => r.json()).then(o => { msg = (o.statements || 0) + ' {{ t('finance.stmt.read') }} · ' + (o.rows_inserted || 0) + ' {{ t('finance.stmt.new') }}'; busy = false; if (o.rows_inserted) setTimeout(() => location.reload(), 1200); }).catch(e => { msg = String(e); busy = false; })">
+              @click="busy = true; msg = ''; fetch('/api/finance/import-statements', {method: 'POST'}).then(r => r.json()).then(o => { msg = (o.statements || 0) + (' ' + tr('finance.stmt.read') + ' · ') + (o.rows_inserted || 0) + (' ' + tr('finance.stmt.new')); busy = false; if (o.rows_inserted) setTimeout(() => location.reload(), 1200); }).catch(e => { msg = String(e); busy = false; })">
         <span x-show="!busy">{{ t('finance.stmt.rescan') }}</span><span x-show="busy" x-cloak>…</span>
       </button>
     </div>

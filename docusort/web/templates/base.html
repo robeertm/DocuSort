@@ -71,7 +71,7 @@
       <a href="{{ href }}" class="hidden xl:inline-flex btn-ghost">{{ label }}</a>
     {% endfor %}
     {% if me and me.is_admin %}
-    <a href="/settings" class="hidden xl:inline-flex btn-ghost" :aria-label="'{{ t('nav.settings') }}'">
+    <a href="/settings" class="hidden xl:inline-flex btn-ghost" :aria-label="tr('nav.settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -142,8 +142,8 @@
             }"
             @click="toggle()"
             class="btn-ghost !px-2 !min-w-[44px]"
-            :aria-label="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'"
-            :title="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'">
+            :aria-label="theme === 'light' ? tr('nav.theme_dark') : tr('nav.theme_light')"
+            :title="theme === 'light' ? tr('nav.theme_dark') : tr('nav.theme_light')">
       {# Sun for light mode (click → goes dark), moon for dark mode (click → goes light) #}
       <svg x-show="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
         <circle cx="12" cy="12" r="4"/>
@@ -157,7 +157,7 @@
     <!-- language picker (Handy: im „Mehr"-Blatt) -->
     <div class="relative hidden md:block" x-data="{ open: false }" @click.outside="open = false">
       <button type="button" @click="open = !open"
-              class="btn-ghost !px-2" :aria-label="'{{ t('nav.language') }}'">
+              class="btn-ghost !px-2" :aria-label="tr('nav.language')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
           <circle cx="12" cy="12" r="10"/>
           <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>
@@ -184,7 +184,7 @@
       <button type="button" @click="open = !open"
               class="btn-ghost !px-1.5 flex items-center"
               :aria-expanded="open" aria-haspopup="menu"
-              :aria-label="'{{ t('auth.account') }}'" title="{{ me.label }}">
+              :aria-label="tr('auth.account')" title="{{ me.label }}">
         <span class="inline-flex h-6 w-6 items-center justify-center rounded-full
                      bg-emerald-500/15 text-emerald-300 text-xs font-semibold uppercase">
           {{ me.label[0] }}
@@ -211,7 +211,7 @@
     {% endif %}
 
     <a href="/upload" class="btn-primary !px-2 sm:!px-3 shrink-0 hidden md:inline-flex"
-       :aria-label="'{{ t('nav.upload') }}'">
+       :aria-label="tr('nav.upload')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
         <path d="M12 3v14M5 10l7-7 7 7M5 21h14"/>
       </svg>
@@ -509,7 +509,7 @@ function updateBanner() {
                                  document.querySelector('meta[name=theme-color]').setAttribute('content', next === 'light' ? '#f1f5f9' : '#0f172a');
                                  theme = next;">
             <span x-text="theme === 'light' ? '🌙' : '☀️'"></span>
-            <span x-text="theme === 'light' ? '{{ t('nav.theme_dark') }}' : '{{ t('nav.theme_light') }}'"></span>
+            <span x-text="theme === 'light' ? tr('nav.theme_dark') : tr('nav.theme_light')"></span>
           </button>
           {% for code, name in supported_langs %}
             <button type="button" @click="switchLang('{{ code }}')"

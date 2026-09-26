@@ -24,7 +24,7 @@
               @click.prevent.stop="toggle({{ d.id }})"
               class="absolute top-2 left-2 z-10 h-5 w-5 rounded border-2 border-ink-600 bg-ink-900/70 opacity-60 group-hover:opacity-100 flex items-center justify-center transition"
               :class="selected.has({{ d.id }}) ? '!border-emerald-400 !bg-emerald-500/40 !opacity-100' : ''"
-              :aria-label="selected.has({{ d.id }}) ? '{{ t('library.deselect') }}' : '{{ t('library.select') }}'">
+              :aria-label="selected.has({{ d.id }}) ? tr('library.deselect') : tr('library.select')">
         <svg x-show="selected.has({{ d.id }})" x-cloak
              viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" class="h-3 w-3">
           <path d="M20 6 9 17l-5-5"/>
