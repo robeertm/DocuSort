@@ -140,19 +140,19 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
             <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.income_total') }}</div>
             <div class="mt-1 text-xl font-semibold tabular-nums text-emerald-300" x-text="fmt(d.income_total)"></div>
             <div class="text-[11px] tabular-nums text-ink-500" x-show="d.prev_month" x-cloak
-                 x-text="(d.income_total - d.prev_income_total > 0 ? '+' : '') + fmt0(d.income_total - d.prev_income_total) + ' € {{ t('spending.vs_prev_short') }}'"></div>
+                 x-text="(d.income_total - d.prev_income_total > 0 ? '+' : '') + fmt0(d.income_total - d.prev_income_total) + (' € ' + tr('spending.vs_prev_short'))"></div>
           </div>
           <div>
             <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.total_spent') }}</div>
             <div class="mt-1 text-xl font-semibold tabular-nums text-rose-300" x-text="fmt(d.total)"></div>
             <div class="text-[11px] tabular-nums text-ink-500" x-show="d.prev_month" x-cloak
-                 x-text="(delta > 0 ? '+' : '') + fmt0(delta) + ' € {{ t('spending.vs_prev_short') }}'"></div>
+                 x-text="(delta > 0 ? '+' : '') + fmt0(delta) + (' € ' + tr('spending.vs_prev_short'))"></div>
           </div>
           <div>
             <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.net') }}</div>
             <div class="mt-1 text-xl font-semibold tabular-nums" :class="d.net >= 0 ? 'text-emerald-300' : 'text-rose-300'"
                  x-text="(d.net > 0 ? '+' : '') + fmt(d.net)"></div>
-            <div class="text-[11px] text-ink-500" x-text="d.net >= 0 ? '{{ t('spending.net_plus') }}' : '{{ t('spending.net_minus') }}'"></div>
+            <div class="text-[11px] text-ink-500" x-text="d.net >= 0 ? tr('spending.net_plus') : tr('spending.net_minus')"></div>
           </div>
           <div>
             <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('spending.fixed_part') }}</div>
@@ -524,7 +524,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
                   <span class="font-medium text-sm">
                     <span x-text="label(c.category)"></span>
                     <span x-show="c.fixed > 0" x-cloak class="ml-1.5 text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border border-ink-600 text-ink-400"
-                          x-text="'{{ t('spending.fixed_pill') }}' + (c.fixed < c.total - 0.5 ? ' ' + fmt0(c.fixed) + ' €' : '')"></span>
+                          x-text="tr('spending.fixed_pill') + (c.fixed < c.total - 0.5 ? ' ' + fmt0(c.fixed) + ' €' : '')"></span>
                   </span>
                   <span class="text-sm font-semibold tabular-nums whitespace-nowrap" x-text="fmt(c.total)"></span>
                 </div>
@@ -532,10 +532,10 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
                   <div class="h-full rounded-full" :style="'width:' + Math.max(1, 100 * c.total / Math.max(1, ...d.categories.map(x => x.total))) + '%; background:' + color(i)"></div>
                 </div>
                 <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-ink-500 flex-wrap">
-                  <span x-text="c.count + ' {{ t('spending.bookings') }} · ' + c.share + ' %'"></span>
+                  <span x-text="c.count + (' ' + tr('spending.bookings') + ' · ') + c.share + ' %'"></span>
                   <span class="tabular-nums whitespace-nowrap">
                     <span x-show="d.prev_month" x-cloak :class="c.total - c.prev > 0 ? 'text-rose-300' : c.total - c.prev < 0 ? 'text-emerald-300' : ''"
-                          x-text="(c.total - c.prev > 0 ? '+' : '') + fmt0(c.total - c.prev) + ' € {{ t('spending.vs_prev_short') }}'"></span>
+                          x-text="(c.total - c.prev > 0 ? '+' : '') + fmt0(c.total - c.prev) + (' € ' + tr('spending.vs_prev_short'))"></span>
                     <span x-show="d.avg_months" x-cloak class="ml-2" x-text="'Ø ' + fmt0(c.avg) + ' €'"></span>
                   </span>
                 </div>
@@ -609,7 +609,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
                 <div class="mt-1.5 h-1.5 rounded-full overflow-hidden">
                   <div class="h-full rounded-full bg-emerald-500/70" :style="'width:' + Math.max(1, 100 * c.total / Math.max(1, ...d.income_categories.map(x => x.total))) + '%'"></div>
                 </div>
-                <div class="mt-1 text-[11px] text-ink-500" x-text="c.count + ' {{ t('spending.bookings') }} · ' + c.share + ' %'"></div>
+                <div class="mt-1 text-[11px] text-ink-500" x-text="c.count + (' ' + tr('spending.bookings') + ' · ') + c.share + ' %'"></div>
               </div>
               <span class="text-ink-500 text-xs shrink-0" x-text="open === 'in-' + c.category ? '▴' : '▾'"></span>
             </button>

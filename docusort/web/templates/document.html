@@ -105,7 +105,7 @@
           <template x-for="i in Math.min(shown, pages)" :key="'pg-' + i">
             <a :href="'/document/{{ doc.id }}/file'" target="_blank" rel="noopener" class="block">
               <img :src="'/document/{{ doc.id }}/page.png?p=' + i"
-                   :alt="'{{ t('document.page_of') | replace("'", "\'") }}'.replace('{n}', i).replace('{total}', pages)"
+                   :alt="tr('document.page_of').replace('{n}', i).replace('{total}', pages)"
                    loading="lazy" decoding="async"
                    class="w-full h-auto bg-white block border-b border-ink-700/40"
                    @error="if (i === 1) imgOk = false">
@@ -113,7 +113,7 @@
           </template>
           <button type="button" x-show="pages > shown" x-cloak @click="shown = pages"
                   class="btn-ghost w-full !justify-center text-sm border-t border-ink-700/40"
-                  x-text="'{{ t('document.show_all_pages') | replace("'", "\'") }}'.replace('{n}', pages)"></button>
+                  x-text="tr('document.show_all_pages').replace('{n}', pages)"></button>
         </div>
 
         <iframe src="/document/{{ doc.id }}/file#toolbar=0&view=FitH"

@@ -7,6 +7,48 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.62.0] – 2026-09-26
+
+### Fixed
+- 🔴 **The Local AI Bridge card was never translated.** Switch DocuSort to
+  German and the whole card stayed English — heading, description, every
+  field label, both status badges, all four buttons and the first-run hints.
+  The i18n pass had covered the other cards on the page and walked past this
+  one. It now speaks all five languages, and so does the AI-provider card's
+  bridge section.
+- 🔴 **The duplicates page was English in every language.** All of it,
+  including the singular/plural built into the markup as `group{s}` and
+  `cop{y|ies}` — a rule that only exists in English. Each language now gets
+  its own singular and plural key.
+- 🔴 **Translations rendered into JavaScript string literals.** 123 places
+  wrote a translated sentence straight into a JS literal
+  (`x-text="'{{ t('k') }}'"`). Jinja escapes the apostrophe to `&#39;`, and
+  that lands differently depending on where it sits: inside a `<script>`
+  block the browser does not decode entities, so French and Italian users
+  read `l&#39;IA` on screen; inside an Alpine expression attribute the
+  browser *does* decode it first, so the expression breaks and the element
+  goes dead. Nine places were already live in French and Italian. All 123 now
+  call `tr('key')`, which reads the text at runtime instead of casting it
+  into the source.
+- The `| replace("'", "\\'")` guard that was meant to prevent this never
+  worked — it runs before Jinja's escaping, so it produced `Aujourd\&#39;hui`
+  rather than a usable apostrophe. Removed in all 37 places.
+- Three more untranslated strings: the service-restart flow in Settings, the
+  bridge token regeneration prompt, and the finance link on the transactions
+  page.
+
+### Added
+- **`probe_sprachen.py`** — renders every page in all five languages and
+  checks each `<script>` block actually parses, finds visible text that never
+  passes through the translator, finds translations cast into JS literals
+  (including the ones today's languages have no apostrophe for — they are
+  armed, not safe), and checks key completeness and placeholder parity.
+  Counter-tested against six deliberate defects: eight failures.
+
+### Security
+- The bridge card's status line and rejection notice no longer build markup
+  out of the client's self-reported host name; they render as text.
+
 ## [0.61.0] – 2026-09-25
 
 ### Added

@@ -12,7 +12,7 @@
       <button @click="refresh()" :disabled="loading"
               class="rounded-lg border border-ink-700 px-2 py-1 hover:border-emerald-500/50 hover:text-emerald-300"
               :class="loading ? 'opacity-50' : ''"
-              :aria-label="'{{ t('hub.refresh') }}'">
+              :aria-label="tr('hub.refresh')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              class="h-3.5 w-3.5 inline" :class="loading ? 'animate-spin' : ''">
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>
@@ -41,8 +41,8 @@
           <span class="h-1.5 w-1.5 rounded-full"
                 :class="state.bridge && state.bridge.connected ? 'bg-emerald-400' : 'bg-rose-400'"></span>
           <span x-text="state.bridge && state.bridge.connected
-                          ? '{{ t('hub.bridge.connected') }}'
-                          : '{{ t('hub.bridge.offline') }}'"></span>
+                          ? tr('hub.bridge.connected')
+                          : tr('hub.bridge.offline')"></span>
         </span>
       </div>
     </div>
@@ -68,8 +68,8 @@
       <div class="text-cyan-100">
         <span class="font-medium" x-text="state.in_flight"></span>
         <span x-text="state.in_flight === 1
-                       ? '{{ t('hub.live.llm_one') }}'
-                       : '{{ t('hub.live.llm_many') }}'"></span>
+                       ? tr('hub.live.llm_one')
+                       : tr('hub.live.llm_many')"></span>
       </div>
     </div>
 
@@ -185,7 +185,7 @@
            is one click away instead of a twelve-hour wait. #}
         <button type="button" class="btn-secondary text-xs" :disabled="matching"
                 @click="matchDeadlines()"
-                :title="'{{ t('dashboard.deadlines.match_hint') }}'">
+                :title="tr('dashboard.deadlines.match_hint')">
           <span x-show="!matching">{{ t('dashboard.deadlines.match') }}</span>
           <span x-show="matching" x-cloak>{{ t('dashboard.deadlines.match_running') }}</span>
         </button>
@@ -213,8 +213,8 @@
               <button type="button"
                       @click="markDeadlineDone(d.id)"
                       :disabled="doneDeadline === d.id"
-                      :title="'{{ t('dashboard.deadlines.done_hint') }}'"
-                      :aria-label="'{{ t('dashboard.deadlines.done_hint') }}'"
+                      :title="tr('dashboard.deadlines.done_hint')"
+                      :aria-label="tr('dashboard.deadlines.done_hint')"
                       class="shrink-0 mt-0.5 h-5 w-5 rounded-md border border-ink-600 text-emerald-300
                              hover:border-emerald-400 hover:bg-emerald-500/10 flex items-center justify-center
                              disabled:opacity-50 transition">
@@ -330,13 +330,13 @@
               <button @click="retryDoc(d.id)" :disabled="busyDoc === d.id"
                       class="rounded-lg px-2 py-1 text-[11px] border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10"
                       :class="busyDoc === d.id ? 'opacity-50' : ''"
-                      :title="'{{ t('hub.problems.retry') }}'">
+                      :title="tr('hub.problems.retry')">
                 <span x-show="busyDoc !== d.id">↻</span>
                 <span x-show="busyDoc === d.id">…</span>
               </button>
               <a :href="'/document/' + d.id"
                  class="rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500"
-                 :title="'{{ t('hub.problems.open') }}'">→</a>
+                 :title="tr('hub.problems.open')">→</a>
             </div>
           </div>
         </li>
