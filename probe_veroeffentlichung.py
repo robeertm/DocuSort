@@ -189,6 +189,14 @@ else:
            hinweis="vorhanden: " + ", ".join(sorted(m for m in marken if m)[:6]))
     pruefe("und „latest“ ist mitgezogen", "latest" in marken)
 
+# 🔴 Der Workflow darf NICHT auf Tags bauen. Er schiebt `:latest` mit, also
+#    haette ein Tag auf einer aelteren Fassung jedem Kunden alten Code als
+#    `latest` gegeben. Genau das ist bei der Postwache einmal passiert.
+wf = lies(".github", "workflows", "docker-publish.yml")
+pruefe("der Workflow baut NICHT auf Tags",
+       'tags: ["v*"]' not in wf and "tags:" not in wf.split("workflow_dispatch")[0],
+       hinweis="sonst schoebe ein alter Tag `:latest` zurueck")
+
 schlecht = [n for n, i, s in F if i != s]
 print("\n%s  %d Proben, %d Fehlschlaege"
       % ("🔴 ROT" if schlecht else "GRUEN", len(F), len(schlecht)))
