@@ -9,144 +9,134 @@ along the way rather than every single step.
 
 ## [0.64.0] – 2026-09-29
 
-Robert: „wichtig die **tailscaleinstallation muss einfacher gehen** als diese
-komplizierte anleitung auf github … **nur die tokens rein** mit einer kleinen
-handlichen anleitung und wer beide programme installiert hat bekommt die
-**verbindung zwischen beiden sofort gesetzt oder maximal mit einem klick**. wie
-sieht das mit automatischer aktualisierung im docker aus? … aktiviere
-**watchtower** in postwache und docusort als standart … **die kunden sollen
-nichts machen müssen das ist ganz wichtig!!**"
-
 ### Changed
 
-- 🔒 **Tailscale: aus einer Anleitung wird ein Befehl.**
+- 🔒 **Tailscale: from an instruction to one command.**
 
   ```bash
-  ./deploy/tailscale.sh tskey-auth-…
+  ./deploy/tailscale.sh tskey-auth-xxxxxxxxxxxx
   ```
 
-  Mehr ist es nicht. Das Skript schreibt Schlüssel **und** `COMPOSE_FILE` in
-  die `.env`, startet alles und nennt die fertige Adresse — die es aus
-  `tailscale cert` herausliest, derselbe Griff wie in
-  `scripts/setup-tailscale-https.sh`.
+  That is the whole setup. The script writes the key **and** `COMPOSE_FILE`
+  into `.env`, starts everything and prints the finished address — which it
+  reads out of `tailscale cert`, the same trick
+  `scripts/setup-tailscale-https.sh` already used.
 
-  🔑 **Gemessen:** steht `COMPOSE_FILE` in der `.env`, nimmt ein blankes
-  `docker compose up -d` beide Dateien. Das `-f … -f …` muss sich niemand mehr
-  merken — und wer es vergisst, startet nicht mehr versehentlich mit offenem
-  Port und ohne Tailnet.
+  🔑 `COMPOSE_FILE` is the real gain, and it was measured: with that line in
+  `.env`, a plain `docker compose up -d` uses both files from then on. Nobody
+  has to remember `-f … -f …` again — and nobody starts by accident with a
+  published port and no tailnet because they forgot it once.
 
-- 🔄 **Watchtower ist eingeschaltet**, in der compose-Datei **und** im
-  Ein-Befehl-Installer. Nächtlich um 04:00, Zeit über `WATCHTOWER_SCHEDULE`
-  verstellbar. Es ist der **gepflegte Fork** `ghcr.io/nicholas-fedor/watchtower`
-  (`containrrr` steht seit Jahren still), und er sieht **nur den eigenen
-  Container** an — deshalb streitet er sich nicht mit einem fremden Watchtower.
+- 🔄 **Watchtower is switched on**, in the compose file **and** in the
+  one-command installer. Nightly at 04:00, movable with `WATCHTOWER_SCHEDULE`.
+  It is the maintained fork `ghcr.io/nicholas-fedor/watchtower` (`containrrr`
+  has stood still for years), and it watches **only** the `docusort` container,
+  which is why it does not fight with a Watchtower you already run.
 
-  🔴 Die Antwort auf die Frage: **nein**, wer schon einen Watchtower hat,
-  bekommt DocuSort nicht automatisch dazu. Einer mit Namensliste nimmt nur die
-  genannten Container. Steht im README.
+  🔴 An existing Watchtower does **not** pick DocuSort up on its own if it
+  names the containers it watches. The README says how to tell.
 
 ### Added
 
-- 🤝 **Die Kopplung mit der Postwache stellt sich selbst her.**
+- 🤝 **The pairing with the Postwache makes itself.**
 
-  * **Zusammen installiert → null Klicks.** `deploy/install-both.sh` oder
-    `docker-compose.both.yml`: ein Geheimnis in einer `.env`, beide Seiten
-    lesen es. DocuSort legt das Konto beim Start an, die Postwache trägt es
-    ein. Bewiesen von Ende zu Ende: Konto da, Zugangsdatei mit 0600, echte
-    Anmeldung gelingt.
-  * **Getrennt installiert → ein Klick je Seite.** Neue Karte *Postwache* in
-    den Einstellungen mit einer **Kopplungszeile** zum Kopieren; die Postwache
-    hat ein Feld zum Einfügen.
+  * **Installed together → no clicks at all.** `deploy/install-both.sh` or
+    `docker-compose.both.yml`: one secret in one `.env`, read by both sides.
+    DocuSort creates the account at start-up, the Postwache writes it down.
+    Proven end to end: account there, access file at 0600, a real login
+    succeeds.
+  * **Installed separately → one click each side.** A new *Postwache* card in
+    the settings shows a **pairing line** to copy; the Postwache has a field to
+    paste it into.
 
-- 🔑 **Ein dritter Rang: `deliver`.** Das Postwache-Konto darf **`POST /upload`
-  und `GET /api/status/<name>`** — und sonst nichts. Bisher brauchte es einen
-  `user`, und ein `user` darf auch Bibliothek und Finanzen **lesen**. Solange
-  ein Mensch dieses Konto von Hand anlegt, ist das eine bewusste Entscheidung;
-  seit die Kopplung von selbst passiert, wäre es eine, die niemand getroffen
-  hat. Gegengeprüft an der laufenden Instanz: Bibliothek, Finanzen, Auswertung,
-  Dokumentenliste und Einstellungen antworten diesem Konto mit **403**.
+- 🔑 **A third role, `deliver`.** The Postwache account may do
+  **`POST /upload` and `GET /api/status/<name>`** — and nothing else. It used
+  to need a `user`, and a `user` may also **read** the library and the
+  finances. While a person creates that account by hand, that is a decision
+  somebody made; now that the pairing happens on its own, it would be one
+  nobody made. Checked against a running instance: library, finances,
+  analytics, document list and settings all answer **403**.
 
 ### Fixed
 
-- 🔴 **Rohe Tags standen als Text auf der Seite.** Neun Übersetzungen tragen
-  absichtlich Markup (`<b>`, `<code>`, ein Link), wurden aber mit `{{ t(…) }}`
-  ausgegeben — und Jinja escapt. Auf `/settings` und `/upload` las man deshalb
-  `<b>macOS:</b>`. Sechs Stellen auf `| safe` umgestellt; im Browser
-  nachgemessen, vorher und nachher.
-- 🔴 **Die Wand vor dem letzten Admin fragte die falsche Frage.** Sie prüfte
-  „wird er `user`" statt „verliert er `admin`" — mit einem dritten Rang wäre
-  der letzte Admin daran vorbeigekommen und niemand hätte mehr hineingekonnt.
-- 🔴 **Der Bau-Workflow lief auch auf Tags und schob dabei `:latest` mit.** Ein
-  Tag auf einer alten Version hätte jedem Kunden alten Code als `latest`
-  gegeben. Er baut jetzt nur noch von `main`.
+- 🔴 **Raw tags stood as TEXT on the page.** Nine translations deliberately
+  carry markup (`<b>`, `<code>`, a link) but were rendered with `{{ t(…) }}`,
+  which Jinja escapes — so `/settings` and `/upload` showed `<b>macOS:</b>`.
+  Six places now render safely; measured in the browser before and after.
+- 🔴 **The wall in front of the last administrator asked the wrong question.**
+  It checked "does this user become `user`" instead of "does this user lose
+  `admin`". With a third role the last admin could have slipped past it and
+  locked everyone out.
+- 🔴 **The build workflow also ran on tags and pushed `:latest` along with
+  it.** Tagging an older version would have handed every customer old code as
+  `latest` on their next pull. It builds from `main` only now.
 
 ### Verified
 
-- `probe_einstellungen.py` **18 → 35 Proben**: Watchtower (Abbild, Umfang,
-  Zeitplan, auch im Installer), die Postwache-Karte, der schmale Rang samt
-  Gegenprobe „die Bibliothek steht NICHT in der Liste", die Datei für beide,
-  beide Skripte. Gegenproben laufen rot, wenn man das alte Watchtower-Abbild
-  einsetzt oder `/library` in die schmale Liste schmuggelt.
-- `probe_veroeffentlichung.py` (seit 0.63.0) prüft, dass Tag, Release und
-  Abbild wirklich draußen sind.
+- `probe_einstellungen.py` grows **18 → 35** checks: Watchtower (image, scope,
+  schedule, and in the installer too), the Postwache card, the narrow role with
+  the counter-check "the library is NOT in that list", the both-file and both
+  scripts. The counter-tests go red when the old Watchtower image comes back or
+  `/library` is smuggled into the narrow list.
+- `probe_veroeffentlichung.py` checks that tag, release and image really made it
+  out — including that the workflow does not build on tags.
 
 ## [0.63.0] – 2026-09-29
 
 ### Changed
-- 🔴 **Das Einstellmenü hatte drei Türen zu einem lokalen Modell.** Das
-  Auswahlfeld „KI-Anbieter" bot „OpenAI-kompatibel" (mit der Adresse
-  `localhost:11434`) **und** „Lokale KI-Brücke"; darunter standen noch zwei
-  eigene Karten: „Ein lokales Modell, in einem Klick" und „Lokale KI-Brücke".
-  Wer eine davon benutzte, sah die anderen trotzdem weiter. Robert, 29.09.2026:
-  „bei docusort einstellungen gibt es **zweimal die möglichkeit die lokale ki zu
-  installieren**, räume das einstellmenü von docusort ordentlich auf".
 
-  Jetzt gibt es **eine** Karte mit **einer** Frage — welcher Anbieter? — und
-  darunter erscheint nur, was zu dieser Antwort gehört. Nichts ist
-  weggefallen: die Suche nach einem laufenden Ollama, die Installationsdateien
-  für macOS/Windows/Linux und die Brücke sind alle noch da, nur eben dort, wo
-  man sie sucht. Gemessen am Telefon: Karten **8 → 6**, Seitenhöhe
-  **6116 → 4906 px**, 0 JS-Fehler, und beim Umschalten des Anbieters erscheint
-  jeweils genau der passende Block.
+- 🔴 **The settings page had three doors to a local model.** The "AI provider"
+  dropdown offered "OpenAI-compatible" (with the address `localhost:11434`)
+  **and** "Local AI Bridge"; below it stood two more cards of their own, "A
+  local model, in one click" and "Local AI Bridge". Use any one of them and you
+  still saw the others.
+
+  There is now **one** card with **one** question — which provider? — and below
+  it only what belongs to that answer. Nothing was dropped: the search for a
+  running Ollama, the installers for macOS/Windows/Linux and the bridge are all
+  still there, just where you look for them. Measured on a phone: cards
+  **8 → 6**, page height **6116 → 4906 px**, 0 JS errors, and switching the
+  provider reveals exactly the matching block.
 
 ### Added
-- 🔒 **Tailscale als Weg in den Container.** Neu: `docker-compose.tailscale.yml`
-  als **Überlagerung** neben der Hauptdatei — eine bestehende Installation
-  bleibt unberührt, der private Weg ist ein zusätzliches `-f`:
+
+- 🔒 **Tailscale as the way in.** New: `docker-compose.tailscale.yml` as an
+  **overlay** next to the main file — an existing install stays untouched, and
+  the private way in is one extra `-f`:
 
   ```bash
   echo 'TS_AUTHKEY=tskey-auth-…' >> .env
   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
   ```
 
-  Danach `https://docusort.<dein-tailnet>.ts.net` — HTTPS mit einem Zertifikat,
-  das Tailscale selbst holt und erneuert. Kein Port offen, kein Reverse Proxy,
-  kein Zertifikat zum Pflegen.
+  Then `https://docusort.<your-tailnet>.ts.net` — HTTPS with a certificate
+  Tailscale fetches and renews by itself. No port open, no reverse proxy, no
+  certificate to look after.
 
-  🔴 **`ports: !reset []`, nicht `ports: []`.** Compose **führt Listen
-  zusammen**: mit der leeren Liste blieb der veröffentlichte Port aus der
-  Hauptdatei stehen — und ein Container, der einen Port veröffentlicht **und**
-  im Netz eines anderen läuft, wird von Docker beim Start abgelehnt. Gefunden,
-  indem die zusammengerechnete Datei wirklich erzeugt wurde:
-  `docker compose config` nannte die kaputte Fassung **gültig**.
+  🔴 **`ports: !reset []`, not `ports: []`.** Compose **merges** lists: with
+  the empty list the published port from the main file stayed standing — and a
+  container that publishes a port **and** rides another one's network is
+  refused by Docker at start. Found by actually rendering the merged file:
+  `docker compose config` called the broken version **valid**.
 
-  🔴 Der Anmeldeschlüssel gehört in `.env`, nie ins Repo, und wird nur einmal
-  gebraucht: danach liegt die Kennung der Maschine in `tailscale/state/`
-  (git-ignoriert). Gegenprobe: ohne `TS_AUTHKEY` bricht der Start ab, statt
-  still ohne Netz zu starten.
+  🔴 The auth key belongs in `.env`, never in the repository, and is needed
+  only once: after that the machine's identity lives in `tailscale/state/`
+  (git-ignored). Counter-test: without `TS_AUTHKEY` the start aborts instead of
+  quietly coming up with no network.
 
 ### Verified
-- **Die Handy-Ansicht, zwölf Seiten nachgemessen** (Start, Bibliothek,
-  Finanzen, Buchungen, Ausgaben, Fixkosten, Upload, Einstellungen, Benutzer,
-  Konto, Analytik, Doppelte) in WebKit: **0 Querlauf, 0 Überhang, 0
-  abgeschnittener Text, 0 iOS-Zoomfallen**. Die Arbeit aus 0.58.0 hält.
-- **Jede Einstellung wirkt wirklich** — 20 Proben gegen die
-  Konfigurationsdatei, nicht gegen den Rückgabewert: KI-Anbieter, Modell und
-  Adresse; Web-Adresse und Tor; Datenschutzschalter; Benachrichtigungen;
-  Sicherung; Sprache; die Suche nach lokaler KI; der Stand der Brücke. Dazu
-  Gegenproben: ein unbekannter Anbieter und ein unmögliches Tor werden mit
-  **400** abgelehnt und die Konfiguration bleibt unberührt.
-- Neuer Prüfstand `probe_einstellungen.py` (18 Proben) hält beides fest.
+
+- **The phone view, twelve pages measured** (home, library, finances, bookings,
+  expenses, fixed costs, upload, settings, users, account, analytics,
+  duplicates) in WebKit: **0 horizontal scroll, 0 overflow, 0 clipped text, 0
+  iOS zoom traps**. The work from 0.58.0 holds.
+- **Every setting really takes effect** — 20 checks against the configuration
+  *file*, not against the return value: AI provider, model and address; web
+  address and port; privacy switches; notifications; backup; language; the
+  search for local AI; the bridge status. Plus counter-tests: an unknown
+  provider and an impossible port are refused with **400** and the
+  configuration stays untouched.
+- New bench `probe_einstellungen.py` (18 checks) keeps both nailed down.
 
 ## [0.62.0] – 2026-09-26
 

@@ -493,6 +493,110 @@ def abschnitt_benutzt(T) -> None:
         print("       z. B. %s" % ", ".join(tot[:6]))
 
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Die Dokumente, die Kunden lesen
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 Zweimal ist ein deutscher Changelog-Eintrag ins oeffentliche Repo
+#    gerutscht, einmal samt woertlichem Zitat des Besitzers. Beides gehoert
+#    dort nicht hin: README und CHANGELOG sind die Kundenseite, sie sind
+#    ENGLISCH, und persoenliche Zitate haben in einem oeffentlichen Repo
+#    nichts zu suchen.
+#
+# 🔑 Gesucht wird die FORM, nicht ein Name — dieser Pruefstand wird selbst
+#    veroeffentlicht und darf nicht das sein, wovor er warnt: deutsche
+#    Anfuehrungszeichen und deutsche Funktionswoerter, ausserhalb von
+#    Code-Bloecken.
+
+import re as _re
+
+# Was absichtlich fremdsprachig ist und englisch erklaert wird.
+ERLAUBTE_FREMDE_STELLEN = (
+    "\u201eHier geht die Post ab\u201c",   # the slogan, quoted and explained in English
+)
+
+_DEUTSCHE_WOERTER = _re.compile(
+    r"\b(und|oder|aber|der|die|das|dem|den|des|ein|eine|einen|einem|eines|"
+    r"nicht|nichts|wird|werden|wurde|ist|sind|war|waren|kann|muss|soll|"
+    r"auf|mit|von|zum|zur|aus|bei|beim|fuer|f\u00fcr|sich|schon|jetzt|noch|auch|"
+    r"nur|dass|wenn|weil|damit|ueber|\u00fcber|durch|gegen|ohne|sehr|immer)\b")
+
+# 🔴 Ein ZITAT ist nicht jedes Anfuehrungszeichen. Gequotete Begriffe in
+#    englischem Fliesstext („New", „locked") sind voellig in Ordnung und stehen
+#    seit jeher in diesen Dateien. Was NICHT hineingehoert, ist die
+#    Zuschreibung gesprochener Worte an eine Person — und die hat eine Form:
+#    ein Name, ein Doppelpunkt (mit oder ohne Datum davor), dann eine
+#    Anfuehrung.
+#
+# 🔑 Gesucht wird die FORM, nicht ein Name: dieser Pruefstand wird selbst
+#    veroeffentlicht und darf nicht das sein, wovor er warnt.
+_ZITAT = _re.compile(
+    r"(?m)(?:^|[\s(])([A-Z][a-z\u00e4\u00f6\u00fc]{2,15})"      # a name
+    r"(?:,\s*\d{1,2}\.\s*\d{1,2}\.\s*\d{2,4})?"             # optional date
+    r"\s*:\s*[\u201e\u201c\"\u00ab]")                          # colon, then a quote
+
+
+def _ohne_code(text):
+    """Code-Bloecke und Inline-Code raus — dort steht kein Fliesstext."""
+    text = _re.sub(r"```.*?```", " ", text, flags=_re.S)
+    text = _re.sub(r"`[^`\n]*`", " ", text)
+    return text
+
+
+def pruefe_dokumente(dateien):
+    """dateien: Liste von (Pfad, Anzeigename). Gibt eine Liste von Befunden."""
+    fehler = []
+    for pfad, name in dateien:
+        try:
+            roh = open(pfad, encoding="utf-8").read()   # builtin, braucht kein io
+        except OSError:
+            fehler.append("%s fehlt" % name)
+            continue
+        text = _ohne_code(roh)
+        for erlaubt in ERLAUBTE_FREMDE_STELLEN:
+            text = text.replace(erlaubt, " ")
+
+        # 1. Woertliche Zitate einer Person.
+        for m in _ZITAT.finditer(text):
+            stelle = text[max(0, m.start() - 20):m.end() + 70]
+            fehler.append("%s: woertliches Zitat einer Person — gehoert nicht "
+                          "in ein oeffentliches Dokument (…%s…)"
+                          % (name, stelle.replace("\n", " ").strip()))
+
+        # 2. Deutscher Fliesstext.
+        #
+        # 🔑 Nicht die ZAHL deutscher Woerter entscheidet, sondern ihre DICHTE.
+        #    Ein einzelnes genanntes Wort ist kein deutscher Text: das Changelog
+        #    erklaert an einer Stelle, warum ein Muster das deutsche „nichts"
+        #    nicht traf, und der Slogan ist eine Redewendung, die englisch
+        #    erlaeutert wird. Beides ist richtig so. Deutscher FLIESSTEXT sieht
+        #    anders aus — da stehen Funktionswoerter dicht beieinander.
+        stellen = [m.start() for m in _DEUTSCHE_WOERTER.finditer(text)]
+        for i, anfang in enumerate(stellen):
+            nahe = [x for x in stellen[i:] if x - anfang <= 120]
+            if len(nahe) >= 3:
+                auszug = text[max(0, anfang - 30):anfang + 150]
+                fehler.append("%s: deutscher Fliesstext — README und CHANGELOG "
+                              "sind ENGLISCH (…%s…)"
+                              % (name, auszug.replace("\n", " ").strip()))
+                break
+    return fehler
+
+
+def abschnitt_dokumente():
+    """README und CHANGELOG sind die Kundenseite: englisch, ohne Zitate."""
+    print("\n── Die Dokumente, die Kunden lesen ──")
+    befunde = pruefe_dokumente([
+        (HIER / "README.md", "README.md"),
+        (HIER / "CHANGELOG.md", "CHANGELOG.md"),
+    ])
+    for b in befunde:
+        fehler.append(b)
+    print("  %s" % ("%d Befund(e)" % len(befunde) if befunde
+                    else "englisch, keine Zitate"))
+
+
 def main() -> int:
     T = tabellen()
     print("DocuSort — Sprachprobe")
@@ -504,6 +608,7 @@ def main() -> int:
     abschnitt_roh_js(T)
     abschnitt_vollstaendig(T)
     abschnitt_benutzt(T)
+    abschnitt_dokumente()
     print("\n" + "─" * 62)
     if fehler:
         print("ROT — %d Befund(e):" % len(fehler))
