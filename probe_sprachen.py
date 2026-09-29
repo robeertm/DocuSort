@@ -597,6 +597,64 @@ def abschnitt_dokumente():
                     else "englisch, keine Zitate"))
 
 
+
+# ── Woertliche Rede in einer VEROEFFENTLICHTEN Datei ────────────────────────
+#
+# 🔴 29.09.2026. Die Regel „kein woertliches Zitat einer Person" war fuer
+#    README und CHANGELOG bewacht — und stand 16 Mal im veroeffentlichten
+#    QUELLTEXT, mit Name oder „Wunsch:" davor. Das Raster kannte die beiden
+#    Dokumente, nicht die Gestalt der Sache.
+#
+# 🔑 Das Kriterium ist die FORM, nicht ein Name: dieser Pruefstand wird selbst
+#    veroeffentlicht und darf keinen tragen. Ein Wort, ein Doppelpunkt, ein
+#    deutsches oeffnendes Anfuehrungszeichen — so sieht zitierte Rede aus. Das
+#    ASCII-Zeichen " zaehlt NICHT mit: `None: """` ist eine Python-Zeichenkette
+#    und keine Aussage. (Mit ihm zusammen waren es 176 Treffer, davon 160 Unsinn.)
+_QUELL_ZITAT = _re.compile(
+    u"(?:^|[\\s(#*])([A-Z\u00c4\u00d6\u00dc][a-z\u00e4\u00f6\u00fc]{2,15})"
+    u"(?:,\\s*[\\d.\\-]{6,12})?\\s*:\\s*\u201e([^\u201e]{1,300}?)[\u201c\u201d\"]",
+    _re.M | _re.S)
+# 🔴 Die Form allein reicht nicht: ein deutsches Substantiv mit Doppelpunkt vor
+#    einem BEGRIFF sieht genauso aus („Entgelte: \u201esiehe Anlage Nr. 1\u201c").
+#    Zwei Fehlalarme. Es entscheidet also zusaetzlich, ob in den
+#    Anfuehrungszeichen ein SATZ steht — drei deutsche Funktionswoerter. Ein
+#    Begriff hat keine.
+
+
+def abschnitt_quellen():
+    """Jede .py und .html im Baum — das ganze Repo ist oeffentlich."""
+    print("\n── Woertliche Rede im veroeffentlichten Quelltext ──")
+    ueber = {".git", ".venv", "node_modules", "__pycache__", "tailscale"}
+    getroffen = []
+    gezaehlt = 0
+    for pfad in sorted(HIER.rglob("*")):
+        if pfad.suffix not in (".py", ".html") or not pfad.is_file():
+            continue
+        if ueber & set(pfad.relative_to(HIER).parts):
+            continue
+        try:
+            roh = pfad.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        gezaehlt += 1
+        for m in _QUELL_ZITAT.finditer(roh):
+            # 🔴 Zwei, nicht drei: „PDF Vorschau nicht passend im
+            #    Vorschaufenster" hat nur zwei — und ist trotzdem ein Zitat.
+            #    Bei zwei bleiben die Begriffe („VISA", „siehe Anlage Nr. 1")
+            #    weiterhin draussen; gemessen am ganzen Baum.
+            if len(_DEUTSCHE_WOERTER.findall(m.group(2))) < 2:
+                continue                    # ein Begriff, keine Aussage
+            zeile = roh[:m.start()].count("\n") + 1
+            kurz = roh[m.start():m.start() + 80].replace("\n", " ").strip()
+            getroffen.append("%s:%d  %s…"
+                             % (pfad.relative_to(HIER), zeile, kurz))
+    for x in getroffen[:8]:
+        fehler.append("woertliche Rede im Quelltext: " + x)
+        print("      · %s" % x)
+    print("  %s (%d Dateien)"
+          % ("%d Befund(e)" % len(getroffen) if getroffen else "keine", gezaehlt))
+
+
 def main() -> int:
     T = tabellen()
     print("DocuSort — Sprachprobe")
@@ -609,6 +667,7 @@ def main() -> int:
     abschnitt_vollstaendig(T)
     abschnitt_benutzt(T)
     abschnitt_dokumente()
+    abschnitt_quellen()
     print("\n" + "─" * 62)
     if fehler:
         print("ROT — %d Befund(e):" % len(fehler))

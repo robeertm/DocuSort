@@ -579,10 +579,10 @@
       {% if doc.due_amount %}
         <p class="text-[11px] text-ink-500 mt-3">
           {{ t('document.paid.amount_read') }}: <span class="tabular-nums">{{ doc.due_amount | money }}</span>
-          {% if doc.due_amount_src %}<br><span class="text-ink-600">„{{ doc.due_amount_src }}"</span>{% endif %}
+          {% if doc.due_amount_src %}<br><span class="text-ink-500">„{{ doc.due_amount_src }}"</span>{% endif %}
         </p>
       {% endif %}
-      <p class="text-[11px] text-ink-600 mt-2">{{ t('document.paid.hint') }}</p>
+      <p class="text-[11px] text-ink-500 mt-2">{{ t('document.paid.hint') }}</p>
       <div x-show="message" x-cloak class="mt-2 text-xs text-ink-400" x-text="message"></div>
     </div>
     {% endif %}

@@ -13,9 +13,8 @@ Liest nur Dateien, startet nichts und fasst keine Installation an.
     `localhost:11434`), eine eigene Karte „Ein lokales Modell, in einem Klick"
     und eine eigene Karte „Lokale KI-Bruecke" — die zusaetzlich noch einmal im
     selben Auswahlfeld stand. Wer eine davon benutzte, sah die anderen
-    trotzdem weiter. Robert, 29.09.2026: „bei docusort einstellungen gibt es
-    zweimal die moeglichkeit die lokale ki zu installieren, raeume das
-    einstellmenu von docusort ordentlich auf".
+    trotzdem weiter — zweimal derselbe Weg zu einem lokalen Modell, an zwei
+    Stellen im selben Menue.
 
   · **`ports: !reset []`, nicht `ports: []`.** Compose FUEHRT Listen ZUSAMMEN.
     Mit der leeren Liste bleibt der veroeffentlichte Port aus der Hauptdatei

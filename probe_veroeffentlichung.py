@@ -6,8 +6,8 @@
 
 🔴 Warum es diesen Pruefstand gibt (29.09.2026). 0.63.0 war gebaut, getestet
    und auf `main` gepusht — das Abbild in GHCR war aktuell, denn der Workflow
-   haengt am Push auf `main`. Trotzdem fragte Robert: „warum ist mein docusort
-   nicht aktuell?"
+   haengt am Push auf `main`. Trotzdem meldete eine laufende Installation
+   weiterhin, sie sei auf dem neuesten Stand.
 
    Der Grund: seine Installation ist eine QUELL-Installation, und der
    eingebaute Aktualisierer fragt GitHub nach `/releases/latest`. Das neueste
@@ -206,6 +206,6 @@ if schlecht:
     print("\n🔑 Fehlt Tag oder Release, dann so nachziehen:\n"
           "   gh release create %s --target main \\\n"
           "     --title \"DocuSort %s — <Schlagzeile>\" --notes-file <text.md>\n"
-          "   Der Text ist ENGLISCH (das Changelog ist deutsch, die Releases\n"
-          "   sind die Kundenseite)." % (TAG, V))
+          "   Der Text ist ENGLISCH — wie Changelog und README, und ohne\n"
+          "   woertliches Zitat: das ist die Kundenseite." % (TAG, V))
 sys.exit(1 if schlecht else 0)

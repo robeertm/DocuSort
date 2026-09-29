@@ -50,7 +50,7 @@
     <!-- Idle state -->
     <div x-show="!anyActivity" x-cloak class="text-sm text-ink-400 py-4 text-center">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
-           class="h-8 w-8 mx-auto mb-2 text-ink-600">
+           class="h-8 w-8 mx-auto mb-2 text-ink-500">
         <path d="M5 12l5 5L20 7"/>
       </svg>
       {{ t('hub.live.idle') }}
@@ -373,8 +373,8 @@
                  x-text="d.subject || d.original_name || ('Dok ' + d.id)"></a>
               <div class="text-[11px] text-ink-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                 <span class="truncate" x-text="d.category + (d.subcategory ? ' / ' + d.subcategory : '')"></span>
-                <template x-if="d.sender"><span class="text-ink-600">·</span><span class="truncate" x-text="d.sender"></span></template>
-                <template x-if="d.doc_date"><span class="text-ink-600">·</span><span x-text="d.doc_date"></span></template>
+                <template x-if="d.sender"><span class="text-ink-500">·</span><span class="truncate" x-text="d.sender"></span></template>
+                <template x-if="d.doc_date"><span class="text-ink-500">·</span><span x-text="d.doc_date"></span></template>
               </div>
             </div>
             <div class="text-[11px] text-ink-500 shrink-0 tabular-nums" x-text="ago(d.created_at)"></div>

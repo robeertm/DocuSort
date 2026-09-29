@@ -96,7 +96,7 @@ _ESSEN = (
     "gasthaus", "gasthof", "brauhaus", "eiscafe", "eiscafé", "cafe",
     "caf", "l osteria", "losteria", "hans im glueck", "peter pane",
     # English / anglicised names — häufig bei modernen Läden, die die reine
-    # Keyword-Liste sonst nicht fängt (Wunsch: „soul food ist ne suppenbar").
+    # Keyword-Liste sonst nicht fängt („Soul Food" etwa ist eine Suppenbar).
     "soul food", "soulfood", "food", "streetfood", "street food", "foodtruck",
     "kitchen", "grill", "steakhouse", "steak house", "diner", "deli",
     "canteen", "kantine", "mensa", "bowl", "poke", "ramen", "noodle",

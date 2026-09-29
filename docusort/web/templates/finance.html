@@ -101,9 +101,9 @@
         <p class="text-xs text-ink-500 mt-3">{{ t('finance.budget.saved_note') | replace('{amt}', "%.0f"|format(cp.saved)) }}</p>
       {% endif %}
       {% if finance_cfg.monthly_budget and finance_cfg.monthly_budget > 0 %}
-        <p class="text-[11px] text-ink-600 mt-1">{{ t('finance.budget.fixed_hint') | replace('{budget}', "%.0f"|format(finance_cfg.monthly_budget)) }}</p>
+        <p class="text-[11px] text-ink-500 mt-1">{{ t('finance.budget.fixed_hint') | replace('{budget}', "%.0f"|format(finance_cfg.monthly_budget)) }}</p>
       {% else %}
-        <p class="text-[11px] text-ink-600 mt-1">{{ t('finance.budget.income_hint') }}</p>
+        <p class="text-[11px] text-ink-500 mt-1">{{ t('finance.budget.income_hint') }}</p>
       {% endif %}
     </div>
   {% endif %}
@@ -330,7 +330,7 @@
           </li>
         {% endfor %}
       </ul>
-      <p class="text-[11px] text-ink-600 mt-3">{{ t('finance.start_balance_hint') }}</p>
+      <p class="text-[11px] text-ink-500 mt-3">{{ t('finance.start_balance_hint') }}</p>
     {% else %}
       <p class="text-xs text-ink-500">{{ t('finance.no_accounts') }}</p>
     {% endif %}
@@ -455,19 +455,19 @@
         <span class="block text-xs text-ink-400 mb-1">{{ t('finance.tracker.salary_match') }}</span>
         <input type="text" x-model="salaryMatch" placeholder="ACME GMBH"
                class="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1.5 text-sm"/>
-        <span class="block text-[11px] text-ink-600 mt-1">{{ t('finance.tracker.salary_match_hint') }}</span>
+        <span class="block text-[11px] text-ink-500 mt-1">{{ t('finance.tracker.salary_match_hint') }}</span>
       </label>
       <label class="block">
         <span class="block text-xs text-ink-400 mb-1">{{ t('finance.tracker.anchor_day') }}</span>
         <input type="number" min="1" max="31" x-model.number="anchorDay"
                class="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1.5 text-sm tabular-nums"/>
-        <span class="block text-[11px] text-ink-600 mt-1">{{ t('finance.tracker.anchor_day_hint') }}</span>
+        <span class="block text-[11px] text-ink-500 mt-1">{{ t('finance.tracker.anchor_day_hint') }}</span>
       </label>
       <label class="block">
         <span class="block text-xs text-ink-400 mb-1">{{ t('finance.tracker.budget') }}</span>
         <input type="text" inputmode="decimal" x-model="monthlyBudget" placeholder="0"
                class="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1.5 text-sm tabular-nums text-right"/>
-        <span class="block text-[11px] text-ink-600 mt-1">{{ t('finance.tracker.budget_hint') }}</span>
+        <span class="block text-[11px] text-ink-500 mt-1">{{ t('finance.tracker.budget_hint') }}</span>
       </label>
     </div>
     <div class="mt-4 flex items-center gap-3">

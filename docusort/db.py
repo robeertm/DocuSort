@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import sqlite3
 import threading
 from dataclasses import asdict, dataclass, field
@@ -302,8 +303,7 @@ def _day_series(range_start: str, range_end: str,
 
     Zwei Dinge, die `per_day` nicht kann:
     * Ein Tag ohne Buchung fehlte dort ganz — dabei ist „nichts ausgegeben"
-      eine Aussage und gehört angezeigt (Wunsch: „es soll auch tage
-      anzeigen wo man nichts ausgegeben hat").
+      eine Aussage und gehört angezeigt.
     * Tage, die noch kommen, gehören ebenfalls ins Bild — am ersten Tag
       eines Gehaltsmonats soll der ganze Monat zu sehen sein. Sie werden
       mit `future: True` markiert: 🔴 ein Tag, der noch nicht stattgefunden
@@ -440,8 +440,8 @@ class Database:
 
     def _finance_drop_income_pins_on_debits(self) -> None:
         """v0.45.3: hand-pins that put a debit into an income category are
-        void (Wunsch: „Ausgaben sind nie Erstattungen") — dropped so the
-        reclassify can decide afresh."""
+        void — an expense is never a refund — dropped so the reclassify can
+        decide afresh."""
         from .finance.categories import INCOME_CATEGORIES
         marks = ",".join("?" * len(INCOME_CATEGORIES))
         with self._lock:
@@ -594,8 +594,8 @@ class Database:
 
         # v0.43: every booking carries WHY it has its category
         # (`category_source` = manual|transfer|rule|ai|keyword|bank|import|none,
-        # `category_reason` = one human sentence) — Wunsch: „jede einzelne
-        # Buchung muss nachvollziehbar sein".
+        # `category_reason` = one human sentence): every single booking has
+        # to be traceable.
         tx_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(transactions)")}
         if "category_source" not in tx_cols:
             self._conn.execute("ALTER TABLE transactions ADD COLUMN category_source TEXT DEFAULT ''")
@@ -1156,6 +1156,13 @@ class Database:
 
     # ---------- Deadlines (due / cancellation reminders) ----------
 
+    # Wie lange eine bezahlte Rechnung noch auf der Karte stehen bleibt.
+    # 🔑 Sie soll nicht in dem Augenblick verschwinden, in dem die Zahlung
+    #    erkannt wird — man will sehen, DASS sie erkannt wurde. Aber ewig
+    #    stehen bleiben soll sie auch nicht, sonst ist die Karte irgendwann
+    #    eine Liste von Erledigtem.
+    BEZAHLT_SICHTBAR_TAGE = 7
+
     def upcoming_deadlines(
         self, *, within_days: int = 30, overdue_grace_days: int = 21,
         limit: int = 50,
@@ -1167,11 +1174,19 @@ class Database:
         today = _date.today()
         lo = (today - _td(days=overdue_grace_days)).isoformat()
         hi = (today + _td(days=within_days)).isoformat()
+        seit = (today - _td(days=self.BEZAHLT_SICHTBAR_TAGE)).isoformat()
         with self._lock:
             rows = self._conn.execute(
-                # Paid rows stay in the list on purpose: the owner asked to
-                # SEE that a bill is settled, not for it to quietly vanish.
-                # Only a hand-tick ("erledigt") removes a row.
+                # 🔑 Eine bezahlte Rechnung bleibt ein paar Tage GRUEN stehen —
+                # man will sehen, dass die Zahlung erkannt wurde — und faellt
+                # danach von selbst heraus. Ein Haken ("erledigt") nimmt sie
+                # sofort weg.
+                #
+                # 🔴 Und eine GUTSCHRIFT ist keine Forderung: die
+                # Telekom-Rechnung vom November 2025 stand hier ueber
+                # -113,05 € („Rechnungsbetrag (Guthaben)"), also als etwas,
+                # das zu zahlen waere, obwohl das Geld zurueckkommt. Ein
+                # negativer Betrag gehoert nicht auf diese Karte.
                 "SELECT id, filename, category, subcategory, sender, subject, "
                 "       doc_date, due_date, due_kind, status, "
                 "       due_amount, paid_tx_id, paid_at, paid_source "
@@ -1179,9 +1194,11 @@ class Database:
                 "WHERE deleted_at IS NULL AND category != '_csv_container' "
                 "  AND due_date IS NOT NULL AND due_date != '' "
                 "  AND COALESCE(deadline_done_at, '') = '' "
+                "  AND COALESCE(due_amount, 0) >= 0 "
+                "  AND (COALESCE(paid_at, '') = '' OR paid_at >= ?) "
                 "  AND due_date BETWEEN ? AND ? "
                 "ORDER BY (COALESCE(paid_at,'') != '') ASC, due_date ASC, id DESC LIMIT ?",
-                (lo, hi, limit),
+                (seit, lo, hi, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -1199,8 +1216,10 @@ class Database:
                 "  AND due_date IS NOT NULL AND due_date != '' "
                 "  AND due_date BETWEEN ? AND ? "
                 "  AND COALESCE(deadline_notified_at, '') = '' "
-                # A bill that is already paid has nothing to remind about.
+                # A bill that is already paid has nothing to remind about —
+                # and neither has a credit note, where the money comes back.
                 "  AND COALESCE(paid_at, '') = '' "
+                "  AND COALESCE(due_amount, 0) >= 0 "
                 "ORDER BY due_date ASC LIMIT 200",
                 (today, hi),
             ).fetchall()
@@ -1253,6 +1272,35 @@ class Database:
             w for w in merchant_key(text or "").split()
             if len(w) > 2 and w not in Database._PAYEE_STOP
         }
+
+    # Eine Zahl, die aus mindestens einer Dreiergruppe besteht und mit Punkt,
+    # Strich, Schraegstrich oder Leerzeichen gegliedert sein darf:
+    # „01-1425-137975", „563 422 1440", „DE08 2501 0030 0000 2893 04".
+    _NUMMER = re.compile(r"\d[\d.\-/ ]{5,32}\d")
+    _DATUM = re.compile(r"^\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}$")
+
+    @staticmethod
+    def _belegnummern(text: str | None) -> set[str]:
+        """Rechnungs-, Kunden- und Kontonummern aus einem Text.
+
+        🔑 Der zweite Weg, einen Empfaenger zu belegen. Eine Rechnung vom
+        Zahnarzt wird an die Verrechnungsstelle ueberwiesen — kein Name
+        passt zum anderen, aber die Rechnungsnummer steht auf beiden Seiten.
+
+        🔴 Mindestens ACHT Ziffern, und Datumsangaben fliegen raus: „15.09.2026"
+        haette acht und stuende in jedem zweiten Dokument. Kurze Nummern
+        kollidieren, lange nicht — und Betrag, Zeitfenster und die 1:1-Regel
+        gelten zusaetzlich weiter.
+        """
+        raus: set[str] = set()
+        for roh in Database._NUMMER.findall(text or ""):
+            roh = roh.strip()
+            if Database._DATUM.match(roh):
+                continue
+            ziffern = re.sub(r"\D", "", roh)
+            if len(ziffern) >= 8 and re.search(r"\d{3}", roh):
+                raus.add(ziffern)
+        return raus
 
     def backfill_due_amounts(self, *, force: bool = False) -> int:
         """Read the amount out of each payment deadline's own text.
@@ -1375,6 +1423,21 @@ class Database:
                 ).fetchall()
             }
 
+        # 🔑 Der Dokumenttext ist gross und wird nur fuer die Dokumente geholt,
+        #    bei denen der Name nicht reicht — einmal, dann gemerkt.
+        _belege_cache: dict[int, set[str]] = {}
+
+        def belege(doc_id: int) -> set[str]:
+            if doc_id not in _belege_cache:
+                with self._lock:
+                    row = self._conn.execute(
+                        "SELECT extracted_text FROM documents WHERE id = ?",
+                        (doc_id,),
+                    ).fetchone()
+                _belege_cache[doc_id] = self._belegnummern(
+                    row["extracted_text"] if row else "")
+            return _belege_cache[doc_id]
+
         pairs: list[tuple[int, int, int, int, str]] = []   # distance, doc, tx, ...
         for doc in docs:
             amount = round(float(doc["due_amount"]), 2)
@@ -1398,11 +1461,6 @@ class Database:
             hi = (due + _td(days=tail)).isoformat()
 
             wanted = self._payee_tokens(doc["sender"])
-            if not wanted:
-                # Without a payee to compare we would be matching on the
-                # amount alone — exactly the mistake that turns an Amazon
-                # purchase into a paid phone bill.
-                continue
 
             with self._lock:
                 cands = self._conn.execute(
@@ -1418,7 +1476,12 @@ class Database:
                     continue
                 have = self._payee_tokens(tx["counterparty"]) | self._payee_tokens(tx["purpose"])
                 if not (wanted & have):
-                    continue
+                    # 🔑 Kein gemeinsamer Name — dann muss eine gemeinsame
+                    #    NUMMER her. Ohne beides wird nur der Betrag
+                    #    verglichen, und genau so wird aus einem Amazon-Kauf
+                    #    eine bezahlte Telefonrechnung.
+                    if not (belege(doc["id"]) & self._belegnummern(tx["purpose"])):
+                        continue
                 try:
                     bd = _date.fromisoformat(tx["booking_date"])
                 except (TypeError, ValueError):
@@ -2279,8 +2342,8 @@ class Database:
                              account_ids: list[int] | None = None) -> list[dict[str, Any]]:
         """Bestenliste des Spar-Spiels über ALLE Zeiträume.
 
-        Wunsch: „nun brauche ich noch eine übersicht welcher monat am
-        erfolgreichsten war, wo man alle sehen kann." Gewertet wird mit
+        Eine Übersicht über ALLE Zeiträume auf einmal — welcher Monat war
+        der erfolgreichste? Gewertet wird mit
         derselben Funktion wie die Karte auf /ausgaben
         (`finance.game.score_days`) — es gibt nur EINEN Regelsatz.
 
@@ -2860,8 +2923,8 @@ class Database:
                 out["amount"] = abs(float(tx.get("amount") or 0.0))
         from .finance.categories import INCOME_CATEGORIES
         for (kind, val), name in targets.items():
-            # Direction of a learned rule (Wunsch: „Ausgaben sind nie
-            # Erstattungen"): an income category → credits only; an expense
+            # Direction of a learned rule (an expense is never a refund):
+            # an income category → credits only; an expense
             # category learned from debits → debits only, so a credit from
             # that shop stays a refund; learned from a credit (pocket money
             # back from Oskar → Kinder) or mixed → both ways.
@@ -3580,8 +3643,8 @@ class Database:
         with outgoing bookings, for the search box: anything can be taken
         into the fixed costs by hand, however irregular it looks).
 
-        `account_ids` narrows every figure to those accounts (Wunsch: „bei
-        den fixkosten will ich auch die konten auswählen können") — the
+        `account_ids` narrows every figure to those accounts — the accounts
+        can be picked in the fixed costs too, the
         same selection as on /ausgaben, and like there an empty list means
         all accounts. The filter sits in the ONE query this function reads
         from, so contracts, the per-category averages and the totals can
@@ -4640,8 +4703,8 @@ class Database:
                                   account_ids: list[int] | None = None) -> dict[str, Any]:
         """Spending of one month by *transaction category* — the categories
         the user assigns, the classifier explains and the rules learn. One
-        system for the whole app (v0.45 — Wunsch: „das tab ausgaben bekommt
-        neukategorisierungen nicht mit").
+        system for the whole app (v0.45 — before that the spending tab did
+        not notice a re-categorisation at all).
 
         Two ways to cut a "month":
         - `periods` given → salary months (Gehalt bis Gehalt); `month` is the
@@ -4704,9 +4767,9 @@ class Database:
                     return "", ""
                 end = p["end"]
                 # 🔴 Der LAUFENDE Gehaltsmonat wird bis zu seinem erwarteten
-                # Ende gezeichnet, nicht bis heute (Wunsch: „auch am
-                # gehaltsmonatsanfang sollen alle tage schon zu sehen sein
-                # und zeigen wieviel pro tag ausgegeben werden darf max").
+                # Ende gezeichnet, nicht bis heute: schon am Anfang eines
+                # Gehaltsmonats sollen alle Tage zu sehen sein und zeigen,
+                # wieviel pro Tag höchstens ausgegeben werden darf.
                 # `finance_salary_periods` schließt den offenen Zeitraum bei
                 # heute ab — damit stünden am dritten Tag drei Balken statt
                 # eines Monats. Die kommenden Tage markiert `_day_series`
@@ -4730,8 +4793,8 @@ class Database:
             if not key:
                 return []
             a, b = _range(key)
-            # Kontenauswahl (Wunsch: „ein Konto raus, alle anderen drin —
-            # oder eines drin, alle anderen raus"). Leer = alle Konten.
+            # Kontenauswahl: ein Konto raus, alle anderen drin — oder eines
+            # drin, alle anderen raus. Leer = alle Konten.
             acc_sql = ""
             acc_args: tuple[Any, ...] = ()
             if account_ids:
@@ -4856,8 +4919,8 @@ class Database:
             "income_categories": income_categories,
             "income_open_count": sum(1 for r in inc_rows if (r["category"] or "sonstiges") == "sonstiges"),
             "open_count": sum(1 for r in cur_rows if (r["category"] or "sonstiges") == "sonstiges"),
-            # Tage OHNE Ausgabe gehören dazu (Wunsch: „es soll auch tage
-            # anzeigen wo man nichts ausgegeben hat"). `per_day` kennt nur
+            # Tage OHNE Ausgabe gehören dazu — auch sie sind eine Aussage.
+            # `per_day` kennt nur
             # Tage mit Buchung — die Reihe wird deshalb über den ganzen
             # Zeitraum aufgefüllt, aber höchstens bis HEUTE: ein Tag, der
             # noch nicht stattgefunden hat, ist kein Tag ohne Ausgaben.

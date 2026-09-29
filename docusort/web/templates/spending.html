@@ -293,9 +293,9 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
           <div class="flex gap-[2px] sm:gap-[3px] mt-1.5">
             <template x-for="(day, i) in d.days" :key="'ax' + day.date">
               <div class="flex-1 min-w-[20px] text-center leading-tight"
-                   :class="isFuture(day) ? 'text-ink-600' : (isWeekend(day) ? 'text-ink-500' : 'text-ink-400')">
+                   :class="isFuture(day) ? 'text-ink-500' : (isWeekend(day) ? 'text-ink-400' : 'text-ink-300')">
                 <div class="text-[9px] tabular-nums" x-text="day.date.slice(8, 10)"></div>
-                <div class="text-[8px] uppercase tracking-wide text-ink-600"
+                <div class="text-[8px] uppercase tracking-wide text-ink-500"
                      x-text="i === 0 || day.date.slice(8, 10) === '01' ? monthShort(day) : weekdayShort(day)"></div>
               </div>
             </template>
@@ -454,7 +454,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
                       x-text="r.place === 1 ? '🥇' : (r.place === 2 ? '🥈' : '🥉')"></span>
                 <span x-show="r.place > 3" class="text-[11px] tabular-nums text-ink-500"
                       x-text="r.place + '.'"></span>
-                <span x-show="r.place === 0" class="text-[11px] text-ink-600">–</span>
+                <span x-show="r.place === 0" class="text-[11px] text-ink-500">–</span>
               </div>
 
               <div class="min-w-0 flex-1">
@@ -462,7 +462,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
                   <span class="text-sm font-medium truncate" x-text="r.label"></span>
                   <span x-show="r.is_current" class="chip bg-ink-800 text-ink-400 text-[10px] py-0"
                         x-cloak>{{ t('game.board_running') }}</span>
-                  <span x-show="!r.rated" class="text-[10px] text-ink-600" x-cloak
+                  <span x-show="!r.rated" class="text-[10px] text-ink-500" x-cloak
                         x-text="T.game_board_unrated"></span>
                 </div>
                 {# Quotenbalken — die Länge ist die Punktequote #}
