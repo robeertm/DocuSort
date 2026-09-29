@@ -1,0 +1,80 @@
+# DocuSort and the Postwache, wired to each other — one file, one command.
+#
+#     ./deploy/install-both.sh            (writes the .env for you)
+#  or, by hand:
+#     echo "PAIRING_SECRET=$(openssl rand -base64 24)" > .env
+#     docker compose -f docker-compose.both.yml up -d
+#
+# What you get:
+#   * DocuSort on http://<host>:8080 — documents and household finances
+#   * the Postwache on http://<host>:8110 — watches your mailbox
+#   * and the two ALREADY know each other. Attachments from your mail land in
+#     DocuSort by themselves: PDFs in the archive, bank CSVs in the finances.
+#     There is nothing to set up for that — no account to create, no password
+#     to copy across.
+#
+# 🔑 How that works: one secret in one `.env`, read by both sides. DocuSort
+#    creates the `Postwache` account with it; the Postwache writes it into its
+#    own access file. That account may do exactly two things — hand a file in
+#    and ask what became of it. It cannot read the library, the finances or the
+#    settings.
+#
+# 🔴 `POSTWACHE_DS_URL` is plain http, on purpose and safely: `docusort` is a
+#    service name from this very file, resolved inside the Docker network. The
+#    request crosses a bridge inside your machine and never touches a wire. For
+#    anything with a dot in it the Postwache insists on https — a password does
+#    not go across a LAN in the clear.
+
+services:
+  docusort:
+    image: ghcr.io/robeertm/docusort:latest
+    container_name: docusort
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - TZ=${TZ:-Europe/Berlin}
+      - DOCUSORT_LOG_LEVEL=INFO
+      # The shared pairing secret. DocuSort creates the account with it.
+      - DOCUSORT_POSTWACHE_PASSWORD=${PAIRING_SECRET:?put PAIRING_SECRET=... in .env — `openssl rand -base64 24` makes a good one}
+    volumes:
+      - ./docusort/inbox:/data/inbox
+      - ./docusort/library:/data/library
+      - ./docusort/config:/app/config
+      - ./docusort/logs:/app/logs
+
+  postwache:
+    image: ghcr.io/robeertm/postwache:latest
+    container_name: postwache
+    restart: unless-stopped
+    ports:
+      - "8110:8110"
+    environment:
+      - TZ=${TZ:-Europe/Berlin}
+      - POSTWACHE_TAKT=60
+      # The same secret from the other side — plus where to find DocuSort.
+      - POSTWACHE_DS_URL=http://docusort:8080
+      - POSTWACHE_DS_BENUTZER=Postwache
+      - POSTWACHE_DS_PASSWORT=${PAIRING_SECRET:?put PAIRING_SECRET=... in .env — `openssl rand -base64 24` makes a good one}
+    volumes:
+      - ./postwache/data:/data
+    depends_on:
+      - docusort
+
+  # Keeps both up to date. See the note in docker-compose.yml for what the
+  # Docker socket costs you; nightly at 04:00, and only these two containers.
+  watchtower:
+    image: ghcr.io/nicholas-fedor/watchtower:latest
+    container_name: docusort-postwache-watchtower
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - --cleanup
+      - --schedule
+      - ${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
+      - docusort
+      - postwache

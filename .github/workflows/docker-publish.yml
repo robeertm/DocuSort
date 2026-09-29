@@ -6,8 +6,14 @@ name: Publish container image
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
+
+# 🔴 Deliberately NOT on tags. A push to main already publishes both
+# `:latest` and `:<version>`, so a tag adds no image — but it would start a
+# build from the TAGGED commit that pushes `:latest` too. Tag an older
+# version (to fill in a release history, say) and every customer on
+# `:latest` would be handed OLD code by the next pull. Tags are git markers
+# and release archives here; the image comes from main.
 
 concurrency:
   group: publish-${{ github.ref }}

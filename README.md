@@ -233,31 +233,66 @@ services:
 mkdir -p data/inbox config && docker compose up -d
 ```
 
-### Over Tailscale — the way in we recommend
+### Over Tailscale — one command
 
-A private network beats a forwarded port. With the overlay file in this repo,
-DocuSort is reachable at `https://docusort.<your-tailnet>.ts.net` — HTTPS with a
-certificate Tailscale fetches and renews itself, no port open anywhere, no
-reverse proxy, and nobody outside your tailnet can even knock.
+A private network beats a forwarded port. Paste a Tailscale auth key and you
+are done:
 
 ```bash
-# once: Tailscale admin console → Settings → Keys → reusable auth key
-echo 'TS_AUTHKEY=tskey-auth-...' >> .env
-# and Settings → DNS → MagicDNS + HTTPS certificates switched on
-
-docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+./deploy/tailscale.sh tskey-auth-xxxxxxxxxxxx
 ```
 
-The overlay only changes what has to change: docusort gives up its published
-port and runs inside the `tailscale` container's network, which is what lets
-`tailscale serve` reach it on `127.0.0.1` without opening anything. Want the
-address in your own network to keep working as well? Uncomment the `ports:`
-block on the **tailscale** service — that is where the network lives now.
+That is the whole setup. DocuSort is then at
+`https://docusort.<your-tailnet>.ts.net` — HTTPS with a certificate Tailscale
+fetches and renews by itself, no port open anywhere, no reverse proxy, and
+nobody outside your tailnet can even knock.
 
-The auth key is needed once, to join. After that this machine's identity sits
+Get the key from the Tailscale admin console → *Settings → Keys →
+Generate auth key* (switch on **Reusable**). And once, in *Settings → DNS*,
+turn on **MagicDNS** and **HTTPS Certificates** — that is the only thing the
+script cannot do for you, and it will tell you if it is still missing.
+
+<details><summary>What the script does, if you would rather do it by hand</summary>
+
+It writes two lines into `.env` and starts the stack:
+
+```
+TS_AUTHKEY=tskey-auth-xxxxxxxxxxxx
+COMPOSE_FILE=docker-compose.yml:docker-compose.tailscale.yml
+```
+
+`COMPOSE_FILE` is the part worth knowing: with it in `.env`, a plain
+`docker compose up -d` uses the Tailscale overlay from then on — you never
+have to remember `-f docker-compose.yml -f docker-compose.tailscale.yml`
+again. The overlay changes only what must change: DocuSort gives up its
+published port and runs inside the `tailscale` container's network, which is
+what lets `tailscale serve` reach it on `127.0.0.1` without opening anything.
+
+The auth key is needed once, to join. Afterwards this machine's identity sits
 in `./tailscale/state` (git-ignored), so the key can be revoked and the
 container keeps running.
 
+</details>
+
+### With the Postwache — nothing to connect
+
+If you also run the [Postwache](https://github.com/robeertm/Postwache), it
+hands attachments from your mail straight in: PDFs into the archive, bank CSVs
+into the finances. Install the two together and **the connection is already
+made**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/robeertm/DocuSort/main/deploy/install-both.sh | bash
+```
+
+One secret in one `.env` is read by both sides — DocuSort creates the account,
+the Postwache writes it down. Nobody types anything.
+
+Already running both, separately? Then it is one click each side: *Settings →
+Postwache* here shows a **pairing line**; paste it on the Postwache page under
+*Pairing line from DocuSort*. The `Postwache` account may do exactly two
+things — hand a file in and ask what became of it. It cannot read the library,
+the finances or the settings.
 
 ### From source
 
@@ -288,16 +323,31 @@ docker compose pull && docker compose up -d
 Your documents, database and config live in the mounted volumes, so replacing
 the image leaves them untouched.
 
-### Having it done for you
+### It is already done for you
 
-`docker-compose.yml` ships a commented **Watchtower** block. Uncomment it and
-new images are pulled on a daily schedule. Two things to weigh first:
+Both the repository's `docker-compose.yml` and the one-command installer ship
+**Watchtower switched on**. New images are pulled nightly at 04:00 and the
+container is recreated — you do not have to do anything.
+
+```
+WATCHTOWER_SCHEDULE=0 30 3 * * *     # in .env, if you want a different time
+```
+
+What that costs, stated plainly:
 
 * Watchtower needs the **Docker socket**, which is effectively root on the
-  host. It is mounted read-only here, but it is still a privilege you are
-  handing to a container.
-* It updates on *its* schedule, which may be while you are mid-upload. The
-  shipped schedule is nightly at 04:00 rather than hourly for that reason.
+  host. It is mounted read-only, but it is still a privilege you are handing
+  to a container. Not willing? Delete the `watchtower` service and update by
+  hand with the two lines above.
+* It updates on *its* schedule, which is why the shipped one is nightly rather
+  than hourly.
+
+**Already running a Watchtower of your own?** Then check whether it names the
+containers it watches. A Watchtower started with a list of names —
+`watchtower app1 app2` — updates only those, so it will *not* pick DocuSort up;
+one started with no names watches everything and will. Ours names only
+`docusort`, so the two never fight over the same container. If yours already
+covers everything, delete our `watchtower` service and let yours do the work.
 
 ### Running from source
 

@@ -260,6 +260,17 @@ def create_app(
 
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    # ---------- Die Postwache-Kopplung (0.64.0) ----------
+    # 🔑 Bei jedem Start: das Konto anlegen oder nachziehen, damit die
+    #    Postwache sich anmelden kann, ohne dass jemand etwas eintraegt. Wenn
+    #    das schiefgeht, darf es den Start NICHT aufhalten — DocuSort soll
+    #    ohne Postwache genauso hochkommen.
+    try:
+        from .. import postwache as _postwache
+        _postwache.konto_sichern(db, settings.config_dir)
+    except Exception as exc:                       # noqa: BLE001
+        logger.warning("Postwache-Konto konnte nicht gesichert werden: %s", exc)
+
     # ---------- First-run gate ----------
     # Paths that always work even when the install is unconfigured (the
     # wizard, language switcher, static files, and a few read-only API
@@ -626,7 +637,12 @@ def create_app(
         # The last active administrator may not demote, disable or lock
         # himself out. Without this the archive becomes unreachable and
         # only a hand-edit of the database gets it back.
-        loses_admin = (fields.get("role") == _auth.ROLE_USER
+        # 🔴 Stand 0.63.0 stand hier `== ROLE_USER`. Mit einem DRITTEN Rang
+        #    haette der letzte Admin sich nach „deliver" umtragen koennen und
+        #    waere damit an dieser Wand vorbei — kein Admin mehr im Haus. Die
+        #    Frage ist nicht „wird er user", sondern „verliert er admin".
+        neue_rolle = fields.get("role")
+        loses_admin = ((neue_rolle is not None and neue_rolle != _auth.ROLE_ADMIN)
                        or fields.get("is_active") == 0)
         if loses_admin and row["role"] == _auth.ROLE_ADMIN and db.admin_count() <= 1:
             raise HTTPException(status_code=409,
@@ -4125,6 +4141,18 @@ def create_app(
         return {"ok": True, "id": doc_id, "done": done}
 
     # ---------- Updater ----------
+    @app.get("/api/postwache/pairing")
+    def api_postwache_pairing(request: Request):
+        """Die Zeile, die auf der Postwache-Seite eingefuegt wird.
+
+        🔴 Sie traegt das Kopplungswort im Klartext (base64 ist keine
+        Verschluesselung). Der Weg steht deshalb NICHT in `auth.USER_ALLOW`
+        und ist damit Admin-Sache — so wie die Marke der lokalen Bruecke.
+        """
+        from .. import postwache as _postwache
+        return _postwache.kopplung(db, settings.config_dir,
+                                   str(request.base_url))
+
     @app.get("/api/version")
     def api_version():
         from .. import updater

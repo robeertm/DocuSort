@@ -7,6 +7,89 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.64.0] – 2026-09-29
+
+Robert: „wichtig die **tailscaleinstallation muss einfacher gehen** als diese
+komplizierte anleitung auf github … **nur die tokens rein** mit einer kleinen
+handlichen anleitung und wer beide programme installiert hat bekommt die
+**verbindung zwischen beiden sofort gesetzt oder maximal mit einem klick**. wie
+sieht das mit automatischer aktualisierung im docker aus? … aktiviere
+**watchtower** in postwache und docusort als standart … **die kunden sollen
+nichts machen müssen das ist ganz wichtig!!**"
+
+### Changed
+
+- 🔒 **Tailscale: aus einer Anleitung wird ein Befehl.**
+
+  ```bash
+  ./deploy/tailscale.sh tskey-auth-…
+  ```
+
+  Mehr ist es nicht. Das Skript schreibt Schlüssel **und** `COMPOSE_FILE` in
+  die `.env`, startet alles und nennt die fertige Adresse — die es aus
+  `tailscale cert` herausliest, derselbe Griff wie in
+  `scripts/setup-tailscale-https.sh`.
+
+  🔑 **Gemessen:** steht `COMPOSE_FILE` in der `.env`, nimmt ein blankes
+  `docker compose up -d` beide Dateien. Das `-f … -f …` muss sich niemand mehr
+  merken — und wer es vergisst, startet nicht mehr versehentlich mit offenem
+  Port und ohne Tailnet.
+
+- 🔄 **Watchtower ist eingeschaltet**, in der compose-Datei **und** im
+  Ein-Befehl-Installer. Nächtlich um 04:00, Zeit über `WATCHTOWER_SCHEDULE`
+  verstellbar. Es ist der **gepflegte Fork** `ghcr.io/nicholas-fedor/watchtower`
+  (`containrrr` steht seit Jahren still), und er sieht **nur den eigenen
+  Container** an — deshalb streitet er sich nicht mit einem fremden Watchtower.
+
+  🔴 Die Antwort auf die Frage: **nein**, wer schon einen Watchtower hat,
+  bekommt DocuSort nicht automatisch dazu. Einer mit Namensliste nimmt nur die
+  genannten Container. Steht im README.
+
+### Added
+
+- 🤝 **Die Kopplung mit der Postwache stellt sich selbst her.**
+
+  * **Zusammen installiert → null Klicks.** `deploy/install-both.sh` oder
+    `docker-compose.both.yml`: ein Geheimnis in einer `.env`, beide Seiten
+    lesen es. DocuSort legt das Konto beim Start an, die Postwache trägt es
+    ein. Bewiesen von Ende zu Ende: Konto da, Zugangsdatei mit 0600, echte
+    Anmeldung gelingt.
+  * **Getrennt installiert → ein Klick je Seite.** Neue Karte *Postwache* in
+    den Einstellungen mit einer **Kopplungszeile** zum Kopieren; die Postwache
+    hat ein Feld zum Einfügen.
+
+- 🔑 **Ein dritter Rang: `deliver`.** Das Postwache-Konto darf **`POST /upload`
+  und `GET /api/status/<name>`** — und sonst nichts. Bisher brauchte es einen
+  `user`, und ein `user` darf auch Bibliothek und Finanzen **lesen**. Solange
+  ein Mensch dieses Konto von Hand anlegt, ist das eine bewusste Entscheidung;
+  seit die Kopplung von selbst passiert, wäre es eine, die niemand getroffen
+  hat. Gegengeprüft an der laufenden Instanz: Bibliothek, Finanzen, Auswertung,
+  Dokumentenliste und Einstellungen antworten diesem Konto mit **403**.
+
+### Fixed
+
+- 🔴 **Rohe Tags standen als Text auf der Seite.** Neun Übersetzungen tragen
+  absichtlich Markup (`<b>`, `<code>`, ein Link), wurden aber mit `{{ t(…) }}`
+  ausgegeben — und Jinja escapt. Auf `/settings` und `/upload` las man deshalb
+  `<b>macOS:</b>`. Sechs Stellen auf `| safe` umgestellt; im Browser
+  nachgemessen, vorher und nachher.
+- 🔴 **Die Wand vor dem letzten Admin fragte die falsche Frage.** Sie prüfte
+  „wird er `user`" statt „verliert er `admin`" — mit einem dritten Rang wäre
+  der letzte Admin daran vorbeigekommen und niemand hätte mehr hineingekonnt.
+- 🔴 **Der Bau-Workflow lief auch auf Tags und schob dabei `:latest` mit.** Ein
+  Tag auf einer alten Version hätte jedem Kunden alten Code als `latest`
+  gegeben. Er baut jetzt nur noch von `main`.
+
+### Verified
+
+- `probe_einstellungen.py` **18 → 35 Proben**: Watchtower (Abbild, Umfang,
+  Zeitplan, auch im Installer), die Postwache-Karte, der schmale Rang samt
+  Gegenprobe „die Bibliothek steht NICHT in der Liste", die Datei für beide,
+  beide Skripte. Gegenproben laufen rot, wenn man das alte Watchtower-Abbild
+  einsetzt oder `/library` in die schmale Liste schmuggelt.
+- `probe_veroeffentlichung.py` (seit 0.63.0) prüft, dass Tag, Release und
+  Abbild wirklich draußen sind.
+
 ## [0.63.0] – 2026-09-29
 
 ### Changed
