@@ -1,7 +1,7 @@
 """Eine Buchung → Kategorie **mit Begründung**.
 
-Wunsch: „es gibt immer eine kategorie sonstige … zuweisen und das system
-lernt dann dabei … jede einzelne buchung muss nachvollziehbar sein."
+Die Vorgabe: es gibt immer eine Kategorie „Sonstige", von Hand zugewiesen
+lernt das System mit — und jede einzelne Buchung muss nachvollziehbar sein.
 
 Deshalb liefert dieser Klassifikator nie nur ein Wort, sondern eine
 `Decision(category, source, reason)`, die an der Buchung gespeichert wird
@@ -457,7 +457,7 @@ def classify(tx: dict[str, Any], *, rules: RuleIndex | None = None,
         _amt = float(tx.get("amount") or 0.0)
     except (TypeError, ValueError):
         _amt = 0.0
-    # Hard rule (Wunsch: „Ausgaben sind nie Erstattungen!"): a debit can
+    # Hard rule (an expense is never a refund): a debit can
     # never carry an income category — not by hand, not by rule, not by AI.
     debit = _amt < 0
     if pinned and tx_hash in pinned and (pinned[tx_hash] or "").strip() \

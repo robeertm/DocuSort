@@ -4,8 +4,8 @@ Warum das sein muss: Die Vorschau lag als `<iframe src="…file#view=Fit">`
 auf der Seite. Auf dem Schreibtisch zeigt Chrome darin seinen eigenen
 PDF-Betrachter und passt die Seite ein; **iOS-Safari ignoriert den
 Fragment-Teil** und stellt das Dokument in Originalgröße dar — sichtbar
-war die linke obere Ecke, der Rest abgeschnitten (Wunsch: „PDF Vorschau
-nicht passend im Vorschaufenster").
+war die linke obere Ecke, der Rest abgeschnitten — die Vorschau passte
+nicht in ihr Fenster.
 
 Ein Bild kennt dieses Problem nicht: `width: 100%` passt immer.
 

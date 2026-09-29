@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Die Kopplung mit der Postwache — ohne dass der Kunde etwas tun muss.
 
-Robert, 29.09.2026: „wer beide programme installiert hat bekommt die verbindung
-zwischen beiden sofort gesetzt oder maximal mit einem klick … die kunden sollen
-nichts machen muessen das ist ganz wichtig!!"
+🔑 Die Vorgabe: wer beide Programme installiert hat, findet die Verbindung
+zwischen ihnen bereits gesetzt — hoechstens ein Klick, und ohne dass jemand
+etwas einrichten muss.
 
 Die Postwache uebergibt Anhaenge aus Mails durch `POST /upload` — dieselbe
 Vordertuer, die auch der Browser benutzt. Dafuer braucht sie ein Konto. Bisher

@@ -340,7 +340,7 @@
         <span x-text="rules.length + ' gelernte Regel(n)'"></span>
         <button type="button" @click="showRules = !showRules" class="underline hover:text-emerald-300"
                 x-text="showRules ? 'Regeln ausblenden' : 'Regeln anzeigen'"></button>
-        <span class="text-ink-600">·</span>
+        <span class="text-ink-500">·</span>
         <button type="button" @click="showCats = !showCats" class="underline hover:text-emerald-300"
                 x-text="showCats ? tr('tx.hide_cats') : tr('tx.own_cats').replace('{n}', customCats.length)"></button>
         <div x-show="showCats" x-cloak class="w-full mt-1 space-y-2">
@@ -367,7 +367,7 @@
                         title="{{ t('tx.delete_cat') }}">✕</button>
               </div>
             </template>
-            <span x-show="!customCats.length" x-cloak class="text-ink-600">Noch keine eigenen — die eingebauten reichen oft; lege an, was dir fehlt.</span>
+            <span x-show="!customCats.length" x-cloak class="text-ink-500">Noch keine eigenen — die eingebauten reichen oft; lege an, was dir fehlt.</span>
           </div>
         </div>
         <div x-show="showRules" x-cloak class="w-full mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">

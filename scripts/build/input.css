@@ -99,6 +99,38 @@
   html[data-theme="light"] :is(.text-cyan-100, .text-cyan-200, .text-cyan-300, .text-cyan-400) { color: #0e7490; }
   html[data-theme="light"] :is(.text-violet-200, .text-violet-300, .text-violet-400) { color: #6d28d9; }
   html[data-theme="light"] :is(.bg-emerald-500 .text-emerald-300, .bg-emerald-500.text-emerald-300, .bg-rose-500 .text-rose-300, .bg-rose-500.text-rose-300) { color: #ffffff; }
+  /* 🔴 The rules above match a CLASS NAME. Tailwind writes a DIFFERENT name
+     for every shape of the same colour, and those shapes fell straight
+     through this raster and stayed pastel on paper:
+
+         text-cyan-100         caught
+         text-cyan-100/90      NOT caught — opacity modifier (measured 1.06:1)
+         hover:text-emerald-300  NOT caught — state prefix (invisible on hover)
+
+     So these match the SHAPE instead of the exact name: any class that
+     carries the utility plus an opacity modifier, and any hover/group-hover
+     variant while it is actually hovered. Dark mode is untouched. */
+  html[data-theme="light"] :is([class*="text-emerald-100/"], [class*="text-emerald-200/"], [class*="text-emerald-300/"], [class*="text-emerald-400/"]) { color: #047857; }
+  html[data-theme="light"] :is([class*="text-rose-100/"], [class*="text-rose-200/"], [class*="text-rose-300/"], [class*="text-rose-400/"]) { color: #be123c; }
+  html[data-theme="light"] :is([class*="text-amber-100/"], [class*="text-amber-200/"], [class*="text-amber-300/"], [class*="text-amber-400/"]) { color: #b45309; }
+  html[data-theme="light"] :is([class*="text-indigo-100/"], [class*="text-indigo-200/"], [class*="text-indigo-300/"], [class*="text-indigo-400/"]) { color: #4338ca; }
+  html[data-theme="light"] :is([class*="text-sky-100/"], [class*="text-sky-200/"], [class*="text-sky-300/"], [class*="text-sky-400/"]) { color: #0369a1; }
+  html[data-theme="light"] :is([class*="text-cyan-100/"], [class*="text-cyan-200/"], [class*="text-cyan-300/"], [class*="text-cyan-400/"]) { color: #0e7490; }
+  html[data-theme="light"] :is([class*="text-violet-100/"], [class*="text-violet-200/"], [class*="text-violet-300/"], [class*="text-violet-400/"]) { color: #6d28d9; }
+  html[data-theme="light"] :is([class*="hover:text-emerald-100"], [class*="hover:text-emerald-200"], [class*="hover:text-emerald-300"], [class*="hover:text-emerald-400"]):hover { color: #047857; }
+  html[data-theme="light"] :is([class*="hover:text-rose-100"], [class*="hover:text-rose-200"], [class*="hover:text-rose-300"], [class*="hover:text-rose-400"]):hover { color: #be123c; }
+  html[data-theme="light"] :is([class*="hover:text-amber-100"], [class*="hover:text-amber-200"], [class*="hover:text-amber-300"], [class*="hover:text-amber-400"]):hover { color: #b45309; }
+  html[data-theme="light"] :is([class*="hover:text-indigo-100"], [class*="hover:text-indigo-200"], [class*="hover:text-indigo-300"], [class*="hover:text-indigo-400"]):hover { color: #4338ca; }
+  html[data-theme="light"] :is([class*="hover:text-sky-100"], [class*="hover:text-sky-200"], [class*="hover:text-sky-300"], [class*="hover:text-sky-400"]):hover { color: #0369a1; }
+  html[data-theme="light"] :is([class*="hover:text-cyan-100"], [class*="hover:text-cyan-200"], [class*="hover:text-cyan-300"], [class*="hover:text-cyan-400"]):hover { color: #0e7490; }
+  html[data-theme="light"] :is([class*="hover:text-violet-100"], [class*="hover:text-violet-200"], [class*="hover:text-violet-300"], [class*="hover:text-violet-400"]):hover { color: #6d28d9; }
+  html[data-theme="light"] .group:hover :is([class*="group-hover:text-emerald-100"], [class*="group-hover:text-emerald-200"], [class*="group-hover:text-emerald-300"], [class*="group-hover:text-emerald-400"]) { color: #047857; }
+  html[data-theme="light"] .group:hover :is([class*="group-hover:text-rose-100"], [class*="group-hover:text-rose-200"], [class*="group-hover:text-rose-300"], [class*="group-hover:text-rose-400"]) { color: #be123c; }
+  html[data-theme="light"] .group:hover :is([class*="group-hover:text-amber-100"], [class*="group-hover:text-amber-200"], [class*="group-hover:text-amber-300"], [class*="group-hover:text-amber-400"]) { color: #b45309; }
+  html[data-theme="light"] .group:hover :is([class*="group-hover:text-indigo-100"], [class*="group-hover:text-indigo-200"], [class*="group-hover:text-indigo-300"], [class*="group-hover:text-indigo-400"]) { color: #4338ca; }
+  html[data-theme="light"] .group:hover :is([class*="group-hover:text-sky-100"], [class*="group-hover:text-sky-200"], [class*="group-hover:text-sky-300"], [class*="group-hover:text-sky-400"]) { color: #0369a1; }
+  html[data-theme="light"] .group:hover :is([class*="group-hover:text-cyan-100"], [class*="group-hover:text-cyan-200"], [class*="group-hover:text-cyan-300"], [class*="group-hover:text-cyan-400"]) { color: #0e7490; }
+  html[data-theme="light"] .group:hover :is([class*="group-hover:text-violet-100"], [class*="group-hover:text-violet-200"], [class*="group-hover:text-violet-300"], [class*="group-hover:text-violet-400"]) { color: #6d28d9; }
   /* Translucent tints over white are far paler than over ink — one notch stronger. */
   html[data-theme="light"] .bg-emerald-500\/5  { background-color: rgb(16 185 129 / 0.10); }
   html[data-theme="light"] .bg-emerald-500\/10 { background-color: rgb(16 185 129 / 0.16); }

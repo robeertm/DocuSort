@@ -7,6 +7,101 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.65.0] – 2026-09-29
+
+### Fixed
+
+- 🧾 **Two doctor's bills stayed open although they were paid.** The amount
+  matched to the cent and the date window was right; it failed on the payee.
+  The bill comes from the practice, the transfer goes to its billing agency —
+  not one word in common, and the match rule needs a shared word on purpose
+  (a bare amount once turned an Amazon purchase into a paid phone bill).
+
+  🔑 But the **invoice number stands on both sides**: in the document
+  (`Rechnungsnummer 01-1425-137975`) and in the booking's purpose line
+  (`ONLINE-UEBERWEISUNG TERM. 01-1425-137975 …`). So there is now a second way
+  to establish the payee, and it is **stricter** than the name, not looser:
+  at least eight digits have to be identical. Dates are excluded — `15.09.2026`
+  would otherwise be an eight-digit number standing in half the archive — and
+  so are short numbers that could collide. Amount, date window and the
+  one-booking-settles-one-bill rule all still apply on top.
+
+  Measured against the real archive: 58 open bills checked, **3 newly
+  settled** — the two doctor's bills and a tax claim that is paid to the state
+  treasury rather than to the office that issued it, matched on the reference
+  number the document itself asks you to quote. Nothing was matched wrongly.
+
+- 🧾 **A credit note stood on the card as something to pay.** A phone bill from
+  November 2025 asked for **−113.05 €** — its own text says the amount is
+  credited to the account and offset against the next bill. Money that comes
+  back cannot be transferred away, so a negative amount no longer appears
+  under "Fällig demnächst" and no longer triggers a reminder. The matcher had
+  skipped credit notes since 0.49.0; the card had not.
+
+### Changed
+
+- 🧾 **A settled bill now leaves the card by itself after seven days.** Until
+  now paid entries stayed until they were ticked off by hand, so the card
+  slowly turned into a list of things already done. They stay green and
+  visible for a week — long enough to see that the payment was recognised —
+  and then drop out. A hand-tick still removes one immediately.
+
+### Added
+
+- 🧪 **`probe_fristen.py`** — 16 probes on a throwaway database of its own:
+  a bill paid to a different name but with a shared invoice number must
+  match; the same amount from an unrelated payee must not; a shared date is
+  not evidence; a credit note is not a demand; and a paid entry is still
+  there on the last day of the week and gone on the next. Counter-tested
+  against the previous behaviour, where four of them turn red.
+
+## [0.64.1] – 2026-09-29
+
+### Fixed
+
+- 🎨 **Pale text on paper: a hint on the settings page measured 1.06:1 —
+  light on white, simply not there.** The cause was not the colour but the
+  SHAPE of its name. Light mode turns the pastel tones into their darker
+  sibling through a list of class names:
+
+  ```css
+  html[data-theme="light"] :is(.text-cyan-100, .text-cyan-200, …) { … }
+  ```
+
+  Tailwind writes a **different** name for every shape of the same colour, and
+  two of them were outside that list:
+
+  | in the markup            | matched by the list? |
+  | ------------------------ | -------------------- |
+  | `text-cyan-100`          | yes                  |
+  | `text-cyan-100/90`       | **no** — opacity modifier |
+  | `hover:text-emerald-300` | **no** — state prefix |
+
+  25 places carried an opacity modifier and 55 a state prefix. All of them
+  stayed pastel on paper: notes that could not be read, links that vanished
+  under the pointer. The rules now match the **shape** instead of the exact
+  name, so a new opacity modifier is covered the day it is written. Dark mode
+  is untouched — verified by reading the computed colour back in both themes.
+
+- 🎨 **Hint text that used `text-ink-600` moved one step darker.** The palette
+  is mirrored for light mode, which makes `ink-600` a pale grey on paper —
+  2.56:1, below anything readable — and it carried real text in 18 places
+  (the hints under the finance fields, the amount a document was matched on,
+  the separators). It cannot be healed through the colour either: for
+  `ink-600` to reach 4.5:1 on white it would have to be darker than `ink-500`,
+  which turns the scale of faint steps upside down. So the faintest step that
+  may carry text is `ink-500` (4.76:1 on white). Borders and surfaces in
+  `ink-600` are untouched.
+
+### Added
+
+- 🧪 **`probe_kontrast.py`** — it compares the two sides that drifted apart:
+  every pastel shape the templates use against every shape the stylesheet
+  covers in light mode, and it checks the **built** sheet as well, because a
+  rule that only exists in the source colours nothing. It also refuses text in
+  a tone that disappears on paper. Counter-tested against three deliberately
+  broken states; each one turns it red.
+
 ## [0.64.0] – 2026-09-29
 
 ### Changed

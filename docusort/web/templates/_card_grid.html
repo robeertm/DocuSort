@@ -64,7 +64,7 @@
         <span class="flex items-center gap-2">
           {% if d.confidence is not none %}
             <span class="tabular-nums">{{ '%.0f'|format(d.confidence * 100) }} %</span>
-            <span class="text-ink-600">·</span>
+            <span class="text-ink-500">·</span>
           {% endif %}
           <span class="tabular-nums">{{ d.cost_usd | usd }}</span>
         </span>
