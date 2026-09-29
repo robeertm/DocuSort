@@ -18,3 +18,7 @@ CLAUDE.md
 .claude/
 GEMINI.md
 .cursorrules
+
+# Tailscale keeps this machine's identity here — never in the repo.
+tailscale/state/*
+!tailscale/state/.gitkeep
