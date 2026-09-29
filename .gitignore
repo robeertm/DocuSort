@@ -22,3 +22,8 @@ GEMINI.md
 # Tailscale keeps this machine's identity here — never in the repo.
 tailscale/state/*
 !tailscale/state/.gitkeep
+
+# Die Pruefstaende sind Werkzeuge des Eigentuemers, nicht Teil des Produkts:
+# nichts importiert sie, kein Dockerfile kopiert sie, kein Ausrollweg traegt
+# sie — und in der Wurzel waren sie das Erste, was ein Leser sah.
+pruefstaende/
