@@ -1,0 +1,70 @@
+# Reach DocuSort over Tailscale — the standard way in.
+#
+# Use it TOGETHER with the main file, it only overrides what has to change:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#
+# What this changes: docusort no longer publishes a port on the host. It runs
+# inside the tailscale container's network, and Tailscale serves it over HTTPS
+# at
+#
+#     https://docusort.<your-tailnet>.ts.net
+#
+# with a certificate Tailscale fetches and renews by itself. Nothing is exposed
+# to the internet, there is no port forwarding, no reverse proxy and no
+# certificate to look after. Anybody on your tailnet reaches it; nobody else
+# can, because there is nothing to reach.
+#
+# Once, before the first start:
+#   1. Tailscale admin console → Settings → Keys → generate a REUSABLE auth
+#      key. Put it in `.env` next to this file:
+#          TS_AUTHKEY=tskey-auth-...
+#   2. Settings → DNS → switch on MagicDNS and HTTPS certificates.
+#      Without HTTPS certificates the name resolves but the certificate does
+#      not exist, and the browser says so.
+#   3. Start with the two-file command above.
+#
+# 🔴 The auth key is a credential. It belongs in `.env`, never in the
+#    repository. It is needed ONCE to join the tailnet — after that the
+#    machine's identity lives in ./tailscale/state, so the key can be revoked
+#    and the container keeps working.
+#
+# 🔴 `network_mode: service:tailscale` means the app gives up its own network.
+#    That is the whole point: `tailscale serve` then reaches it on 127.0.0.1
+#    without a single port being opened anywhere.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    container_name: docusort-tailscale
+    hostname: docusort                  # becomes docusort.<tailnet>.ts.net
+    restart: unless-stopped
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY:?put TS_AUTHKEY=tskey-auth-... in .env}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_ACCEPT_DNS=true
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./tailscale/state:/var/lib/tailscale
+      - ./tailscale/serve.json:/config/serve.json:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    # 🔑 If you ALSO want the old address in your own network to keep working,
+    #    publish the port here — on the tailscale service, because that is
+    #    where the network now lives. Left out on purpose: tailnet-only is the
+    #    point of this file.
+    # ports:
+    #   - "8080:8080"
+
+  docusort:
+    network_mode: service:tailscale
+    # 🔴 `!reset`, not `[]`. Compose MERGES lists across files — an empty list
+    #    leaves the published port from the main file standing, and a container
+    #    that both publishes a port and rides another one's network is refused
+    #    by Docker at start. `!reset` is the one thing that actually removes it.
+    #    (Found by rendering the merged file with `docker compose config`, not
+    #    by reading it: `config` called the broken version valid.)
+    ports: !reset []

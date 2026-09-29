@@ -7,6 +7,64 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.63.0] – 2026-09-29
+
+### Changed
+- 🔴 **Das Einstellmenü hatte drei Türen zu einem lokalen Modell.** Das
+  Auswahlfeld „KI-Anbieter" bot „OpenAI-kompatibel" (mit der Adresse
+  `localhost:11434`) **und** „Lokale KI-Brücke"; darunter standen noch zwei
+  eigene Karten: „Ein lokales Modell, in einem Klick" und „Lokale KI-Brücke".
+  Wer eine davon benutzte, sah die anderen trotzdem weiter. Robert, 29.09.2026:
+  „bei docusort einstellungen gibt es **zweimal die möglichkeit die lokale ki zu
+  installieren**, räume das einstellmenü von docusort ordentlich auf".
+
+  Jetzt gibt es **eine** Karte mit **einer** Frage — welcher Anbieter? — und
+  darunter erscheint nur, was zu dieser Antwort gehört. Nichts ist
+  weggefallen: die Suche nach einem laufenden Ollama, die Installationsdateien
+  für macOS/Windows/Linux und die Brücke sind alle noch da, nur eben dort, wo
+  man sie sucht. Gemessen am Telefon: Karten **8 → 6**, Seitenhöhe
+  **6116 → 4906 px**, 0 JS-Fehler, und beim Umschalten des Anbieters erscheint
+  jeweils genau der passende Block.
+
+### Added
+- 🔒 **Tailscale als Weg in den Container.** Neu: `docker-compose.tailscale.yml`
+  als **Überlagerung** neben der Hauptdatei — eine bestehende Installation
+  bleibt unberührt, der private Weg ist ein zusätzliches `-f`:
+
+  ```bash
+  echo 'TS_AUTHKEY=tskey-auth-…' >> .env
+  docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+  ```
+
+  Danach `https://docusort.<dein-tailnet>.ts.net` — HTTPS mit einem Zertifikat,
+  das Tailscale selbst holt und erneuert. Kein Port offen, kein Reverse Proxy,
+  kein Zertifikat zum Pflegen.
+
+  🔴 **`ports: !reset []`, nicht `ports: []`.** Compose **führt Listen
+  zusammen**: mit der leeren Liste blieb der veröffentlichte Port aus der
+  Hauptdatei stehen — und ein Container, der einen Port veröffentlicht **und**
+  im Netz eines anderen läuft, wird von Docker beim Start abgelehnt. Gefunden,
+  indem die zusammengerechnete Datei wirklich erzeugt wurde:
+  `docker compose config` nannte die kaputte Fassung **gültig**.
+
+  🔴 Der Anmeldeschlüssel gehört in `.env`, nie ins Repo, und wird nur einmal
+  gebraucht: danach liegt die Kennung der Maschine in `tailscale/state/`
+  (git-ignoriert). Gegenprobe: ohne `TS_AUTHKEY` bricht der Start ab, statt
+  still ohne Netz zu starten.
+
+### Verified
+- **Die Handy-Ansicht, zwölf Seiten nachgemessen** (Start, Bibliothek,
+  Finanzen, Buchungen, Ausgaben, Fixkosten, Upload, Einstellungen, Benutzer,
+  Konto, Analytik, Doppelte) in WebKit: **0 Querlauf, 0 Überhang, 0
+  abgeschnittener Text, 0 iOS-Zoomfallen**. Die Arbeit aus 0.58.0 hält.
+- **Jede Einstellung wirkt wirklich** — 20 Proben gegen die
+  Konfigurationsdatei, nicht gegen den Rückgabewert: KI-Anbieter, Modell und
+  Adresse; Web-Adresse und Tor; Datenschutzschalter; Benachrichtigungen;
+  Sicherung; Sprache; die Suche nach lokaler KI; der Stand der Brücke. Dazu
+  Gegenproben: ein unbekannter Anbieter und ein unmögliches Tor werden mit
+  **400** abgelehnt und die Konfiguration bleibt unberührt.
+- Neuer Prüfstand `probe_einstellungen.py` (18 Proben) hält beides fest.
+
 ## [0.62.0] – 2026-09-26
 
 ### Fixed

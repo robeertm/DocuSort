@@ -103,237 +103,252 @@
         </button>
       </div>
     </div>
-  </section>
 
-  <!-- ===== A local model, in one click =====
-       Two ways in, and both end in the same place: "find it" for the
-       install that already has an Ollama, "set it up" for the one that
-       doesn't. 🔴 The search runs on the SERVER's side — see
-       docusort/local_ai.py for why that is the only useful side. -->
-  <section class="card p-6" x-data="localAI()" x-init="init()">
-    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
-      <h2 class="text-lg font-semibold">🖥 {{ t('settings.local_ai.heading') }}</h2>
-      <span class="text-xs px-2 py-0.5 rounded-full"
-            :class="finds.length ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
-            x-text="finds.length ? tr('settings.local_ai.found_badge')
-                                : tr('settings.local_ai.none_badge')"></span>
-    </div>
-    <p class="text-ink-400 text-sm mb-4">{{ t('settings.local_ai.subtitle') }}</p>
+    <!-- ===== Was zur gewaehlten Antwort gehoert =========================
+         🔴 Diese beiden Bloecke standen bis 0.63.0 als EIGENE Karten weiter
+         unten auf der Seite. Damit gab es drei Tueren zu einem lokalen
+         Modell: das Auswahlfeld oben, die Karte „ein lokales Modell" und die
+         Karte „Bruecke" — und wer eine davon benutzte, sah die anderen
+         trotzdem weiter. Jetzt ist die Frage EINE (welcher Anbieter?) und
+         darunter steht nur, was zu dieser Antwort gehoert. -->
+    <template x-if="ai.provider === 'openai_compat'">
+      <div class="mt-6 pt-6 border-t border-ink-800">
+    <!-- ===== A local model, in one click =====
+         Two ways in, and both end in the same place: "find it" for the
+         install that already has an Ollama, "set it up" for the one that
+         doesn't. 🔴 The search runs on the SERVER's side — see
+         docusort/local_ai.py for why that is the only useful side. -->
+    <div x-data="localAI()" x-init="init()">
+      <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+        <h3 class="text-base font-semibold">🖥 {{ t('settings.local_ai.heading') }}</h3>
+        <span class="text-xs px-2 py-0.5 rounded-full"
+              :class="finds.length ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+              x-text="finds.length ? tr('settings.local_ai.found_badge')
+                                  : tr('settings.local_ai.none_badge')"></span>
+      </div>
+      <p class="text-ink-400 text-sm mb-4">{{ t('settings.local_ai.subtitle') }}</p>
 
-    <div class="flex items-center gap-3 flex-wrap mb-1">
-      <button type="button" @click="search()" :disabled="searching"
-              class="rounded-xl px-4 py-2 text-sm font-medium border border-ink-700
-                     hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed">
-        <span x-show="!searching">🔍 {{ t('settings.local_ai.search') }}</span>
-        <span x-show="searching" x-cloak>{{ t('settings.local_ai.searching') }}</span>
-      </button>
-      <span class="text-xs text-ink-500" x-show="searched && !finds.length" x-cloak
-            x-text="tr('settings.local_ai.nothing')"></span>
-    </div>
-
-    <!-- Every place DocuSort can reach one. Usually exactly one. -->
-    <template x-for="(f, i) in finds" :key="f.url">
-      <div class="mt-4 rounded-xl bg-ink-900/40 border border-ink-700 p-3
-                  flex items-end gap-3 flex-wrap">
-        <div class="grow min-w-[12rem]">
-          <label class="block text-xs text-ink-500 mb-1">{{ t('settings.local_ai.address') }}</label>
-          <div class="font-mono text-sm break-all" x-text="f.url"></div>
-        </div>
-        <div>
-          <label class="block text-xs text-ink-500 mb-1">{{ t('settings.local_ai.model') }}</label>
-          <select x-model="f.chosen"
-                  class="rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-1.5 text-sm font-mono">
-            <template x-for="m in f.models" :key="m">
-              <option :value="m" x-text="m"></option>
-            </template>
-          </select>
-        </div>
-        <button type="button" @click="use(f)" :disabled="applying || !f.chosen"
-                class="rounded-xl px-4 py-2 text-sm font-medium border border-cyan-500/40
-                       bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20
-                       disabled:opacity-50 disabled:cursor-not-allowed">
-          <span x-show="!applying">{{ t('settings.local_ai.use') }}</span>
-          <span x-show="applying" x-cloak>{{ t('setup.saving') }}</span>
+      <div class="flex items-center gap-3 flex-wrap mb-1">
+        <button type="button" @click="search()" :disabled="searching"
+                class="rounded-xl px-4 py-2 text-sm font-medium border border-ink-700
+                       hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span x-show="!searching">🔍 {{ t('settings.local_ai.search') }}</span>
+          <span x-show="searching" x-cloak>{{ t('settings.local_ai.searching') }}</span>
         </button>
+        <span class="text-xs text-ink-500" x-show="searched && !finds.length" x-cloak
+              x-text="tr('settings.local_ai.nothing')"></span>
+      </div>
+
+      <!-- Every place DocuSort can reach one. Usually exactly one. -->
+      <template x-for="(f, i) in finds" :key="f.url">
+        <div class="mt-4 rounded-xl bg-ink-900/40 border border-ink-700 p-3
+                    flex items-end gap-3 flex-wrap">
+          <div class="grow min-w-[12rem]">
+            <label class="block text-xs text-ink-500 mb-1">{{ t('settings.local_ai.address') }}</label>
+            <div class="font-mono text-sm break-all" x-text="f.url"></div>
+          </div>
+          <div>
+            <label class="block text-xs text-ink-500 mb-1">{{ t('settings.local_ai.model') }}</label>
+            <select x-model="f.chosen"
+                    class="rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-1.5 text-sm font-mono">
+              <template x-for="m in f.models" :key="m">
+                <option :value="m" x-text="m"></option>
+              </template>
+            </select>
+          </div>
+          <button type="button" @click="use(f)" :disabled="applying || !f.chosen"
+                  class="rounded-xl px-4 py-2 text-sm font-medium border border-cyan-500/40
+                         bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20
+                         disabled:opacity-50 disabled:cursor-not-allowed">
+            <span x-show="!applying">{{ t('settings.local_ai.use') }}</span>
+            <span x-show="applying" x-cloak>{{ t('setup.saving') }}</span>
+          </button>
+        </div>
+      </template>
+
+      <div x-show="message" x-cloak class="mt-4 text-xs rounded-lg px-3 py-2"
+           :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+           x-text="message"></div>
+
+      <!-- For the install that has no Ollama at all. -->
+      <div class="mt-6 rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">
+        <p class="text-sm text-ink-200 mb-3">{{ t('settings.local_ai.setup_help') }}</p>
+        <div class="flex flex-wrap gap-2 mb-2">
+          <a href="/api/local-ai/installer?os=mac" download
+             class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
+                    bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ macOS</a>
+          <a href="/api/local-ai/installer?os=windows" download
+             class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
+                    bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ Windows</a>
+          <a href="/api/local-ai/installer?os=linux" download
+             class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
+                    bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ Linux</a>
+        </div>
+        <p class="text-xs text-ink-500 mt-2">{{ t('settings.local_ai.hints') }}</p>
+        <p class="text-xs text-amber-300/80 mt-2">⚠ {{ t('settings.local_ai.warning') }}</p>
+      </div>
+    </div>
       </div>
     </template>
 
-    <div x-show="message" x-cloak class="mt-4 text-xs rounded-lg px-3 py-2"
-         :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
-         x-text="message"></div>
-
-    <!-- For the install that has no Ollama at all. -->
-    <div class="mt-6 rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">
-      <p class="text-sm text-ink-200 mb-3">{{ t('settings.local_ai.setup_help') }}</p>
-      <div class="flex flex-wrap gap-2 mb-2">
-        <a href="/api/local-ai/installer?os=mac" download
-           class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
-                  bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ macOS</a>
-        <a href="/api/local-ai/installer?os=windows" download
-           class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
-                  bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ Windows</a>
-        <a href="/api/local-ai/installer?os=linux" download
-           class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40
-                  bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">⬇ Linux</a>
+    <template x-if="ai.provider === 'bridge'">
+      <div class="mt-6 pt-6 border-t border-ink-800">
+    <!-- ===== Local AI Bridge ===== -->
+    <div id="bridge" x-data="bridgeSettings()" x-init="init()">
+      <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
+        <h3 class="text-base font-semibold">{{ t('settings.bridge.heading') }}</h3>
+        <span class="text-xs px-2 py-0.5 rounded-full"
+              :class="status.connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
+              x-text="status.connected ? tr('settings.bridge.connected')
+                                      : tr('settings.bridge.offline')"></span>
       </div>
-      <p class="text-xs text-ink-500 mt-2">{{ t('settings.local_ai.hints') }}</p>
-      <p class="text-xs text-amber-300/80 mt-2">⚠ {{ t('settings.local_ai.warning') }}</p>
-    </div>
-  </section>
+      <p class="text-ink-400 text-sm mb-5">
+        {{ t('settings.bridge.intro') }}
+      </p>
 
-  <!-- ===== Local AI Bridge ===== -->
-  <section class="card p-6" id="bridge" x-data="bridgeSettings()" x-init="init()">
-    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-1">
-      <h2 class="text-lg font-semibold">{{ t('settings.bridge.heading') }}</h2>
-      <span class="text-xs px-2 py-0.5 rounded-full"
-            :class="status.connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-800 text-ink-400'"
-            x-text="status.connected ? tr('settings.bridge.connected')
-                                    : tr('settings.bridge.offline')"></span>
-    </div>
-    <p class="text-ink-400 text-sm mb-5">
-      {{ t('settings.bridge.intro') }}
-    </p>
-
-    <!-- Live status block -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5 text-sm">
-      <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3">
-        <div class="text-ink-500 text-xs uppercase tracking-wide mb-1">{{ t('settings.bridge.client') }}</div>
-        <div x-show="status.connected" class="font-mono text-xs leading-5 break-all">
-          <div><span class="text-ink-500">{{ t('settings.bridge.field_host') }}:</span> <span x-text="status.client.host || '—'"></span></div>
-          <div><span class="text-ink-500">{{ t('settings.bridge.field_platform') }}:</span> <span x-text="status.client.platform || '—'"></span></div>
-          <div><span class="text-ink-500">{{ t('settings.bridge.field_model') }}:</span> <span x-text="status.client.model || '—'"></span></div>
-          <div><span class="text-ink-500">{{ t('settings.bridge.field_ollama') }}:</span> <span x-text="status.client.ollama || '—'"></span></div>
-        </div>
-        <template x-if="!status.connected">
-          <div class="text-xs">
-            <template x-if="(status.last_reject && status.last_reject.at)">
-              <div class="rounded bg-rose-500/10 text-rose-200 px-2 py-1.5 mb-2 leading-5"
-                   x-text="tr('settings.bridge.rejected', {
-                       host: status.last_reject.host,
-                       token: status.last_reject.token_preview})"></div>
-            </template>
-            <div class="text-ink-400" x-text="tr('settings.bridge.no_client')"></div>
+      <!-- Live status block -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5 text-sm">
+        <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3">
+          <div class="text-ink-500 text-xs uppercase tracking-wide mb-1">{{ t('settings.bridge.client') }}</div>
+          <div x-show="status.connected" class="font-mono text-xs leading-5 break-all">
+            <div><span class="text-ink-500">{{ t('settings.bridge.field_host') }}:</span> <span x-text="status.client.host || '—'"></span></div>
+            <div><span class="text-ink-500">{{ t('settings.bridge.field_platform') }}:</span> <span x-text="status.client.platform || '—'"></span></div>
+            <div><span class="text-ink-500">{{ t('settings.bridge.field_model') }}:</span> <span x-text="status.client.model || '—'"></span></div>
+            <div><span class="text-ink-500">{{ t('settings.bridge.field_ollama') }}:</span> <span x-text="status.client.ollama || '—'"></span></div>
           </div>
-        </template>
-      </div>
-      <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3 text-xs">
-        <div class="flex items-center justify-between mb-1">
-          <div class="text-ink-500 uppercase tracking-wide">{{ t('settings.bridge.activity') }}</div>
-          <button type="button" @click="testConnection()"
-                  :disabled="!status.connected || testing"
-                  class="text-[11px] rounded-md px-2 py-0.5 border border-ink-700 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-not-allowed">
-            <span x-show="!testing">{{ t('settings.bridge.test') }}</span>
-            <span x-show="testing" x-cloak>…</span>
-          </button>
+          <template x-if="!status.connected">
+            <div class="text-xs">
+              <template x-if="(status.last_reject && status.last_reject.at)">
+                <div class="rounded bg-rose-500/10 text-rose-200 px-2 py-1.5 mb-2 leading-5"
+                     x-text="tr('settings.bridge.rejected', {
+                         host: status.last_reject.host,
+                         token: status.last_reject.token_preview})"></div>
+              </template>
+              <div class="text-ink-400" x-text="tr('settings.bridge.no_client')"></div>
+            </div>
+          </template>
         </div>
-        <div class="grid grid-cols-2 gap-y-1 font-mono">
-          <div class="text-ink-500">{{ t('settings.bridge.calls_total') }}</div>
-          <div x-text="status.calls_total ?? 0" class="text-right tabular-nums"></div>
-          <div class="text-ink-500">{{ t('settings.bridge.calls_failed') }}</div>
-          <div :class="status.calls_failed > 0 ? 'text-rose-300' : ''"
-               x-text="status.calls_failed ?? 0" class="text-right tabular-nums"></div>
-          <div class="text-ink-500">{{ t('settings.bridge.tokens_in') }}</div>
-          <div x-text="status.tokens_in ?? 0" class="text-right tabular-nums"></div>
-          <div class="text-ink-500">{{ t('settings.bridge.tokens_out') }}</div>
-          <div x-text="status.tokens_out ?? 0" class="text-right tabular-nums"></div>
-          <div class="text-ink-500">{{ t('settings.bridge.pending') }}</div>
-          <div x-text="status.pending ?? 0" class="text-right tabular-nums"></div>
-        </div>
-        <div x-show="testMessage" x-cloak
-             class="mt-2 rounded px-2 py-1.5 text-[11px] leading-4"
-             :class="testOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
-             x-text="testMessage"></div>
-      </div>
-    </div>
-
-    <!-- Token + one-liner install -->
-    <div class="space-y-3">
-      <label class="block text-sm font-medium">{{ t('settings.bridge.token_label') }}</label>
-      <div class="flex flex-wrap gap-2 items-stretch">
-        <input :value="status.token || ''" readonly
-               class="flex-1 min-w-0 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-xs font-mono"
-               :type="showToken ? 'text' : 'password'">
-        <button type="button" @click="showToken = !showToken" class="btn-secondary text-sm"
-                x-text="showToken ? tr('settings.bridge.hide')
-                                  : tr('settings.bridge.show')"></button>
-        <button type="button" @click="copyToken()" class="btn-secondary text-sm"
-                x-text="copied ? tr('settings.bridge.copied')
-                                : tr('settings.bridge.copy')"></button>
-        <button type="button" @click="regenerate()"
-                class="btn-secondary text-sm text-rose-300 hover:text-rose-200">{{ t('settings.bridge.regenerate') }}</button>
-      </div>
-      <p class="text-xs text-ink-500">{{ t('settings.bridge.token_hint') }}</p>
-
-      <div class="mt-5">
-        <label class="block text-sm font-medium mb-2">{{ t('settings.bridge.start_label') }}</label>
-
-        <!-- One-click download path — most users land here. The file
-             carries the token + server URL embedded; double-clicking
-             starts the bridge in a terminal window. -->
-        <div class="rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">
-          <p class="text-sm text-ink-200 mb-3">{{ t('settings.bridge.oneclick') }}</p>
-          <div class="flex flex-wrap gap-2 mb-2">
-            <a :href="'/api/bridge/installer?os=mac'" download
-               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-4 w-4">
-                <path d="M16 4c-1 1.5-2 2.5-3.5 2.5C13 5 14 4 16 4Zm0 4c-2 0-3 1.5-4 1.5s-2-1.5-3.5-1.5C6 8 4 10 4 13c0 4 3 7 4.5 7s2-1 3.5-1 2.5 1 3.5 1c2 0 4-3 4-7 0-2-1-3-2.5-3"/>
-              </svg>
-              macOS
-            </a>
-            <a :href="'/api/bridge/installer?os=windows'" download
-               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
-              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" class="h-4 w-4">
-                <path d="M3 5.5 11 4v8H3zM12 4l9-1.5V12h-9zM3 13h8v8L3 19.5zM12 13h9v8.5L12 21z"/>
-              </svg>
-              Windows
-            </a>
-            <a :href="'/api/bridge/installer?os=linux'" download
-               class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-4 w-4">
-                <path d="M12 3a4 4 0 0 0-4 4c0 2 1 3 1 5s-3 4-3 6 1 3 6 3 6-1 6-3-3-4-3-6 1-3 1-5a4 4 0 0 0-4-4Z"/>
-                <circle cx="10.5" cy="7.5" r=".7" fill="currentColor"/>
-                <circle cx="13.5" cy="7.5" r=".7" fill="currentColor"/>
-              </svg>
-              Linux
-            </a>
+        <div class="rounded-lg bg-ink-900/60 border border-ink-700 p-3 text-xs">
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-ink-500 uppercase tracking-wide">{{ t('settings.bridge.activity') }}</div>
+            <button type="button" @click="testConnection()"
+                    :disabled="!status.connected || testing"
+                    class="text-[11px] rounded-md px-2 py-0.5 border border-ink-700 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-not-allowed">
+              <span x-show="!testing">{{ t('settings.bridge.test') }}</span>
+              <span x-show="testing" x-cloak>…</span>
+            </button>
           </div>
-          <details class="text-xs text-ink-500 mt-2">
-            <summary class="cursor-pointer hover:text-ink-300">{{ t('settings.bridge.hints_summary') }}</summary>
-            <ul class="mt-2 space-y-1 list-disc pl-5">
-              <li>{{ t('settings.bridge.hint_mac') }}</li>
-              <li>{{ t('settings.bridge.hint_windows') }}</li>
-              <li>{{ t('settings.bridge.hint_linux') }}</li>
-            </ul>
-          </details>
+          <div class="grid grid-cols-2 gap-y-1 font-mono">
+            <div class="text-ink-500">{{ t('settings.bridge.calls_total') }}</div>
+            <div x-text="status.calls_total ?? 0" class="text-right tabular-nums"></div>
+            <div class="text-ink-500">{{ t('settings.bridge.calls_failed') }}</div>
+            <div :class="status.calls_failed > 0 ? 'text-rose-300' : ''"
+                 x-text="status.calls_failed ?? 0" class="text-right tabular-nums"></div>
+            <div class="text-ink-500">{{ t('settings.bridge.tokens_in') }}</div>
+            <div x-text="status.tokens_in ?? 0" class="text-right tabular-nums"></div>
+            <div class="text-ink-500">{{ t('settings.bridge.tokens_out') }}</div>
+            <div x-text="status.tokens_out ?? 0" class="text-right tabular-nums"></div>
+            <div class="text-ink-500">{{ t('settings.bridge.pending') }}</div>
+            <div x-text="status.pending ?? 0" class="text-right tabular-nums"></div>
+          </div>
+          <div x-show="testMessage" x-cloak
+               class="mt-2 rounded px-2 py-1.5 text-[11px] leading-4"
+               :class="testOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
+               x-text="testMessage"></div>
         </div>
+      </div>
 
-        <!-- Power-user fallback: paste the same command into a terminal. -->
-        <details class="mt-4">
-          <summary class="cursor-pointer text-xs text-ink-400 hover:text-ink-200 select-none">
-            {{ t('settings.bridge.terminal_summary') }}
-          </summary>
-          <div class="mt-2">
-            <div class="flex justify-end mb-2">
-              <div class="inline-flex rounded-md overflow-hidden border border-ink-700 text-[11px]">
-                <button type="button" @click="osChoice='unix'"
-                        :class="osChoice==='unix' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
-                        class="px-2 py-1">macOS / Linux</button>
-                <button type="button" @click="osChoice='windows'"
-                        :class="osChoice==='windows' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
-                        class="px-2 py-1 border-l border-ink-700">Windows</button>
+      <!-- Token + one-liner install -->
+      <div class="space-y-3">
+        <label class="block text-sm font-medium">{{ t('settings.bridge.token_label') }}</label>
+        <div class="flex flex-wrap gap-2 items-stretch">
+          <input :value="status.token || ''" readonly
+                 class="flex-1 min-w-0 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-xs font-mono"
+                 :type="showToken ? 'text' : 'password'">
+          <button type="button" @click="showToken = !showToken" class="btn-secondary text-sm"
+                  x-text="showToken ? tr('settings.bridge.hide')
+                                    : tr('settings.bridge.show')"></button>
+          <button type="button" @click="copyToken()" class="btn-secondary text-sm"
+                  x-text="copied ? tr('settings.bridge.copied')
+                                  : tr('settings.bridge.copy')"></button>
+          <button type="button" @click="regenerate()"
+                  class="btn-secondary text-sm text-rose-300 hover:text-rose-200">{{ t('settings.bridge.regenerate') }}</button>
+        </div>
+        <p class="text-xs text-ink-500">{{ t('settings.bridge.token_hint') }}</p>
+
+        <div class="mt-5">
+          <label class="block text-sm font-medium mb-2">{{ t('settings.bridge.start_label') }}</label>
+
+          <!-- One-click download path — most users land here. The file
+               carries the token + server URL embedded; double-clicking
+               starts the bridge in a terminal window. -->
+          <div class="rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">
+            <p class="text-sm text-ink-200 mb-3">{{ t('settings.bridge.oneclick') }}</p>
+            <div class="flex flex-wrap gap-2 mb-2">
+              <a :href="'/api/bridge/installer?os=mac'" download
+                 class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-4 w-4">
+                  <path d="M16 4c-1 1.5-2 2.5-3.5 2.5C13 5 14 4 16 4Zm0 4c-2 0-3 1.5-4 1.5s-2-1.5-3.5-1.5C6 8 4 10 4 13c0 4 3 7 4.5 7s2-1 3.5-1 2.5 1 3.5 1c2 0 4-3 4-7 0-2-1-3-2.5-3"/>
+                </svg>
+                macOS
+              </a>
+              <a :href="'/api/bridge/installer?os=windows'" download
+                 class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" class="h-4 w-4">
+                  <path d="M3 5.5 11 4v8H3zM12 4l9-1.5V12h-9zM3 13h8v8L3 19.5zM12 13h9v8.5L12 21z"/>
+                </svg>
+                Windows
+              </a>
+              <a :href="'/api/bridge/installer?os=linux'" download
+                 class="rounded-xl px-3 py-2 text-sm font-medium border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 inline-flex items-center gap-2">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="h-4 w-4">
+                  <path d="M12 3a4 4 0 0 0-4 4c0 2 1 3 1 5s-3 4-3 6 1 3 6 3 6-1 6-3-3-4-3-6 1-3 1-5a4 4 0 0 0-4-4Z"/>
+                  <circle cx="10.5" cy="7.5" r=".7" fill="currentColor"/>
+                  <circle cx="13.5" cy="7.5" r=".7" fill="currentColor"/>
+                </svg>
+                Linux
+              </a>
+            </div>
+            <details class="text-xs text-ink-500 mt-2">
+              <summary class="cursor-pointer hover:text-ink-300">{{ t('settings.bridge.hints_summary') }}</summary>
+              <ul class="mt-2 space-y-1 list-disc pl-5">
+                <li>{{ t('settings.bridge.hint_mac') }}</li>
+                <li>{{ t('settings.bridge.hint_windows') }}</li>
+                <li>{{ t('settings.bridge.hint_linux') }}</li>
+              </ul>
+            </details>
+          </div>
+
+          <!-- Power-user fallback: paste the same command into a terminal. -->
+          <details class="mt-4">
+            <summary class="cursor-pointer text-xs text-ink-400 hover:text-ink-200 select-none">
+              {{ t('settings.bridge.terminal_summary') }}
+            </summary>
+            <div class="mt-2">
+              <div class="flex justify-end mb-2">
+                <div class="inline-flex rounded-md overflow-hidden border border-ink-700 text-[11px]">
+                  <button type="button" @click="osChoice='unix'"
+                          :class="osChoice==='unix' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
+                          class="px-2 py-1">macOS / Linux</button>
+                  <button type="button" @click="osChoice='windows'"
+                          :class="osChoice==='windows' ? 'bg-ink-700 text-ink-100' : 'bg-ink-900 text-ink-400 hover:text-ink-200'"
+                          class="px-2 py-1 border-l border-ink-700">Windows</button>
+                </div>
+              </div>
+              <div class="rounded-xl bg-ink-950/80 border border-ink-700 p-3 font-mono text-[11px] leading-5 overflow-x-auto whitespace-pre-wrap break-all"
+                   x-text="installCmd()"></div>
+              <div class="flex justify-end mt-2">
+                <button type="button" @click="copyInstall()" class="btn-secondary text-xs"
+                        x-text="installCopied ? tr('settings.bridge.copied')
+                                              : tr('settings.bridge.copy_command')"></button>
               </div>
             </div>
-            <div class="rounded-xl bg-ink-950/80 border border-ink-700 p-3 font-mono text-[11px] leading-5 overflow-x-auto whitespace-pre-wrap break-all"
-                 x-text="installCmd()"></div>
-            <div class="flex justify-end mt-2">
-              <button type="button" @click="copyInstall()" class="btn-secondary text-xs"
-                      x-text="installCopied ? tr('settings.bridge.copied')
-                                            : tr('settings.bridge.copy_command')"></button>
-            </div>
-          </div>
-        </details>
+          </details>
+        </div>
       </div>
     </div>
+      </div>
+    </template>
   </section>
 
   <!-- ===== Web server (host + port) ===== -->

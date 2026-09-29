@@ -233,6 +233,32 @@ services:
 mkdir -p data/inbox config && docker compose up -d
 ```
 
+### Over Tailscale — the way in we recommend
+
+A private network beats a forwarded port. With the overlay file in this repo,
+DocuSort is reachable at `https://docusort.<your-tailnet>.ts.net` — HTTPS with a
+certificate Tailscale fetches and renews itself, no port open anywhere, no
+reverse proxy, and nobody outside your tailnet can even knock.
+
+```bash
+# once: Tailscale admin console → Settings → Keys → reusable auth key
+echo 'TS_AUTHKEY=tskey-auth-...' >> .env
+# and Settings → DNS → MagicDNS + HTTPS certificates switched on
+
+docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+```
+
+The overlay only changes what has to change: docusort gives up its published
+port and runs inside the `tailscale` container's network, which is what lets
+`tailscale serve` reach it on `127.0.0.1` without opening anything. Want the
+address in your own network to keep working as well? Uncomment the `ports:`
+block on the **tailscale** service — that is where the network lives now.
+
+The auth key is needed once, to join. After that this machine's identity sits
+in `./tailscale/state` (git-ignored), so the key can be revoked and the
+container keeps running.
+
+
 ### From source
 
 ```bash
