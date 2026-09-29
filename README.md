@@ -415,9 +415,9 @@ listen on the network — and Ollama has no password, so anyone on that network
 can then use it. The setup says so in plain words and asks first. On a single
 machine none of this comes up.
 
-`probe_local_ai.py` runs the whole path against a throwaway config and refuses
-to pass if the ticket-guarded routes are anything other than exactly three, if
-a missing or spent ticket is accepted, or if the generated launcher is wrong.
+A bench runs the whole path against a throwaway config and refuses to pass if
+the ticket-guarded routes are anything other than exactly three, if a missing
+or spent ticket is accepted, or if the generated launcher is wrong.
 
 ---
 
