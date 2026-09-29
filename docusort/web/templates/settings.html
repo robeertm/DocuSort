@@ -312,9 +312,9 @@
             <details class="text-xs text-ink-500 mt-2">
               <summary class="cursor-pointer hover:text-ink-300">{{ t('settings.bridge.hints_summary') }}</summary>
               <ul class="mt-2 space-y-1 list-disc pl-5">
-                <li>{{ t('settings.bridge.hint_mac') }}</li>
-                <li>{{ t('settings.bridge.hint_windows') }}</li>
-                <li>{{ t('settings.bridge.hint_linux') }}</li>
+                <li>{{ t('settings.bridge.hint_mac') | safe }}</li>
+                <li>{{ t('settings.bridge.hint_windows') | safe }}</li>
+                <li>{{ t('settings.bridge.hint_linux') | safe }}</li>
               </ul>
             </details>
           </div>
@@ -387,6 +387,31 @@
         {{ t('settings.save') }}
       </button>
     </div>
+  </section>
+
+  <!-- ===== Postwache pairing =====
+       🔴 Die Zeile traegt das Kopplungswort im Klartext. Der Weg dahin
+       (`/api/postwache/pairing`) steht NICHT in `auth.USER_ALLOW` und ist
+       damit Admin-Sache — genau wie die Marke der lokalen Bruecke. -->
+  <section class="card p-6" x-data="postwacheSettings()" x-init="laden()">
+    <h2 class="text-lg font-semibold mb-1">{{ t('settings.postwache.heading') }}</h2>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.postwache.subtitle') }}</p>
+
+    <label class="block text-sm font-medium mb-1">{{ t('settings.postwache.line') }}</label>
+    <div class="flex flex-wrap gap-2 mb-2">
+      <input :value="zeile" readonly @focus="$event.target.select()"
+             class="flex-1 min-w-0 rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono">
+      <button @click="kopieren()" class="btn-secondary whitespace-nowrap shrink-0">
+        <span x-show="!kopiert">{{ t('settings.postwache.copy') }}</span>
+        <span x-show="kopiert" x-cloak>{{ t('settings.postwache.copied') }}</span>
+      </button>
+    </div>
+    <p class="text-xs text-amber-300/80 mb-2">{{ t('settings.postwache.secret') }}</p>
+    <p class="text-xs text-ink-500">{{ t('settings.postwache.hint') }}</p>
+
+    <div x-show="fehler" x-cloak
+         class="mt-3 text-sm rounded-lg px-3 py-2 bg-rose-500/10 text-rose-200"
+         x-text="fehler"></div>
   </section>
 
   <!-- ===== Finance privacy ===== -->
@@ -500,7 +525,7 @@
         </label>
         <div x-show="form.telegram_enabled" x-cloak class="space-y-2 text-sm">
           <p class="text-xs text-ink-500">
-            {{ t('settings.notif.telegram.help') }}
+            {{ t('settings.notif.telegram.help') | safe }}
           </p>
           <label class="block">
             <span class="text-xs text-ink-400">{{ t('settings.notif.telegram.bot_token') }}</span>
@@ -937,7 +962,7 @@
         <code class="font-mono text-emerald-300 break-all text-right text-xs sm:text-sm">{{ inbox_path }}</code>
       </div>
     </div>
-    <p class="text-xs text-ink-500 mt-3">{{ t('settings.paths.hint') }}</p>
+    <p class="text-xs text-ink-500 mt-3">{{ t('settings.paths.hint') | safe }}</p>
   </section>
 
   </div><!-- /grid -->
@@ -1343,6 +1368,44 @@ function bridgeSettings() {
       } finally {
         this.testing = false;
       }
+    },
+  };
+}
+
+function postwacheSettings() {
+  return {
+    zeile: '',
+    kopiert: false,
+    fehler: '',
+    async laden() {
+      try {
+        const r = await fetch('/api/postwache/pairing');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        this.zeile = d.zeile || '';
+      } catch (e) {
+        this.fehler = T['settings.postwache.failed'];
+      }
+    },
+    async kopieren() {
+      // 🔴 `navigator.clipboard` gibt es nur auf einer sicheren Herkunft.
+      //    Wer DocuSort ueber http im Heimnetz aufruft, hat es NICHT — dann
+      //    bleibt der alte Weg ueber ein Auswaehlen. Ohne den Rueckfall
+      //    passiert beim Druecken schlicht nichts, und niemand weiss warum.
+      try {
+        await navigator.clipboard.writeText(this.zeile);
+      } catch (e) {
+        const f = document.createElement('textarea');
+        f.value = this.zeile;
+        f.style.position = 'fixed';
+        f.style.opacity = '0';
+        document.body.appendChild(f);
+        f.select();
+        try { document.execCommand('copy'); } catch (e2) { /* nichts zu machen */ }
+        document.body.removeChild(f);
+      }
+      this.kopiert = true;
+      setTimeout(() => { this.kopiert = false; }, 2000);
     },
   };
 }

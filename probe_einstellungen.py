@@ -111,6 +111,61 @@ gi = lies(".gitignore") if os.path.isfile(os.path.join(HIER, ".gitignore")) else
 pruefe("der Tailscale-Zustand ist vom Repo ausgeschlossen",
        "tailscale/state/" in gi)
 
+print("\n── 3. Updates kommen von selbst ────────────────────────────────────")
+H = lies("docker-compose.yml")
+pruefe("Watchtower ist eingeschaltet, nicht auskommentiert",
+       "watchtower:" in H and "# watchtower:" not in H)
+# 🔴 `containrrr/watchtower` steht seit Jahren still. Auf Roberts Pi laeuft
+#    laengst der gepflegte Fork — das ist der Ist-Zustand, nicht meine Wahl.
+pruefe("es ist der gepflegte Fork",
+       "ghcr.io/nicholas-fedor/watchtower" in H
+       and "containrrr/watchtower" not in H)
+pruefe("er sieht nur den eigenen Container an",
+       H.rstrip().endswith("- docusort"),
+       hinweis="sonst streitet er sich mit einem fremden Watchtower")
+pruefe("die Zeit laesst sich in der .env aendern",
+       "${WATCHTOWER_SCHEDULE:-" in H)
+INST = lies("deploy", "install.sh")
+pruefe("der Installer schreibt denselben Stand",
+       "nicholas-fedor/watchtower" in INST and "# watchtower:" not in INST,
+       hinweis="sonst gilt der Standard nur fuer Klon-Nutzer")
+
+print("\n── 4. Die Kopplung mit der Postwache ───────────────────────────────")
+pruefe("es gibt eine Karte „Postwache“ in den Einstellungen",
+       "postwacheSettings()" in E and "settings.postwache.heading" in E)
+pruefe("sie holt die Zeile vom eigenen Weg",
+       "/api/postwache/pairing" in E)
+A = lies("docusort", "auth.py")
+pruefe("es gibt den schmalen Rang „deliver“",
+       'ROLE_DELIVER = "deliver"' in A and "ROLE_DELIVER" in A.split("ROLES =")[1][:60])
+pruefe("und er darf NUR hereinlegen und nachfragen",
+       "DELIVER_ALLOW" in A
+       and A.count('("POST", r"^/upload$")') >= 1
+       and "_DELIVER_ALLOW_COMPILED" in A)
+# 🔴 Gegenprobe im Quelltext: die Bibliothek darf NICHT in der schmalen Liste
+#    stehen. Sonst waere der Rang nur ein anderer Name fuer „user“.
+schmal = A.split("DELIVER_ALLOW")[1].split(")")[0:12]
+pruefe("die Bibliothek steht NICHT in der schmalen Liste",
+       "/library" not in "".join(schmal))
+P2 = lies("docusort", "postwache.py")
+pruefe("das Kopplungswort kommt aus der Umgebung, sonst gemerkt, sonst neu",
+       "DOCUSORT_POSTWACHE_PASSWORD" in P2 and "secrets.token_urlsafe" in P2)
+pruefe("das Konto wird bei jedem Start nachgezogen, aber nur wenn noetig",
+       "verify_password" in P2,
+       hinweis="sonst floege die Sitzung der Postwache bei jedem Neustart weg")
+B = lies("docker-compose.both.yml")
+pruefe("die Datei fuer beide fordert das gemeinsame Geheimnis",
+       B.count("${PAIRING_SECRET:?") == 2)
+pruefe("und nennt der Postwache die Adresse von DocuSort",
+       "POSTWACHE_DS_URL=http://docusort:8080" in B)
+for name in ("deploy/tailscale.sh", "deploy/install-both.sh"):
+    p = os.path.join(HIER, name)
+    pruefe("%s ist da und ausfuehrbar" % name,
+           os.path.isfile(p) and bool(os.stat(p).st_mode & 0o111))
+pruefe("das Tailscale-Skript merkt sich COMPOSE_FILE",
+       "COMPOSE_FILE" in lies("deploy", "tailscale.sh"),
+       hinweis="damit ein blankes `docker compose up -d` die Ueberlagerung behaelt")
+
 schlecht = [n for n, i, s in F if i != s]
 print("\n%s  %d Proben, %d Fehlschlaege"
       % ("🔴 ROT" if schlecht else "GRUEN", len(F), len(schlecht)))

@@ -52,16 +52,25 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
 
-  # Optional: let Watchtower pull new images by itself (daily at 04:00).
-  # It needs the Docker socket — effectively root on the host. Without it,
-  # update by hand: docker compose pull && docker compose up -d
-  # watchtower:
-  #   image: containrrr/watchtower
-  #   container_name: docusort-watchtower
-  #   restart: unless-stopped
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock:ro
-  #   command: --cleanup --schedule "0 0 4 * * *" docusort
+  # Keeps itself up to date, nightly at 04:00. \`image: …:latest\` is a label,
+  # not a subscription — Docker never re-pulls a running container, so without
+  # this you would have to remember it yourself.
+  # It needs the Docker socket (effectively root on the host, mounted
+  # read-only) and it watches ONLY the docusort container. Delete this service
+  # to switch it off; put WATCHTOWER_SCHEDULE=... in .env to move the time.
+  watchtower:
+    image: ghcr.io/nicholas-fedor/watchtower:latest
+    container_name: docusort-watchtower
+    restart: unless-stopped
+    environment:
+      - TZ=\${TZ}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - --cleanup
+      - --schedule
+      - \${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
+      - docusort
 YAML
   say "Wrote $DIR/docker-compose.yml"
 fi

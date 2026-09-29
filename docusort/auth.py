@@ -29,7 +29,16 @@ logger = logging.getLogger("docusort.auth")
 
 ROLE_ADMIN = "admin"
 ROLE_USER = "user"
-ROLES = (ROLE_ADMIN, ROLE_USER)
+# 🔑 Ein dritter Rang, der NUR hereinlegen darf (0.64.0).
+#
+# Die Postwache uebergibt Anhaenge durch `POST /upload` — dieselbe Vordertuer,
+# die auch der Browser benutzt. Dafuer brauchte sie bisher einen `user`, und
+# ein `user` darf auch die Bibliothek und die Finanzen LESEN. Solange ein
+# Mensch dieses Konto von Hand anlegt, ist das eine bewusste Entscheidung.
+# Seit die Kopplung von selbst passiert, waere es eine, die NIEMAND getroffen
+# hat — deshalb dieser Rang.
+ROLE_DELIVER = "deliver"
+ROLES = (ROLE_ADMIN, ROLE_USER, ROLE_DELIVER)
 
 SESSION_COOKIE = "ds_session"
 SESSION_DAYS = 30
@@ -202,6 +211,17 @@ USER_ALLOW: tuple[tuple[str, str], ...] = (
 
 _USER_ALLOW_COMPILED = tuple((m, re.compile(p)) for m, p in USER_ALLOW)
 
+# Was ein „deliver"-Konto darf — und sonst NICHTS. Die Liste ist nicht
+# geschaetzt, sondern an der Postwache abgelesen: sie ruft `POST /login`
+# (oeffentlich), `POST /upload`, `GET /api/status/<name>` und
+# `GET /api/version` (oeffentlich). Mehr braucht sie nicht, mehr bekommt sie
+# nicht.
+DELIVER_ALLOW: tuple[tuple[str, str], ...] = (
+    ("POST", r"^/upload$"),
+    ("GET", r"^/api/status/[^/]+$"),
+)
+_DELIVER_ALLOW_COMPILED = tuple((m, re.compile(p)) for m, p in DELIVER_ALLOW)
+
 # Fields a non-admin may change on a transaction. Everything else
 # (amount, date, account, counterparty) is the admin's to touch —
 # a user categorises, it does not rewrite bookkeeping.
@@ -220,7 +240,9 @@ def may_access(user: User, method: str, path: str) -> bool:
     method = method.upper()
     if method == "HEAD":
         method = "GET"
-    for allowed_method, pattern in _USER_ALLOW_COMPILED:
+    regeln = (_DELIVER_ALLOW_COMPILED if user.role == ROLE_DELIVER
+              else _USER_ALLOW_COMPILED)
+    for allowed_method, pattern in regeln:
         if allowed_method == method and pattern.match(path):
             return True
     return False
