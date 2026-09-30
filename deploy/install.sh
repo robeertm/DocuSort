@@ -29,7 +29,14 @@ fi
 docker info >/dev/null 2>&1 || die "Docker is installed but not running (or this user may not talk to it)."
 
 say "Installing into $DIR"
-mkdir -p "$DIR/data/inbox" "$DIR/data/library" "$DIR/config"
+# Every host path the compose file below mounts, created before the daemon is
+# asked for it. `logs` was missing here and the installer still stopped on some
+# machines and not others: most Docker daemons create a missing bind-mount
+# source themselves (as root), Synology's refuses and answers
+#   Error response from daemon: Bind mount failed: '…/logs' does not exist
+# — so the omission only ever showed up on a NAS, which is where a lot of
+# people put this.
+mkdir -p "$DIR/data/inbox" "$DIR/data/library" "$DIR/config" "$DIR/logs"
 
 if [ -f "$DIR/docker-compose.yml" ]; then
   warn "docker-compose.yml exists — keeping it."
@@ -86,10 +93,23 @@ ENV
   say "Wrote $DIR/.env"
 fi
 
+# The list above is what THIS installer mounts. A compose file that was
+# already here can mount paths of its own, so read them back out of the file
+# that is actually going to be used and make anything still missing. Then a
+# future omission costs a line of output instead of an install.
+while IFS= read -r rel; do
+  case "$rel" in *.*) continue ;; esac      # a file mount is the user's to provide
+  [ -d "$DIR/$rel" ] || { warn "creating missing mount directory ./$rel"; mkdir -p "$DIR/$rel"; }
+done < <(sed -n 's#^[[:space:]]*-[[:space:]]*\./\([^:]*\):.*#\1#p' "$DIR/docker-compose.yml" | sort -u)
+
 say "Pulling $IMAGE"
 ( cd "$DIR" && $COMPOSE pull && $COMPOSE up -d )
 
-HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
+# `hostname -I` is Linux-only, and with `set -euo pipefail` a failing one took
+# the whole script down HERE — after the container was already up. The install
+# had worked and the last thing the user saw was a non-zero exit and no
+# address, no paths, no next step.
+HOST="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 HOST="${HOST:-localhost}"
 cat <<DONE
 
