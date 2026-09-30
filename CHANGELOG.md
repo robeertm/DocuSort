@@ -7,6 +7,44 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.67.3] - 2026-09-30
+
+### Fixed
+
+**A missing default config file no longer kills the container at start-up.**
+`docker-entrypoint.sh` seeded `/app/config` only when `config.yaml` was absent.
+That is the wrong question: the program needs three files — `config.yaml`,
+`categories.yaml` and `categories.de.yaml` — and an installation whose config
+directory held one but not the others was left with what it had. The container
+then died with a Python traceback and never came back, which looks to its owner
+exactly like "the update broke it".
+
+`cp -n` is already per-file no-clobber, so asking first bought nothing: a config
+the user owns is never overwritten either way. Every missing default file is put
+there now, and nothing else is touched.
+
+### Added
+
+**`pruefstaende/vor_auslieferung.py` — the gate before a delivery.** It answers
+three questions, and the third is the one that was missing all along:
+
+1. Is every bench green? — read from the exit code, never through a pipe.
+2. Do the version and the changelog agree, with this version at the top?
+3. **Does it run?** A real installation on a machine with a real Docker daemon,
+   once fresh and once as an installation that already exists, and then the web
+   UI is actually fetched. Not "the file looks right" but "it answers". The
+   fresh one has to publish its port and reply; the existing one has to go on
+   replying on its old port with its own `config.yaml` untouched.
+
+It refuses to run at all if the test machine carries a real installation, and it
+clears up after itself. The entrypoint bug above is its first find — on its
+first proper run, before anyone shipped it.
+
+Six more checks in `pruefstaende/probe_installer.py` (41 in total) cover the
+entrypoint directly: a config directory holding only `config.yaml` has to end up
+with all three files, and the one that was already there has to come back
+unchanged.
+
 ## [0.67.2] - 2026-09-30
 
 ### Fixed
