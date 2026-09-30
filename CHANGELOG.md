@@ -7,6 +7,69 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.66.0] - 2026-09-30
+
+### Fixed
+
+**The one-click model setup now does the work instead of describing it.** On a
+Linux machine where Ollama runs as a systemd service — which is what the
+official installer sets up — the setup used to start a second `ollama serve` of
+its own next to it. That second copy can only lose: the service already holds
+port 11434, so it dies with `address already in use` and the user was left
+looking at
+
+    ! Ollama did not answer within 40 s.
+    Ollama is not reachable at http://<this machine>:11434.
+
+There is exactly one owner of that port on such a machine, and it is the
+service. The setup now writes
+`/etc/systemd/system/ollama.service.d/docusort.conf`, reloads and restarts the
+service itself, and then waits for it to answer. The only thing to type is the
+login password, once — and only when there is really something to do. The file
+says in its own first lines how to undo it.
+
+**It also says why, when something does go wrong.** `ollama serve` writes its
+reason into `~/ollama-docusort.log`; the setup wrote it there and then reported
+only that nothing had answered. The reason was on the user's own disk and
+nobody showed it to them. Now the lines from *this* run are printed, the two
+answers that come up again and again (an occupied port, an existing service)
+are named, and an empty log is reported as an empty log rather than passed off
+as silence.
+
+**And it opens the firewall rather than asking the user to.** If Ollama answers
+on the machine but not from the network, that is a firewall; firewalld and ufw
+are detected and — after one plain yes/no question — opened.
+
+### Changed
+
+Everything above had to work on **any** Linux, not on one:
+
+* **Becoming root** is a question, not a constant: `sudo`, `pkexec` (the
+  graphical password box, and the only one that can ask at all when the script
+  was double-clicked rather than started in a terminal) and `doas` are all
+  used, in the order that fits the situation. With none of them available the
+  setup says so plainly and prints what an administrator would have to run,
+  instead of pretending the work was done.
+* **Writing the file** prefers `install -D` and falls back to
+  `mkdir -p` + `cp` + `chmod` where coreutils is busybox.
+* **The firewall** is asked in its own words first (`firewall-cmd --state`,
+  `/etc/ufw/ufw.conf`) and only then through the service manager, because not
+  every system has one.
+* **nftables and plain iptables are detected but never edited.** There is no
+  safe, persistent, distribution-independent way to add a rule there, and a
+  wrong one can cut a machine off its own network. The setup says what is in
+  the way and leaves the rules to whoever wrote them.
+
+### Added
+
+`pruefstaende/probe_ollama_start.py` - 49 checks. It fakes a whole Linux
+machine (`ollama`, `systemctl`, `sudo`, `pkexec`, `doas`, `install`,
+`firewall-cmd`, `ufw`, `nft`) in a throwaway directory and reads back what was
+actually produced: the contents of the unit drop-in and the commands that were
+really issued. Included are the busybox path, each way of becoming root on its
+own, a machine with no way at all, and a counter-test against the previous
+behaviour.
+
 ## [0.65.2] – 2026-09-30
 
 ### Fixed

@@ -35,6 +35,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -179,14 +180,276 @@ def install_ollama() -> None:
          "and run this file again.")
 
 
+def why_it_failed(log: str, seit: int) -> None:
+    """Say WHY, instead of only that it did not work.
+
+    🔴 This is the whole reason this function exists. `ollama serve` writes its
+    reason into the log and the setup used to answer „did not answer within
+    40 s" — the answer was lying on the user's own disk and nobody showed it to
+    them. Whatever goes wrong here, the next person sees the reason on their
+    screen and can act on it.
+    """
+    zeilen = []
+    try:
+        with open(log, "rb") as fh:
+            try:                                   # only what THIS run wrote
+                fh.seek(seit)
+            except Exception:
+                pass
+            zeilen = [z for z in fh.read().decode("utf-8", "replace").splitlines()
+                      if z.strip()]
+    except Exception:
+        pass
+    if zeilen:
+        warn("What Ollama itself said:")
+        for z in zeilen[-12:]:
+            info(z[:200])
+    else:
+        info("The log stayed empty — Ollama did not even get as far as a message.")
+
+    # The two answers that come up again and again, named rather than guessed at.
+    ganz = " ".join(zeilen).lower()
+    if "address already in use" in ganz or "bind" in ganz and "in use" in ganz:
+        warn("Something is already holding port %d." % OLLAMA_PORT)
+        info("Most often that is Ollama's own service, listening on 127.0.0.1")
+        info("only. On Linux it has to be told the new address and restarted:")
+        for z in systemd_rezept("0.0.0.0"):
+            info(z)
+    elif platform.system() == "Linux" and systemd_hat_ollama():
+        warn("There is an `ollama` service on this machine.")
+        info("Starting a second copy by hand fights it. Set the address on the")
+        info("service instead and restart it:")
+        for z in systemd_rezept("0.0.0.0"):
+            info(z)
+
+
+def systemd_hat_ollama() -> bool:
+    """Is Ollama a systemd service here? Asked, not assumed — the official
+    Linux installer creates one, a distribution package may not."""
+    try:
+        r = subprocess.run(["systemctl", "list-unit-files", "ollama.service"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=5)
+        return b"ollama.service" in (r.stdout or b"")
+    except Exception:
+        return False
+
+
+def systemd_rezept(bind: str) -> list:
+    return ["sudo systemctl edit ollama",
+            "  [Service]",
+            '  Environment="OLLAMA_HOST=%s:%d"' % (bind, OLLAMA_PORT),
+            "sudo systemctl restart ollama",
+            "then run this file again."]
+
+
+def wurzelweg() -> list:
+    """How does one become root ON THIS machine? Asked, not assumed.
+
+    🔴 `sudo` is not a law of nature. Debian without sudo, Alpine and the BSD
+    school use `doas`, a desktop session has `pkexec` with a graphical password
+    box, and a live system may already be root. Every Linux has at least one of
+    them; which one is a question, not a constant.
+    """
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        return []                                   # nothing to do
+    # A terminal can take a typed password; a double-clicked window cannot, and
+    # there `pkexec` is the only one that can ask at all.
+    reihe = ["sudo", "pkexec", "doas"] if sys.stdin.isatty() \
+        else ["pkexec", "sudo", "doas"]
+    for w in reihe:
+        if have(w):
+            return [w]
+    return []
+
+
+def als_root(args: list, timeout: int = 120) -> bool:
+    """Run one command with root rights.
+
+    🔑 The person in front of this is not here to learn systemd. Typing a
+    password once is something everybody knows how to do; opening an editor on
+    a unit file is not. So the setup does the work and asks only for the
+    password — and only when there is actually something to do.
+    """
+    weg = wurzelweg()
+    if weg == ["sudo"]:
+        # -p: say WHY the password is wanted, right where it is typed.
+        ruf = ["sudo", "-p", "  Your login password: "] + args
+    elif weg:
+        ruf = weg + args
+    elif hasattr(os, "geteuid") and os.geteuid() == 0:
+        ruf = args
+    else:
+        return False
+    try:
+        return subprocess.call(ruf, timeout=timeout) == 0
+    except Exception:
+        return False
+
+
+def schreibe_als_root(inhalt: str, ziel: str) -> bool:
+    """Put a file where only root may write.
+
+    `install -D` makes the directory on the way and is one command, one
+    password — but it is GNU coreutils. Busybox and the leaner systems get the
+    two-step way instead. Both are plain, and the second is tried only if the
+    first really failed.
+    """
+    tmp = os.path.join(tempfile.gettempdir(), "docusort-ollama.conf")
+    try:
+        with open(tmp, "w") as fh:
+            fh.write(inhalt)
+    except Exception as exc:
+        warn("Could not prepare the setting: %s" % exc)
+        return False
+    try:
+        if als_root(["install", "-D", "-m", "644", tmp, ziel]):
+            return True
+        return (als_root(["mkdir", "-p", os.path.dirname(ziel)])
+                and als_root(["cp", tmp, ziel])
+                and als_root(["chmod", "644", ziel]))
+    finally:
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+
+
+def systemd_binden(bind: str) -> bool:
+    """Tell the `ollama` service the address and restart it — no typing.
+
+    🔴 The old setup printed a recipe and started a second `ollama serve` of
+    its own next to the service. That second copy can only ever lose: the
+    service already holds the port, so it dies with „address already in use"
+    and the user is left with 40 seconds of silence. There is exactly one owner
+    of that port on a systemd machine, and it is the service.
+    """
+    conf = "/etc/systemd/system/ollama.service.d/docusort.conf"
+    inhalt = ("# Written by the DocuSort setup.\n"
+              "# DocuSort runs on another machine, so Ollama has to listen on\n"
+              "# the network instead of on 127.0.0.1 only.\n"
+              "# Delete this file and restart ollama to undo it.\n"
+              "[Service]\n"
+              'Environment="OLLAMA_HOST=%s:%d"\n' % (bind, OLLAMA_PORT))
+    step("Setting up the Ollama service to listen on %s:%d" % (bind, OLLAMA_PORT))
+    if not wurzelweg() and not (hasattr(os, "geteuid") and os.geteuid() == 0):
+        # 🔴 No way to become root at all. Then the recipe IS the help, and it
+        #    is better than pretending the work was done.
+        warn("This needs administrator rights, and this machine offers no way "
+             "to ask for them (no sudo, no pkexec, no doas).")
+        info("Ask whoever administers it to run:")
+        for z in systemd_rezept(bind):
+            info(z)
+        return False
+    info("This needs your password once — the one you use to log in.")
+    if not schreibe_als_root(inhalt, conf):
+        warn("Could not write %s." % conf)
+        info("If you would rather do it by hand:")
+        for z in systemd_rezept(bind):
+            info(z)
+        return False
+    als_root(["systemctl", "daemon-reload"])
+    if not als_root(["systemctl", "restart", "ollama"]):
+        warn("The ollama service did not restart.")
+        info("Its own words:  systemctl status ollama")
+        return False
+    good("The service now listens on %s:%d." % (bind, OLLAMA_PORT))
+    # 🔑 „restarted" is not „answering". Ask it, do not assume it.
+    for _ in range(SERVE_WAIT):
+        if ollama_models("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
+            good("Ollama is up.")
+            return True
+        time.sleep(1)
+    warn("The service restarted but does not answer yet.")
+    info("Its own words:  systemctl status ollama")
+    return False
+
+
+def _sagt(args: list, timeout: int = 5) -> str:
+    try:
+        r = subprocess.run(args, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, timeout=timeout)
+        return (r.stdout or b"").decode("utf-8", "replace").strip()
+    except Exception:
+        return ""
+
+
+def firewall_art() -> str:
+    """Which firewall is actually RUNNING here — not which one is installed.
+
+    🔴 Every distribution answers this differently and not all of them have
+    systemd, so each one is asked in its own words first and only then through
+    the service manager. Two are handled: firewalld (Fedora, RHEL, openSUSE,
+    CachyOS) and ufw (Ubuntu, Mint, Debian desktops). Between them they cover
+    what a desktop Linux normally runs.
+    """
+    if have("firewall-cmd") and _sagt(["firewall-cmd", "--state"]) == "running":
+        return "firewalld"
+    if have("ufw"):
+        # Readable by everyone, so no password is needed just to look.
+        try:
+            with open("/etc/ufw/ufw.conf") as fh:
+                if "ENABLED=yes" in fh.read().replace(" ", ""):
+                    return "ufw"
+        except Exception:
+            pass
+    if have("systemctl"):
+        for dienst in ("firewalld", "ufw"):
+            if have(dienst.replace("firewalld", "firewall-cmd")) \
+                    and _sagt(["systemctl", "is-active", dienst]) == "active":
+                return dienst
+    return ""
+
+
+def firewall_fremd() -> bool:
+    """A rule set that is nobody's to edit blindly.
+
+    🔴 nftables and plain iptables have no safe, persistent, distribution-
+    independent „open this port" — where the rule has to go depends on the
+    setup, and a wrong one can lock the machine out of its own network. So this
+    is only DETECTED, and said out loud. Doing less here is doing the user a
+    favour.
+    """
+    for w, args in (("nft", ["nft", "list", "ruleset"]),
+                    ("iptables", ["iptables", "-S"])):
+        if have(w) and _sagt(args, 8):
+            return True
+    return False
+
+
+def firewall_oeffnen(art: str) -> bool:
+    """Open the port, rather than telling somebody else to."""
+    step("Opening port %d in the firewall (%s)" % (OLLAMA_PORT, art))
+    if art == "firewalld":
+        ok = als_root(["firewall-cmd", "--permanent",
+                       "--add-port=%d/tcp" % OLLAMA_PORT])
+        ok = als_root(["firewall-cmd", "--reload"]) and ok
+    elif art == "ufw":
+        ok = als_root(["ufw", "allow", "%d/tcp" % OLLAMA_PORT])
+    else:
+        return False
+    if ok:
+        good("Port %d is open for your local network." % OLLAMA_PORT)
+    else:
+        warn("Could not change the firewall.")
+    return ok
+
+
 def serve(bind: str) -> bool:
     """Start `ollama serve` in the background, bound to `bind`.
 
     🔴 The bind address is the whole point. Ollama listens on 127.0.0.1 by
     default — perfectly right, and perfectly useless when DocuSort runs on a
     different machine."""
+    # 🔑 Ask FIRST whether a service already owns this. Starting a second copy
+    #    by hand only produces „address already in use", and the user is left
+    #    with a failure whose cause was knowable before the attempt.
+    if platform.system() == "Linux" and systemd_hat_ollama():
+        return systemd_binden(bind)
+
     env = dict(os.environ, OLLAMA_HOST="%s:%d" % (bind, OLLAMA_PORT))
     log = os.path.join(os.path.expanduser("~"), "ollama-docusort.log")
+    seit = os.path.getsize(log) if os.path.exists(log) else 0
     step("Starting Ollama (listening on %s:%d)" % (bind, OLLAMA_PORT))
     try:
         with open(log, "ab") as fh:
@@ -206,6 +469,7 @@ def serve(bind: str) -> bool:
             return True
         time.sleep(1)
     warn("Ollama did not answer within %d s." % SERVE_WAIT)
+    why_it_failed(log, seit)
     return False
 
 
@@ -224,11 +488,11 @@ def bind_permanently(bind: str) -> None:
         except Exception as exc:
             warn("Could not set OLLAMA_HOST: %s" % exc)
     elif system == "Linux":
-        info("If Ollama runs as a systemd service, it needs the same setting:")
-        info("  sudo systemctl edit ollama")
-        info("  [Service]")
-        info('  Environment="OLLAMA_HOST=%s"' % value)
-        info("  sudo systemctl restart ollama")
+        # A service is set up and restarted in `serve()` — nothing to say here.
+        # Without one, Ollama is started by hand and there is nothing to make
+        # permanent either; the next run of this file does it again.
+        if not systemd_hat_ollama():
+            info("Ollama is not a service here; this file starts it when needed.")
     elif system == "Windows":
         try:
             subprocess.check_call(["setx", "OLLAMA_HOST", value],
@@ -351,9 +615,32 @@ def main() -> int:
         serve(bind)
         reachable = ollama_models(target, 4.0)
 
+    # 🔑 Ollama answers on this machine but not from outside: that is a firewall
+    #    and nothing else. Telling somebody „allow port 11434" is telling them
+    #    to go and learn their firewall. Ask once, then do it.
+    if not reachable and not here and ollama_models(
+            "http://127.0.0.1:%d" % OLLAMA_PORT, 3.0):
+        art = firewall_art()
+        if art:
+            warn("Ollama runs, but your firewall (%s) is blocking port %d."
+                 % (art, OLLAMA_PORT))
+            if ask_yes_no("Open port %d so DocuSort can reach it?" % OLLAMA_PORT):
+                firewall_oeffnen(art)
+                reachable = ollama_models(target, 4.0)
+
     if not reachable:
-        stop("Ollama is not reachable at %s.\nIf a firewall is in the way, "
-             "allow port %d for your local network." % (target, OLLAMA_PORT))
+        hinweis = ""
+        if not here and ollama_models("http://127.0.0.1:%d" % OLLAMA_PORT, 3.0):
+            hinweis = ("\nOllama answers on this machine but not from the "
+                       "network, so something in between is blocking port %d."
+                       % OLLAMA_PORT)
+            if firewall_fremd():
+                hinweis += ("\nThis machine filters with nftables/iptables. "
+                            "There is no safe way for this setup to edit those "
+                            "rules — a wrong one can cut the machine off its "
+                            "own network — so port %d has to be allowed by "
+                            "whoever set them up." % OLLAMA_PORT)
+        stop("Ollama is not reachable at %s.%s" % (target, hinweis))
     good("%d model(s) available." % len(reachable))
 
     # 4. Model — take what is already there before downloading gigabytes.
