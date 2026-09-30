@@ -6,7 +6,7 @@
 #     docker compose -f docker-compose.both.yml up -d
 #
 # What you get:
-#   * DocuSort on http://<host>:8080 — documents and household finances
+#   * DocuSort on http://<host>:9876 — documents and household finances
 #   * the Postwache on http://<host>:8110 — watches your mailbox
 #   * and the two ALREADY know each other. Attachments from your mail land in
 #     DocuSort by themselves: PDFs in the archive, bank CSVs in the finances.
@@ -31,7 +31,7 @@ services:
     container_name: docusort
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "9876:9876"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - TZ=${TZ:-Europe/Berlin}
@@ -54,7 +54,7 @@ services:
       - TZ=${TZ:-Europe/Berlin}
       - POSTWACHE_TAKT=60
       # The same secret from the other side — plus where to find DocuSort.
-      - POSTWACHE_DS_URL=http://docusort:8080
+      - POSTWACHE_DS_URL=http://docusort:9876
       - POSTWACHE_DS_BENUTZER=Postwache
       - POSTWACHE_DS_PASSWORT=${PAIRING_SECRET:?put PAIRING_SECRET=... in .env — `openssl rand -base64 24` makes a good one}
     volumes:

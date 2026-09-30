@@ -10,7 +10,7 @@ set -euo pipefail
 
 IMAGE="${DOCUSORT_IMAGE:-ghcr.io/robeertm/docusort:latest}"
 DIR="${DOCUSORT_DIR:-$PWD/docusort}"
-PORT="${DOCUSORT_PORT:-8080}"
+PORT="${DOCUSORT_PORT:-9876}"
 TZ_DEFAULT="${TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##')}"
 TZ_DEFAULT="${TZ_DEFAULT:-Europe/Berlin}"
 
@@ -48,7 +48,7 @@ services:
     container_name: docusort
     restart: unless-stopped
     ports:
-      - "\${DOCUSORT_PORT}:8080"
+      - "\${DOCUSORT_PORT}:9876"
     environment:
       - TZ=\${TZ}
       - DOCUSORT_LOG_LEVEL=INFO

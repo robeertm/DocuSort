@@ -4,7 +4,7 @@ services:
     container_name: docusort
     restart: unless-stopped
     ports:
-      - "8080:8080"           # Web UI; open http://<nas-ip>:8080
+      - "9876:9876"           # Web UI; open http://<nas-ip>:9876
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - TZ=Europe/Berlin
