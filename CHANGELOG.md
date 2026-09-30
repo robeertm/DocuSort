@@ -7,6 +7,46 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.67.0] - 2026-09-30
+
+### Changed
+
+**DocuSort no longer asks for port 8080.** A fresh installation now publishes
+its web UI on **9876**: `http://<host>:9876`. 8080 is spoken for on a lot of
+machines — a NAS hands it to its own web station, a development box to whatever
+was started last — and an installation that collides on its first day looks
+broken while the cause is invisible from the outside.
+
+**Nothing moves for an installation that already runs.** The port lives in two
+files that belong to the installation, not to the image: `docker-compose.yml`
+and `.env` are both kept by `deploy/install.sh` when they already exist, and
+`docker-entrypoint.sh` seeds the default `config.yaml` with `cp -n`, so a
+config that is already there is never overwritten. An installation on 8080 goes
+on listening on 8080 after any update. To move it anyway, set
+`DOCUSORT_PORT=9876` in `.env`, change `8080` to `9876` on the right-hand side
+of the `ports:` line, put `port: 9876` in `config/config.yaml`, and restart.
+
+Changed with it, so the parts do not disagree: `docker-compose.yml`,
+`docker-compose.both.yml` (including `POSTWACHE_DS_URL`), the Tailscale
+overlay and its `serve.json`, both install scripts, the README, the default
+`config.yaml`, the code default, `EXPOSE`, and the port hint on the settings
+page in all five languages.
+
+### Note for the Postwache
+
+The Postwache finds DocuSort by asking a handful of addresses that follow from
+how the two are installed. It now asks **both** ports, 9876 first and 8080
+after it, so a pairing with an older DocuSort keeps working — and it asks them
+side by side, because doubling the list would otherwise have doubled the wait
+on a machine where nothing answers. That change ships in Postwache 5.10.0.
+
+### Added
+
+Six more checks in `pruefstaende/probe_installer.py` (25 in total). Two of them
+are the promise above: a fresh install lands on 9876, and a run against an
+installation that already exists leaves its `docker-compose.yml` byte for byte
+as it was and keeps `DOCUSORT_PORT=8080` in its `.env`.
+
 ## [0.66.0] - 2026-09-30
 
 ### Fixed

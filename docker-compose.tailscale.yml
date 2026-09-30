@@ -57,7 +57,7 @@ services:
     #    where the network now lives. Left out on purpose: tailnet-only is the
     #    point of this file.
     # ports:
-    #   - "8080:8080"
+    #   - "9876:9876"
 
   docusort:
     network_mode: service:tailscale

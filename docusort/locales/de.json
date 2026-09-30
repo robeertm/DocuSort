@@ -1047,7 +1047,7 @@
   "settings.sync.test_ok": "„{name}\" funktioniert.",
   "settings.sync.webdav_hint": "Nextcloud, Synology WebDAV, ownCloud",
   "settings.web.heading": "Web-Server",
-  "settings.web.hint": "Host: 0.0.0.0 = alle Netzwerke. Port: gängig 8080 (HTTP) oder 9876 (HTTPS via Tailscale-Setup-Skript). Reichen Standard-Ports < 1024 nicht aus, weil DocuSort nicht als root läuft — wähle einen freien Port > 1024.",
+  "settings.web.hint": "Host: 0.0.0.0 = alle Netzwerke. Port: Vorgabe 9876 — 8080 ist auf vielen Geräten schon vergeben (NAS, Entwicklungsrechner). Ports < 1024 gehen nicht, weil DocuSort nicht als root läuft — wähle einen freien Port > 1024.",
   "settings.web.host": "Host",
   "settings.web.https_active": "HTTPS ist aktiv (TLS-Zertifikat in config.yaml hinterlegt).",
   "settings.web.port": "Port",

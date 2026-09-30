@@ -13,7 +13,11 @@ paths:
 # Web UI
 web:
   host: "0.0.0.0"             # 0.0.0.0 = listen on all interfaces inside the container
-  port: 8080                  # exposed via docker-compose; open http://<nas>:8080
+  port: 9876                  # exposed via docker-compose; open http://<nas>:9876
+  # 🔑 Not 8080. That port is spoken for on a lot of machines — a NAS
+  # hands it to its own web station, and a developer machine to whatever
+  # was started last. An installation that collides on its first day
+  # looks broken, and the cause is invisible from the outside.
   default_language: "de"      # de / en / fr / es / it — falls back to browser Accept-Language
 
   # Optional HTTPS. Set both to PEM paths the docusort process can read

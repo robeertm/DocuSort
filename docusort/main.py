@@ -1,7 +1,7 @@
 """DocuSort entrypoint.
 
 Default mode starts BOTH the folder watcher and the FastAPI web UI in the same
-process (web UI on port from config.yaml, default 8080).
+process (web UI on port from config.yaml, default 9876).
 
     python -m docusort             # watcher + web UI
     python -m docusort --once      # process existing inbox files and exit

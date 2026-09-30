@@ -72,7 +72,7 @@ cat <<TXT
 
   Both are starting, and they already know each other.
 
-    DocuSort     http://$HOST:8080     documents and household finances
+    DocuSort     http://$HOST:9876     documents and household finances
     Postwache    http://$HOST:8110     watches your mailbox
 
   First visit to DocuSort asks you to create the admin account. Then tell the

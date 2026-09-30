@@ -209,7 +209,7 @@ curl -fsSL https://raw.githubusercontent.com/robeertm/DocuSort/main/deploy/insta
 
 The script checks that Docker is present, asks where your documents should
 live, writes a `docker-compose.yml` and an `.env` next to it, pulls the image
-and starts DocuSort on port 8080. Open `http://<host>:8080`, create the admin
+and starts DocuSort on port 9876. Open `http://<host>:9876`, create the admin
 account, add your AI key in Settings, and drop the first scan into the inbox.
 
 ### Docker Compose by hand
@@ -221,7 +221,7 @@ services:
     container_name: docusort
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "9876:9876"
     volumes:
       - ./data:/data            # inbox, library, database
       - ./config:/app/config    # config.yaml, categories.yaml
@@ -305,7 +305,7 @@ the finances or the settings.
 git clone https://github.com/robeertm/DocuSort.git && cd REPO
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-python -m docusort            # http://localhost:8080
+python -m docusort            # http://localhost:9876
 ```
 
 Python 3.11+ is required. For OCR install Tesseract (`apt install
