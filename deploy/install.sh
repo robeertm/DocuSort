@@ -38,6 +38,22 @@ say "Installing into $DIR"
 # people put this.
 mkdir -p "$DIR/data/inbox" "$DIR/data/library" "$DIR/config" "$DIR/logs"
 
+# 🔴 The port INSIDE the container is not ours to choose when an installation
+# is already here. `config/config.yaml` lives in a mounted directory and is
+# never overwritten (`docker-entrypoint.sh` seeds it with `cp -n`), so an
+# installation from before 0.67.0 goes on listening on 8080 — and a compose
+# file written with `:9876` would point at a door that is not there. Ask the
+# config that is actually on disk; only a fresh installation gets 9876.
+INNEN=9876
+if [ -f "$DIR/config/config.yaml" ]; then
+  GEFUNDEN="$(sed -n 's/^[[:space:]]*port:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+              "$DIR/config/config.yaml" | head -1)"
+  if [ -n "$GEFUNDEN" ] && [ "$GEFUNDEN" != "$INNEN" ]; then
+    warn "this installation already listens on $GEFUNDEN inside the container — keeping that"
+    INNEN="$GEFUNDEN"
+  fi
+fi
+
 if [ -f "$DIR/docker-compose.yml" ]; then
   warn "docker-compose.yml exists — keeping it."
 else
@@ -48,7 +64,7 @@ services:
     container_name: docusort
     restart: unless-stopped
     ports:
-      - "\${DOCUSORT_PORT}:9876"
+      - "\${DOCUSORT_PORT}:$INNEN"
     environment:
       - TZ=\${TZ}
       - DOCUSORT_LOG_LEVEL=INFO
