@@ -7,6 +7,30 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.67.1] - 2026-09-30
+
+### Fixed
+
+**The installer no longer writes a port the installation does not have.** With
+0.67.0 `deploy/install.sh` wrote `${DOCUSORT_PORT}:9876` into a compose file it
+creates. That is right for a fresh install and wrong for an older one: its
+`config/config.yaml` lives in a mounted directory and is never overwritten, so
+the program inside the container goes on listening on 8080 — and a mapping to
+9876 points at a door that is not there. The installer now reads the port out
+of an existing `config/config.yaml` and uses that as the container side,
+saying so as it does. Only an installation with no config of its own gets 9876.
+
+This only ever bites when the compose file is being written again — normally it
+is kept — but that is exactly the situation somebody is in when they are trying
+to repair an installation.
+
+### Added
+
+Four more checks in `pruefstaende/probe_installer.py` (29 in total): a run
+against a directory that already holds `config/config.yaml` with `port: 8080`
+has to produce a compose file mapping to 8080 and nothing pointing at 9876, and
+a run with no config has to stay on 9876.
+
 ## [0.67.0] - 2026-09-30
 
 ### Changed
