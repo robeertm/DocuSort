@@ -230,8 +230,13 @@ services:
 ```
 
 ```bash
-mkdir -p data/inbox config && docker compose up -d
+mkdir -p data/inbox data/library config logs && docker compose up -d
 ```
+
+Make the directories first. Most Docker daemons would create a missing mount
+source themselves, but Synology's stops with `Bind mount failed: '…/logs' does
+not exist` — and the same four cover the repository's own
+`docker-compose.yml`, which mounts inbox, library, config and logs separately.
 
 ### Over Tailscale — one command
 

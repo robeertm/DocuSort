@@ -7,6 +7,35 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.65.2] – 2026-09-30
+
+### Fixed
+
+- 🔴 **The one-command install stopped on a Synology.** `deploy/install.sh`
+  created `data/inbox`, `data/library` and `config` — and then wrote a
+  compose file that also mounts `./logs`. Most Docker daemons create a
+  missing bind-mount source themselves (measured: they do, owned by root),
+  so the omission never showed. Synology's refuses and answers
+  `Error response from daemon: Bind mount failed: '…/logs' does not exist`,
+  which is exactly where a lot of people put this. The directory is created
+  now, and after the compose file is in place the installer reads every
+  `./…` mount back out of it and makes anything still missing — so a compose
+  file that was already there, with paths of its own, is covered too, and a
+  future omission costs a line of output instead of an install. A mounted
+  *file* is left alone; creating it as a directory would break it for good.
+  Re-running the one-liner repairs an installation that stopped this way.
+- 🔴 **The installer reported failure after a successful install.**
+  `hostname -I` is Linux-only, and under `set -euo pipefail` a failing one
+  ended the script at the very last step — after the container was already
+  running. The user saw a non-zero exit and none of the closing notes: no
+  address, no paths, no next step.
+
+### Changed
+
+- 📄 The README's by-hand `mkdir` now names all four directories the
+  repository's own `docker-compose.yml` mounts, with a word on why they have
+  to exist first.
+
 ## [0.65.1] – 2026-09-29
 
 ### Changed
