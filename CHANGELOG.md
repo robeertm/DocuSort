@@ -7,6 +7,34 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.67.2] - 2026-09-30
+
+### Fixed
+
+**A kept compose file that publishes no port is now said out loud.** The
+installer keeps a `docker-compose.yml` that is already there — it is the user's
+file, and that is right. Keeping it *silently* is not: a compose file without a
+`ports:` section starts a container that runs, listens inside, and cannot be
+reached from anywhere. Nothing fails, nothing is logged, and `docker compose ps`
+shows a bare `9876/tcp` instead of `0.0.0.0:9876->9876/tcp`, which nobody reads
+as an error. The installer now looks, says so, and prints the
+`docker-compose.override.yml` that fixes it without touching the user's file —
+compose merges the two.
+
+**An empty `DOCUSORT_PORT` can no longer publish a random port.** Measured on a
+real Docker: with the variable unset, `"${DOCUSORT_PORT}:9876"` publishes on a
+port the kernel picks (32768 here), so the container is running and reachable —
+just not at the address the installer printed a second earlier. The generated
+compose file now carries its own fallback, `"${DOCUSORT_PORT:-9876}:9876"`.
+
+### Added
+
+Six more checks in `pruefstaende/probe_installer.py` (36 in total), answering
+"can a fresh installation end up unreachable at all?" with measurements rather
+than a promise: the generated file has a `ports:` section and a fallback value,
+a kept file without a port is left untouched but produces the warning and the
+remedy, and a kept file that does publish a port produces no warning.
+
 ## [0.67.1] - 2026-09-30
 
 ### Fixed

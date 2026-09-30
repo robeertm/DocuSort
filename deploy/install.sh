@@ -56,6 +56,19 @@ fi
 
 if [ -f "$DIR/docker-compose.yml" ]; then
   warn "docker-compose.yml exists — keeping it."
+  # 🔴 Keeping it is right — it is the user's file. Keeping it SILENTLY is not:
+  # a compose file without a published port starts a container that runs,
+  # listens inside, and cannot be reached from anywhere. Nothing fails, nothing
+  # is logged, and `docker compose ps` says `9876/tcp` instead of
+  # `0.0.0.0:9876->9876/tcp` — which nobody reads as an error. This cost a user
+  # an evening. The information was there; it was simply never said out loud.
+  if ! grep -qE '^[[:space:]]*-[[:space:]]*"?[0-9$][^"]*:[0-9]+' "$DIR/docker-compose.yml"; then
+    warn "🔴 but it publishes no port — DocuSort would be unreachable from outside."
+    warn "   Put this next to it as docker-compose.override.yml and it is fixed"
+    warn "   without touching your own file (compose merges the two):"
+    printf '\n     services:\n       docusort:\n         ports:\n           - "%s:%s"\n\n' \
+           "$PORT" "$INNEN"
+  fi
 else
   cat > "$DIR/docker-compose.yml" <<YAML
 services:
@@ -64,7 +77,7 @@ services:
     container_name: docusort
     restart: unless-stopped
     ports:
-      - "\${DOCUSORT_PORT}:$INNEN"
+      - "\${DOCUSORT_PORT:-$PORT}:$INNEN"
     environment:
       - TZ=\${TZ}
       - DOCUSORT_LOG_LEVEL=INFO
