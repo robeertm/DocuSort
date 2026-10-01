@@ -17,8 +17,10 @@
 # forwarding, no reverse proxy.
 #
 # Once, before the first start:
-#   1. Tailscale admin console → Settings → Keys → generate a REUSABLE auth
-#      key, put it in `.env` as TS_AUTHKEY=tskey-auth-…
+#   1. Tailscale admin console → Settings → Keys → under "Auth keys" press
+#      "Generate auth key..." (Reusable on). NOT "Generate access token..."
+#      further down — that one is for the API and cannot log a machine in.
+#      Put it in `.env` as TS_AUTHKEY=tskey-auth-…
 #   2. Settings → DNS → MagicDNS on, HTTPS Certificates on.
 #      Without the second one the name resolves and the certificate does not
 #      exist, and the browser says so in a way that sounds much worse.
