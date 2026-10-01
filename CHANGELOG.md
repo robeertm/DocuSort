@@ -7,6 +7,23 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.70.0] - 2026-10-01
+
+### Added
+
+**The installer refuses to put a second DocuSort on a machine that already has
+one.** A user's Docker interface showed two containers from the same image: one
+green, one turning in circles for ever. Neither was broken. They were simply
+both there — started from different places, each with its own data and both
+wanting the same port. Nothing on screen said there were two, so the setting you
+saved went into one and the page you opened came from the other.
+
+Before it writes anything, the installer now looks for other containers running
+`ghcr.io/robeertm/docusort`, names them, says why two cannot work, shows the
+command that reveals which ports and folders the other one uses, and stops
+without having changed a thing. Its own container is not mistaken for a stranger,
+so updating still works.
+
 ## [0.69.2] - 2026-10-01
 
 ### Fixed

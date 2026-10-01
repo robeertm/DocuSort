@@ -31,6 +31,29 @@ else
 fi
 docker info >/dev/null 2>&1 || die "Docker is installed but not running (or this user may not talk to it)."
 
+# 🔴 ZWEI DocuSorts auf einer Maschine
+# Ein Nutzer hatte neben dem Container dieses Installers noch einen zweiten aus
+# demselben Abbild (`ghcr-io-robeertm-docusort-1`, aus der NAS-Oberflaeche
+# angelegt). Der eine lief gruen, der andere drehte sich ewig im Kreis — und
+# nichts auf dem Schirm sagte, dass es zwei sind. Beide wollen denselben
+# Wirts-Port, beide haengen an ihren eigenen Daten: man richtet den einen ein
+# und ruft den anderen auf. Also nachsehen und es SAGEN, bevor ein zweiter
+# dazukommt. Gemessen: `{{.Image}}` druckt den Namen genau so, wie er hier steht.
+ANDERE="$(docker ps -a --format '{{.Names}}\t{{.Image}}' 2>/dev/null \
+          | awk -F'\t' -v img="$IMAGE" '$2==img && $1!="docusort" {print $1}' || true)"
+if [ -n "$ANDERE" ]; then
+  warn "🔴 This machine already runs DocuSort in another container:"
+  for n in $ANDERE; do warn "     $n"; done
+  warn "   Two of them fight over the same port and keep separate data —"
+  warn "   you would set one up and open the other. Keep ONE."
+  warn "   Look at it first:  docker inspect $(echo "$ANDERE" | head -1) \\"
+  warn "                        --format '{{.HostConfig.PortBindings}} {{range .Mounts}}{{.Source}} {{end}}'"
+  warn "   Then remove the one you do not want:  docker rm -f <name>"
+  warn "   Nothing has been changed. Run this installer again afterwards."
+  exit 1
+fi
+
+
 say "Installing into $DIR"
 # Every host path the compose file below mounts, created before the daemon is
 # asked for it. `logs` was missing here and the installer still stopped on some
