@@ -236,9 +236,13 @@ cat <<DONE
   The first visit asks you to create the admin account.
   Then open Settings and choose your AI provider.
 
-  Update later:  cd $DIR && $COMPOSE pull && $COMPOSE up -d
-                 (or uncomment the watchtower block in docker-compose.yml
-                  to have it done for you)
+  Updates:       they happen by themselves, nightly at 04:00 — the compose
+                 file this installer wrote carries a watchtower service that
+                 watches only the docusort container. Measured, not promised:
+                 `docker logs docusort-watchtower` prints its next run.
+                 To switch it off, delete that service. To move the time, put
+                 WATCHTOWER_SCHEDULE=0 30 3 * * * in .env.
+  Update now:    cd $DIR && $COMPOSE pull && $COMPOSE up -d
   Logs:          cd $DIR && $COMPOSE logs -f
 
 DONE
