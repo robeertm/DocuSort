@@ -3453,7 +3453,12 @@ def create_app(
         origin = f"{scheme}://{host}".rstrip("/")
         script = f"{origin}/api/local-ai/setup-script"
         ticket = local_ai.new_setup_ticket()
-        short  = host.split(":")[0]
+        # 🔴 Der Name trug nur die IP. Zieht DocuSort auf einen anderen Port,
+        #    heisst der neue Launcher genau wie der alte — und ein Nutzer hat
+        #    den alten gestartet, der noch auf :8080 zeigte. Die Fehlermeldung
+        #    war dann `curl: (7) Could not connect`, und er schloss daraus, er
+        #    muesse einen Port weiterleiten. Der Port gehoert in den Namen.
+        short  = host.replace(":", "-")
         # DocuSort's own certificate is usually self-signed — the script has
         # to be told, it never skips verification on its own.
         extra = " --insecure" if scheme == "https" else ""
@@ -3462,11 +3467,30 @@ def create_app(
         # 🔴 Never skip certificate checking silently. Try it properly first
         # and say out loud when falling back — a self-signed DocuSort is the
         # normal case, an unnoticed man in the middle is not.
-        hol = (f'curl -fsSL "{script}" -o "$DIR/setup.py" || {{\n'
-               f'  echo "  Certificate not trusted - retrying without verification"\n'
-               f'  echo "  (normal for a self-signed DocuSort on your own network)."\n'
-               f'  curl -fsSLk "{script}" -o "$DIR/setup.py"\n'
-               f'}}')
+        # 🔴 Die alte Zwischenmeldung behauptete einen Grund, den sie nicht
+        #    kannte: bei einem unerreichbaren DocuSort stand da „Certificate not
+        #    trusted", obwohl niemandes Zertifikat etwas damit zu tun hatte.
+        #    Und schlug auch der zweite Versuch fehl, blieb nur curls nackte
+        #    Zeile stehen. Jetzt sagt der Launcher, was wirklich los ist.
+        nicht_da = [
+            '    echo ""',
+            f'    echo "  DocuSort did not answer at {origin}"',
+            '    echo ""',
+            '    echo "  This launcher was made for that exact address, and it is"',
+            '    echo "  the address DocuSort had when you downloaded it. If DocuSort"',
+            '    echo "  has moved since - another port, another machine - then this"',
+            '    echo "  file is simply out of date. You do not have to forward"',
+            '    echo "  or change any port: open DocuSort in your browser, go to"',
+            '    echo "  Settings, Local AI, and download the launcher again."',
+            '    echo ""',
+            '    echo "  Nothing on this machine was changed."',
+            '    exit 1',
+        ]
+        hol = "\n".join(
+            [f'curl -fsSL "{script}" -o "$DIR/setup.py" || {{',
+             '  echo "  First attempt failed - retrying without certificate check"',
+             '  echo "  (normal for a self-signed DocuSort on your own network)."',
+             f'  curl -fsSLk "{script}" -o "$DIR/setup.py" || {{'] + nicht_da + ['  }', '}'])
 
         if os_norm in ("mac", "macos", "darwin"):
             body = "\n".join([
@@ -3508,11 +3532,24 @@ def create_app(
                 "set DEST=%TEMP%\\docusort_ollama_setup.py",
                 f'curl -fsSL "{script}" -o "%DEST%"',
                 "if errorlevel 1 (",
-                "  echo   Certificate not trusted - retrying without verification",
+                "  echo   First attempt failed - retrying without certificate check",
                 "  echo   ^(normal for a self-signed DocuSort on your own network^).",
                 f'  curl -fsSLk "{script}" -o "%DEST%"',
                 ")",
-                "if errorlevel 1 (echo Download failed.& pause & exit /b 1)",
+                "if errorlevel 1 (",
+                "  echo.",
+                f"  echo   DocuSort did not answer at {origin}",
+                "  echo.",
+                "  echo   This launcher was made for that exact address. If DocuSort",
+                "  echo   has moved since -- another port, another machine -- then",
+                "  echo   this file is out of date. You do not have to forward or",
+                "  echo   change any port: open DocuSort in your browser, go to",
+                "  echo   Settings, Local AI, and download the launcher again.",
+                "  echo.",
+                "  echo   Nothing on this machine was changed.",
+                "  pause",
+                "  exit /b 1",
+                ")",
                 f'python "%DEST%" --docusort "{origin}" --ticket "{ticket}"{extra}',
                 'del "%DEST%" >nul 2>&1',
                 "pause",
