@@ -127,12 +127,36 @@ def detail(exc: Exception) -> str:
 
 
 # -------------------------------------------------------------------- Ollama
-def ollama_models(base: str, timeout: float = 2.0) -> list:
+def ollama_models(base: str, timeout: float = 2.0):
+    """The models at `base` — or ``None`` when nothing answered there.
+
+    🔴 THIS RETURNED `[]` FOR BOTH CASES AND IT COST SOMEBODY AN EVENING.
+    A fresh Ollama has no models yet. `/api/tags` then answers, politely and
+    correctly, with an empty list — and an empty list is false. So the setup
+    read „no models" as „no Ollama", announced
+
+        ✋ Ollama is not reachable at http://192.168.178.38:11434
+
+    and stopped — one step before the very thing that would have fixed it, which
+    is pulling a model. The owner meanwhile opened that exact address in a
+    browser and read „Ollama is running".
+
+    „It answered" and „it has something" are two different questions. Asking one
+    and reporting the other is how a setup tells somebody their network is
+    broken when nothing is.
+    """
     try:
-        return [str((m or {}).get("name") or "")
-                for m in (get(base.rstrip("/") + "/api/tags", timeout).get("models") or [])]
+        antwort = get(base.rstrip("/") + "/api/tags", timeout)
     except Exception:
-        return []
+        return None                      # niemand da
+    return [str((m or {}).get("name") or "")
+            for m in (antwort.get("models") or [])]
+
+
+def ollama_antwortet(base: str, timeout: float = 2.0) -> bool:
+    """Antwortet dort ueberhaupt ein Ollama? Unabhaengig davon, ob es schon
+    ein Modell hat."""
+    return ollama_models(base, timeout) is not None
 
 
 def pick_model(models: list) -> str:
@@ -436,7 +460,7 @@ def systemd_binden(bind: str) -> bool:
     good("The service now listens on %s." % want)
     # 🔑 „restarted" is not „answering". Ask it, do not assume it.
     for _ in range(SERVE_WAIT):
-        if ollama_models("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
+        if ollama_antwortet("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
             good("Ollama is up.")
             return True
         time.sleep(1)
@@ -544,7 +568,7 @@ def serve(bind: str) -> bool:
         return False
     info("log: %s" % log)
     for _ in range(SERVE_WAIT):
-        if ollama_models("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
+        if ollama_antwortet("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
             good("Ollama is up.")
             return True
         time.sleep(1)
@@ -653,13 +677,17 @@ def main() -> int:
     install_ollama()
 
     step("Checking Ollama")
+    # 🔑 „Antwortet es?" und „hat es Modelle?" sind ZWEI Fragen. `modelle` kann
+    #    eine leere Liste sein — das ist ein frisch installiertes Ollama, kein
+    #    Netzproblem. Nur `None` heisst: da antwortet niemand.
     local = ollama_models("http://127.0.0.1:%d" % OLLAMA_PORT)
     target = "http://%s:%d" % (visible, OLLAMA_PORT)
-    reachable = local if here else ollama_models(target)
+    modelle = local if here else ollama_models(target)
+    reachable = modelle is not None
 
     if reachable:
         good("Ollama answers at %s." % target)
-    elif local and not here:
+    elif local is not None and not here:
         warn("Ollama runs, but only for this machine (127.0.0.1).")
         print("\n  DocuSort sits on another computer, so Ollama has to listen")
         print("  on the network as well. That means: anyone on your local")
@@ -679,10 +707,11 @@ def main() -> int:
             subprocess.call(["open", "-a", "Ollama"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(4)
-        reachable = ollama_models(target, 4.0)
-        if not reachable:
+        modelle = ollama_models(target, 4.0)
+        if modelle is None:
             serve("0.0.0.0")
-            reachable = ollama_models(target, 4.0)
+            modelle = ollama_models(target, 4.0)
+        reachable = modelle is not None
     else:
         if not here and not ask_yes_no(
                 "Ollama has to listen on the network (0.0.0.0:%d) so DocuSort "
@@ -693,12 +722,13 @@ def main() -> int:
         if not here:
             bind_permanently("0.0.0.0")
         serve(bind)
-        reachable = ollama_models(target, 4.0)
+        modelle = ollama_models(target, 4.0)
+        reachable = modelle is not None
 
     # 🔑 Ollama answers on this machine but not from outside: that is a firewall
     #    and nothing else. Telling somebody „allow port 11434" is telling them
     #    to go and learn their firewall. Ask once, then do it.
-    if not reachable and not here and ollama_models(
+    if not reachable and not here and ollama_antwortet(
             "http://127.0.0.1:%d" % OLLAMA_PORT, 3.0):
         art = firewall_art()
         if art:
@@ -706,11 +736,12 @@ def main() -> int:
                  % (art, OLLAMA_PORT))
             if ask_yes_no("Open port %d so DocuSort can reach it?" % OLLAMA_PORT):
                 firewall_oeffnen(art)
-                reachable = ollama_models(target, 4.0)
+                modelle = ollama_models(target, 4.0)
+                reachable = modelle is not None
 
     if not reachable:
         hinweis = ""
-        if not here and ollama_models("http://127.0.0.1:%d" % OLLAMA_PORT, 3.0):
+        if not here and ollama_antwortet("http://127.0.0.1:%d" % OLLAMA_PORT, 3.0):
             hinweis = ("\nOllama answers on this machine but not from the "
                        "network, so something in between is blocking port %d."
                        % OLLAMA_PORT)
@@ -721,11 +752,16 @@ def main() -> int:
                             "own network — so port %d has to be allowed by "
                             "whoever set them up." % OLLAMA_PORT)
         stop("Ollama is not reachable at %s.%s" % (target, hinweis))
-    good("%d model(s) available." % len(reachable))
+    modelle = modelle or []
+    if modelle:
+        good("%d model(s) available." % len(modelle))
+    else:
+        # 🔑 Kein Mangel, sondern der Normalzustand eines frischen Ollama.
+        good("Ollama answers. No model on it yet — fetching one now.")
 
     # 4. Model — take what is already there before downloading gigabytes.
-    model = a.model.strip() or pick_model(reachable) or DEFAULT_MODEL
-    if model not in reachable:
+    model = a.model.strip() or pick_model(modelle) or DEFAULT_MODEL
+    if model not in modelle:
         if not pull(model):
             if model != SMALL_MODEL and ask_yes_no(
                     "Pull failed. Try the smaller %s instead?" % SMALL_MODEL):

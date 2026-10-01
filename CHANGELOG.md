@@ -7,6 +7,30 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.71.1] - 2026-10-01
+
+### Fixed
+
+**A fresh Ollama with no model is no longer reported as unreachable.** The setup
+asked Ollama for its models and treated the answer as the answer to a different
+question. A newly installed Ollama has no models yet, so `/api/tags` replies —
+correctly and politely — with an empty list. An empty list is false. So the setup
+read "no models" as "no Ollama", announced
+
+```
+✋ Ollama is not reachable at http://192.168.178.38:11434
+```
+
+and stopped — one step before the thing that would have fixed it, which is
+pulling a model. Meanwhile the owner opened that exact address in a browser and
+read "Ollama is running".
+
+"It answered" and "it has something" are two questions. The probe now returns
+nothing at all when nobody answered and a list — possibly empty — when somebody
+did, and the setup asks the first question for reachability and the second only
+when choosing a model. An Ollama without a model is now greeted with "Ollama
+answers. No model on it yet — fetching one now."
+
 ## [0.71.0] - 2026-10-01
 
 ### Changed
