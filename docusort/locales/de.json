@@ -1461,6 +1461,7 @@
   "update.available": "Update verfügbar:",
   "update.close": "Schließen",
   "update.docker_hint": "Läuft im Container — hier wird das Abbild getauscht, nicht die Dateien:",
+  "update.docker_warn_second": "Führe das in dem Ordner aus, in dem deine docker-compose.yml liegt. 🔴 Lege dafür niemals in der NAS-Oberfläche einen neuen Container an — das aktualisiert nichts, sondern stellt einen ZWEITEN DocuSort daneben. Beide wollen denselben Port und haben getrennte Daten: du richtest den einen ein und öffnest den anderen.",
   "update.failed": "Update fehlgeschlagen:",
   "update.install_now": "Jetzt aktualisieren",
   "update.installed_manual": "Update installiert — der Service muss manuell neu gestartet werden:",

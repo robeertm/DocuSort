@@ -270,6 +270,14 @@
           <code class="block rounded-lg bg-ink-900/70 border border-ink-700 px-3 py-2
                        text-xs text-ink-200 break-words"
                 x-text="info.update_command || 'docker compose pull && docker compose up -d'"></code>
+          <!-- 🔴 Die eine Zeile, die einem Nutzer einen Tag erspart haette: in
+               der NAS-Oberflaeche einen Container NEU ANZULEGEN aktualisiert
+               nichts, es stellt einen ZWEITEN daneben. Beide wollen denselben
+               Port, beide haben eigene Daten — und nichts auf dem Schirm sagt,
+               dass es zwei sind. -->
+          <div class="text-xs text-amber-300/90 mt-2 max-w-prose">
+            {{ t('update.docker_warn_second') }}
+          </div>
         </div>
       </template>
     </div>
