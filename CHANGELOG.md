@@ -7,6 +7,28 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.71.0] - 2026-10-01
+
+### Changed
+
+**Updates now arrive once an hour instead of once a night.** A fix you are
+waiting for should not have to wait until the following night — especially not
+one that was shipped because your installation is the one that is broken. The
+shipped Watchtower schedule is now `0 0 * * * *`, measured against a real
+Watchtower before shipping: it is accepted and reports its next run on the hour.
+
+What that costs is stated where the schedule is: the restart happens on *its*
+clock, not yours. `WATCHTOWER_SCHEDULE` in `.env` moves it — `0 0 4 * * *` puts
+it back to a single nightly run at 04:00.
+
+An installation that already exists keeps the schedule written into its own
+compose file, because that file belongs to its owner. It switches over by adding
+one line to `.env`:
+
+```
+WATCHTOWER_SCHEDULE=0 0 * * * *
+```
+
 ## [0.70.1] - 2026-10-01
 
 ### Changed
