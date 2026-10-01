@@ -7,6 +7,24 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.70.1] - 2026-10-01
+
+### Changed
+
+**The update card now warns against the one action that silently doubles your
+installation.** A user reported that after updating there were suddenly two
+DocuSort containers. Measured on real Docker: the nightly Watchtower update is
+not the cause — one container before, one after. A second one appears when the
+container is **created anew** in a NAS interface instead of the image being
+swapped. That updates nothing: it places a second DocuSort beside the first, both
+wanting the same port and each keeping its own data, so the settings you save go
+into one and the page you open comes from the other.
+
+From inside its own container DocuSort cannot see that this has happened, so the
+warning stands where the update path is described: run the command in the folder
+that holds `docker-compose.yml`, and never create a new container instead. In all
+five languages.
+
 ## [0.70.0] - 2026-10-01
 
 ### Added

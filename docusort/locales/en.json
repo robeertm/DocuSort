@@ -1461,6 +1461,7 @@
   "update.available": "Update available:",
   "update.close": "Close",
   "update.docker_hint": "Running in a container — here you replace the image, not the files:",
+  "update.docker_warn_second": "Run this in the folder that holds your docker-compose.yml. 🔴 Never create a new container in your NAS interface instead — that updates nothing, it puts a SECOND DocuSort beside the first. Both want the same port and keep separate data: you set up one and open the other.",
   "update.failed": "Update failed:",
   "update.install_now": "Update now",
   "update.installed_manual": "Update installed — the service has to be restarted manually:",
