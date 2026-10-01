@@ -136,7 +136,18 @@ while IFS= read -r rel; do
 done < <(sed -n 's#^[[:space:]]*-[[:space:]]*\./\([^:]*\):.*#\1#p' "$DIR/docker-compose.yml" | sort -u)
 
 say "Pulling $IMAGE"
-( cd "$DIR" && $COMPOSE pull && $COMPOSE up -d )
+# 🔴 Ein fehlgeschlagener Abruf ist nicht dasselbe wie ein fehlendes Abbild.
+#    Mit `pull && up -d` riss eine kurze Netzstoerung (oder eine Registry, die
+#    gerade nicht mag) die ganze Installation mit, obwohl das Abbild schon auf
+#    der Maschine lag. Erst fragen, dann abbrechen.
+if ! ( cd "$DIR" && $COMPOSE pull ); then
+  if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    warn "could not fetch $IMAGE — using the copy already on this machine."
+  else
+    die "could not fetch $IMAGE, and there is no copy on this machine."
+  fi
+fi
+( cd "$DIR" && $COMPOSE up -d )
 
 # 🔴 WHY THIS BLOCK EXISTS
 # Until now the installer ran `up -d`, printed „DocuSort is starting." and
