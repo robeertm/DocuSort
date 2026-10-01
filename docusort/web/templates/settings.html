@@ -351,6 +351,62 @@
     </template>
   </section>
 
+  <!-- ===== Tailscale: aufs Handy, von ueberall ===== -->
+  <section class="card p-6" x-data="tailscaleSettings()" x-init="init()">
+    <div class="flex items-center justify-between gap-3 mb-1">
+      <h2 class="text-lg font-semibold">{{ t('settings.ts.heading') }}</h2>
+      <span x-show="lage.verbunden" x-cloak
+            class="text-xs rounded-full px-2 py-0.5 bg-emerald-900/40 text-emerald-300
+                   border border-emerald-700">{{ t('settings.ts.connected') }}</span>
+    </div>
+    <p class="text-ink-400 text-sm mb-5">{{ t('settings.ts.subtitle') }}</p>
+
+    <!-- Altes Abbild: dann gibt es hier nichts zu tun, und das wird gesagt. -->
+    <template x-if="!lage.moeglich">
+      <p class="text-sm text-amber-300/90">{{ t('settings.ts.unavailable') }}</p>
+    </template>
+
+    <template x-if="lage.moeglich && lage.verbunden">
+      <div class="space-y-3">
+        <div class="rounded-xl bg-ink-900/60 border border-ink-700 p-4">
+          <div class="text-xs text-ink-400 mb-1">{{ t('settings.ts.address') }}</div>
+          <a :href="'https://' + lage.adresse" target="_blank"
+             class="font-mono text-sm text-cyan-300 underline break-all"
+             x-text="'https://' + lage.adresse"></a>
+          <p class="text-xs text-ink-500 mt-2">{{ t('settings.ts.phone_hint') }}</p>
+        </div>
+        <button type="button" @click="trennen()" :disabled="arbeitet"
+                class="rounded-lg border border-ink-600 px-3 py-1.5 text-xs
+                       hover:bg-ink-800 disabled:opacity-50">
+          {{ t('settings.ts.disconnect') }}
+        </button>
+      </div>
+    </template>
+
+    <template x-if="lage.moeglich && !lage.verbunden">
+      <div class="space-y-3">
+        <ol class="text-sm text-ink-300 space-y-1 list-decimal list-inside">
+          <li>{{ t('settings.ts.step_key') | safe }}</li>
+          <li>{{ t('settings.ts.step_dns') | safe }}</li>
+          <li>{{ t('settings.ts.step_paste') }}</li>
+        </ol>
+        <div class="flex flex-col sm:flex-row gap-2">
+          <input x-model="authkey" type="password" autocomplete="off"
+                 placeholder="tskey-auth-…"
+                 class="flex-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
+          <button type="button" @click="verbinden()" :disabled="arbeitet || !authkey"
+                  class="btn-primary whitespace-nowrap disabled:opacity-50">
+            <span x-show="!arbeitet">{{ t('settings.ts.connect') }}</span>
+            <span x-show="arbeitet" x-cloak>{{ t('settings.ts.working') }}</span>
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <p x-show="meldung" x-cloak class="text-sm mt-3"
+       :class="ok ? 'text-emerald-300' : 'text-amber-300'" x-text="meldung"></p>
+  </section>
+
   <!-- ===== Web server (host + port) ===== -->
   <section class="card p-6" x-data="webSettings()">
     <h2 class="text-lg font-semibold mb-1">{{ t('settings.web.heading') }}</h2>
@@ -1459,6 +1515,56 @@ function postwacheSettings() {
       }
       this.kopiert = true;
       setTimeout(() => { this.kopiert = false; }, 2000);
+    },
+  };
+}
+
+// 🔑 Tailscale, von innen. Ein Feld, ein Knopf — kein Beiwagen, keine
+//    compose-Datei, keine Kommandozeile.
+function tailscaleSettings() {
+  return {
+    lage: { moeglich: false, laeuft: false, verbunden: false, adresse: '' },
+    authkey: '',
+    arbeitet: false,
+    meldung: '',
+    ok: false,
+    async init() { await this.holen(); },
+    async holen() {
+      try {
+        const r = await fetch('/api/tailscale/status');
+        if (r.ok) this.lage = await r.json();
+      } catch (e) { /* eine stille Karte ist besser als eine kaputte Seite */ }
+    },
+    async verbinden() {
+      this.arbeitet = true; this.meldung = ''; this.ok = false;
+      try {
+        const r = await fetch('/api/tailscale/connect', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ authkey: this.authkey }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) {
+          this.ok = true;
+          this.authkey = '';
+          this.meldung = tr('settings.ts.done');
+        } else {
+          // 🔑 Was Tailscale selbst sagt, nicht was ich vermute.
+          this.meldung = d.grund || d.detail || ('HTTP ' + r.status);
+        }
+      } catch (e) { this.meldung = e.message || String(e); }
+      this.arbeitet = false;
+      await this.holen();
+    },
+    async trennen() {
+      this.arbeitet = true; this.meldung = ''; this.ok = false;
+      try {
+        const r = await fetch('/api/tailscale/disconnect', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        this.meldung = d.ok ? tr('settings.ts.gone') : (d.grund || 'HTTP ' + r.status);
+        this.ok = !!d.ok;
+      } catch (e) { this.meldung = e.message || String(e); }
+      this.arbeitet = false;
+      await this.holen();
     },
   };
 }

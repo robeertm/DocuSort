@@ -586,6 +586,17 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
     except Exception:
         log.exception("Finance reset failed — continuing startup")
 
+    # 🔑 Eine bestehende Tailscale-Anmeldung lebt weiter — ohne das muesste
+    #    nach jedem Update jemand den Knopf druecken, und Updates kommen
+    #    stuendlich. Nie toedlich: wer Tailscale nicht benutzt, merkt nichts.
+    try:
+        from . import tailscale as _ts
+        threading.Thread(target=_ts.beim_start,
+                         args=(settings.config_dir, settings.web.port),
+                         daemon=True).start()
+    except Exception:
+        log.exception("Tailscale: could not be started — continuing without it")
+
     ssl_kwargs: dict = {}
     cert, key = settings.web.ssl_cert, settings.web.ssl_key
     if cert and key:
