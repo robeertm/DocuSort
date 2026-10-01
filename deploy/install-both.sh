@@ -78,7 +78,7 @@ cat <<TXT
   First visit to DocuSort asks you to create the admin account. Then tell the
   Postwache about your mailbox — and attachments start arriving on their own.
 
-  Updates happen by themselves, nightly at 04:00.
+  Updates happen by themselves, once an hour.
   Over Tailscale instead of the LAN:  ./deploy/tailscale.sh tskey-auth-…
   Logs:  cd $DIR && $COMPOSE logs -f
 

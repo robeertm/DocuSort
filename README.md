@@ -331,11 +331,11 @@ the image leaves them untouched.
 ### It is already done for you
 
 Both the repository's `docker-compose.yml` and the one-command installer ship
-**Watchtower switched on**. New images are pulled nightly at 04:00 and the
+**Watchtower switched on**. New images are pulled once an hour and the
 container is recreated — you do not have to do anything.
 
 ```
-WATCHTOWER_SCHEDULE=0 30 3 * * *     # in .env, if you want a different time
+WATCHTOWER_SCHEDULE=0 0 4 * * *      # in .env, e.g. once a night at 04:00
 ```
 
 What that costs, stated plainly:
@@ -344,8 +344,10 @@ What that costs, stated plainly:
   host. It is mounted read-only, but it is still a privilege you are handing
   to a container. Not willing? Delete the `watchtower` service and update by
   hand with the two lines above.
-* It updates on *its* schedule, which is why the shipped one is nightly rather
-  than hourly.
+* It updates on *its* schedule, not on yours. The shipped one runs **on the
+  hour**, so a fix is on your machine within the hour rather than the following
+  night. The cost of that is a restart you did not ask for, at a minute you did
+  not pick; the line above moves it, for instance to a single nightly run.
 
 **Already running a Watchtower of your own?** Then check whether it names the
 containers it watches. A Watchtower started with a list of names —

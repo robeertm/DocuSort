@@ -115,7 +115,7 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
 
-  # Keeps itself up to date, nightly at 04:00. \`image: …:latest\` is a label,
+  # Keeps itself up to date, once an hour. \`image: …:latest\` is a label,
   # not a subscription — Docker never re-pulls a running container, so without
   # this you would have to remember it yourself.
   # It needs the Docker socket (effectively root on the host, mounted
@@ -132,7 +132,7 @@ services:
     command:
       - --cleanup
       - --schedule
-      - \${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
+      - \${WATCHTOWER_SCHEDULE:-0 0 * * * *}
       - docusort
 YAML
   say "Wrote $DIR/docker-compose.yml"
@@ -270,12 +270,14 @@ cat <<DONE
   The first visit asks you to create the admin account.
   Then open Settings and choose your AI provider.
 
-  Updates:       they happen by themselves, nightly at 04:00 — the compose
+  Updates:       they happen by themselves, once an hour — the compose
                  file this installer wrote carries a watchtower service that
                  watches only the docusort container. Measured, not promised:
                  `docker logs docusort-watchtower` prints its next run.
                  To switch it off, delete that service. To move the time, put
-                 WATCHTOWER_SCHEDULE=0 30 3 * * * in .env.
+                 WATCHTOWER_SCHEDULE=0 0 4 * * * in .env (that one is
+                 nightly at 04:00). An existing installation switches to
+                 hourly the same way: WATCHTOWER_SCHEDULE=0 0 * * * *
   Update now:    cd $DIR && $COMPOSE pull && $COMPOSE up -d
   Logs:          cd $DIR && $COMPOSE logs -f
 

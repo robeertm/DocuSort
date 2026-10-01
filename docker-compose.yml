@@ -26,15 +26,15 @@ services:
   # What that costs, stated plainly:
   #   * it needs the Docker socket, which is effectively root on the host.
   #     Mounted READ-ONLY here, but still a privilege you are granting.
-  #   * it updates on ITS schedule. Nightly at 04:00, not hourly, so a new
-  #     version does not land in the middle of what you are doing.
+  #   * it updates on ITS schedule: once an hour, on the hour. A fix you
+  #     are waiting for should not have to wait until tomorrow night.
   #   * it watches ONLY the docusort container (named at the end of the
   #     command). If you already run a Watchtower of your own, the two do not
   #     fight — they look at different containers.
   #
   # To switch it off: delete this service, or `docker compose stop watchtower`.
   # To change when it runs, put a cron line in `.env`:
-  #     WATCHTOWER_SCHEDULE=0 30 3 * * *
+  #     WATCHTOWER_SCHEDULE=0 0 4 * * *      # or once a night at 04:00
   watchtower:
     image: ghcr.io/nicholas-fedor/watchtower:latest
     container_name: docusort-watchtower
@@ -46,5 +46,5 @@ services:
     command:
       - --cleanup
       - --schedule
-      - ${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
+      - ${WATCHTOWER_SCHEDULE:-0 0 * * * *}
       - docusort
