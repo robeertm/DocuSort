@@ -7,6 +7,30 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.67.4] - 2026-10-01
+
+### Fixed
+
+**The Ollama setup no longer reports a success that systemd outvoted.**
+On a machine with a systemd Ollama service, the setup writes a drop-in file
+with the address Ollama should listen on. systemd merges drop-ins in *filename*
+order and the last one wins — and `docusort.conf` sorts before `override.conf`,
+the name `systemctl edit` gives its file. A machine that had once been set up
+by hand therefore kept its own address while the setup announced the new one.
+Three changes, each one measurable:
+
+* the effective address is now read back from systemd itself
+  (`systemctl show -p Environment ollama`) after the restart. If it is not the
+  one that was asked for, the setup says so, lists every drop-in that has a
+  say, and reports failure instead of success.
+* if another drop-in already sets the address and sorts after ours, ours is
+  written as `zz-docusort.conf` so that it is the one in force. The other file
+  is named on screen and left exactly as it is; deleting ours undoes
+  everything.
+* if the service is *already* set to the right address, nothing is written and
+  nothing is restarted. The setup says that the next question is the network
+  path, not the binding — which is what it actually is in that case.
+
 ## [0.67.3] - 2026-09-30
 
 ### Fixed
