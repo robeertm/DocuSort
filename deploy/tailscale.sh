@@ -34,12 +34,30 @@ RAW="https://raw.githubusercontent.com/robeertm/DocuSort/main"
 # Either we were called from the directory holding docker-compose.yml, or from
 # a clone — then it is the repository root, one level up from this script.
 DIR="$PWD"
-if [ ! -f "$DIR/docker-compose.yml" ]; then
+if [ ! -f "$DIR/docker-compose.yml" ] && [ ! -f "$DIR/docker-compose.both.yml" ]; then
   DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
-[ -f "$DIR/docker-compose.yml" ] \
-  || die "No docker-compose.yml found. Run this from the directory docusort is installed in."
 cd "$DIR"
+
+# 🔑 Zwei Gestalten, ein Skript. Eine Doppelinstallation (DocuSort + Postwache)
+#    braucht zwei Beiwagen und zwei serve-Dateien, damit BEIDE einen eigenen
+#    Namen bekommen statt einer von beiden eine Portnummer in der Adresse.
+if [ -f docker-compose.both.yml ]; then
+  BASIS="docker-compose.both.yml"
+  UEBERLAGERUNG="docker-compose.both.tailscale.yml"
+  SERVE="tailscale/serve-docusort.json tailscale/serve-postwache.json"
+  ZUSTAND="tailscale/state-docusort tailscale/state-postwache"
+  BEIWAGEN="ts-docusort ts-postwache"
+elif [ -f docker-compose.yml ]; then
+  BASIS="docker-compose.yml"
+  UEBERLAGERUNG="docker-compose.tailscale.yml"
+  SERVE="tailscale/serve.json"
+  ZUSTAND="tailscale/state"
+  BEIWAGEN="tailscale"
+else
+  die "No docker-compose.yml and no docker-compose.both.yml here. Run this in the directory the install lives in."
+fi
+say "Found $BASIS"
 
 # ---------- The key ----------
 KEY="${1:-${TS_AUTHKEY:-}}"
@@ -61,18 +79,18 @@ case "$KEY" in
 esac
 
 # ---------- The two files the overlay needs ----------
-if [ ! -f docker-compose.tailscale.yml ]; then
-  say "Fetching docker-compose.tailscale.yml"
-  curl -fsSL "$RAW/docker-compose.tailscale.yml" -o docker-compose.tailscale.yml \
-    || die "Could not download docker-compose.tailscale.yml — no network?"
+if [ ! -f "$UEBERLAGERUNG" ]; then
+  say "Fetching $UEBERLAGERUNG"
+  curl -fsSL "$RAW/$UEBERLAGERUNG" -o "$UEBERLAGERUNG" \
+    || die "Could not download $UEBERLAGERUNG — no network?"
 fi
-if [ ! -f tailscale/serve.json ]; then
-  say "Fetching tailscale/serve.json"
-  mkdir -p tailscale/state
-  curl -fsSL "$RAW/tailscale/serve.json" -o tailscale/serve.json \
-    || die "Could not download tailscale/serve.json — no network?"
-fi
-mkdir -p tailscale/state
+mkdir -p tailscale
+for f in $SERVE; do
+  [ -f "$f" ] && continue
+  say "Fetching $f"
+  curl -fsSL "$RAW/$f" -o "$f" || die "Could not download $f — no network?"
+done
+mkdir -p $ZUSTAND
 
 # ---------- Write .env ----------
 # 🔴 COMPOSE_FILE is the whole trick: with it in .env, a plain
@@ -90,7 +108,7 @@ setenv() {                       # setenv KEY VALUE — replace or append
   rm -f "$tmp"
 }
 setenv TS_AUTHKEY "$KEY"
-setenv COMPOSE_FILE "docker-compose.yml:docker-compose.tailscale.yml"
+setenv COMPOSE_FILE "$BASIS:$UEBERLAGERUNG"
 chmod 600 .env 2>/dev/null || true
 say "Wrote TS_AUTHKEY and COMPOSE_FILE into .env (chmod 600)"
 
@@ -98,23 +116,81 @@ say "Wrote TS_AUTHKEY and COMPOSE_FILE into .env (chmod 600)"
 COMPOSE="docker compose"
 docker compose version >/dev/null 2>&1 || COMPOSE="docker-compose"
 say "Starting — this also pulls the tailscale image the first time"
-$COMPOSE up -d
+# 🔴 WARUM DAS NICHT EINFACH `$COMPOSE up -d` BLEIBT
+# Startet ein Beiwagen nicht — ein verbrauchter Auth-Key reicht dafuer —, dann
+# koennen die Anwendungen seine Netzwerk-Umgebung nicht betreten, und Docker
+# sagt dazu:
+#     cannot join network namespace of container …: is restarting
+# Das ist wahr und voellig unbrauchbar. Der Grund steht im Log des Beiwagens,
+# also wird er geholt und hingeschrieben, statt den Nutzer damit allein zu
+# lassen.
+if ! $COMPOSE up -d; then
+  echo
+  warn "Something did not come up. What the Tailscale side says:"
+  echo
+  for b in $BEIWAGEN; do
+    printf '  ── %s ──\n' "$b"
+    L="$($COMPOSE logs --tail 15 "$b" 2>&1 || true)"
+    # 🔑 Ein leeres Log ist eine Aussage, kein Nichts — sagen, statt eine
+    #    Leerzeile zu drucken und den Leser raten zu lassen.
+    if [ -z "${L//[[:space:]]/}" ]; then
+      printf '    (it said nothing at all — it did not get as far as a message)\n'
+    else
+      printf '%s\n' "$L" | sed 's/^/    /'
+    fi
+  done
+  echo
+  cat <<'TXT'
+  The usual cause is the auth key: used up (generate a REUSABLE one), expired,
+  or belonging to a different tailnet. Generate a new one here and run this
+  again — nothing else has to be undone:
+
+    Tailscale admin console → Settings → Keys → "Generate auth key"
+      • Reusable   on
+TXT
+  exit 1
+fi
+
+# „Started" ist nicht „laeuft". Ein Beiwagen, der sich im Kreis dreht, meldet
+# genau dasselbe — dieselbe Falle wie beim Installer.
+sleep 4
+for b in $BEIWAGEN; do
+  ZUSTAND="$(docker inspect -f '{{.State.Status}}' "$b" 2>/dev/null || echo weg)"
+  case "$ZUSTAND" in
+    running) : ;;
+    *)
+      warn "The Tailscale container $b is $ZUSTAND. Its own words:"
+      $COMPOSE logs --tail 15 "$b" 2>&1 | sed 's/^/    /'
+      die "Fix the key (REUSABLE, not expired) and run this again."
+      ;;
+  esac
+done
 
 # ---------- What is the address? ----------
 # `tailscale cert` with no arguments prints the recommended domain in its usage
 # text. Same trick as scripts/setup-tailscale-https.sh — no JSON parser needed.
 say "Waiting for the tailnet (up to 60s)"
 DOMAIN=""
+GEFUNDEN=""
 for _ in $(seq 1 30); do
-  DOMAIN="$($COMPOSE exec -T tailscale tailscale cert 2>&1 \
-            | grep -oE '[a-z0-9_.-]+\.[a-z0-9-]+\.ts\.net' | head -1 || true)"
-  [ -n "$DOMAIN" ] && break
+  DOMAIN=""
+  for b in $BEIWAGEN; do
+    d="$($COMPOSE exec -T "$b" tailscale cert 2>&1 \
+         | grep -oE '[a-z0-9_.-]+\.[a-z0-9-]+\.ts\.net' | head -1 || true)"
+    [ -n "$d" ] && DOMAIN="$DOMAIN $d"
+  done
+  GEFUNDEN="$(printf '%s' "$DOMAIN" | tr ' ' '\n' | grep -c . || true)"
+  ZAHL="$(printf '%s' "$BEIWAGEN" | tr ' ' '\n' | grep -c .)"
+  [ "${GEFUNDEN:-0}" -ge "$ZAHL" ] && break
   sleep 2
 done
 
 echo
 if [ -n "$DOMAIN" ]; then
-  printf '\033[32m✓\033[0m DocuSort is on your tailnet:\n\n    \033[1mhttps://%s\033[0m\n\n' "$DOMAIN"
+  printf '\033[32m✓\033[0m On your tailnet:\n\n'
+  for d in $DOMAIN; do printf '    \033[1mhttps://%s\033[0m\n' "$d"; done
+  printf '\n'
+  printf '  Open those on the phone and add them to the home screen — done.\n\n'
   cat <<'TXT'
 If the browser complains that the certificate does not exist, one switch is
 still off — this is the only thing that cannot be done from here:
@@ -123,7 +199,7 @@ still off — this is the only thing that cannot be done from here:
     • MagicDNS               on
     • HTTPS Certificates     on
 
-Then run this script again (or just `docker compose restart tailscale`).
+Then run this script again.
 TXT
 else
   warn "The container is up but has not reported a tailnet name yet."

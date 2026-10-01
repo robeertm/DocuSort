@@ -22,6 +22,9 @@ GEMINI.md
 # Tailscale keeps this machine's identity here — never in the repo.
 tailscale/state/*
 !tailscale/state/.gitkeep
+# Die Doppelinstallation hat zwei Beiwagen, also zwei Kennungen.
+tailscale/state-docusort/
+tailscale/state-postwache/
 
 # Die Pruefstaende sind Werkzeuge des Eigentuemers, nicht Teil des Produkts:
 # nichts importiert sie, kein Dockerfile kopiert sie, kein Ausrollweg traegt
