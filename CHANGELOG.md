@@ -7,6 +7,16 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.69.2] - 2026-10-01
+
+### Fixed
+
+**A failed image fetch no longer tears down an installation that already has the
+image.** `docker compose pull && docker compose up -d` meant a momentary network
+problem, or a registry having a bad minute, stopped the installer dead — even
+when the image was sitting on the machine already. It now asks: no copy here
+either, and it stops with that said; a copy here, and it says so and starts it.
+
 ## [0.69.1] - 2026-10-01
 
 ### Fixed
