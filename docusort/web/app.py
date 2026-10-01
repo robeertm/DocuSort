@@ -3571,6 +3571,19 @@ def create_app(
                      "Cache-Control": "no-store, max-age=0"},
         )
 
+    @app.post("/api/local-ai/ticket-check")
+    def api_local_ai_ticket_check(payload: dict):
+        """Gilt dieser Zettel noch? Fragt, ohne ihn zu verbrauchen.
+
+        🔴 Der Einrichter hat ihn bisher erst benutzt, wenn alles getan war —
+        Ollama installiert, gebunden, Modell heruntergeladen. Ein Nutzer sah
+        gigabyteweise zusehen und dann „ticket invalid or expired". Die Frage
+        kostet nichts; sie gehoert an den ANFANG.
+        """
+        from .. import local_ai
+        return {"ok": local_ai.check_setup_ticket(
+            str(payload.get("ticket") or ""))}
+
     @app.post("/api/local-ai/adopt")
     def api_local_ai_adopt(payload: dict):
         """Called by the setup script, which has no session — it carries a

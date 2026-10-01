@@ -663,6 +663,26 @@ def main() -> int:
              "on the same network?" % (origin, detail(exc)))
     good("DocuSort %s answers." % (ver.get("current") or ver.get("version") or "?"))
 
+    # 🔑 Den Zettel JETZT pruefen, nicht am Ende. Bisher stellte sich erst nach
+    #    dem Herunterladen eines Modells heraus, dass er abgelaufen war — und
+    #    dann war die ganze Arbeit getan und nichts gespeichert. Die Frage
+    #    kostet eine Zehntelsekunde.
+    try:
+        gueltig = bool(post(origin + "/api/local-ai/ticket-check",
+                            {"ticket": a.ticket}, 10.0, a.insecure).get("ok"))
+    except Exception:
+        gueltig = True          # Aeltere Fassung kennt den Weg nicht — weiter.
+    if not gueltig:
+        warn("The ticket in this launcher is no longer valid.")
+        print("")
+        info("A launcher carries a ticket from the moment you downloaded it,")
+        info("and that ticket does not last for ever. Nothing is wrong with")
+        info("your machine — this file is simply too old.")
+        print("")
+        info("Open DocuSort, go to Settings, Local AI, and download the")
+        info("launcher again. Then run the new one.")
+        stop("Stopped before doing any work — nothing was changed.", 0)
+
     # 2. Is DocuSort on THIS machine?
     mine = my_address(host, port)
     here = mine.startswith("127.") or host in ("localhost", "127.0.0.1", "::1")
