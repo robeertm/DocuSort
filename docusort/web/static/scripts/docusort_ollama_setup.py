@@ -243,6 +243,41 @@ def systemd_rezept(bind: str) -> list:
             "then run this file again."]
 
 
+# 🔴 Als Konstante, nicht als Zeichenkette mitten im Code: ein Pruefstand muss
+# das Verzeichnis umbiegen koennen, sonst liest er das echte /etc des Rechners,
+# auf dem er laeuft — und misst damit wieder die Maschine statt den Fall.
+DROPIN_DIR = "/etc/systemd/system/ollama.service.d"
+
+
+def systemd_dropins() -> list:
+    """Which drop-in files does the `ollama` service already have?
+
+    🔴 Asked because systemd merges drop-ins in FILENAME order and the LAST
+    one wins. A machine that followed the older printed recipe has an
+    `override.conf` from `systemctl edit` — and `docusort.conf` sorts BEFORE
+    it, so our file would be written, loaded, and quietly outvoted.
+    """
+    try:
+        return sorted(n for n in os.listdir(DROPIN_DIR)
+                      if n.endswith(".conf"))
+    except Exception:
+        return []
+
+
+def systemd_host() -> str:
+    """The address the service would REALLY use — merged from the unit and all
+    its drop-ins. Asked of systemd, never read back out of our own file: our
+    file is one voice among several, and not the loudest by default.
+    """
+    for stueck in _sagt(["systemctl", "show", "-p", "Environment",
+                         "ollama"]).split():
+        if stueck.startswith("Environment="):
+            stueck = stueck[len("Environment="):]
+        if stueck.startswith("OLLAMA_HOST="):
+            return stueck[len("OLLAMA_HOST="):].strip('"').replace("http://", "")
+    return ""
+
+
 def wurzelweg() -> list:
     """How does one become root ON THIS machine? Asked, not assumed.
 
@@ -324,7 +359,37 @@ def systemd_binden(bind: str) -> bool:
     and the user is left with 40 seconds of silence. There is exactly one owner
     of that port on a systemd machine, and it is the service.
     """
-    conf = "/etc/systemd/system/ollama.service.d/docusort.conf"
+    want = "%s:%d" % (bind, OLLAMA_PORT)
+    # 🔑 Perhaps there is nothing to do at all. Restarting somebody's Ollama to
+    #    write a setting it already has is noise, and it hides the real cause:
+    #    if the address is right and DocuSort still cannot reach it, the port is
+    #    blocked — a firewall question, not a bind question.
+    vorher = systemd_host()
+    if vorher == want:
+        good("The service is already set to %s — leaving it alone." % want)
+        info("If DocuSort still cannot reach it, something between the two "
+             "machines is blocking port %d." % OLLAMA_PORT)
+        return True
+
+    # 🔴 Drop-ins are merged in filename order, last one wins. If a file that
+    #    sorts AFTER ours already sets the address, ours would be outvoted in
+    #    silence — so take a name that comes last, and say so. Their file is
+    #    left untouched; deleting ours undoes everything.
+    datei = "docusort.conf"
+    # 🔴 Die ganze Liste behalten. Beim ersten Entwurf filterte sie „docusort.conf"
+    #    sofort heraus — und die Frage „liegt da noch eine alte eigene Datei?"
+    #    konnte danach nie mehr wahr werden.
+    vorhanden = systemd_dropins()
+    staerker = [n for n in vorhanden
+                if n > datei and n not in ("zz-docusort.conf",)]
+    if staerker and vorher:
+        datei = "zz-docusort.conf"
+        warn("This machine already sets the address itself, in %s."
+             % ", ".join(staerker))
+        info("That file says %s and would outvote ours, so ours goes in as %s."
+             % (vorher, datei))
+        info("Your own file stays exactly as it is.")
+    conf = os.path.join(DROPIN_DIR, datei)
     inhalt = ("# Written by the DocuSort setup.\n"
               "# DocuSort runs on another machine, so Ollama has to listen on\n"
               "# the network instead of on 127.0.0.1 only.\n"
@@ -348,12 +413,27 @@ def systemd_binden(bind: str) -> bool:
         for z in systemd_rezept(bind):
             info(z)
         return False
+    # A stale file of ours from an earlier run would only confuse the next
+    # person reading that directory; the one we just wrote outvotes it anyway.
+    if datei != "docusort.conf" and "docusort.conf" in vorhanden:
+        als_root(["rm", "-f", os.path.join(DROPIN_DIR, "docusort.conf")])
     als_root(["systemctl", "daemon-reload"])
     if not als_root(["systemctl", "restart", "ollama"]):
         warn("The ollama service did not restart.")
         info("Its own words:  systemctl status ollama")
         return False
-    good("The service now listens on %s:%d." % (bind, OLLAMA_PORT))
+    # 🔑 „The file is written" is not „the setting is in force". Ask systemd
+    #    what it ended up with — otherwise a drop-in we did not expect makes
+    #    this report a success that never happened.
+    nachher = systemd_host()
+    if nachher and nachher != want:
+        warn("The service still uses %s, not %s." % (nachher, want))
+        info("Something else is setting it. These files have a say, the last")
+        info("one wins:")
+        for n in systemd_dropins():
+            info("  %s" % os.path.join(DROPIN_DIR, n))
+        return False
+    good("The service now listens on %s." % want)
     # 🔑 „restarted" is not „answering". Ask it, do not assume it.
     for _ in range(SERVE_WAIT):
         if ollama_models("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
