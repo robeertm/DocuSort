@@ -7,6 +7,33 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.71.2] - 2026-10-01
+
+### Fixed
+
+**The setup ticket no longer expires in the middle of the setup it belongs to.**
+It was good for 30 minutes and lived only in memory, and the setup script checks
+it at the very end — after installing Ollama and pulling a model of several
+gigabytes. Somebody watched that download finish and was then told
+
+```
+✋ DocuSort refused the setting: setup ticket invalid or expired
+```
+
+with the work done and nothing saved. Two things had changed under that design:
+a model download is longer than thirty minutes on an ordinary line, and since
+updates arrive hourly the service may restart right through a setup, which
+emptied the ticket store.
+
+Tickets are now good for four hours and are written down — the SHA-256 of the
+token and its expiry, nothing that identifies anyone, in the config directory,
+readable only by the owner, removed the moment the ticket is spent or expires.
+
+**And if the handover fails anyway, the work is no longer lost in silence.** The
+setup now says that Ollama is running and the model is on the machine, that only
+the handover failed, and prints the two values needed to finish by hand: the
+address and the model name.
+
 ## [0.71.1] - 2026-10-01
 
 ### Fixed

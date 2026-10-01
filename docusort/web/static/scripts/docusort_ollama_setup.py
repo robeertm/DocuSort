@@ -782,7 +782,24 @@ def main() -> int:
                    {"ticket": a.ticket, "url": target, "model": model},
                    VERIFY_WAIT, a.insecure)
     except Exception as exc:
-        stop("DocuSort refused the setting: %s" % detail(exc))
+        # 🔴 Hier war alles schon getan: Ollama laeuft, gebunden, Modell
+        #    heruntergeladen — und dann starb es an der UEBERGABE. Wer
+        #    gigabyteweise gewartet hat, darf nicht mit „abgelehnt" alleine
+        #    dastehen. Die zwei Werte, die noch fehlen, stehen hier.
+        warn("DocuSort refused the setting: %s" % detail(exc))
+        print("")
+        info("Nothing of your work is lost — Ollama is running and the model")
+        info("is on this machine. Only the handover failed. Two ways on:")
+        print("")
+        info("  a) Download the setup again in DocuSort (Settings, Local AI)")
+        info("     and run it. The model is already here, so it is quick.")
+        info("  b) Or type these two values in DocuSort yourself, under")
+        info("     Settings, AI, provider \"OpenAI-compatible\":")
+        print("")
+        info("       Address :  %s/v1" % target)
+        info("       Model   :  %s" % model)
+        print("")
+        stop("The setting was not saved.")
     if not res.get("verified"):
         stop("The setting is saved, but DocuSort cannot use the model yet:\n  %s"
              "\n\nMost often a firewall on this machine is blocking port %d."

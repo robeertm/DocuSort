@@ -148,12 +148,62 @@ def ask(base: str, model: str, timeout: float = ASK_TIMEOUT) -> tuple[bool, str]
 # downloads, good for exactly two things: writing the AI setting and
 # restarting the service afterwards.
 #
-# 🔴 Kept in memory on purpose. A ticket that survives a restart of the
-# service is a ticket lying around on disk, and there is no reason for one to
-# outlive the setup it belongs to.
-SETUP_TTL = 30 * 60
+# 🔴 THIS USED TO SAY: kept in memory on purpose, because a ticket that
+# survives a restart is a ticket lying around on disk, and none should outlive
+# the setup it belongs to. The reasoning was fine. Both of its premises are not:
+#
+#   * „the setup it belongs to" is not a short thing. The script installs
+#     Ollama and pulls a model — gigabytes over whatever line the user has.
+#     Thirty minutes is a fast download, not a generous allowance, and the
+#     ticket was only ever checked at the very END, after that download. One
+#     user watched a model finish and was then told the ticket had expired.
+#   * „a restart" used to be rare. Since updates arrive hourly, the service may
+#     restart at the top of any hour — right through the middle of a setup.
+#
+# So it is written down now: the SHA-256 of the token and its expiry, nothing
+# that identifies anyone, in the config directory with owner-only permissions,
+# removed the moment it is spent or expires.
+SETUP_TTL = 4 * 60 * 60
 _tickets: dict[str, float] = {}
 _ticket_lock = threading.Lock()
+_ticket_store: str = ""
+
+
+def set_ticket_store(pfad: str) -> None:
+    """Where tickets are written down. Called once when the app is built."""
+    global _ticket_store
+    _ticket_store = pfad
+    with _ticket_lock:
+        _tickets.update(_lies_tickets())
+
+
+def _lies_tickets() -> dict:
+    if not _ticket_store:
+        return {}
+    try:
+        with open(_ticket_store, encoding="utf-8") as fh:
+            roh = json.load(fh)
+        jetzt = time.time()
+        return {str(h): float(e) for h, e in roh.items() if float(e) > jetzt}
+    except Exception:
+        return {}
+
+
+def _schreibe_tickets() -> None:
+    """Der Aufrufer haelt bereits `_ticket_lock`."""
+    if not _ticket_store:
+        return
+    tmp = _ticket_store + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(_tickets, fh)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, _ticket_store)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
 
 
 def _hash(token: str) -> str:
@@ -168,6 +218,7 @@ def new_setup_ticket() -> str:
             if exp < now:
                 _tickets.pop(h, None)
         _tickets[_hash(token)] = now + SETUP_TTL
+        _schreibe_tickets()
     return token
 
 
@@ -178,8 +229,14 @@ def check_setup_ticket(token: str) -> bool:
     now = time.time()
     with _ticket_lock:
         exp = _tickets.get(h)
+        if exp is None:
+            # Die Fassung von der Platte kann neuer sein als unsere — nach
+            # einem Neustart ist der Speicher leer, die Datei nicht.
+            _tickets.update(_lies_tickets())
+            exp = _tickets.get(h)
         if exp is None or exp < now:
-            _tickets.pop(h, None)
+            if _tickets.pop(h, None) is not None:
+                _schreibe_tickets()
             return False
     return True
 
@@ -188,3 +245,4 @@ def spend_setup_ticket(token: str) -> None:
     """Called once the setup is finished — nothing is left to reuse."""
     with _ticket_lock:
         _tickets.pop(_hash(token), None)
+        _schreibe_tickets()
