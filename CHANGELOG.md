@@ -7,6 +7,49 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.72.0] - 2026-10-01
+
+### Added
+
+**DocuSort and the Postwache together on your tailnet, in one command.** Each of
+them could already be reached over Tailscale on its own; the two of them side by
+side could not. Now:
+
+```
+curl -fsSL .../deploy/install-both.sh | bash -s -- tskey-auth-xxxxxxxx
+```
+
+and afterwards, from the phone, anywhere:
+
+```
+https://docusort.<your-tailnet>.ts.net
+https://postwache.<your-tailnet>.ts.net
+```
+
+Two names, no port numbers in the address, certificates Tailscale fetches and
+renews itself, nothing published to the internet and no port forwarding. Open
+them on the phone and add them to the home screen.
+
+Two sidecars rather than one, deliberately: one would have meant one name for
+two programs, so the second would have carried a port number in its address.
+A name is something a person can say out loud.
+
+The pairing between the two survives that: a container that rides another's
+network has no name on the Docker network any more, so the Postwache now reaches
+DocuSort at the sidecar's name instead. Measured on real Docker before shipping,
+not reasoned about. MagicDNS is deliberately off inside those containers —
+switching it on replaces the resolver and that name would stop resolving.
+
+### Changed
+
+**A Tailscale container that fails to start now says why.** When a sidecar does
+not come up — a used-up auth key is enough — the applications cannot enter its
+network and Docker says `cannot join network namespace of container: … is
+restarting`, which is true and useless. The setup now prints the sidecar's own
+log, says that the key is the usual cause and where to make a new one, and
+reports failure. An empty log is named as empty rather than shown as a blank
+line.
+
 ## [0.71.3] - 2026-10-01
 
 ### Changed

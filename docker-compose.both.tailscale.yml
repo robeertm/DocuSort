@@ -1,0 +1,103 @@
+# DocuSort AND the Postwache on your tailnet — two names, nothing exposed.
+#
+# Use it together with the combined file:
+#
+#     docker compose -f docker-compose.both.yml -f docker-compose.both.tailscale.yml up -d
+#
+# or simply `./deploy/tailscale.sh tskey-auth-…`, which writes the two-file
+# line into `.env` for you and never asks again.
+#
+# Afterwards, on the phone:
+#
+#     https://docusort.<your-tailnet>.ts.net
+#     https://postwache.<your-tailnet>.ts.net
+#
+# Two names, no port numbers to remember, certificates that Tailscale fetches
+# and renews by itself. Nothing is published to the internet, no port
+# forwarding, no reverse proxy.
+#
+# Once, before the first start:
+#   1. Tailscale admin console → Settings → Keys → generate a REUSABLE auth
+#      key, put it in `.env` as TS_AUTHKEY=tskey-auth-…
+#   2. Settings → DNS → MagicDNS on, HTTPS Certificates on.
+#      Without the second one the name resolves and the certificate does not
+#      exist, and the browser says so in a way that sounds much worse.
+#
+# 🔑 WHY TWO SIDECARS AND NOT ONE
+# One would mean one name for two programs, so the second would need a port
+# number in its address — `…ts.net:8443`. Two give both of them a real name.
+# The cost is one more container; the gain is an address a person can say out
+# loud.
+#
+# 🔴 WHY THE PAIRING STILL WORKS
+# `network_mode: service:…` hands a container's whole network over to another.
+# DocuSort therefore no longer has a name on the Docker network — but its
+# sidecar does, and they share one stack. So the Postwache reaches DocuSort at
+# `http://ts-docusort:9876`: the sidecar's name, DocuSort's port.
+#
+# 🔴 WHY TS_ACCEPT_DNS IS OFF HERE
+# With it on, Tailscale replaces the resolver inside that network namespace
+# with MagicDNS — and then `ts-docusort` stops resolving, because that name
+# only exists in Docker's own DNS. The pairing would break in a way that looks
+# like the Postwache cannot see DocuSort. Nothing here needs MagicDNS from the
+# inside.
+
+services:
+  ts-docusort:
+    # Pinnable: TS_IMAGE=tailscale/tailscale:v1.80 docker compose up -d
+    image: ${TS_IMAGE:-tailscale/tailscale:stable}
+    container_name: ts-docusort
+    hostname: docusort                   # → docusort.<tailnet>.ts.net
+    restart: unless-stopped
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY:?put TS_AUTHKEY=tskey-auth-... in .env}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_ACCEPT_DNS=false
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./tailscale/state-docusort:/var/lib/tailscale
+      - ./tailscale/serve-docusort.json:/config/serve.json:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+
+  ts-postwache:
+    image: ${TS_IMAGE:-tailscale/tailscale:stable}
+    container_name: ts-postwache
+    hostname: postwache                  # → postwache.<tailnet>.ts.net
+    restart: unless-stopped
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY:?put TS_AUTHKEY=tskey-auth-... in .env}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_ACCEPT_DNS=false
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./tailscale/state-postwache:/var/lib/tailscale
+      - ./tailscale/serve-postwache.json:/config/serve.json:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+
+  docusort:
+    network_mode: service:ts-docusort
+    # 🔴 `!reset`, not `[]`. Compose MERGES lists across files — an empty list
+    #    leaves the published port from the main file standing, and a container
+    #    that both publishes a port and rides another one's network is refused
+    #    by Docker at start.
+    ports: !reset []
+    depends_on:
+      - ts-docusort
+
+  postwache:
+    network_mode: service:ts-postwache
+    ports: !reset []
+    environment:
+      # The sidecar's name, DocuSort's port — see the note above.
+      - POSTWACHE_DS_URL=http://ts-docusort:9876
+    depends_on:
+      - ts-postwache
+      - docusort

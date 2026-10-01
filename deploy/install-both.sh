@@ -3,6 +3,12 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/robeertm/DocuSort/main/deploy/install-both.sh | bash
 #
+# With a Tailscale auth key it goes all the way in ONE command — both programs
+# get their own name on your tailnet and are reachable from the phone, with
+# nothing exposed to the internet:
+#
+#   curl -fsSL …/deploy/install-both.sh | bash -s -- tskey-auth-xxxxxxxx
+#
 # Writes docker-compose.both.yml and an .env with a freshly made pairing secret,
 # then starts both. Attachments from your mail land in DocuSort by themselves
 # from the first minute: there is no account to create and no password to carry
@@ -17,6 +23,8 @@ die()  { printf '\033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
 RAW="https://raw.githubusercontent.com/robeertm/DocuSort/main"
 DIR="${INSTALL_DIR:-$PWD/docusort-postwache}"
+# Ein Tailscale-Schluessel als erstes Argument macht aus zwei Befehlen einen.
+TSKEY="${1:-${TS_AUTHKEY:-}}"
 
 command -v docker >/dev/null 2>&1 || die "Docker is missing. Install it and run this again."
 COMPOSE="docker compose"
@@ -62,6 +70,20 @@ fi
 #    file from now on — nobody has to remember a -f.
 grep -q '^COMPOSE_FILE=' .env || echo "COMPOSE_FILE=docker-compose.both.yml" >> .env
 
+# 🔑 Mit Schluessel wird gar nicht erst auf dem LAN gestartet: sonst laeuft es
+#    kurz mit veroeffentlichten Ports, und genau die soll die Ueberlagerung ja
+#    wegnehmen. Erst einrichten, dann EINMAL starten.
+if [ -n "$TSKEY" ]; then
+  say "Tailscale key given — setting both up on your tailnet"
+  if [ ! -f deploy/tailscale.sh ]; then
+    mkdir -p deploy
+    curl -fsSL "$RAW/deploy/tailscale.sh" -o deploy/tailscale.sh \
+      || die "Could not download deploy/tailscale.sh — no network?"
+    chmod +x deploy/tailscale.sh
+  fi
+  exec bash deploy/tailscale.sh "$TSKEY"
+fi
+
 say "Pulling images"
 $COMPOSE pull
 $COMPOSE up -d
@@ -79,7 +101,8 @@ cat <<TXT
   Postwache about your mailbox — and attachments start arriving on their own.
 
   Updates happen by themselves, once an hour.
-  Over Tailscale instead of the LAN:  ./deploy/tailscale.sh tskey-auth-…
+  On the phone, over Tailscale instead of the LAN — both get their own name:
+                  ./deploy/tailscale.sh tskey-auth-…
   Logs:  cd $DIR && $COMPOSE logs -f
 
 TXT
