@@ -279,6 +279,11 @@ cat <<DONE
                  nightly at 04:00). An existing installation switches to
                  hourly the same way: WATCHTOWER_SCHEDULE=0 0 * * * *
   Update now:    cd $DIR && $COMPOSE pull && $COMPOSE up -d
+  On the phone:  reach it from anywhere over Tailscale, with nothing exposed
+                 to the internet and no port forwarding — one command:
+                   cd $DIR && curl -fsSL \
+                     https://raw.githubusercontent.com/robeertm/DocuSort/main/deploy/tailscale.sh \
+                     | bash -s -- tskey-auth-…
   Logs:          cd $DIR && $COMPOSE logs -f
 
 DONE
