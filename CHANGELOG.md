@@ -7,6 +7,33 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.69.0] - 2026-10-01
+
+### Added
+
+**DocuSort finds your Telegram Chat-ID for you.** Connecting Telegram asked you
+to create a bot — fine, @BotFather walks you through that — and then to open
+`api.telegram.org/bot<TOKEN>/getUpdates` and read your Chat-ID out of the raw
+answer. That was the one step in the whole setup that asked somebody to decipher
+a machine's reply, and it is the step people got stuck on.
+
+Settings → Notifications → Telegram now has a **Find Chat-ID** button. Paste the
+token from @BotFather, send your bot any message in Telegram, press the button:
+
+* one chat found — it is filled in for you.
+* several found (your own chat, a group, a channel) — each one is offered with
+  its name, and one tap picks it.
+* nothing found yet — it says so, and says what to do: message the bot first.
+  That is not an error, it is the normal state of a brand-new bot.
+* a wrong token, no internet, a blocked `api.telegram.org` — each is reported as
+  what it is, in words you can act on, instead of a raw HTTP code.
+
+Groups and channels are found as well, not only private chats, so a household or
+an office can have the notifications land in one shared thread.
+
+The help text in all five languages was rewritten to describe the button. Nobody
+is sent to `getUpdates` any more.
+
 ## [0.68.1] - 2026-10-01
 
 ### Fixed

@@ -152,6 +152,65 @@ def _telegram_hint(code: int, detail: str) -> str:
     return f"Telegram HTTP {code}: {detail}"
 
 
+def telegram_find_chats(bot_token: str) -> dict:
+    """Frage Telegram selbst nach der Chat-ID, statt ein Rezept zu drucken.
+
+    🔴 WARUM ES DAS GIBT
+    Der Hilfetext sagte: „oeffne api.telegram.org/bot<TOKEN>/getUpdates und
+    lies deine Chat-ID aus der Antwort." Das ist der EINZIGE Schritt der
+    ganzen Einrichtung, der jemanden bittet, die Antwort einer Maschine zu
+    entziffern — also ist es genau der Schritt, den das Programm selbst tut.
+    Dieselbe Lehre wie beim Ollama-Einrichter: wer ein Rezept druckt, hilft
+    dem nicht, der es nicht lesen kann.
+
+    Gibt ``{"bot": "<name>", "chats": [{"id", "name", "type"}, ...]}`` zurueck.
+    Eine leere Liste ist kein Fehler: dann hat noch niemand dem Bot
+    geschrieben, und genau das muss der Oberflaeche gesagt werden.
+    """
+    token = (bot_token or "").strip()
+    if not token:
+        raise ValueError("telegram: bot_token required")
+
+    def hol(methode: str) -> dict:
+        url = f"https://api.telegram.org/bot{token}/{methode}"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                return json.loads(r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:400]
+            except Exception:
+                pass
+            raise RuntimeError(_telegram_hint(exc.code, detail)) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Telegram unreachable: {getattr(exc, 'reason', exc)} "
+                "(no internet on the server, or api.telegram.org blocked?)"
+            ) from exc
+
+    ich = hol("getMe").get("result") or {}
+    bot = ich.get("username") or ich.get("first_name") or ""
+
+    gesehen: dict = {}
+    for eintrag in (hol("getUpdates").get("result") or []):
+        # Eine Nachricht kann in mehreren Formen kommen; der Chat haengt
+        # ueberall dran, also alle durchsehen statt eine zu raten.
+        for schluessel in ("message", "edited_message", "channel_post",
+                           "my_chat_member"):
+            chat = (eintrag.get(schluessel) or {}).get("chat") or {}
+            kennung = chat.get("id")
+            if kennung is None or kennung in gesehen:
+                continue
+            name = (chat.get("title")
+                    or " ".join(x for x in (chat.get("first_name"),
+                                            chat.get("last_name")) if x)
+                    or chat.get("username") or str(kennung))
+            gesehen[kennung] = {"id": str(kennung), "name": name,
+                                "type": chat.get("type") or ""}
+    return {"bot": bot, "chats": list(gesehen.values())}
+
+
 def _md_escape(s: str) -> str:
     r"""Telegram Markdown V1 escape — only the special chars `_ * [ \``."""
     return (s.replace("\\", "\\\\")
