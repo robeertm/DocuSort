@@ -7,6 +7,34 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.68.0] - 2026-10-01
+
+### Changed
+
+**The installer no longer says "starting" and walks away.** It ran
+`docker compose up -d`, printed `DocuSort is starting.` and finished — and
+"started" is Docker's word for "the process was launched". A container that dies
+a second later and is restarted for ever says exactly the same thing. Somebody
+whose installation never came up was told that it had, saw an entry in his NAS
+interface that stayed orange instead of going green, and had no way of finding
+out why — while the reason sat in the container's own log the whole time.
+
+The installer now waits until the web interface **answers**, for up to a minute,
+and while waiting it watches the container:
+
+* if it answers, it says so, and the closing message reads `DocuSort is running.`
+* if the container is in a restart loop — the one failure that looks like a
+  success in every interface, because the container keeps being "running" — the
+  installer names it, says how many restarts there have been, and explains that
+  this is exactly why the Docker interface shows it as starting and never green.
+* if the container has stopped, it says that instead of waiting out the minute.
+* in every failing case the **last 30 log lines of the container** are printed,
+  introduced as what DocuSort itself said, followed by the command for the whole
+  log — and the installer exits non-zero instead of claiming success.
+
+If the compose file publishes no port, there is no address to ask, and the
+installer says that rather than pretending to have measured something.
+
 ## [0.67.4] - 2026-10-01
 
 ### Fixed
