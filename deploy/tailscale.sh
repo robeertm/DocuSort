@@ -92,6 +92,31 @@ for f in $SERVE; do
 done
 mkdir -p $ZUSTAND
 
+# 🔴 DIE STILLE FALLE AN DIESER STELLE
+# `serve.json` trägt eine feste Zahl: 9876, DocuSorts Vorgabe seit 0.67.0. Eine
+# Installation von davor hört im Container weiter auf 8080 (`config.yaml`
+# gehört dem Nutzer und wird nie überschrieben). Dann legt Tailscale 443 auf
+# 127.0.0.1:9876 — wo niemand horcht. Der Name löst auf, das Zertifikat stimmt,
+# und die Seite antwortet mit einem Fehler, der nach Tailscale aussieht und
+# keiner ist.
+# Also dieselbe Frage wie im Installer: welchen Port sagt die config, die
+# WIRKLICH auf der Platte liegt?
+INNEN=""
+if [ -f config/config.yaml ]; then
+  INNEN="$(sed -n 's/^[[:space:]]*port:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+           config/config.yaml | head -1)"
+fi
+if [ -n "$INNEN" ] && [ -f tailscale/serve.json ]; then
+  ALT="$(sed -n 's#.*127\.0\.0\.1:\([0-9][0-9]*\).*#\1#p' tailscale/serve.json | head -1)"
+  if [ -n "$ALT" ] && [ "$ALT" != "$INNEN" ]; then
+    say "This installation listens on $INNEN inside the container — pointing Tailscale there"
+    tmp="$(mktemp)"
+    sed "s#127\.0\.0\.1:$ALT#127.0.0.1:$INNEN#" tailscale/serve.json > "$tmp"
+    cat "$tmp" > tailscale/serve.json
+    rm -f "$tmp"
+  fi
+fi
+
 # ---------- Write .env ----------
 # 🔴 COMPOSE_FILE is the whole trick: with it in .env, a plain
 #    `docker compose up -d` uses BOTH files. Without it you would have to

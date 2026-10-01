@@ -7,6 +7,26 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.72.1] - 2026-10-01
+
+### Fixed
+
+**Tailscale on an installation from before the move to port 9876 now points at
+the right door.** `tailscale/serve.json` carries a fixed number, and an older
+installation goes on listening on 8080 inside its container, because its
+`config.yaml` belongs to it and is never overwritten. Tailscale would then have
+put 443 onto a port where nobody is listening: the name resolves, the
+certificate is valid, and the page fails with an error that looks like Tailscale
+and is not. The setup now asks the config that is actually on disk — the same
+question the installer asks — and says so when it moves the target.
+
+### Changed
+
+**The installer says how to get onto the phone.** Its closing message now names
+the one command that puts an existing DocuSort on your tailnet, with nothing
+exposed to the internet and no port forwarding. It worked before; nobody could
+find it.
+
 ## [0.72.0] - 2026-10-01
 
 ### Added
