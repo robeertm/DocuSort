@@ -7,6 +7,24 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.71.3] - 2026-10-01
+
+### Changed
+
+**The setup asks whether its ticket is still good before it does any work, not
+after.** The ticket was used only at the very end, so somebody could install
+Ollama, bind it, and wait out a model download of several gigabytes before being
+told the ticket had expired — with everything done and nothing saved. The
+question costs a tenth of a second and now comes first.
+
+If the ticket is stale the setup stops immediately and says what is actually
+true: a launcher carries the ticket it was downloaded with, that ticket does not
+last for ever, nothing is wrong with the machine, and the file is simply too old.
+Download the launcher again.
+
+The check does not consume the ticket — a check that spent it would be the
+reason the setup afterwards failed.
+
 ## [0.71.2] - 2026-10-01
 
 ### Fixed

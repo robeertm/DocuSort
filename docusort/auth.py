@@ -154,7 +154,13 @@ PUBLIC_PATHS = (
     # `/api/local-ai/`, or the search and the apply would be open to anyone
     # who knows the address. They are guarded by a short-lived ticket that
     # the administrator downloads inside the launcher.
+    # 🔴 `ticket-check` kam dazu, weil der Zettel bisher erst GANZ AM ENDE
+    #    geprueft wurde — nach dem Herunterladen eines Modells von mehreren
+    #    Gigabyte. Wer eine Frage hat, soll sie stellen BEVOR die lange Arbeit
+    #    laeuft, nicht danach. Er sagt nur gueltig/ungueltig und verbraucht
+    #    nichts.
     "/api/local-ai/setup-script", "/api/local-ai/adopt", "/api/local-ai/finish",
+    "/api/local-ai/ticket-check",
 )
 
 # What a non-admin may reach. Anything not listed is admin-only.
