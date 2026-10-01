@@ -7,6 +7,21 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.69.1] - 2026-10-01
+
+### Fixed
+
+**The installer no longer tells you to switch on something that is already on.**
+Its closing message said "or uncomment the watchtower block in
+docker-compose.yml to have it done for you" — but the compose file the installer
+writes carries that service **active**. Measured on a real machine: a fresh
+install brings up `docusort-watchtower` and it logs `Next scheduled run:
+04:00:00`. So the sentence sent the owner looking for something to enable that
+was already running, and left the impression that updates do not happen by
+themselves. The message now says what is true: updates arrive nightly at 04:00,
+`docker logs docusort-watchtower` prints the next run, deleting that service
+switches it off, and `WATCHTOWER_SCHEDULE` in `.env` moves the time.
+
 ## [0.69.0] - 2026-10-01
 
 ### Added
