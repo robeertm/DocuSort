@@ -248,6 +248,11 @@ def create_app(
     classifier: Classifier | None = None,
 ) -> FastAPI:
     app = FastAPI(title="DocuSort", version=__version__)
+    # 🔑 Einrichtungs-Zettel ueberleben jetzt einen Neustart — seit die Updates
+    #    stuendlich kommen, kann einer mitten in eine laufende Einrichtung
+    #    fallen, und ein Modell-Download dauert laenger als jede Pause.
+    from .. import local_ai as _local_ai
+    _local_ai.set_ticket_store(str(Path(settings.config_dir) / "setup_tickets.json"))
     templates_dir = Path(__file__).parent / "templates"
     static_dir = Path(__file__).parent / "static"
     static_dir.mkdir(exist_ok=True)
