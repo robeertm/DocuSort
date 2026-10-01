@@ -1010,7 +1010,7 @@
   "settings.ts.heading": "Sur votre téléphone, où que vous soyez (Tailscale)",
   "settings.ts.phone_hint": "Ouvrez ceci sur le téléphone et ajoutez-le à l’écran d’accueil — il ressemble alors à une application.",
   "settings.ts.step_dns": "Là, sous <a href=\"https://login.tailscale.com/admin/dns\" target=\"_blank\" class=\"underline\">DNS</a>, activez <b>MagicDNS</b> et <b>HTTPS Certificates</b>.",
-  "settings.ts.step_key": "Générez une clé dans la <a href=\"https://login.tailscale.com/admin/settings/keys\" target=\"_blank\" class=\"underline\">console Tailscale</a> — activez « Reusable ».",
+  "settings.ts.step_key": "Dans la <a href=\"https://login.tailscale.com/admin/settings/keys\" target=\"_blank\" class=\"underline\">console Tailscale</a>, sous <b>Auth keys</b>, appuyez sur <b>« Generate auth key… »</b> et activez <b>« Reusable »</b>. <b>Pas</b> le bouton en dessous (« Generate access token… ») — il sert à autre chose. La bonne clé commence par <span class=\"font-mono\">tskey-auth-</span>.",
   "settings.ts.step_paste": "Collez la clé ici et appuyez sur Connecter.",
   "settings.ts.subtitle": "Accéder à DocuSort via un réseau privé — sans redirection de port, sans rien exposer sur Internet. Il faut un compte Tailscale gratuit et une clé, une fois.",
   "settings.ts.unavailable": "Cette image n’embarque pas encore Tailscale. Faites la mise à jour et un champ apparaîtra ici.",

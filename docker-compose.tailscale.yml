@@ -16,8 +16,11 @@
 # can, because there is nothing to reach.
 #
 # Once, before the first start:
-#   1. Tailscale admin console → Settings → Keys → generate a REUSABLE auth
-#      key. Put it in `.env` next to this file:
+#   1. Tailscale admin console → Settings → Keys → under "Auth keys" press
+#      "Generate auth key..." and switch Reusable on. NOT "Generate access
+#      token..." further down — that is a key for the API and cannot log a
+#      machine in. The right one starts with tskey-auth-.
+#      Put it in `.env` next to this file:
 #          TS_AUTHKEY=tskey-auth-...
 #   2. Settings → DNS → switch on MagicDNS and HTTPS certificates.
 #      Without HTTPS certificates the name resolves but the certificate does

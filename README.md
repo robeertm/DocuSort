@@ -252,8 +252,11 @@ That is the whole setup. DocuSort is then at
 fetches and renews by itself, no port open anywhere, no reverse proxy, and
 nobody outside your tailnet can even knock.
 
-Get the key from the Tailscale admin console → *Settings → Keys →
-Generate auth key* (switch on **Reusable**). And once, in *Settings → DNS*,
+Get the key from the Tailscale admin console → *Settings → Keys*. That page has
+two buttons: use the upper one, **Generate auth key…** under *Auth keys*, and
+switch on **Reusable**. The lower one, *Generate access token…*, is a key for
+the Tailscale API and cannot log a machine in — the right key starts with
+`tskey-auth-`. And once, in *Settings → DNS*,
 turn on **MagicDNS** and **HTTPS Certificates** — that is the only thing the
 script cannot do for you, and it will tell you if it is still missing.
 

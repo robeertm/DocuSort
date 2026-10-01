@@ -7,6 +7,26 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.73.1] - 2026-10-01
+
+### Fixed
+
+**The Tailscale instructions now say which of the two buttons to press.** The
+Keys page offers *Generate auth key…* under **Auth keys** and *Generate access
+token…* under **API access tokens**, and the text said only "generate a key".
+The second one is a key for the Tailscale API: it cannot log a machine in, and
+`tailscale up` fails with a message that never mentions the button one line
+above.
+
+Both places now name the right button, say which one is wrong, and say that the
+key you want starts with `tskey-auth-` — in the settings card in all five
+languages, in the installer prompt, in both compose overlays and in the README.
+
+**And a key of the wrong kind is now recognised before anything is tried.**
+Paste an API access token and DocuSort says so, names the button to use instead,
+and changes nothing. Something that is not a Tailscale key at all is turned away
+the same way.
+
 ## [0.73.0] - 2026-10-01
 
 ### Added

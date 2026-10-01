@@ -137,8 +137,28 @@ def verbinden(config_dir, authkey: str, port: int, hostname: str = "docusort") -
     #    leerer Schluessel — egal, was auf dieser Maschine installiert ist.
     #    Umgekehrt bekaeme jemand ohne Schluessel eine Auskunft ueber das
     #    Abbild, die mit seinem Fehler nichts zu tun hat.
-    if not (authkey or "").strip():
+    schluessel = (authkey or "").strip()
+    if not schluessel:
         return {"ok": False, "grund": "no auth key given"}
+    # 🔴 AUF DER KEYS-SEITE STEHEN ZWEI KNOEPFE
+    # „Generate auth key…" (Auth keys) und „Generate access token…" (API access
+    # tokens). Gebraucht wird der ERSTE. Der zweite ist ein Schluessel fuer die
+    # Tailscale-API und kann einen Rechner nicht anmelden — `tailscale up`
+    # scheitert damit mit einer Meldung, die niemandem sagt, dass der Knopf
+    # daneben der richtige war. Die beiden sind am Anfang unterscheidbar:
+    #   tskey-auth-…   anmelden
+    #   tskey-api-…    die API bedienen
+    if schluessel.startswith("tskey-api-"):
+        return {"ok": False, "grund":
+                "that is an API access token, not an auth key. On the Keys "
+                "page use the upper button, \u201cGenerate auth key\u2026\u201d "
+                "under \u201cAuth keys\u201d \u2014 not \u201cGenerate access "
+                "token\u2026\u201d. An auth key starts with tskey-auth-."}
+    if not schluessel.startswith("tskey-"):
+        return {"ok": False, "grund":
+                "that does not look like a Tailscale key \u2014 they start with "
+                "tskey-auth-. On the Keys page: \u201cGenerate auth key\u2026\u201d "
+                "under \u201cAuth keys\u201d."}
     if not verfuegbar():
         return {"ok": False, "grund": "this image does not carry Tailscale"}
     if not daemon_starten(config_dir):

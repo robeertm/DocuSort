@@ -65,8 +65,13 @@ if [ -z "$KEY" ]; then
   cat <<'TXT'
 Paste a Tailscale auth key. You get one here:
 
-  Tailscale admin console → Settings → Keys → "Generate auth key"
-  Switch on "Reusable" so a later restart does not need a new one.
+  Tailscale admin console → Settings → Keys
+    → under "Auth keys", the button "Generate auth key..."
+      Switch on "Reusable" so a later restart does not need a new one.
+
+  🔴 NOT "Generate access token..." further down that page. That one is a key
+     for the Tailscale API and cannot log a machine in. The right one starts
+     with  tskey-auth-
 
 TXT
   printf 'Auth key: '
@@ -170,7 +175,8 @@ if ! $COMPOSE up -d; then
   or belonging to a different tailnet. Generate a new one here and run this
   again — nothing else has to be undone:
 
-    Tailscale admin console → Settings → Keys → "Generate auth key"
+    Tailscale admin console → Settings → Keys
+      → under "Auth keys": "Generate auth key..."   (NOT "access token")
       • Reusable   on
 TXT
   exit 1

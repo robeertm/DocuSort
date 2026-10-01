@@ -1010,7 +1010,7 @@
   "settings.ts.heading": "Aufs Handy, von überall (Tailscale)",
   "settings.ts.phone_hint": "Auf dem Handy öffnen und zum Home-Bildschirm hinzufügen — dann sieht es aus wie eine App.",
   "settings.ts.step_dns": "Dort unter <a href=\"https://login.tailscale.com/admin/dns\" target=\"_blank\" class=\"underline\">DNS</a> <b>MagicDNS</b> und <b>HTTPS Certificates</b> einschalten.",
-  "settings.ts.step_key": "In der <a href=\"https://login.tailscale.com/admin/settings/keys\" target=\"_blank\" class=\"underline\">Tailscale-Konsole</a> einen Schlüssel erzeugen — „Reusable\" einschalten.",
+  "settings.ts.step_key": "In der <a href=\"https://login.tailscale.com/admin/settings/keys\" target=\"_blank\" class=\"underline\">Tailscale-Konsole</a> unter <b>Auth keys</b> auf <b>„Generate auth key…\"</b> tippen und <b>„Reusable\"</b> einschalten. <b>Nicht</b> den Knopf darunter („Generate access token…\") — der ist für etwas anderes. Der richtige Schlüssel fängt mit <span class=\"font-mono\">tskey-auth-</span> an.",
   "settings.ts.step_paste": "Schlüssel hier einfügen und auf Verbinden tippen.",
   "settings.ts.subtitle": "DocuSort über ein privates Netz erreichbar machen — ohne Portfreigabe, ohne etwas ins Internet zu stellen. Du brauchst ein kostenloses Tailscale-Konto und einmal einen Schlüssel.",
   "settings.ts.unavailable": "Dieses Abbild bringt Tailscale noch nicht mit. Hole das Update, dann erscheint hier ein Feld.",
