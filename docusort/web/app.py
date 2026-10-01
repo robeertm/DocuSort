@@ -3946,6 +3946,28 @@ def create_app(
         return {"ok": True,
                 "channels_active": _notifier.get_dispatcher().channels_summary()}
 
+    @app.post("/api/notifications/telegram/chat-id")
+    def api_telegram_chat_id(payload: dict):
+        """Die Chat-ID selbst finden, statt sie erklaeren zu lassen.
+
+        Nimmt den gerade eingetippten Token; ist das Feld leer, den
+        gespeicherten. So funktioniert es beim ersten Einrichten UND spaeter.
+        """
+        from .. import notifier as _notifier
+        token = str(payload.get("telegram_bot_token") or "").strip()
+        if not token:
+            token = (load_secrets(settings.config_dir)
+                     .get("telegram_bot_token") or "").strip()
+        if not token:
+            raise HTTPException(400, "no bot token yet — paste the token from "
+                                     "@BotFather first")
+        try:
+            return _notifier.telegram_find_chats(token)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except Exception as exc:
+            raise HTTPException(502, str(exc))
+
     @app.post("/api/notifications/test")
     def api_notifications_test():
         from .. import notifier as _notifier

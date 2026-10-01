@@ -539,6 +539,25 @@
                    placeholder="123456789"
                    class="w-full mt-1 rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm font-mono">
           </label>
+          <!-- 🔑 Die Chat-ID selbst finden. Sie aus einer JSON-Antwort ablesen
+               zu lassen war der einzige Schritt, der jemandem Handarbeit an
+               einer Maschinenausgabe zumutete. -->
+          <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" @click="findeChatId()" :disabled="suchend"
+                    class="rounded-lg border border-ink-600 px-3 py-1.5 text-xs
+                           hover:bg-ink-800 disabled:opacity-50">
+              <span x-show="!suchend">{{ t('settings.notif.telegram.find') }}</span>
+              <span x-show="suchend" x-cloak>{{ t('settings.notif.telegram.finding') }}</span>
+            </button>
+            <template x-for="chat in gefundeneChats" :key="chat.id">
+              <button type="button" @click="form.telegram_chat_id = chat.id"
+                      class="rounded-lg border border-cyan-700 bg-cyan-900/30 px-3 py-1.5 text-xs">
+                <span x-text="chat.name"></span>
+                <span class="font-mono text-ink-400" x-text="chat.id"></span>
+              </button>
+            </template>
+          </div>
+          <p x-show="chatHinweis" x-cloak class="text-xs text-ink-400" x-text="chatHinweis"></p>
         </div>
       </div>
 
@@ -1125,8 +1144,42 @@ function notificationsSettings() {
     channels: [],
     saving:   false,
     testing:  false,
+    suchend:  false,
+    gefundeneChats: [],
+    chatHinweis: '',
     message:  '',
     ok:       false,
+    // 🔑 Die Chat-ID holen, statt sie aus einer JSON-Antwort ablesen zu lassen.
+    async findeChatId() {
+      this.suchend = true;
+      this.chatHinweis = '';
+      this.gefundeneChats = [];
+      try {
+        const r = await fetch('/api/notifications/telegram/chat-id', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({telegram_bot_token: this.form.telegram_bot_token || ''}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.chatHinweis = d.detail || ('HTTP ' + r.status); return; }
+        this.gefundeneChats = d.chats || [];
+        if (this.gefundeneChats.length === 1) {
+          // Genau eine Antwort ist keine Auswahl — eintragen.
+          this.form.telegram_chat_id = this.gefundeneChats[0].id;
+          this.chatHinweis = tr('settings.notif.telegram.one') +
+                             (d.bot ? ' (@' + d.bot + ')' : '');
+        } else if (!this.gefundeneChats.length) {
+          this.chatHinweis = tr('settings.notif.telegram.none') +
+                             (d.bot ? ' @' + d.bot : '');
+        } else {
+          this.chatHinweis = tr('settings.notif.telegram.pick');
+        }
+      } catch (e) {
+        this.chatHinweis = e.message || String(e);
+      } finally {
+        this.suchend = false;
+      }
+    },
     async init() {
       try {
         const r = await fetch('/api/settings/notifications');
