@@ -7,6 +7,44 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.73.0] - 2026-10-01
+
+### Added
+
+**Tailscale is now a field and a button in the settings.** It worked before, as
+a second compose file and a shell script with an auth key — which assumes a
+command line, an editor, and somebody who knows which directory they are
+standing in. Settings → *On your phone, from anywhere* now asks for one key,
+and afterwards shows the address:
+
+```
+https://docusort.<your-tailnet>.ts.net
+```
+
+Open it on the phone, add it to the home screen, and it looks like an app.
+Nothing is published to the internet, no port is forwarded, and the certificate
+is Tailscale's business.
+
+This is possible because `tailscaled --tun=userspace-networking` needs neither
+`NET_ADMIN` nor `/dev/net/tun` — measured in a bare container before any of this
+was built. DocuSort therefore brings its own Tailscale instead of demanding a
+second container.
+
+Three details that decide whether it keeps working:
+
+* the login is stored in the **mounted** config directory. In the image it would
+  be gone at the next `docker compose pull`, leaving a dead machine in your
+  tailnet.
+* it resumes by itself after a restart. With hourly updates, anything else would
+  mean pressing the button every hour.
+* the page is published on the port DocuSort **actually** listens on, read from
+  the settings — not on a default. That exact mix-up is what made an
+  installation from before the move to 9876 unreachable behind Tailscale: the
+  name resolves, the certificate is valid, and nobody is listening behind it.
+
+The sidecar route still exists and is unchanged; it is the right one when
+Tailscale should also carry other containers.
+
 ## [0.72.1] - 2026-10-01
 
 ### Fixed

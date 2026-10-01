@@ -3893,6 +3893,28 @@ def create_app(
         finally:
             await bridge.detach_client(ws)
 
+    # ------------------------------------------------------------- Tailscale
+    # 🔑 Von innen, ohne Beiwagen: ein Feld und ein Knopf statt einer zweiten
+    #    compose-Datei auf der Kommandozeile. Siehe docusort/tailscale.py.
+    @app.get("/api/tailscale/status")
+    def api_tailscale_status():
+        from .. import tailscale as _ts
+        return _ts.status(settings.config_dir)
+
+    @app.post("/api/tailscale/connect")
+    def api_tailscale_connect(payload: dict):
+        from .. import tailscale as _ts
+        # 🔴 Der Port, auf dem DocuSort WIRKLICH hoert — nicht die Vorgabe.
+        return _ts.verbinden(settings.config_dir,
+                             str(payload.get("authkey") or ""),
+                             int(settings.web.port),
+                             str(payload.get("hostname") or "docusort"))
+
+    @app.post("/api/tailscale/disconnect")
+    def api_tailscale_disconnect():
+        from .. import tailscale as _ts
+        return _ts.trennen(settings.config_dir)
+
     # ---------------------------------------------------------- Notifications
     @app.get("/api/settings/notifications")
     def api_settings_notifications_get():
