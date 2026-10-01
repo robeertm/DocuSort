@@ -7,6 +7,31 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.68.1] - 2026-10-01
+
+### Fixed
+
+**The one-click Ollama launcher now says what is wrong when DocuSort has
+moved.** The launcher carries the address DocuSort had when it was downloaded,
+and its file name only ever carried the host — so after DocuSort changed port,
+a freshly downloaded launcher had exactly the same name as the old one. Somebody
+ran the old file, got `curl: (7) Failed to connect to ...:8080` and reasonably
+concluded that a port had to be forwarded somewhere. Nothing of the sort: the
+file was simply out of date.
+
+* the file name now carries the port as well, so two launchers for two
+  addresses are two visibly different files.
+* when DocuSort does not answer, the launcher names the address it was made
+  for, says in so many words that no port has to be forwarded or changed, and
+  points at Settings → Local AI for a fresh download. It also states that
+  nothing on the machine was touched.
+* the message on the first failed attempt no longer claims a cause it cannot
+  know. It used to say "Certificate not trusted" even when the real reason was
+  that nothing was listening at that address at all.
+
+**The setup wizard no longer falls back to port 8080** when it has no port to
+show. That fallback was left over from before the move to 9876.
+
 ## [0.68.0] - 2026-10-01
 
 ### Changed
