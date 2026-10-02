@@ -2810,6 +2810,54 @@ def create_app(
              "accounts": db.account_picks(None)},
         )
 
+    # ── Rechnungen: was gefordert wurde, was offen ist, was belegt ist ─────
+    # 🔑 WARUM EINE EIGENE SEITE UND NICHT EIN FILTER AUF /library
+    # Die Bibliothek beantwortet „wo liegt dieses Papier". Hier ist die Frage
+    # eine andere: wie viel ist offen, bei wem, seit wann — und WOHER weiss ich,
+    # dass etwas bezahlt ist. Das sind Summen und Belege, keine Dateiliste.
+    @app.get("/rechnungen", response_class=HTMLResponse)
+    def rechnungen_page(request: Request):
+        return templates.TemplateResponse(
+            request, "rechnungen.html", {**base_ctx(request)},
+        )
+
+    @app.get("/api/rechnungen")
+    def api_rechnungen(
+        von: str = Query(""),
+        bis: str = Query(""),
+        kategorie: str = Query(""),
+        zustand: str = Query(""),
+        art: str = Query(""),
+        q: str = Query(""),
+        gruppe: str = Query("kategorie"),
+    ):
+        """Die ganze Seite in einer Runde.
+
+        🔑 Die Mehrfachauswahlen kommen als KOMMALISTE und nicht als wiederholter
+        Parameter: die Seite baut die Adresse selbst zusammen, und eine Adresse,
+        die man in die Zwischenablage legen und jemandem schicken kann, ist mehr
+        wert als ein formal schoeneres Schema.
+        """
+        from ..finance.invoices import auswerten
+
+        def liste(w: str) -> tuple[str, ...]:
+            return tuple(x.strip() for x in (w or "").split(",") if x.strip())
+
+        # 🔑 „alle" ist die Abkuerzung fuer „auch die Betraege, die keine
+        #    Forderung sind". Welche Arten es gibt, weiss der Server — eine
+        #    Aufzaehlung in der Adresse waere eine Liste, die in dem Moment
+        #    veraltet, in dem eine Art dazukommt.
+        arten = ("forderung", "gutschrift", "hinweis", "unbekannt") \
+            if (art or "").strip() == "alle" else liste(art)
+
+        return auswerten(
+            db.invoice_rows(),
+            von=(von or "").strip(), bis=(bis or "").strip(),
+            kategorien=liste(kategorie), zustaende=liste(zustand),
+            arten=arten, suche=(q or "").strip(),
+            gruppe=(gruppe or "kategorie").strip(),
+        )
+
     @app.get("/transactions", response_class=HTMLResponse)
     def transactions_page(request: Request):
         from ..finance.categories import TX_CATEGORIES

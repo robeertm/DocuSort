@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+{# ===========================================================================
+   Rechnungen — was gefordert wurde, was offen ist, und WOHER man weiß, dass
+   etwas bezahlt ist.
+
+   🔑 DREI ZUSTÄNDE, NICHT ZWEI. Ein Haken von Hand und eine Buchung aus einem
+   Kontoauszug sind beide „erledigt", aber nicht gleich viel wert. Die Seite
+   hält sie getrennt und summiert sie getrennt — eine Zahl, die beides
+   addiert, beantwortet keine Frage, die jemand wirklich hat.
+
+   🔴 NICHT JEDER BETRAG IST EINE FORDERUNG. Aus dem Textleser kommen auch
+   „Gesamtes Vertragsguthaben", „Gesamtrente", „Gesamtersparnis". Die sind
+   standardmäßig AUSGEBLENDET und werden gezählt angezeigt, damit niemand
+   glaubt, hier fehle etwas. Siehe finance/invoice_kind.py.
+   =========================================================================== #}
+{% block content %}
+<div class="mx-auto max-w-screen-2xl px-3 sm:px-4 py-4 sm:py-6 space-y-4"
+     x-data="rechnungen()" x-init="init()">
+
+  <div class="flex items-center justify-between gap-3 flex-wrap">
+    <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">{{ t('inv.title') }}</h1>
+    <div class="flex items-center gap-2 text-xs">
+      <button type="button" @click="csv()" class="btn-ghost !px-3 !py-1.5"
+              :disabled="!daten.zeilen || !daten.zeilen.length">{{ t('inv.export') }}</button>
+      <span class="text-ink-500" x-text="stand"></span>
+    </div>
+  </div>
+
+  <!-- ===== Filter ===== -->
+  <section class="card p-4 space-y-3">
+    <div class="flex flex-wrap items-end gap-2">
+      <div>
+        <label class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('inv.from') }}</label>
+        <input type="date" x-model="f.von" @change="holen()"
+               class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm">
+      </div>
+      <div>
+        <label class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('inv.to') }}</label>
+        <input type="date" x-model="f.bis" @change="holen()"
+               class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm">
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        <template x-for="s in schnell" :key="s.k">
+          <button type="button" @click="spanne(s.k)"
+                  class="rounded-full px-3 py-1.5 text-xs border"
+                  :class="spanneAktiv === s.k
+                            ? 'border-emerald-600 bg-emerald-500/15 text-emerald-300'
+                            : 'border-ink-700 text-ink-300 hover:bg-ink-800'"
+                  x-text="s.n"></button>
+        </template>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-end gap-2">
+      <div class="flex-1 min-w-[12rem]">
+        <label class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('inv.search') }}</label>
+        <input type="search" x-model="f.q" @input.debounce.300ms="holen()"
+               placeholder="{{ t('inv.search_hint') }}"
+               class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm">
+      </div>
+      <div>
+        <label class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('inv.category') }}</label>
+        <select x-model="f.kategorie" @change="holen()"
+                class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm">
+          <option value="">{{ t('inv.all_categories') }}</option>
+          <template x-for="k in (daten.kategorien || [])" :key="k">
+            <option :value="k" x-text="catLabel(k)"></option>
+          </template>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('inv.group') }}</label>
+        <select x-model="f.gruppe" @change="holen()"
+                class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm">
+          <template x-for="g in gruppen" :key="g">
+            <option :value="g" x-text="gruppeLabel(g)"></option>
+          </template>
+        </select>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-1.5">
+      <template x-for="z in ['offen','abgehakt','bezahlt']" :key="z">
+        <button type="button" @click="umschalten(z)"
+                class="rounded-full px-3 py-1.5 text-xs border"
+                :class="f.zustand.includes(z)
+                          ? zustandFarbe(z) : 'border-ink-700 text-ink-400 hover:bg-ink-800'"
+                x-text="zustandLabel(z)"></button>
+      </template>
+      <span class="w-px h-5 bg-ink-700 mx-1"></span>
+      <!-- 🔴 Die Hinweise sind AUS, bis jemand sie anfordert: eine Rente in der
+           offenen Summe wäre eine stille Lüge. Die Zahl daneben sagt trotzdem,
+           wie viele es sind — Ausblenden ist kein Verschweigen. -->
+      <button type="button" @click="hinweise = !hinweise; holen()"
+              class="rounded-full px-3 py-1.5 text-xs border"
+              :class="hinweise ? 'border-sky-600 bg-sky-500/15 text-sky-300'
+                               : 'border-ink-700 text-ink-400 hover:bg-ink-800'">
+        <span x-text="tr('inv.show_notes')"></span>
+        <span x-show="!hinweise && daten.ausgeblendet" class="opacity-70"
+              x-text="'(' + daten.ausgeblendet + ')'"></span>
+      </button>
+      <button type="button" @click="zuruecksetzen()"
+              class="rounded-full px-3 py-1.5 text-xs border border-ink-700 text-ink-400 hover:bg-ink-800"
+              x-text="tr('inv.reset')"></button>
+    </div>
+  </section>
+
+  <!-- ===== Summen ===== -->
+  <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <template x-for="k in ['gesamt','offen','abgehakt','bezahlt']" :key="k">
+      <div class="card p-4">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500"
+             x-text="summeLabel(k)"></div>
+        <div class="text-xl sm:text-2xl font-semibold mt-1 tabular-nums"
+             :class="k === 'offen' ? 'text-rose-300'
+                   : k === 'bezahlt' ? 'text-emerald-300'
+                   : k === 'abgehakt' ? 'text-amber-300' : ''"
+             x-text="geld(s(k))"></div>
+        <div class="text-xs text-ink-500 mt-0.5"
+             x-text="tr('inv.count', {n: k === 'gesamt' ? (daten.summen?.anzahl || 0)
+                                         : (daten.summen?.['anzahl_' + k] || 0)})"></div>
+      </div>
+    </template>
+  </section>
+
+  <!-- 🔑 Ein Vorbehalt, der eine Summe betrifft, gehört AN die Summe. -->
+  <div x-show="daten.summen && daten.summen.netto_vorbehalt" x-cloak
+       class="rounded-xl bg-amber-950/30 border border-amber-800/60 px-4 py-3 text-sm text-amber-200">
+    <span x-text="tr('inv.net_caveat', {n: daten.summen?.netto_vorbehalt || 0})"></span>
+  </div>
+
+  <!-- ===== Gruppen ===== -->
+  <section class="card p-0 overflow-hidden" x-show="daten.gruppen && daten.gruppen.length" x-cloak>
+    <div class="px-4 py-3 border-b border-ink-700/60 flex items-center justify-between">
+      <h2 class="font-semibold text-sm" x-text="aufteilungTitel()"></h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-[11px] uppercase tracking-wider text-ink-500">
+          <tr class="border-b border-ink-700/60">
+            <th class="text-left font-medium px-4 py-2">{{ t('inv.group') }}</th>
+            <th class="text-right font-medium px-3 py-2">{{ t('inv.count_short') }}</th>
+            <th class="text-right font-medium px-3 py-2">{{ t('inv.sum.offen') }}</th>
+            <th class="text-right font-medium px-3 py-2 hidden sm:table-cell">{{ t('inv.sum.abgehakt') }}</th>
+            <th class="text-right font-medium px-3 py-2 hidden sm:table-cell">{{ t('inv.sum.bezahlt') }}</th>
+            <th class="text-right font-medium px-4 py-2">{{ t('inv.sum.gesamt') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="g in (daten.gruppen || [])" :key="g.name">
+            <tr class="border-b border-ink-800/60 hover:bg-ink-800/40">
+              <td class="px-4 py-2" x-text="gruppeName(g.name)"></td>
+              <td class="px-3 py-2 text-right tabular-nums text-ink-400" x-text="g.anzahl"></td>
+              <td class="px-3 py-2 text-right tabular-nums"
+                  :class="g.offen ? 'text-rose-300' : 'text-ink-500'" x-text="geld(g.offen)"></td>
+              <td class="px-3 py-2 text-right tabular-nums hidden sm:table-cell"
+                  :class="g.abgehakt ? 'text-amber-300' : 'text-ink-500'" x-text="geld(g.abgehakt)"></td>
+              <td class="px-3 py-2 text-right tabular-nums hidden sm:table-cell"
+                  :class="g.bezahlt ? 'text-emerald-300' : 'text-ink-500'" x-text="geld(g.bezahlt)"></td>
+              <td class="px-4 py-2 text-right tabular-nums font-medium" x-text="geld(g.summe)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== Die Rechnungen selbst ===== -->
+  <section class="card p-0 overflow-hidden">
+    <div class="px-4 py-3 border-b border-ink-700/60">
+      <h2 class="font-semibold text-sm">{{ t('inv.rows') }}</h2>
+    </div>
+
+    <div x-show="!lade && (!daten.zeilen || !daten.zeilen.length)" x-cloak
+         class="px-4 py-10 text-center text-sm text-ink-400" x-text="tr('inv.empty')"></div>
+
+    <div class="overflow-x-auto" x-show="daten.zeilen && daten.zeilen.length" x-cloak>
+      <table class="w-full text-sm">
+        <thead class="text-[11px] uppercase tracking-wider text-ink-500">
+          <tr class="border-b border-ink-700/60">
+            <th class="text-left font-medium px-4 py-2">{{ t('inv.date') }}</th>
+            <th class="text-left font-medium px-3 py-2">{{ t('inv.sender') }}</th>
+            <th class="text-left font-medium px-3 py-2 hidden md:table-cell">{{ t('inv.category') }}</th>
+            <th class="text-left font-medium px-3 py-2 hidden lg:table-cell">{{ t('inv.due') }}</th>
+            <th class="text-right font-medium px-3 py-2">{{ t('inv.amount') }}</th>
+            <th class="text-left font-medium px-3 py-2">{{ t('inv.state') }}</th>
+            <th class="px-4 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="z in (daten.zeilen || [])" :key="z.id">
+            <tr class="border-b border-ink-800/60 hover:bg-ink-800/40 align-top">
+              <td class="px-4 py-2 whitespace-nowrap tabular-nums text-ink-300" x-text="z.doc_date || '—'"></td>
+              <td class="px-3 py-2">
+                <a :href="'/document/' + z.id" class="hover:text-emerald-300"
+                   x-text="z.sender || z.original_name || ('#' + z.id)"></a>
+                <div class="text-xs text-ink-500 md:hidden" x-text="catLabel(z.category)"></div>
+                <!-- 🔑 Der Beleg, aus dem der Betrag gelesen wurde. Er steht
+                     dabei, weil eine Zahl ohne ihre Herkunft nicht prüfbar ist. -->
+                <div class="text-xs text-ink-500 mt-0.5 break-words" x-show="z.due_amount_src"
+                     x-text="z.due_amount_src"></div>
+              </td>
+              <td class="px-3 py-2 hidden md:table-cell text-ink-300" x-text="catLabel(z.category)"></td>
+              <td class="px-3 py-2 hidden lg:table-cell tabular-nums"
+                  :class="ueberfaellig(z) ? 'text-rose-300' : 'text-ink-400'"
+                  x-text="z.due_date || '—'"></td>
+              <td class="px-3 py-2 text-right tabular-nums font-medium whitespace-nowrap">
+                <span x-text="geld(z.due_amount)"></span>
+                <span x-show="z.vorbehalt === 'netto'"
+                      class="ml-1 text-[10px] rounded px-1 py-0.5 bg-amber-500/15 text-amber-300"
+                      :title="tr('inv.net_hint')">{{ t('inv.net') }}</span>
+                <span x-show="z.art === 'gutschrift'"
+                      class="ml-1 text-[10px] rounded px-1 py-0.5 bg-sky-500/15 text-sky-300"
+                      x-text="tr('inv.art.gutschrift')"></span>
+                <span x-show="z.art === 'hinweis'"
+                      class="ml-1 text-[10px] rounded px-1 py-0.5 bg-ink-500/20 text-ink-300"
+                      :title="z.art_grund" x-text="tr('inv.art.hinweis')"></span>
+              </td>
+              <td class="px-3 py-2">
+                <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs"
+                      :class="zustandChip(z.zustand)">
+                  <span class="h-1.5 w-1.5 rounded-full" :class="zustandPunkt(z.zustand)"></span>
+                  <span x-text="zustandLabel(z.zustand)"></span>
+                </span>
+                <!-- Der Beleg macht den Unterschied zwischen behauptet und belegt. -->
+                <div class="text-xs text-ink-500 mt-1" x-show="z.zustand === 'bezahlt'">
+                  <span x-text="herkunftLabel(z.herkunft)"></span>
+                  <span x-show="z.tx_datum" x-text="' · ' + z.tx_datum"></span>
+                  <span x-show="z.tx_betrag" x-text="' · ' + geld(z.tx_betrag)"></span>
+                </div>
+                <div class="text-xs text-ink-500 mt-1" x-show="z.zustand === 'abgehakt'"
+                     x-text="tr('inv.unconfirmed')"></div>
+              </td>
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                <button type="button" @click="haken(z)" :disabled="z.zustand === 'bezahlt' || busy === z.id"
+                        class="btn-ghost !px-2.5 !py-1 text-xs disabled:opacity-40"
+                        :title="z.zustand === 'bezahlt' ? tr('inv.paid_locked') : ''"
+                        x-text="z.zustand === 'abgehakt' ? tr('inv.untick') : tr('inv.tick')"></button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p x-show="meldung" x-cloak class="text-sm text-amber-300" x-text="meldung"></p>
+</div>
+
+<script>
+function rechnungen() {
+  return {
+    daten: {}, lade: true, busy: null, meldung: '', stand: '',
+    hinweise: false, spanneAktiv: 'alles',
+    gruppen: ['kategorie', 'absender', 'jahr', 'monat', 'zustand', 'art'],
+    schnell: [
+      {k: 'alles',  n: tr('inv.span.all')},
+      {k: 'jahr',   n: tr('inv.span.year')},
+      {k: 'vorjahr',n: tr('inv.span.last_year')},
+      {k: 'm12',    n: tr('inv.span.12m')},
+    ],
+    f: {von: '', bis: '', q: '', kategorie: '', gruppe: 'kategorie',
+        zustand: ['offen', 'abgehakt', 'bezahlt']},
+
+    async init() {
+      /* Die Adresse ist der Zustand: ein Blick, den man teilen kann, muss
+         sich auch verschicken lassen. */
+      const p = new URLSearchParams(location.search);
+      for (const k of ['von', 'bis', 'q', 'kategorie', 'gruppe']) {
+        if (p.get(k)) this.f[k] = p.get(k);
+      }
+      if (p.get('zustand')) this.f.zustand = p.get('zustand').split(',').filter(Boolean);
+      if (p.get('art') === 'alle') this.hinweise = true;
+      await this.holen();
+    },
+    s(k) { return (this.daten.summen && this.daten.summen[k]) || 0; },
+    /* 🔑 Zusammengesetzte Schlüssel gehören ins Skript, nicht in ein Attribut:
+       in der Vorlage sieht `tr('inv.state.' + z)` wie ein roher Satz aus, und
+       der Sprach-Prüfstand kann dort nicht unterscheiden, ob da ein Präfix
+       oder ein vergessener Text steht. */
+    gruppeLabel(g) { return tr('inv.group.' + g); },
+    zustandLabel(z) { return tr('inv.state.' + z); },
+    summeLabel(k) { return tr('inv.sum.' + k); },
+    artLabel(a) { return tr('inv.art.' + a); },
+    herkunftLabel(h) { return tr('inv.src.' + (h || 'unbekannt')); },
+    aufteilungTitel() {
+      return tr('inv.by') + ' ' + this.gruppeLabel(this.daten.gruppe || 'kategorie');
+    },
+    geld(v) {
+      if (v === null || v === undefined || v === '') return '—';
+      return new Intl.NumberFormat(DS_LOCALE,
+        {style: 'currency', currency: 'EUR'}).format(v);
+    },
+    gruppeName(n) {
+      if (this.daten.gruppe === 'kategorie') return catLabel(n);
+      if (this.daten.gruppe === 'zustand') return this.zustandLabel(n);
+      if (this.daten.gruppe === 'art') return this.artLabel(n);
+      return n;
+    },
+    ueberfaellig(z) {
+      return z.zustand === 'offen' && z.due_date &&
+             z.due_date < new Date().toISOString().slice(0, 10);
+    },
+    zustandFarbe(z) {
+      return z === 'offen' ? 'border-rose-600 bg-rose-500/15 text-rose-300'
+           : z === 'bezahlt' ? 'border-emerald-600 bg-emerald-500/15 text-emerald-300'
+           : 'border-amber-600 bg-amber-500/15 text-amber-300';
+    },
+    zustandChip(z) {
+      return z === 'offen' ? 'bg-rose-500/15 text-rose-300'
+           : z === 'bezahlt' ? 'bg-emerald-500/15 text-emerald-300'
+           : 'bg-amber-500/15 text-amber-300';
+    },
+    zustandPunkt(z) {
+      return z === 'offen' ? 'bg-rose-400'
+           : z === 'bezahlt' ? 'bg-emerald-400' : 'bg-amber-400';
+    },
+    umschalten(z) {
+      const i = this.f.zustand.indexOf(z);
+      if (i >= 0) this.f.zustand.splice(i, 1); else this.f.zustand.push(z);
+      this.holen();
+    },
+    spanne(k) {
+      this.spanneAktiv = k;
+      const h = new Date(), j = h.getFullYear();
+      if (k === 'alles')   { this.f.von = ''; this.f.bis = ''; }
+      if (k === 'jahr')    { this.f.von = j + '-01-01'; this.f.bis = j + '-12-31'; }
+      if (k === 'vorjahr') { this.f.von = (j-1) + '-01-01'; this.f.bis = (j-1) + '-12-31'; }
+      if (k === 'm12') {
+        const v = new Date(h); v.setFullYear(v.getFullYear() - 1);
+        this.f.von = v.toISOString().slice(0, 10);
+        this.f.bis = h.toISOString().slice(0, 10);
+      }
+      this.holen();
+    },
+    zuruecksetzen() {
+      this.f = {von: '', bis: '', q: '', kategorie: '', gruppe: 'kategorie',
+                zustand: ['offen', 'abgehakt', 'bezahlt']};
+      this.hinweise = false; this.spanneAktiv = 'alles';
+      this.holen();
+    },
+    adresse() {
+      const p = new URLSearchParams();
+      for (const k of ['von', 'bis', 'q', 'kategorie', 'gruppe']) {
+        if (this.f[k]) p.set(k, this.f[k]);
+      }
+      if (this.f.zustand.length < 3) p.set('zustand', this.f.zustand.join(','));
+      /* „alle" statt einer Aufzählung: welche Arten es gibt, weiß der
+         Server, und eine geteilte Adresse bleibt lesbar. */
+      if (this.hinweise) p.set('art', 'alle');
+      return p;
+    },
+    async holen() {
+      this.lade = true; this.meldung = '';
+      try {
+        const p = this.adresse();
+        const r = await fetch('/api/rechnungen?' + p.toString());
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        this.daten = await r.json();
+        this.stand = new Date().toLocaleTimeString(DS_LOCALE);
+        /* Die sichtbare Adresse mitführen, damit ein Blick teilbar ist. */
+        const neu = p.toString();
+        history.replaceState(null, '', neu ? '?' + neu : location.pathname);
+      } catch (e) {
+        this.meldung = e.message || String(e);
+      }
+      this.lade = false;
+    },
+    async haken(z) {
+      /* 🔴 Eine Rechnung mit Buchung lässt sich hier nicht abhaken: der Haken
+         wäre schwächer als der Beleg, der schon da ist, und würde ihn in der
+         Anzeige nicht einmal verdrängen. Das Lösen der Bindung gehört auf die
+         Dokumentseite, wo die Buchung selbst steht. */
+      if (z.zustand === 'bezahlt') return;
+      this.busy = z.id; this.meldung = '';
+      const an = z.zustand !== 'abgehakt';
+      try {
+        const r = await fetch('/api/document/' + z.id + '/deadline-done?done=' + an,
+                              {method: 'POST'});
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        await this.holen();
+      } catch (e) { this.meldung = e.message || String(e); }
+      this.busy = null;
+    },
+    csv() {
+      const kopf = ['datum', 'absender', 'betreff', 'kategorie', 'unterkategorie',
+                    'faellig', 'betrag', 'art', 'vorbehalt', 'zustand', 'herkunft',
+                    'buchung_datum', 'buchung_betrag', 'beleg'];
+      const q = (v) => '"' + String(v === null || v === undefined ? '' : v)
+                               .replaceAll('"', '""') + '"';
+      const zeilen = (this.daten.zeilen || []).map(z => [
+        z.doc_date, z.sender, z.subject, z.category, z.subcategory, z.due_date,
+        z.due_amount, z.art, z.vorbehalt, z.zustand, z.herkunft,
+        z.tx_datum, z.tx_betrag, z.due_amount_src].map(q).join(';'));
+      /* 🔑 Ein BOM, sonst zeigt Excel aus jedem Umlaut ein Fragezeichen. */
+      const blob = new Blob(['﻿' + [kopf.join(';'), ...zeilen].join('\r\n')],
+                            {type: 'text/csv'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'rechnungen-' + new Date().toISOString().slice(0, 10) + '.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    },
+  };
+}
+</script>
+{% endblock %}

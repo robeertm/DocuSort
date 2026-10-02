@@ -52,7 +52,7 @@
      under the header carries the same items in the same order. #}
   {% set nav_items = [
     ('/library', t('nav.library')), ('/library?status=review', t('nav.review')), ('/analytics', t('nav.analytics')),
-    ('/finance', t('nav.finance')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')),
+    ('/finance', t('nav.finance')), ('/rechnungen', t('nav.invoices')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')),
   ] %}
   <nav class="mx-auto max-w-screen-2xl px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center gap-1.5 sm:gap-x-2.5 2xl:gap-x-4 sm:gap-y-1">
     <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg shrink-0 min-h-[44px]">
@@ -483,6 +483,8 @@ function updateBanner() {
       </div>
 
       <div class="py-1">
+        <a href="/rechnungen" class="sheet-row" {% if path == '/rechnungen' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">🧾</span>{{ t('nav.invoices') }}</a>
         <a href="/ausgaben" class="sheet-row" {% if path == '/ausgaben' %}aria-current="page"{% endif %}>
           <span class="w-6 text-center">📊</span>{{ t('nav.spending') }}</a>
         <a href="/analytics" class="sheet-row" {% if path == '/analytics' %}aria-current="page"{% endif %}>
