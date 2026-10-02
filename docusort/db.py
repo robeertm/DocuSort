@@ -1509,6 +1509,45 @@ class Database:
                         doc_id, tx_id, booking_date, distance)
         return stats
 
+    def invoice_rows(self) -> list[dict[str, Any]]:
+        """Jedes Dokument, aus dem ein Betrag gelesen wurde — mit dem BELEG.
+
+        🔑 Der Beleg ist die halbe Antwort. Zu jeder beglichenen Rechnung wird
+        die Buchung mitgeliefert, die sie beglichen hat, und dazu, WOHER die
+        Buchung stammt: aus einem eingelesenen Kontoauszug oder aus einer
+        CSV-Einfuhr. Ein Haken ohne Beleg ist etwas anderes als ein Haken mit
+        einem Kontoauszug dahinter, und die Seite muss beides unterscheiden
+        koennen, statt beides „bezahlt" zu nennen.
+
+        🔴 `_csv_container` ist der Behaelter, den eine CSV-Einfuhr als
+        Traegerdokument anlegt (`statements.doc_id` darf nicht leer sein). Er
+        ist kein Dokument des Nutzers und faellt deshalb aus der Liste — steht
+        er aber HINTER einer Buchung, ist er genau die gesuchte Herkunft.
+
+        Die Einordnung in Forderung / Gutschrift / Hinweis passiert bewusst
+        NICHT hier: sie ist eine Meinung ueber diese Daten und gehoert dorthin,
+        wo sie sich aendern darf, ohne dass jemand die Datenbank wandert.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT d.id, d.doc_date, d.sender, d.subject, d.category, "
+                "       d.subcategory, d.due_date, d.due_kind, d.due_amount, "
+                "       d.due_amount_src, d.paid_tx_id, d.paid_at, "
+                "       d.paid_source, d.deadline_done_at, d.original_name, "
+                "       t.booking_date AS tx_datum, t.amount AS tx_betrag, "
+                "       t.counterparty AS tx_gegen, t.purpose AS tx_zweck, "
+                "       sd.category AS beleg_traeger "
+                "FROM documents d "
+                "LEFT JOIN transactions t ON t.id = d.paid_tx_id "
+                "LEFT JOIN statements   s ON s.id = t.statement_id "
+                "LEFT JOIN documents   sd ON sd.id = s.doc_id "
+                "WHERE d.deleted_at IS NULL "
+                "  AND d.category <> '_csv_container' "
+                "  AND d.due_amount IS NOT NULL "
+                "ORDER BY COALESCE(NULLIF(d.doc_date,''), d.created_at) DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def deadline_payment(self, doc_id: int) -> dict[str, Any] | None:
         """The booking that settled this document, for the detail page."""
         with self._lock:

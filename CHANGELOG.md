@@ -7,6 +7,61 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.76.0] - 2026-10-02
+
+### Added
+
+**An invoice page: what was asked of you, what is still open, and how you know
+the rest was paid.** `/rechnungen` lists every document an amount was read out
+of — with sums, a date range, free grouping, and three states side by side.
+
+Nothing new had to be stored for it. Documents have carried `due_amount`,
+`paid_tx_id`, `paid_at` and `deadline_done_at` for a while; what was missing was
+a view that asks the right question of them.
+
+**Three states, kept apart on purpose.** A tick by hand and a booking from a
+bank statement are both "done", but they are not worth the same:
+
+| | |
+|---|---|
+| **open** | nothing suggests it was paid |
+| **ticked off** | somebody said it was settled — *unconfirmed*, no money moved behind it |
+| **paid** | tied to a booking — *confirmed*, and the page names where the booking came from: an imported bank statement or a CSV import, with its date and amount |
+
+They are summed separately. A figure that adds "ticked off" to "paid" answers no
+question anybody actually has.
+
+**Not every amount is a payable.** The text reader finds totals, and some of
+them are not bills at all. Measured on a real archive of 118 amounts, taken word
+for word from the stored evidence:
+
+```
+Gesamtes Vertragsguthaben 21.357,37 EUR    ← a contract balance
+Gesamtrente 117,81 EUR                     ← income
+Gesamtersparnis: 0,45 €                    ← a saving
+```
+
+Summed bluntly that is 172,895.16 € of "invoices"; honestly it is 151,178.13 €.
+A table that sums wrongly is worse than no table, because people believe it. So
+`finance/invoice_kind.py` sorts every amount into *payable*, *credit note* (it
+belongs to an invoice and reduces the total) or *note* (it does not). Notes are
+hidden by default — and **counted** next to the switch that shows them, so
+hiding is never concealing. The rule errs towards *note*: an invoice missing
+from a total is noticed when reading the list; a pension counted as an open
+payable quietly falsifies every figure on the page.
+
+An amount read **without tax** keeps its caveat: the row is marked `netto` and
+the page says above the totals how many there are and that the sum is that much
+too low.
+
+The evidence travels with every row — the snippet the amount was read from —
+because a figure without its origin cannot be checked.
+
+Further: date range with quick picks, grouping by topic, sender, year, month,
+state or kind (each group carries its own subtotals), category filter, free-text
+search, tick off / undo straight from the list, CSV export, and the filter state
+in the address so a view can be sent to somebody.
+
 ## [0.75.0] - 2026-10-02
 
 Joined a tailnet is not the same as reachable, and for one user the settings card
