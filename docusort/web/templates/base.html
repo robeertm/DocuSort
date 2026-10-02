@@ -54,7 +54,7 @@
     ('/library', t('nav.library')), ('/library?status=review', t('nav.review')), ('/analytics', t('nav.analytics')),
     ('/finance', t('nav.finance')), ('/rechnungen', t('nav.invoices')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')),
   ] %}
-  <nav class="mx-auto max-w-screen-2xl px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center gap-1.5 sm:gap-x-2.5 2xl:gap-x-4 sm:gap-y-1">
+  <nav class="mx-auto max-w-screen-2xl px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-1.5 sm:gap-x-2.5 2xl:gap-x-4">
     <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg shrink-0 min-h-[44px]">
       <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
@@ -66,12 +66,37 @@
       <span class="hidden sm:inline">DocuSort</span>
       <span class="hidden 2xl:inline text-xs text-ink-400 font-normal ml-1">v{{ version }}</span>
     </a>
-    <div class="flex-1"></div>
+    {# 🔴 WARUM DIE LINKS EINEN EIGENEN KASTEN HABEN (02.10.2026)
+       Vorher lagen Logo, Links und die rechte Knopfgruppe als GESCHWISTER in
+       einer `flex-wrap`-Reihe. Die Reihe war randvoll: ein achter Eintrag
+       (`/rechnungen`) genügte, und der Upload-Knopf — das LETZTE Element —
+       rutschte in eine zweite Zeile, ganz nach links.
+       Gemessen mit Chromium bei 1280/1366/1440/1536/1680/1920 px: ohne den
+       achten Eintrag passte alles, mit ihm brach es bei VIER der sechs
+       Breiten. Dass mehr Bildschirm nicht half, liegt an `max-w-screen-2xl`:
+       die Leiste ist bei 1536 px gedeckelt, 1920 px bringen keinen Platz.
+       Jetzt dürfen nur noch die LINKS untereinander umbrechen. Die rechte
+       Gruppe ist `shrink-0` und kann die Zeile nicht mehr verlassen — der
+       Upload-Knopf steht immer oben rechts, bei jeder Sprache und jeder Zahl
+       von Einträgen. #}
+    <div class="hidden 2xl:flex flex-1 min-w-0 flex-wrap items-center justify-end
+                gap-x-4 gap-y-1">
     {% for href, label in nav_items %}
-      <a href="{{ href }}" class="hidden xl:inline-flex btn-ghost">{{ label }}</a>
+      <a href="{{ href }}" class="btn-ghost">{{ label }}</a>
     {% endfor %}
+    </div>
+    {# Unterhalb von xl ist der Linkkasten ausgeblendet — dann schiebt dieser
+       Abstandhalter die rechte Gruppe nach rechts. #}
+    <div class="flex-1 2xl:hidden"></div>
+
+    {# Die rechte Gruppe: eine Einheit, die NIE umbricht.
+       🔑 Das Zahnrad steht hier und nicht bei den Links: es ist ein
+       BEDIENELEMENT, kein Navigationsziel. Bei 1280 px rutschte es als
+       einziges in eine zweite Zeile und stand dort allein unter den Links —
+       im Bild sofort zu sehen, in den Zahlen nicht. #}
+    <div class="flex items-center gap-1.5 sm:gap-x-2.5 shrink-0">
     {% if me and me.is_admin %}
-    <a href="/settings" class="hidden xl:inline-flex btn-ghost" :aria-label="tr('nav.settings')">
+    <a href="/settings" class="hidden 2xl:inline-flex btn-ghost" :aria-label="tr('nav.settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -217,12 +242,18 @@
       </svg>
       <span class="hidden sm:inline">{{ t('nav.upload') }}</span>
     </a>
+    </div>
   </nav>
   {# Der frühere Scrollstreifen unter der Kopfzeile ist weg: er zeigte je
      nach Sprache drei bis vier Ziele, der Rest lag hinter einer Wischgeste,
      die niemand vermutet. Auf dem Handy führt jetzt die Tab-Leiste am
-     unteren Rand (Daumenreichweite), zwischen md und xl der Streifen. #}
-  <nav class="hidden md:flex xl:hidden mx-auto max-w-screen-2xl px-4 pb-2 gap-1 text-sm overflow-x-auto">
+     unteren Rand (Daumenreichweite), zwischen md und 2xl der Streifen.
+     🔑 Die Grenze lag bis 02.10.2026 bei xl. Mit acht Einträgen passen die
+     deutschen Begriffe bei 1280 px nicht mehr neben die Bedienknöpfe —
+     gemessen, und im Bild war zu sehen, wie „Fixkosten" allein in eine
+     zweite Zeile rutschte. Unterhalb von 2xl trägt sie jetzt dieser
+     Streifen: eine volle Zeile, alles sichtbar, nichts verrutscht. #}
+  <nav class="hidden md:flex 2xl:hidden mx-auto max-w-screen-2xl px-4 pb-2 gap-1 text-sm overflow-x-auto">
     <a href="/" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('nav.dashboard') }}</a>
     {% for href, label in nav_items %}
       <a href="{{ href }}" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ label }}</a>
