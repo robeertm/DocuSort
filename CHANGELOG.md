@@ -7,6 +7,37 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.76.1] - 2026-10-02
+
+### Fixed
+
+**The upload button dropped into a second row, far left.** The invoice page
+added an eighth entry to the navigation, and the header row was already full:
+logo, links and the right-hand controls all sat as siblings in one wrapping
+flex row, so the last element — the upload button — was the one pushed out.
+
+Measured in Chromium at 1280/1366/1440/1536/1680/1920: without the eighth entry
+everything fitted; with it, four of the six widths broke. A wider screen did not
+help, because the bar is capped at `max-w-screen-2xl` (1536 px).
+
+The right-hand controls are now one `shrink-0` group that cannot leave the
+first row, and only the links may wrap among themselves. Below 2xl the links
+ride in the horizontal strip that already existed for medium widths — eight
+German labels plus the controls do not fit beside each other at 1280 px. The
+settings gear moved in with the controls, where it belongs: it is a control,
+not a destination.
+
+🔴 Worth writing down: the first attempt used `xl:flex`, a class the **built**
+stylesheet did not contain (only `xl:inline-flex`). `hidden` therefore stood,
+the whole link box was invisible, and the measurement reported "fine" because
+nothing was left that could wrap. The built sheet is the authority, not
+Tailwind's vocabulary — every new class needs a run of
+`scripts/build/build-css.sh`.
+
+A new bench, `probe_kopfleiste.py`, drives a real browser at those six widths
+and asserts the upload button stays top-right — and that every class in the
+header exists in the built stylesheet.
+
 ## [0.76.0] - 2026-10-02
 
 ### Added
