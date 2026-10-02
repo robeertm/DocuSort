@@ -27,8 +27,24 @@ class OpenAICompatProvider(Provider):
             raise ProviderError(
                 "openai_compat requires base_url (e.g. http://localhost:11434/v1)"
             )
-        # Normalise: strip trailing slash, ensure /v1 if user gave the bare host
+        # Normalise: strip the trailing slash, and add `/v1` when the bare host
+        # was given.
+        #
+        # 🔴 DIESE ZEILE FEHLTE, DER KOMMENTAR STAND SCHON DA. Darüber stand
+        # „ensure /v1 if user gave the bare host" — getan wurde es nie. Wer
+        # `http://localhost:11434` eintrug (genau das, was Ollamas eigene
+        # Anleitung zeigt), schickte seine Anfrage an `…:11434/chat/completions`
+        # und bekam 404. Die Einstellungsseite rettete das zur Hälfte: der
+        # automatische Weg („lokales Modell suchen") hängt `/v1` an, das Feld von
+        # Hand nicht. Zwei Wege, einer heil — und die Begründung, warum es nicht
+        # passieren kann, stand als Kommentar daneben.
         self.base_url = base_url.rstrip("/")
+        # Alles, was mit einem Pfad endet, bleibt unangetastet: `/v1` ist nur die
+        # Schreibweise von Ollama und OpenAI. Groq, Mistral und Together haben
+        # ihre eigene, und die darf nicht überschrieben werden.
+        from urllib.parse import urlsplit
+        if not urlsplit(self.base_url).path.strip("/"):
+            self.base_url += "/v1"
         self.api_key = api_key or "ollama"
         self.timeout = timeout
 

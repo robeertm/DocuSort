@@ -7,6 +7,93 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.74.0] - 2026-10-02
+
+Three faults on the one path "Ollama through the settings". All three already had
+their reasoning written beside them as a comment — the work was never done. That
+is the worst kind: reading the code, it looks finished.
+
+### Fixed
+
+**`/v1` was never appended, although the comment said it was.** Above
+`self.base_url = base_url.rstrip("/")` stood *"ensure /v1 if user gave the bare
+host"*. Enter `http://localhost:11434` — exactly what Ollama's own documentation
+shows — and the request went to `…:11434/chat/completions` and came back 404. The
+settings page saved half of it: the automatic route ("find a local model")
+appends `/v1`, the field filled in by hand does not. Two routes, one of them
+sound. All five spellings are now normalised, and a provider with a path of its
+own (Groq, Mistral, Together) is left alone.
+
+**A local model was given the cloud's timeout.** `bridge` gets
+`max(timeout * 3, 180)`, with the reason stated beside it: local inference on a
+7B model takes 30–90 s for a long bank statement, and a clock check must not kill
+a call that is almost done. Word for word the same applies to `openai_compat`,
+which *is* the route to Ollama — and it got the cloud default of 60 s. Measured
+on a four-core machine with no graphics card:
+
+| | |
+|---|---|
+| `qwen2.5:3b-instruct`, bank statement 1699 tokens, raw API | 144 s |
+| `qwen2.5:3b-instruct`, electricity bill, the program's real path | **186 s** |
+| `qwen2.5:7b-instruct`, the same document | 465 s |
+
+Every classification would have failed. The floor is now 600 s — and that number
+came from the bench, not from me: the first attempt used the bridge's 180 s, and
+the probe pointed out that the measured 186 s is six seconds past it. An explicit
+`timeout_seconds` still wins; the floor only raises the bottom, and a limit that
+never fires costs a cloud provider nothing.
+
+**The search for a local model found nothing on Linux.** It asks
+`host.docker.internal` whenever DocuSort runs in a container. Docker Desktop
+(Mac, Windows) invents that name; Docker on a NAS, a Pi or a VPS does not, unless
+the compose file maps it — and it did not. Measured inside a real container: the
+host answered on its LAN address and on the gateway `172.17.0.1`, and the name
+itself answered `Name or service not known`. So the card said "nothing found"
+about a model running right beside it. `docker-compose.yml` now carries
+`extra_hosts: host.docker.internal:host-gateway`.
+
+### Added
+
+**A local model in the box next door — one command.** Until now "use a local
+model" assumed you already had an Ollama somewhere and knew its address:
+
+```
+docker compose --profile ki up -d
+docker compose exec ollama ollama pull qwen2.5:7b-instruct
+```
+
+The search then finds it at `http://ollama:11434` by itself — a service name from
+the same file, resolved inside the Docker network, asked *before* the host
+because it needs no published port. It stays **off** until you name it: a
+multi-gigabyte download is not something to hand somebody who only wanted their
+scans sorted. The model is held in memory permanently (`OLLAMA_KEEP_ALIVE=-1`),
+because reloading it costs 30 s on top of every wait, measured.
+
+**Which model, measured rather than assumed.** The same electricity bill,
+classified on the program's real path against a real category list:
+
+| | time | category |
+|---|---|---|
+| `qwen2.5:3b-instruct` | 186 s | `Haus` (Home) |
+| `qwen2.5:7b-instruct` | 465 s | `Rechnungen` (Invoices) |
+
+The smaller model is two and a half times faster and files the document in the
+wrong drawer. A document in the wrong drawer is a document you have to find
+again, so the compose file names the larger one.
+
+### Changed
+
+The bundled Watchtower names the optional model in its watched list. A container
+nobody names is never updated, and nothing reports that.
+
+### Bench
+
+`probe_lokales_modell.py` — it measures behaviour rather than reading the source,
+because the source already claimed two of these three things while they were
+untrue. It reads the compose file as YAML (an `extra_hosts` inside a comment maps
+no name) and pulls the candidate list out of the function with `ast` (the address
+also appears in an explaining comment, and a comment asks nobody).
+
 ## [0.73.1] - 2026-10-01
 
 ### Fixed

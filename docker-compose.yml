@@ -15,6 +15,16 @@ services:
       - ./data/library:/data/library
       - ./config:/app/config
       - ./logs:/app/logs
+    # 🔴 OHNE DIESE ZEILE FINDET DIE SUCHE NACH EINEM LOKALEN MODELL NICHTS.
+    # DocuSort fragt im Container nach einem Ollama unter `host.docker.internal`
+    # — der übliche Fall ist ein Modell auf dem Rechner, auf dem der Container
+    # sitzt. Docker Desktop (Mac, Windows) erfindet diesen Namen von selbst. Auf
+    # Linux — also auf der NAS, dem Pi, dem VPS, wo das wirklich installiert wird
+    # — gibt es ihn nicht, solange er hier nicht abgebildet ist. Auf einer
+    # Synology gemessen: ohne die Zeile „Name or service not known", mit ihr
+    # antwortet der Wirt.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ── Keeps itself up to date ────────────────────────────────────────────
   # Docker never re-pulls a running container: `image: …:latest` is a label,
@@ -48,3 +58,75 @@ services:
       - --schedule
       - ${WATCHTOWER_SCHEDULE:-0 0 * * * *}
       - docusort
+      # Das lokale Modell mit, wenn das Profil `ki` an ist. Auch benannt, wenn es
+      # aus ist: ein Name, auf den nichts passt, wird übersprungen — ein
+      # Container, den niemand benannt hat, wird dagegen nie aktualisiert, und
+      # das ist der Fehler, den man nicht merkt.
+      - docusort-ollama
+
+  # ── Ein lokales Modell, in der Kiste nebenan (freiwillig) ───────────────
+  # 🔑 WARUM DAS HIER STEHT
+  # DocuSort kann seine Dokumente von einem lokalen Modell einordnen lassen —
+  # dann verlässt kein Kontoauszug das Haus, es gibt keinen Schlüssel, kein Konto
+  # und keine Rechnung. Bisher setzte das voraus, dass irgendwo schon ein Ollama
+  # läuft und man seine Adresse kennt. Dieser Dienst ist der kurze Weg:
+  #
+  #     docker compose --profile ki up -d
+  #
+  # Er bleibt AUS, solange ihn niemand beim Namen nennt — ein Download von
+  # zwei Gigabyte und mehrere Gigabyte Arbeitsspeicher drängt man niemandem auf,
+  # der nur seine Scans sortiert haben wollte.
+  #
+  # Danach in den Einstellungen: KI → „lokales Modell suchen". Die Suche findet
+  # es von selbst unter `http://ollama:11434`, weil das ein Dienstname AUS DIESER
+  # DATEI ist, aufgelöst im Docker-Netz. Nichts einzutippen.
+  #
+  # 🔴 ERST EIN MODELL HOLEN — ein Ollama ohne Modell antwortet auf der
+  #    Vorderseite 200 und auf jede Frage 404:
+  #
+  #     docker compose exec ollama ollama pull qwen2.5:7b-instruct
+  #
+  # 🔑 WELCHES MODELL — gemessen, nicht geraten, auf einer Synology mit AMD Ryzen
+  #    V1500B (vier Kerne, keine Grafikkarte), also auf der Art Rechner, auf der
+  #    das hier landet. DIESELBE Stromrechnung, eingeordnet auf dem echten Weg
+  #    des Programms, gegen eine echte Kategorienliste:
+  #      qwen2.5:3b-instruct    186 s   ->  Kategorie „Haus"
+  #      qwen2.5:7b-instruct    465 s   ->  Kategorie „Rechnungen"
+  #    Das kleinere ist zweieinhalbmal schneller und legt das Dokument in die
+  #    falsche Schublade. Ein Dokument in der falschen Schublade ist ein
+  #    Dokument, das man wieder suchen muss — darum hier das größere.
+  #
+  #    🔴 Teuer ist nicht das Schreiben der Antwort, sondern das LESEN der Frage,
+  #    und das wächst mit der Länge des Dokuments. Ein Scan ist lang. Auf einem
+  #    Mac mit Apple Silicon ist beides ein Vielfaches schneller — wer einen hat,
+  #    der immer läuft, fährt besser mit `provider: bridge`.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: docusort-ollama
+    profiles: ["ki"]
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-Europe/Berlin}
+      # 🔴 NIE ENTLADEN. Ollama vergisst ein Modell nach fünf untätigen Minuten
+      # und lädt es bei der nächsten Frage neu — auf der NAS gemessen 30 s für
+      # ein 7B. Das käme oben auf jede Wartezeit drauf, und zwar genau dann, wenn
+      # nach einer Pause der erste Scan hereinfällt. Im Speicher gehalten kostet
+      # es die Größe des Modells und sonst nichts.
+      - OLLAMA_KEEP_ALIVE=-1
+      # Ein Modell, eine Frage auf einmal. Zwei gleichzeitig sind auf einem
+      # Rechner ohne Grafikkarte langsamer als zwei hintereinander — und doppelt
+      # so viel Speicher.
+      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_NUM_PARALLEL=1
+    volumes:
+      # Die Modelle sind Gigabytes und gehören dir, nicht dem Abbild — ohne das
+      # hier wären sie nach jedem `docker compose pull` wieder weg.
+      - ./ollama:/root/.ollama
+    # Kein Port auf dem Wirt. DocuSort erreicht es über den Dienstnamen im
+    # Docker-Netz; veröffentlicht wäre es eine Schnittstelle ohne Passwort im
+    # eigenen LAN.
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
