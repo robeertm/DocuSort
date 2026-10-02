@@ -7,6 +7,73 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.75.0] - 2026-10-02
+
+Joined a tailnet is not the same as reachable, and for one user the settings card
+could not tell the difference.
+
+### Fixed
+
+**The card showed a green "connected" and an address that led nowhere.**
+Connecting runs two steps: `tailscale up` joins the tailnet, `tailscale serve`
+publishes the page on 443. On one installation the first succeeded and the second
+did not:
+
+```
+joined, but could not publish the page: error enabling https feature:
+error 500 Internal Server Error: zero serverNoiseKey
+```
+
+The card, however, read only `BackendState == "Running"` — which the first step
+alone already sets. So it showed the green badge and a clickable
+`https://<name>.ts.net`, while nothing was listening behind it. On the phone that
+came back as `ERR_NAME_NOT_RESOLVED`, which looks like a fault of the phone.
+
+Both symptoms had one cause: **MagicDNS and HTTPS Certificates were switched off
+in that tailnet.** Without MagicDNS the name does not exist, which is the failed
+lookup; and HTTPS cannot be switched on without MagicDNS, which is the 500.
+
+Three things changed:
+
+* Whether the page is really being served is now **measured**, not assumed.
+  `tailscale serve status --json` answers `{"TCP": {"443": {"HTTPS": true}}}` on a
+  working install and leaves the block out otherwise. The status route carries
+  that as `angeboten`, and the green badge and the address both hang on it.
+* When `serve` fails, the message is turned into an instruction — switch MagicDNS
+  and HTTPS Certificates on under DNS, then disconnect and connect again — in the
+  reader's own language, with a link to that page. Tailscale's original text is
+  shown underneath and never replaced: a reading can be wrong, a measurement
+  should not disappear behind a friendly sentence. A failure that does *not* match
+  keeps the general message instead of sending everyone to the DNS page.
+* `serve` returning 0 is no longer taken as proof. It means "accepted", and the
+  check afterwards costs one call.
+
+There is no fallback to paper over here. With `--tun=userspace-networking`
+inbound traffic arrives **only** through `tailscale serve` — if that fails, the
+installation is not reachable over Tailscale by any route, and the card now says
+so instead of offering an address.
+
+**The dashboard badge reported on a part nobody was using.** It read "Bridge
+offline", always — even on an installation with no bridge configured. On a setup
+classifying happily through a local model (`provider: openai_compat`) the page
+showed a red failure: a true statement about a component nothing talks to.
+
+The badge now reports the **configured** provider and says who is on the other
+end — model and host, e.g. `qwen2.5:7b-instruct · 10.0.0.5:11434`. It has three
+states, not two:
+
+| provider | reachability |
+|---|---|
+| `bridge` | known without the network — the connection lives in the process |
+| `openai_compat` | really checked, at most once a minute, 2 s patience |
+| cloud | **not checked at all**, and shown grey — neither green nor red |
+
+Nobody pings Anthropic every two seconds just to keep a dot green, so "not
+checked" is its own state rather than a guess dressed up as one. The local check
+asks the bare root, not `/v1/…`: an Ollama with no model answers 200 at the front
+and 404 to every question, and the badge asks whether something is alive, not
+whether it can think.
+
 ## [0.74.0] - 2026-10-02
 
 Three faults on the one path "Ollama through the settings". All three already had
