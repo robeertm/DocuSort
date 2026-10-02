@@ -242,6 +242,78 @@ def _doc_job_progress(doc_id: int, *, current_page: int, total_pages: int) -> No
         j["total_pages"] = int(total_pages)
 
 
+# 🔴 EIN ABZEICHEN, DAS UEBER DEN FALSCHEN TEIL BERICHTET
+# Bis 0.75.0 stand auf der Startseite fest „Bridge offline" — auch dann, wenn
+# gar keine Bruecke eingestellt war. Nach dem Umzug auf ein lokales Modell
+# (`provider: openai_compat`) lief die Einordnung tadellos, und die Seite
+# meldete trotzdem rot einen Ausfall. Robert las das als Stoerung; es war eine
+# wahre Aussage ueber ein Bauteil, das niemand benutzt.
+#
+# Darum berichtet das Abzeichen jetzt ueber den EINGESTELLTEN Anbieter und
+# sagt, mit wem gesprochen wird.
+#
+# 🔑 ERREICHBARKEIT KOSTET. Diese Auskunft haengt an einer Seite, die alle zwei
+# bis drei Sekunden fragt. Ein Netzaufruf je Abfrage waere ein Dauerfeuer auf
+# das Modell. Also:
+#   * `bridge`  — weiss es ohne Netz, die Verbindung liegt im Prozess
+#   * lokal     — hoechstens alle 60 s wirklich nachgesehen, 2 s Geduld
+#   * Wolke     — GAR NICHT geprueft. Niemand pingt Anthropic im Sekundentakt,
+#                 nur damit ein Punkt gruen ist. `erreichbar: None` heisst
+#                 „nicht nachgesehen" und wird auch so angezeigt — nicht gruen
+#                 und nicht rot.
+_KI_PROBE = {"zeit": 0.0, "erreichbar": None, "ziel": ""}
+
+
+def _ki_wolke(provider: str) -> str:
+    return {"anthropic": "Anthropic", "openai": "OpenAI",
+            "gemini": "Google Gemini"}.get(provider, provider)
+
+
+def _ki_erreichbar(basis: str) -> bool | None:
+    """Antwortet das lokale Modell? Hoechstens einmal pro Minute gefragt."""
+    import time as _t
+    import urllib.request as _u
+    if not basis:
+        return None
+    jetzt = _t.time()
+    if _KI_PROBE["ziel"] == basis and (jetzt - _KI_PROBE["zeit"]) < 60:
+        return _KI_PROBE["erreichbar"]
+    # 🔑 Die nackte Wurzel, nicht `/v1/…`: ein Ollama ohne Modell antwortet
+    #    vorne 200 und auf jede Frage 404 — gefragt ist hier „lebt da etwas",
+    #    nicht „kann es rechnen".
+    wurzel = basis.rstrip("/")
+    for ende in ("/v1", "/v1/"):
+        if wurzel.endswith(ende):
+            wurzel = wurzel[: -len(ende)]
+            break
+    try:
+        with _u.urlopen(wurzel + "/", timeout=2) as r:
+            ok = 200 <= r.status < 500
+    except Exception:
+        ok = False
+    _KI_PROBE.update({"zeit": jetzt, "erreichbar": ok, "ziel": basis})
+    return ok
+
+
+def _ki_lage(settings, bridge_status: dict) -> dict:
+    """Wer ist eingestellt, mit wem wird gesprochen, antwortet es?"""
+    from urllib.parse import urlsplit
+    anbieter = (getattr(settings.ai, "provider", "") or "").strip()
+    modell = (getattr(settings.ai, "model", "") or "").strip()
+    basis = (getattr(settings.ai, "base_url", "") or "").strip()
+    if anbieter == "bridge":
+        info = bridge_status.get("info") or {}
+        return {"provider": anbieter, "model": info.get("model") or modell,
+                "wo": info.get("host") or "", "lokal": True,
+                "erreichbar": bool(bridge_status.get("connected"))}
+    if anbieter == "openai_compat":
+        return {"provider": anbieter, "model": modell,
+                "wo": urlsplit(basis).netloc or basis, "lokal": True,
+                "erreichbar": _ki_erreichbar(basis)}
+    return {"provider": anbieter, "model": modell,
+            "wo": _ki_wolke(anbieter), "lokal": False, "erreichbar": None}
+
+
 def create_app(
     settings: AppSettings,
     db: Database,
@@ -1983,6 +2055,8 @@ def create_app(
             "now":           datetime.now().isoformat(timespec="seconds"),
             "counts":        counts,
             "bridge":        bridge_status,
+            # Worueber das Abzeichen auf der Startseite wirklich berichten soll.
+            "ki":            _ki_lage(settings, bridge_status),
             "in_flight":     in_flight,
             "bulk_job":      bulk_job,
             "recent":        recent,

@@ -355,9 +355,15 @@
   <section class="card p-6" x-data="tailscaleSettings()" x-init="init()">
     <div class="flex items-center justify-between gap-3 mb-1">
       <h2 class="text-lg font-semibold">{{ t('settings.ts.heading') }}</h2>
-      <span x-show="lage.verbunden" x-cloak
+      <!-- 🔴 „verbunden" hing frueher allein am BackendState. Ein Rechner kann
+           im Tailnet stehen und trotzdem nichts ausliefern — dann log dieses
+           Abzeichen. Es haengt jetzt an `angeboten`, also an einer Messung. -->
+      <span x-show="lage.verbunden && lage.angeboten" x-cloak
             class="text-xs rounded-full px-2 py-0.5 bg-emerald-900/40 text-emerald-300
                    border border-emerald-700">{{ t('settings.ts.connected') }}</span>
+      <span x-show="lage.verbunden && !lage.angeboten" x-cloak
+            class="text-xs rounded-full px-2 py-0.5 bg-amber-900/40 text-amber-300
+                   border border-amber-700">{{ t('settings.ts.not_served') }}</span>
     </div>
     <p class="text-ink-400 text-sm mb-5">{{ t('settings.ts.subtitle') }}</p>
 
@@ -366,7 +372,37 @@
       <p class="text-sm text-amber-300/90">{{ t('settings.ts.unavailable') }}</p>
     </template>
 
-    <template x-if="lage.moeglich && lage.verbunden">
+    <!-- 🔴 ANGEMELDET, ABER NICHTS AUSGELIEFERT — der Fall, der einen fremden
+         Nutzer eine Stunde kostete. `tailscale up` lief, `tailscale serve`
+         scheiterte, und die Karte zeigte trotzdem gruen eine anklickbare
+         Adresse. Auf dem Handy kam dann ERR_NAME_NOT_RESOLVED, was nach einem
+         Fehler des Handys aussah. Hier steht jetzt, was wirklich los ist. -->
+    <template x-if="lage.moeglich && lage.verbunden && !lage.angeboten">
+      <div class="space-y-3">
+        <div class="rounded-xl bg-amber-950/40 border border-amber-800 p-4">
+          <p class="text-sm text-amber-200">{{ t('settings.ts.not_served_hint') }}</p>
+          <p class="text-sm text-amber-100 mt-3">{{ t('settings.ts.err_https') }}</p>
+          <p class="mt-3">
+            <a href="https://login.tailscale.com/admin/dns" target="_blank"
+               class="text-sm text-cyan-300 underline">login.tailscale.com/admin/dns</a>
+          </p>
+        </div>
+        <div class="flex gap-2">
+          <button type="button" @click="holen()" :disabled="arbeitet"
+                  class="rounded-lg border border-ink-600 px-3 py-1.5 text-xs
+                         hover:bg-ink-800 disabled:opacity-50">
+            {{ t('settings.ts.recheck') }}
+          </button>
+          <button type="button" @click="trennen()" :disabled="arbeitet"
+                  class="rounded-lg border border-ink-600 px-3 py-1.5 text-xs
+                         hover:bg-ink-800 disabled:opacity-50">
+            {{ t('settings.ts.disconnect') }}
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="lage.moeglich && lage.verbunden && lage.angeboten">
       <div class="space-y-3">
         <div class="rounded-xl bg-ink-900/60 border border-ink-700 p-4">
           <div class="text-xs text-ink-400 mb-1">{{ t('settings.ts.address') }}</div>
@@ -405,6 +441,13 @@
 
     <p x-show="meldung" x-cloak class="text-sm mt-3"
        :class="ok ? 'text-emerald-300' : 'text-amber-300'" x-text="meldung"></p>
+    <template x-if="detail">
+      <div class="mt-2">
+        <div class="text-xs text-ink-500">{{ t('settings.ts.ts_said') }}</div>
+        <pre class="text-xs font-mono text-ink-400 whitespace-pre-wrap break-all"
+             x-text="detail"></pre>
+      </div>
+    </template>
   </section>
 
   <!-- ===== Web server (host + port) ===== -->
@@ -1523,10 +1566,12 @@ function postwacheSettings() {
 //    compose-Datei, keine Kommandozeile.
 function tailscaleSettings() {
   return {
-    lage: { moeglich: false, laeuft: false, verbunden: false, adresse: '' },
+    lage: { moeglich: false, laeuft: false, verbunden: false,
+            angeboten: false, adresse: '' },
     authkey: '',
     arbeitet: false,
     meldung: '',
+    detail: '',
     ok: false,
     async init() { await this.holen(); },
     async holen() {
@@ -1536,7 +1581,7 @@ function tailscaleSettings() {
       } catch (e) { /* eine stille Karte ist besser als eine kaputte Seite */ }
     },
     async verbinden() {
-      this.arbeitet = true; this.meldung = ''; this.ok = false;
+      this.arbeitet = true; this.meldung = ''; this.detail = ''; this.ok = false;
       try {
         const r = await fetch('/api/tailscale/connect', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1548,15 +1593,20 @@ function tailscaleSettings() {
           this.authkey = '';
           this.meldung = tr('settings.ts.done');
         } else {
-          // 🔑 Was Tailscale selbst sagt, nicht was ich vermute.
-          this.meldung = d.grund || d.detail || ('HTTP ' + r.status);
+          // 🔑 Erst die Anweisung in der Sprache des Nutzers, dann Tailscales
+          //    Originaltext. Die Deutung kann einmal danebenliegen — dann soll
+          //    die echte Meldung nicht hinter einem freundlichen Satz
+          //    verschwinden.
+          this.meldung = d.grund_key ? tr(d.grund_key)
+                                     : (d.grund || d.detail || ('HTTP ' + r.status));
+          this.detail = d.grund_key ? (d.grund || '') : '';
         }
       } catch (e) { this.meldung = e.message || String(e); }
       this.arbeitet = false;
       await this.holen();
     },
     async trennen() {
-      this.arbeitet = true; this.meldung = ''; this.ok = false;
+      this.arbeitet = true; this.meldung = ''; this.detail = ''; this.ok = false;
       try {
         const r = await fetch('/api/tailscale/disconnect', { method: 'POST' });
         const d = await r.json().catch(() => ({}));

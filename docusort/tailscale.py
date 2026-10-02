@@ -60,6 +60,65 @@ def _cli(*args, timeout: float = 20.0) -> tuple[int, str]:
         return 124, "tailscale did not answer in time"
 
 
+# 🔴 „ANGEMELDET" IST NICHT „ERREICHBAR"
+# Am 02.10.2026 meldete eine fremde Installation beim Verbinden:
+#     joined, but could not publish the page: error enabling https feature:
+#     error 500 Internal Server Error: zero serverNoiseKey
+# `tailscale up` war erfolgreich, `tailscale serve` nicht. Die Karte las danach
+# nur den Status (`BackendState == "Running"`), zeigte gruen „verbunden" und
+# eine anklickbare Adresse — hinter der nichts horchte. Auf dem Handy kam
+# ERR_NAME_NOT_RESOLVED, und das sah nach einem Fehler des Handys aus.
+#
+# Beide Symptome hatten EINE Ursache: im Tailnet waren MagicDNS und HTTPS
+# Certificates aus. Ohne MagicDNS gibt es den Namen nicht (darum loest nichts
+# auf), und ohne MagicDNS laesst sich HTTPS gar nicht einschalten (darum der
+# 500). Darum wird das Anbieten seitdem GEFRAGT statt angenommen.
+#
+# 🔴 EINEN RUECKWEG UEBER DIE 100.x-ADRESSE GIBT ES HIER NICHT. Mit
+# `--tun=userspace-networking` kommt eingehender Verkehr ausschliesslich ueber
+# `tailscale serve` herein. Scheitert `serve`, ist die Installation ueber
+# Tailscale auf KEINEM Weg erreichbar — es gibt nichts zu beschoenigen.
+
+
+def _angeboten() -> bool:
+    """Liegt wirklich ein HTTPS-Angebot auf 443? Gemessen, nicht geschlossen.
+
+    `tailscale serve status --json` antwortet an einer laufenden Installation
+    (auf der NAS nachgesehen) mit `{"TCP": {"443": {"HTTPS": true}}, "Web": …}`.
+    Ohne Angebot fehlt der Block.
+    """
+    code, aus = _cli("serve", "status", "--json", timeout=15)
+    if code != 0 or not aus.startswith("{"):
+        return False
+    try:
+        d = json.loads(aus)
+    except Exception:
+        return False
+    return bool(((d.get("TCP") or {}).get("443") or {}).get("HTTPS"))
+
+
+def _serve_gescheitert(aus: str) -> dict:
+    """Aus Tailscales Innendeutsch eine Anweisung machen — ohne es zu verstecken.
+
+    🔑 Der Schluessel wird zurueckgegeben, nicht der fertige Satz: uebersetzt
+    wird in der Oberflaeche, die die Sprache des Nutzers kennt. Der
+    Originaltext faehrt IMMER mit — passt die Deutung einmal nicht, soll
+    niemand hinter einem freundlichen Satz die echte Meldung verlieren.
+    """
+    low = (aus or "").lower()
+    https_aus = ("enabling https feature" in low
+                 or "https feature" in low
+                 or ("https" in low and "not enabled" in low)
+                 or "servernoisekey" in low)
+    return {
+        "ok": False,
+        "verbunden": True,
+        "angeboten": False,
+        "grund_key": "settings.ts.err_https" if https_aus else "settings.ts.err_serve",
+        "grund": "joined, but could not publish the page: %s" % (aus or "")[:300],
+    }
+
+
 def daemon_laeuft() -> bool:
     return _daemon is not None and _daemon.poll() is None
 
@@ -94,30 +153,36 @@ def status(config_dir) -> dict:
     """Was ist der Stand? Immer beantwortbar, auch wenn gar nichts laeuft."""
     if not verfuegbar():
         return {"moeglich": False, "laeuft": False, "verbunden": False,
-                "adresse": "", "grund": "this image does not carry Tailscale"}
+                "angeboten": False, "adresse": "",
+                "grund": "this image does not carry Tailscale"}
     if not daemon_laeuft():
         # Eine vorhandene Anmeldung ist Grund genug, ihn anzuwerfen.
         if (Path(config_dir) / "tailscale" / "tailscaled.state").exists():
             daemon_starten(config_dir)
     if not daemon_laeuft():
         return {"moeglich": True, "laeuft": False, "verbunden": False,
-                "adresse": "", "grund": ""}
+                "angeboten": False, "adresse": "", "grund": ""}
     code, aus = _cli("status", "--json")
     if code != 0 or not aus.startswith("{"):
         return {"moeglich": True, "laeuft": True, "verbunden": False,
-                "adresse": "", "grund": aus[:300]}
+                "angeboten": False, "adresse": "", "grund": aus[:300]}
     try:
         d = json.loads(aus)
     except Exception:
         return {"moeglich": True, "laeuft": True, "verbunden": False,
-                "adresse": "", "grund": "could not read the status"}
+                "angeboten": False, "adresse": "",
+                "grund": "could not read the status"}
     selbst = d.get("Self") or {}
     namen = [n for n in (selbst.get("DNSName") or "").split(".") if n]
     adresse = (selbst.get("DNSName") or "").rstrip(".")
+    verbunden = (d.get("BackendState") == "Running")
     return {
         "moeglich": True,
         "laeuft": True,
-        "verbunden": (d.get("BackendState") == "Running"),
+        "verbunden": verbunden,
+        # 🔴 Die Karte darf keine Adresse anbieten, hinter der niemand horcht.
+        #    Nur diese Zeile unterscheidet „im Tailnet" von „erreichbar".
+        "angeboten": bool(verbunden and _angeboten()),
         "zustand": d.get("BackendState") or "",
         "adresse": adresse,
         "name": namen[0] if namen else "",
@@ -174,9 +239,14 @@ def verbinden(config_dir, authkey: str, port: int, hostname: str = "docusort") -
     code, aus = _cli("serve", "--bg", "--https=443",
                      "http://127.0.0.1:%d" % port, timeout=60)
     if code != 0:
-        return {"ok": False, "verbunden": True,
-                "grund": "joined, but could not publish the page: %s" % aus[:300]}
+        return _serve_gescheitert(aus)
     st = status(config_dir)
+    # 🔑 `serve` meldete 0 — das heisst „angenommen", nicht „liegt an". Die
+    #    Gegenprobe kostet einen Aufruf und ist der Unterschied zwischen einer
+    #    Zusage und einer Messung.
+    if not st.get("angeboten"):
+        return _serve_gescheitert("serve reported success but nothing is "
+                                  "published on 443")
     return {"ok": True, "adresse": st.get("adresse", ""), "grund": ""}
 
 
@@ -211,3 +281,9 @@ def beim_start(config_dir, port: int) -> None:
             logger.info("Tailscale: reachable at https://%s", st["adresse"])
     else:
         logger.warning("Tailscale: could not publish the page: %s", aus[:200])
+        if _serve_gescheitert(aus)["grund_key"] == "settings.ts.err_https":
+            logger.warning(
+                "Tailscale: this is what it looks like when MagicDNS and HTTPS "
+                "Certificates are off in the tailnet. Switch both on at "
+                "https://login.tailscale.com/admin/dns, then disconnect and "
+                "connect again on the settings page.")

@@ -32,17 +32,28 @@
         </svg>
         <h2 class="font-semibold">{{ t('hub.live.title') }}</h2>
       </div>
-      <!-- Bridge status pill -->
+      <!-- 🔴 WER HIER BERICHTET WIRD, IST DER EINGESTELLTE ANBIETER
+           Frueher stand hier fest „Bridge offline" — auch bei einer
+           Installation, die gar keine Bruecke benutzt. Nach dem Umzug auf ein
+           lokales Modell ordnete DocuSort tadellos ein und meldete trotzdem rot
+           einen Ausfall: eine wahre Aussage ueber ein Bauteil, das niemand
+           benutzt. Jetzt steht hier, mit WEM gesprochen wird.
+           🔑 Drei Zustaende, nicht zwei. Bei einem Anbieter in der Wolke wird
+              nicht nachgesehen (das waere ein Ping im Sekundentakt), und das
+              wird grau gezeigt — nicht gruen und nicht rot. -->
       <div class="flex items-center gap-2 text-xs">
         <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1"
-              :class="state.bridge && state.bridge.connected
-                        ? 'bg-emerald-500/15 text-emerald-300'
-                        : 'bg-rose-500/15 text-rose-300'">
+              :title="(state.ki && state.ki.provider) || ''"
+              :class="!state.ki ? 'bg-ink-500/15 text-ink-300'
+                      : state.ki.erreichbar === true  ? 'bg-emerald-500/15 text-emerald-300'
+                      : state.ki.erreichbar === false ? 'bg-rose-500/15 text-rose-300'
+                      : 'bg-ink-500/15 text-ink-300'">
           <span class="h-1.5 w-1.5 rounded-full"
-                :class="state.bridge && state.bridge.connected ? 'bg-emerald-400' : 'bg-rose-400'"></span>
-          <span x-text="state.bridge && state.bridge.connected
-                          ? tr('hub.bridge.connected')
-                          : tr('hub.bridge.offline')"></span>
+                :class="!state.ki ? 'bg-ink-400'
+                        : state.ki.erreichbar === true  ? 'bg-emerald-400'
+                        : state.ki.erreichbar === false ? 'bg-rose-400'
+                        : 'bg-ink-400'"></span>
+          <span x-text="kiText()"></span>
         </span>
       </div>
     </div>
@@ -404,6 +415,15 @@ function dashboard() {
     matching: false,
     matchMsg: '',
     get bulk() { return this.state.bulk_job; },
+    /* Was auf dem Abzeichen steht: Modell und Gegenstelle, nicht ein fester
+       Name. „nicht erreichbar" wird nur angehaengt, wenn wirklich nachgesehen
+       wurde — bei einem Anbieter in der Wolke steht gar nichts dahinter. */
+    kiText() {
+      const k = this.state.ki;
+      if (!k) return tr('hub.ki.none');
+      const name = [k.model, k.wo].filter(Boolean).join(' · ') || tr('hub.ki.none');
+      return k.erreichbar === false ? name + ' — ' + tr('hub.ki.unreachable') : name;
+    },
     get anyActivity() {
       return (this.state.in_flight > 0)
           || (this.bulk && (this.bulk.running || this.bulk.paused));
