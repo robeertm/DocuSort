@@ -230,13 +230,17 @@ services:
 ```
 
 ```bash
-mkdir -p data/inbox data/library config logs && docker compose up -d
+mkdir -p data/inbox data/library config logs ollama && docker compose up -d
 ```
 
 Make the directories first. Most Docker daemons would create a missing mount
 source themselves, but Synology's stops with `Bind mount failed: '…/logs' does
-not exist` — and the same four cover the repository's own
-`docker-compose.yml`, which mounts inbox, library, config and logs separately.
+not exist` — and the same five cover the repository's own
+`docker-compose.yml`, which mounts inbox, library, config and logs separately,
+plus `ollama` for the optional local model. `deploy/install.sh` does not need
+the list: it reads every `./…` mount out of the compose file that is about to be
+used and creates whatever is missing, so adding a service never costs an
+install.
 
 ### Over Tailscale — one command
 

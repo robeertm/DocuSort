@@ -76,6 +76,19 @@ def _candidates(configured: str = "", client_ip: str = "") -> list[str]:
     add(configured)
     add(f"http://127.0.0.1:{OLLAMA_PORT}")
     if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        # 🔑 Die Kiste nebenan. `docker-compose.yml` bringt einen optionalen
+        # `ollama`-Dienst mit; mit `--profile ki` gestartet ist er unter seinem
+        # Dienstnamen im Docker-Netz erreichbar. Das ist die einzige Adresse, für
+        # die niemand einen Port veröffentlichen und niemand etwas eintippen
+        # muss — darum wird sie vor dem Wirt gefragt.
+        add(f"http://ollama:{OLLAMA_PORT}")
+        # 🔴 Ein Modell auf dem Rechner, auf dem der Container sitzt. Diesen
+        # Namen gibt es auf Linux NICHT von sich aus — nur Docker Desktop
+        # erfindet ihn. Die ausgelieferte Compose-Datei bildet ihn mit
+        # `extra_hosts: host.docker.internal:host-gateway` ab; ohne diese Zeile
+        # antwortet der Kandidat auf einer Synology, einem Pi und einem VPS
+        # gleichermaßen „Name or service not known" — gemessen —, und die Suche
+        # bleibt leer, obwohl das Modell direkt daneben lief.
         add(f"http://host.docker.internal:{OLLAMA_PORT}")
     ip = (client_ip or "").strip()
     # The machine that has the settings page open is the likeliest place for
