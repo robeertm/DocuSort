@@ -4,6 +4,53 @@
 
 <div x-data="dashboard()" x-init="init()" class="space-y-5 sm:space-y-6">
 
+  {# DAS ANGEBOT: lokal rechnen, mit einem Klick.
+     🔑 Der Nutzer muss nichts ueber Ollama, Modelle oder Adressen wissen. Er
+     sieht, DASS es geht, was es kostet und was sein Rechner dabei leistet —
+     und drueckt einmal. Alles andere passiert von selbst.
+     🔴 Die Karte erscheint nur, wenn es wirklich etwas anzubieten gibt: ein
+     erreichbarer Dienst UND genug Speicher. Ein Knopf, der nur enttaeuschen
+     kann, ist schlimmer als keiner. #}
+  <section x-show="angebotZeigen" x-cloak
+           class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 sm:p-5">
+    <div class="flex items-start gap-3 flex-wrap">
+      <div class="flex-1 min-w-[16rem]">
+        <h2 class="text-base font-semibold text-emerald-100">
+          {{ t('hub.local.title') }}</h2>
+        <p class="text-sm text-ink-300 mt-1">{{ t('hub.local.subtitle') }}</p>
+        <p class="text-xs text-ink-400 mt-2" x-text="angebotHardware"></p>
+      </div>
+      <button type="button" @click="lokalEinschalten()" :disabled="lokalLaeuft"
+              class="rounded-xl px-4 py-2.5 text-sm font-medium border
+                     border-emerald-400/50 bg-emerald-400/15 text-emerald-100
+                     hover:bg-emerald-400/25 disabled:opacity-60
+                     disabled:cursor-wait">
+        <span x-show="!lokalLaeuft">{{ t('hub.local.enable') }}</span>
+        <span x-show="lokalLaeuft" x-cloak>{{ t('hub.local.working') }}</span>
+      </button>
+    </div>
+
+    {# Der Fortschritt. Mehrere Gigabyte ohne Rueckmeldung sind von einem
+       haengenden Programm nicht zu unterscheiden. #}
+    <div x-show="lokalFortschritt" x-cloak class="mt-3">
+      <div class="h-2 rounded-full bg-ink-800 overflow-hidden">
+        <div class="h-full bg-emerald-400 transition-all"
+             :style="'width: ' + (lokalFortschritt.prozent || 0) + '%'"></div>
+      </div>
+      <p class="text-xs text-ink-400 mt-1">
+        <span x-text="(lokalFortschritt.prozent || 0) + ' %'"></span>
+        <span x-show="lokalFortschritt.gesamt" x-cloak
+              x-text="' · ' + gb(lokalFortschritt.fertig) + ' / '
+                      + gb(lokalFortschritt.gesamt)"></span>
+        <span class="text-ink-500" x-show="lokalFortschritt.text" x-cloak
+              x-text="' · ' + lokalFortschritt.text"></span>
+      </p>
+    </div>
+    <p x-show="lokalMeldung" x-cloak class="mt-2 text-xs"
+       :class="lokalFehler ? 'text-rose-300' : 'text-emerald-200'"
+       x-text="lokalMeldung"></p>
+  </section>
+
   <!-- =========== HEADER =========== -->
   <header class="flex items-baseline justify-between gap-3 flex-wrap">
     <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('hub.title') }}</h1>
@@ -701,6 +748,7 @@ function dashboard() {
     lastUpdate: '',
     pollHandle: null,
     zustandHandle: null,
+    lokalHandle: null,
     problemsTab: 'all',
     busyDoc: null,
     doneDeadline: null,
@@ -714,6 +762,11 @@ function dashboard() {
     aiAktiv: '',
     zielBusy: '',
     funde: [],
+    angebot: null,
+    lokalLaeuft: false,
+    lokalFortschritt: null,
+    lokalMeldung: '',
+    lokalFehler: false,
     sucheLaeuft: false,
     sucheMeldung: '',
     sucheFehler: false,
@@ -877,6 +930,7 @@ function dashboard() {
     init() {
       this.refresh();
       this.zieleLaden();
+      this.angebotLaden();
       this.pollHandle = setInterval(() => this.refresh(), 2500);
       /* The list itself rarely changes, but the STATE does — a machine can
          die between two page views. Measuring reaches out to other hosts, so
@@ -976,6 +1030,94 @@ function dashboard() {
       } catch (e) {
         this.zielFehler = true; this.zielMeldung = tr('hub.sys.state.tot');
       } finally { this.zielBusy = ''; }
+    },
+    /* ---------- the one-click offer ---------- */
+    get angebotZeigen() {
+      const a = this.angebot;
+      return !!(a && a.can_offer && !a.already_local) || this.lokalLaeuft;
+    },
+    get angebotHardware() {
+      const a = this.angebot;
+      if (!a || !a.hardware) return '';
+      const h = a.hardware;
+      const teile = [];
+      if (h.ram) teile.push(tr('hub.local.ram') + ' ' + this.gb(h.ram));
+      if (h.kerne) teile.push(h.kerne + ' ' + tr('hub.sys.cores'));
+      if (h.gpu && h.gpu !== '?') teile.push(h.gpu);
+      if (h.modell_bytes) {
+        teile.push(tr('hub.local.download') + ' ' + this.gb(h.modell_bytes));
+      }
+      /* Say plainly when the machine is on the edge, rather than letting
+         somebody find out after an hour of downloading. */
+      if (h.urteil === 'klein') teile.push(tr('hub.local.small'));
+      if (h.urteil === 'knapp') teile.push(tr('hub.local.slow'));
+      return teile.join(' · ');
+    },
+    async angebotLaden() {
+      try {
+        const r = await fetch('/api/local-ai/offer');
+        if (!r.ok) { this.angebot = null; return; }
+        this.angebot = await r.json();
+        const p = this.angebot.pulling || {};
+        const erster = Object.values(p)[0];
+        if (erster) { this.lokalLaeuft = true; this.lokalFortschritt = erster;
+                      this.lokalVerfolgen(); }
+      } catch (e) { this.angebot = null; }
+    },
+    async lokalEinschalten() {
+      this.lokalLaeuft = true; this.lokalFehler = false;
+      this.lokalMeldung = tr('hub.local.starting');
+      try {
+        const r = await fetch('/api/local-ai/enable', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.lokalFehler = true;
+          this.lokalMeldung = d.detail || tr('hub.local.failed');
+          this.lokalLaeuft = false;
+          return;
+        }
+        if (d.ready) {
+          this.lokalMeldung = tr('hub.local.done');
+          this.lokalLaeuft = false;
+          this.fertigAufraeumen();
+          return;
+        }
+        this.lokalMeldung = tr('hub.local.downloading');
+        this.lokalVerfolgen();
+      } catch (e) {
+        this.lokalFehler = true;
+        this.lokalMeldung = tr('hub.local.failed');
+        this.lokalLaeuft = false;
+      }
+    },
+    lokalVerfolgen() {
+      if (this.lokalHandle) clearInterval(this.lokalHandle);
+      this.lokalHandle = setInterval(async () => {
+        try {
+          const r = await fetch('/api/local-ai/enable/status');
+          if (!r.ok) return;
+          const d = await r.json();
+          const laufend = Object.values(d.pulling || {})[0];
+          if (laufend) { this.lokalFortschritt = laufend; return; }
+          /* Nothing running any more: either it worked or it failed, and the
+             last state says which. */
+          const letzter = Object.values(d.last || {})[0] || {};
+          clearInterval(this.lokalHandle); this.lokalHandle = null;
+          this.lokalLaeuft = false; this.lokalFortschritt = null;
+          if (letzter.fehler) {
+            this.lokalFehler = true;
+            this.lokalMeldung = tr('hub.local.failed') + ' — ' + letzter.fehler;
+          } else {
+            this.lokalMeldung = tr('hub.local.done');
+            this.fertigAufraeumen();
+          }
+        } catch (e) { /* network blip */ }
+      }, 2000);
+    },
+    fertigAufraeumen() {
+      this.angebotLaden();
+      this.zieleLaden();
+      this.refresh();
     },
     hostVon(url) {
       try { return new URL(url).hostname; } catch (e) { return url; }
