@@ -7,6 +7,14 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.78.1] - 2026-10-03
+
+### Changed
+
+**The status tiles moved below the machine plots.** The owner reads the page
+top-down for *what is happening right now*; the counts are the slower question
+and belong after it. Order only — the same markup, the same figures.
+
 ## [0.78.0] - 2026-10-03
 
 ### Changed
