@@ -7,6 +7,67 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.82.0] - 2026-10-03
+
+### Added
+
+**Every machine now says what it is doing, and the setup says what your
+hardware can do.**
+
+- **A traffic light per machine, measured.** The buttons used to carry a name
+  and nothing else: whether anything was answering there you found out when a
+  document failed on it. Each target is now probed — side by side, with a
+  short deadline so a dead host cannot hold up the page — and reports one of
+  four states: *ready*, *model missing*, *not answering*, or *cannot measure*
+  (a cloud provider; nothing is claimed about a data centre).
+- **The amber dot is gone.** The machine card had exactly two colours, amber
+  and grey, and amber meant "fine" — which reads as a warning on a healthy
+  install. It is a traffic light now, and every colour has its meaning written
+  next to it.
+- **Buttons that can actually do something.** *Wake up* appears when a machine
+  is ready but the model is cold — a cold model costs about 30 seconds extra
+  on the first request. *Fetch model* appears when the machine answers but does
+  not have the model. Neither is shown where it would not work, and a machine
+  that is not answering cannot be selected at all.
+- **A model download shows up in "what's running".** It runs in the
+  background and registers in the work list, so the page no longer says
+  "nothing is running" while several gigabytes come down the line.
+- **You get told when a machine stops answering** — a new `ai_down`
+  notification, on by default. Only on a *change*, never on every check, and
+  debounced: two consecutive readings must agree before anything is sent. A
+  single hiccup is not an outage, and a notification about one makes the next
+  one less believable. The first pass after a restart never notifies.
+
+### Changed
+
+**The setup script measures the machine before it downloads anything.**
+
+- **Memory, cores and GPU are measured**, on macOS, Linux and Windows alike,
+  and the result decides which model is suggested. A machine without enough
+  memory for even the small model is told so *before* several gigabytes are
+  fetched — along with what to do instead (point DocuSort at another machine
+  on the network, or at a cloud provider). Unmeasurable is not treated as
+  insufficient: when the numbers cannot be read, nothing is claimed.
+- **And then it measures the real speed.** Ollama reports timings for every
+  answer, so the machine is asked rather than estimated from core counts: how
+  fast it reads, how fast it writes, and what that means for one document.
+  "About 12 seconds here" or "about 25 minutes here" is the single most useful
+  thing somebody can know before importing three hundred documents.
+- 🔴 **On macOS, Ollama now actually starts by itself.** The script used to
+  run `launchctl setenv OLLAMA_HOST`, which lasts until the next reboot, and
+  then handed the rest to the reader: "add this to your shell profile".
+  Measured on a real machine: after a restart Ollama was not running at all,
+  and started by hand it listened on `127.0.0.1` only — so DocuSort on another
+  host could not reach it, and all it could report was "not reachable". A
+  LaunchAgent now answers both halves: it starts Ollama at login, restarts it
+  if it stops, and carries `OLLAMA_HOST` with it so the setting cannot drift
+  away from the process it belongs to. Nothing is written outside the user's
+  own home and no administrator rights are needed.
+- **On Windows, Ollama is restarted after the setting is stored.** `setx`
+  writes the value for *future* processes, so the copy already running in the
+  tray kept the old one — the setting looked applied and nothing changed until
+  the next reboot.
+
 ## [0.81.0] - 2026-10-03
 
 ### Added

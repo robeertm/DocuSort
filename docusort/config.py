@@ -181,6 +181,10 @@ class NotificationSettings:
     event_bulk_done:  bool = True   # background jobs (analyze-all, …)
     event_sync_failed: bool = True  # backup failed or is stale
     event_deadline:   bool = True   # a document deadline is coming up
+    # 🔴 Ein Rechenort, der nicht mehr antwortet, faellt sonst erst auf,
+    #    wenn ein Dokument darauf scheitert — und das kann Stunden spaeter
+    #    sein. Vorgabe an: das ist eine Stoerung, keine Plauderei.
+    event_ai_down:    bool = True   # a compute target stopped answering
 
     # Telegram channel
     telegram_enabled:  bool = False
@@ -342,6 +346,7 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         event_bulk_done=bool(n_cfg.get("event_bulk_done", True)),
         event_sync_failed=bool(n_cfg.get("event_sync_failed", True)),
         event_deadline=bool(n_cfg.get("event_deadline", True)),
+        event_ai_down=bool(n_cfg.get("event_ai_down", True)),
         telegram_enabled=bool(n_cfg.get("telegram_enabled", False)),
         telegram_chat_id=str(n_cfg.get("telegram_chat_id", "") or ""),
         email_enabled=bool(n_cfg.get("email_enabled", False)),

@@ -343,6 +343,10 @@ def create_app(
     #    KI-Kachel NICHT beantwortet: arbeitet die Maschine ueberhaupt?
     from .. import system_stats as _system_stats
     _system_stats.start(settings.paths.inbox, settings.paths.library)
+    # 🔑 Und ein Waechter ueber die Rechenorte: ein Rechner, der nicht mehr
+    #    antwortet, faellt sonst erst auf, wenn ein Dokument darauf scheitert.
+    from .. import ai_targets as _ai_targets_mod
+    _ai_targets_mod.starte_waechter(settings)
 
     def _modell_laeuft_auf() -> dict[str, Any]:
         return _runtime_von(classifier)
@@ -3617,27 +3621,109 @@ def create_app(
         try:
             liste, key = _ai_ziele_jetzt()
             jetzt = next((t for t in liste if t.key == key), None)
+            # 🔴 Gemessen, nicht geraten — und OHNE Adresse: diese Antwort
+            #    sieht jedes angemeldete Konto.
+            from .. import ai_targets as _t
+            lage = _t.zustaende(liste)
+            meiner = lage.get(key) or {}
+            tot = sum(1 for z in lage.values()
+                      if z.get("zustand") == _t.ZUSTAND_TOT)
             return {
                 "key": key,
                 "label": getattr(jetzt, "label", "") or "",
                 "anzahl": len(liste),
+                "zustand": meiner.get("zustand") or _t.ZUSTAND_OFFEN,
+                "geladen": meiner.get("geladen"),
+                "tot": tot,
                 # Ohne Halter kann nicht gewechselt werden (etwa in Tests, die
                 # einen echten Classifier einsetzen). Das ehrlich sagen, statt
                 # einen Umschalter zu zeigen, der nichts tut.
                 "umschaltbar": hasattr(classifier, "wechsle"),
             }
         except Exception:  # noqa: BLE001
-            return {"key": "", "label": "", "anzahl": 0, "umschaltbar": False}
+            return {"key": "", "label": "", "anzahl": 0, "umschaltbar": False,
+                    "zustand": "offen", "tot": 0}
 
     @app.get("/api/ai/targets")
     def api_ai_targets():
-        """Alle Rechenorte dieser Installation, samt dem laufenden."""
+        """Alle Rechenorte dieser Installation, samt dem laufenden — und was
+        jeder gerade MACHT.
+
+        🔴 Ein Name ist kein Zustand. Vorher nannten die Knoepfe nur, wie ein
+        Ziel heisst; ob dort etwas antwortet, erfuhr man erst, wenn ein
+        Dokument darauf scheiterte. Die Zustaende werden hier gemessen, nicht
+        aus der Konfiguration geschlossen — nebeneinander, mit kurzer
+        Zeitgrenze, damit ein toter Rechner die Seite nicht aufhaelt.
+        """
+        from .. import ai_targets as _t
         liste, key = _ai_ziele_jetzt()
+        lage = _t.zustaende(liste)
+        raus = []
+        for ziel in liste:
+            d = ziel.as_dict()
+            d["state"] = lage.get(ziel.key) or {"zustand": _t.ZUSTAND_OFFEN}
+            raus.append(d)
         return {
             "active": key,
             "switchable": hasattr(classifier, "wechsle"),
-            "targets": [t.as_dict() for t in liste],
+            "targets": raus,
         }
+
+    @app.post("/api/ai/target/wake")
+    def api_ai_target_wake(payload: dict):
+        """Das Modell eines Ziels in den Speicher holen — ohne einzuordnen.
+
+        🔑 Ein kaltes Modell kostet rund 30 Sekunden zusaetzlich auf die erste
+        Anfrage. Wer gleich ein Dokument durchschicken will, weckt vorher.
+        """
+        from .. import ai_targets as _t
+        key = str((payload or {}).get("key") or "").strip()
+        liste, _ = _ai_ziele_jetzt()
+        ziel = next((t for t in liste if t.key == key), None)
+        if ziel is None:
+            raise HTTPException(404, f"unknown target: {key}")
+        ergebnis = _t.aufwecken(ziel)
+        if not ergebnis.get("ok"):
+            raise HTTPException(502, ergebnis.get("grund") or "wake failed")
+        return {"ok": True, "state": _t.zustand(ziel)}
+
+    @app.post("/api/ai/target/pull")
+    def api_ai_target_pull(payload: dict):
+        """Das fehlende Modell auf den Zielrechner holen.
+
+        🔴 Das dauert Minuten bis Stunden. Es laeuft deshalb in einem eigenen
+        Faden UND steht im Werkregister — sonst sagt die Startseite „aktuell
+        laeuft nichts", waehrend mehrere Gigabyte ueber die Leitung gehen.
+        """
+        import threading
+        from .. import activity as _activity, ai_targets as _t
+        key = str((payload or {}).get("key") or "").strip()
+        liste, _ = _ai_ziele_jetzt()
+        ziel = next((t for t in liste if t.key == key), None)
+        if ziel is None:
+            raise HTTPException(404, f"unknown target: {key}")
+        marke = f"{ziel.model} → {ziel.label or ziel.key}"
+        laufend = any(w.get("name") == marke
+                      for w in _activity.work_snapshot())
+        if laufend:
+            return {"ok": True, "schon_dabei": True, "name": marke}
+
+        def _holen():
+            _activity.work_begin(marke)
+            _activity.work_stage(marke, _activity.STAGE_MODEL)
+            try:
+                ergebnis = _t.modell_holen(ziel)
+                if ergebnis.get("ok"):
+                    logger.info("Modell %s auf %s geholt", ziel.model, ziel.key)
+                else:
+                    logger.error("Modell %s auf %s: %s", ziel.model, ziel.key,
+                                 ergebnis.get("grund"))
+            finally:
+                _activity.work_end(marke)
+
+        threading.Thread(target=_holen, daemon=True,
+                         name="modell-holen").start()
+        return {"ok": True, "schon_dabei": False, "name": marke}
 
     @app.post("/api/ai/target")
     def api_ai_target(payload: dict):
@@ -4208,6 +4294,7 @@ def create_app(
             "event_bulk_done":   n.event_bulk_done,
             "event_sync_failed": n.event_sync_failed,
             "event_deadline":    n.event_deadline,
+            "event_ai_down":     n.event_ai_down,
             "telegram_enabled":  n.telegram_enabled,
             "telegram_chat_id":  n.telegram_chat_id,
             # Tell the UI whether a token is already on disk without
@@ -4238,6 +4325,7 @@ def create_app(
             event_bulk_done=payload.get("event_bulk_done"),
             event_sync_failed=payload.get("event_sync_failed"),
             event_deadline=payload.get("event_deadline"),
+            event_ai_down=payload.get("event_ai_down"),
             telegram_enabled=payload.get("telegram_enabled"),
             telegram_chat_id=payload.get("telegram_chat_id"),
             telegram_bot_token=(payload.get("telegram_bot_token") or None),

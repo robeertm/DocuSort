@@ -8,6 +8,8 @@ Events the rest of the code can fire:
   - ``doc_review``  — a document landed in the review queue (low
                        confidence or extraction couldn't run).
   - ``doc_failed``  — classification raised an exception.
+  - ``ai_down``     — a named compute target stopped answering (or came
+    back). Only on a CHANGE, never on every check.
   - ``doc_filed``   — a document was filed successfully (off by default;
                        opt-in because it's noisy).
   - ``bulk_done``   — a background job (analyze-all, retry-review,
@@ -384,6 +386,7 @@ def configure(settings) -> CompositeDispatcher:
         "bulk_done":   bool(getattr(n, "event_bulk_done",   True)),
         "sync_failed": bool(getattr(n, "event_sync_failed", True)),
         "deadline":    bool(getattr(n, "event_deadline",    True)),
+        "ai_down":     bool(getattr(n, "event_ai_down",     True)),
     }
 
     with _dispatcher_lock:

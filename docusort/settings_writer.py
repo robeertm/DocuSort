@@ -209,6 +209,7 @@ def update_notifications(
     event_bulk_done: bool | None = None,
     event_sync_failed: bool | None = None,
     event_deadline: bool | None = None,
+    event_ai_down: bool | None = None,
     telegram_enabled: bool | None = None,
     telegram_chat_id: str | None = None,
     telegram_bot_token: str | None = None,   # → secrets.yaml
@@ -235,6 +236,7 @@ def update_notifications(
         ("event_bulk_done",  event_bulk_done),
         ("event_sync_failed", event_sync_failed),
         ("event_deadline",   event_deadline),
+        ("event_ai_down",    event_ai_down),
         ("telegram_enabled", telegram_enabled),
         ("email_enabled",    email_enabled),
         ("smtp_starttls",    smtp_starttls),

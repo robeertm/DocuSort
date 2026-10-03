@@ -612,6 +612,7 @@
           <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_bulk_done"  class="accent-cyan-400"> {{ t('settings.notif.ev.bulk_done') }}</label>
           <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_sync_failed" class="accent-cyan-400"> {{ t('settings.notif.ev.sync_failed') }}</label>
           <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_deadline"   class="accent-cyan-400"> {{ t('settings.notif.ev.deadline') }}</label>
+          <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_ai_down"    class="accent-cyan-400"> {{ t('settings.notif.ev.ai_down') }}</label>
           <label class="inline-flex items-center gap-2"><input type="checkbox" x-model="form.event_doc_filed"  class="accent-cyan-400"> {{ t('settings.notif.ev.doc_filed') }}</label>
         </div>
       </div>
@@ -1228,6 +1229,7 @@ function notificationsSettings() {
       event_bulk_done:   true,
       event_sync_failed: true,
       event_deadline:    true,
+      event_ai_down:     true,
       telegram_enabled:  false,
       telegram_chat_id:  '',
       telegram_bot_token:'',

@@ -168,6 +168,200 @@ def pick_model(models: list) -> str:
     return usable[0] if usable else ""
 
 
+# --------------------------------------------------------------- hardware
+# "und wenn die hardware es nicht kann muss das auch klar kommuniziert werden"
+#
+# 🔴 A LANGUAGE MODEL THAT DOES NOT FIT IS NOT A SLOW MODEL, IT IS A BROKEN
+#    ONE. Without enough memory the system starts swapping and a single
+#    document takes hours, or the server is killed outright — and from the
+#    outside that looks like DocuSort being broken.
+#
+# 🔑 Measured, never assumed, and on every platform the same three questions:
+#    how much memory, how many cores, is there a GPU. The answer decides which
+#    model is suggested, and it is SAID OUT LOUD either way.
+
+MIN_GB_7B = 8.0      # a 7B model at Q4 occupies ~5 GB plus room to work
+MIN_GB_3B = 4.5      # a 3B model at Q4 occupies ~2 GB
+MIN_CORES = 4        # fewer than this and even a 3B model is painful on CPU
+
+
+def _ram_gb() -> float:
+    """Total memory in GB. 🔴 Returns 0.0 when it cannot be measured — and
+    then nothing is claimed about it, rather than a guess being printed."""
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"],
+                                          text=True).strip()
+            return int(out) / (1024 ** 3)
+        if system == "Linux":
+            with open("/proc/meminfo", "r") as fh:
+                for zeile in fh:
+                    if zeile.startswith("MemTotal:"):
+                        return int(zeile.split()[1]) * 1024 / (1024 ** 3)
+        if system == "Windows":
+            import ctypes
+
+            class _MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            st = _MS()
+            st.dwLength = ctypes.sizeof(_MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
+            return st.ullTotalPhys / (1024 ** 3)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _gpu() -> str:
+    """A name when there is a usable GPU, "" when there is none, and "?" when
+    the question could not be answered."""
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            # Apple Silicon shares memory with the GPU and Ollama uses Metal.
+            if platform.machine() in ("arm64", "aarch64"):
+                return "Apple Silicon (Metal)"
+            return ""
+        out = subprocess.run(["nvidia-smi", "--query-gpu=name",
+                              "--format=csv,noheader"],
+                             capture_output=True, text=True, timeout=6)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip().splitlines()[0]
+        if system == "Linux":
+            lspci = subprocess.run(["lspci"], capture_output=True, text=True,
+                                   timeout=6)
+            if lspci.returncode == 0:
+                for z in lspci.stdout.splitlines():
+                    if "VGA" in z and ("AMD" in z or "NVIDIA" in z):
+                        return z.split(":")[-1].strip()
+        return ""
+    except FileNotFoundError:
+        return ""
+    except Exception:
+        return "?"
+
+
+def hardware_check() -> dict:
+    """Measure the machine and say plainly what it can do.
+
+    Returns {ram, cores, gpu, model, verdict}. `model` is what this machine
+    should actually run; `verdict` is one of ok / small / tight / no.
+    """
+    ram = _ram_gb()
+    cores = os.cpu_count() or 0
+    gpu = _gpu()
+
+    step("Checking what this machine can do")
+    info("Memory: %s" % ("%.1f GB" % ram if ram else "could not be measured"))
+    info("Cores:  %s" % (cores or "could not be measured"))
+    info("GPU:    %s" % (gpu if gpu and gpu != "?" else
+                         ("could not be determined" if gpu == "?"
+                          else "none — the CPU does the work")))
+
+    # 🔴 Unmeasurable is NOT the same as insufficient. When the numbers could
+    #    not be read, nothing is claimed and the default is used — refusing to
+    #    continue on a failed measurement would be worse than continuing.
+    if not ram:
+        warn("Could not measure memory; continuing with the default model.")
+        return {"ram": 0, "cores": cores, "gpu": gpu,
+                "model": DEFAULT_MODEL, "verdict": "unknown"}
+
+    if ram < MIN_GB_3B:
+        print("")
+        warn("%.1f GB of memory is not enough to run a language model here."
+             % ram)
+        info("Even the small model needs about %.1f GB. What you can do:"
+             % MIN_GB_3B)
+        info("  · point DocuSort at another machine on your network that has")
+        info("    Ollama (Settings → AI), or")
+        info("  · use a cloud provider (Settings → AI), or")
+        info("  · add memory to this machine.")
+        return {"ram": ram, "cores": cores, "gpu": gpu,
+                "model": "", "verdict": "no"}
+
+    if ram < MIN_GB_7B:
+        warn("%.1f GB is enough for the small model, not for the recommended "
+             "one." % ram)
+        info("Using %s instead of %s." % (SMALL_MODEL, DEFAULT_MODEL))
+        info("It is quicker but files documents less accurately — measured on "
+             "a real invoice, the small model picked the wrong folder where "
+             "the larger one got it right.")
+        verdict, modell = "small", SMALL_MODEL
+    else:
+        good("Enough memory for the recommended model (%s)." % DEFAULT_MODEL)
+        verdict, modell = "ok", DEFAULT_MODEL
+
+    if not gpu and cores and cores < MIN_CORES:
+        warn("%d cores and no GPU — expect several minutes per document."
+             % cores)
+        info("That is workable for a few documents a day, not for a bulk "
+             "import. DocuSort can use a second machine for that; you set "
+             "them up under Settings → AI.")
+        verdict = "tight"
+    elif not gpu:
+        info("No GPU: the CPU does the work. Expect minutes per document, "
+             "not seconds. This file measures it for real further down.")
+    return {"ram": ram, "cores": cores, "gpu": gpu,
+            "model": modell, "verdict": verdict}
+
+
+def speed_check(base: str, model: str) -> None:
+    """Measure what a document will actually cost HERE.
+
+    🔴 An estimate from core counts would be a guess. Ollama reports the real
+    figures for every answer, so the machine is asked instead: how fast did it
+    read, how fast did it write. DocuSort's own prompt carries all categories
+    and runs about 2000 tokens, which is what the estimate is based on.
+    """
+    step("Measuring how fast this machine answers")
+    try:
+        antwort = post(base + "/api/generate",
+                       {"model": model, "prompt": "Reply with the word ok.",
+                        "stream": False, "keep_alive": -1},
+                       timeout=VERIFY_WAIT)
+    except Exception as exc:
+        return warn("Could not measure: %s" % detail(exc))
+    try:
+        lesen = antwort.get("prompt_eval_count") or 0
+        lese_ns = antwort.get("prompt_eval_duration") or 0
+        schreiben = antwort.get("eval_count") or 0
+        schreib_ns = antwort.get("eval_duration") or 0
+        lese_rate = lesen / (lese_ns / 1e9) if lese_ns else 0
+        schreib_rate = schreiben / (schreib_ns / 1e9) if schreib_ns else 0
+    except Exception:
+        return warn("The server did not report timings.")
+    if not lese_rate or not schreib_rate:
+        return warn("The server did not report timings.")
+
+    info("Reading: %.0f tokens/s   ·   Writing: %.0f tokens/s"
+         % (lese_rate, schreib_rate))
+    # A DocuSort classification: ~2000 tokens in, ~120 out.
+    sekunden = 2000 / lese_rate + 120 / schreib_rate
+    if sekunden < 20:
+        good("A document will take about %.0f seconds here." % sekunden)
+    elif sekunden < 90:
+        good("A document will take about %.0f seconds here." % sekunden)
+        info("Fine for everyday use.")
+    elif sekunden < 600:
+        warn("A document will take about %.0f minutes here." % (sekunden / 60))
+        info("Workable for a few documents a day. For a bulk import of a few "
+             "hundred, this machine will run for many hours — DocuSort can "
+             "send those to a second machine instead (Settings → AI).")
+    else:
+        warn("A document will take roughly %.0f minutes here." % (sekunden / 60))
+        info("That is too slow for regular use. Either point DocuSort at a "
+             "faster machine or at a cloud provider (Settings → AI).")
+
+
 def install_ollama() -> None:
     if have("ollama"):
         return good("Ollama is already installed.")
@@ -577,6 +771,83 @@ def serve(bind: str) -> bool:
     return False
 
 
+AGENT_LABEL = "com.docusort.ollama"
+
+
+def _launchagent_darwin(value: str) -> None:
+    """Start Ollama at login and keep it running — with its environment.
+
+    Writes ~/Library/LaunchAgents/<label>.plist. Nothing is written outside
+    the user's own home, and nothing needs administrator rights.
+    """
+    import plistlib
+    pfad_ollama = shutil.which("ollama") or "/usr/local/bin/ollama"
+    ziel = os.path.expanduser(
+        "~/Library/LaunchAgents/%s.plist" % AGENT_LABEL)
+    plist = {
+        "Label": AGENT_LABEL,
+        # 🔑 The FULL path: a LaunchAgent inherits no PATH from any shell.
+        "ProgramArguments": [pfad_ollama, "serve"],
+        "EnvironmentVariables": {
+            "OLLAMA_HOST": value,
+            # Keep the model resident: reloading it costs about 30 seconds on
+            # top of every request after an idle period.
+            "OLLAMA_KEEP_ALIVE": "-1",
+        },
+        "RunAtLoad": True,
+        # The difference between "running because I started it today" and
+        # "running".
+        "KeepAlive": True,
+        "StandardOutPath": "/tmp/ollama.log",
+        "StandardErrorPath": "/tmp/ollama.err",
+    }
+    try:
+        os.makedirs(os.path.dirname(ziel), exist_ok=True)
+        with open(ziel, "wb") as fh:
+            plistlib.dump(plist, fh)
+    except Exception as exc:
+        warn("Could not write the startup item: %s" % exc)
+        info("Ollama will keep working until you log out.")
+        return
+    # Reload it, so an older copy does not keep the port.
+    subprocess.run(["launchctl", "unload", ziel],
+                   capture_output=True)
+    # 🔴 An Ollama started by hand holds port 11434 and the agent would fail
+    #    silently. The one we are replacing is ours to stop.
+    subprocess.run(["pkill", "-f", "ollama serve"], capture_output=True)
+    time.sleep(1)
+    r = subprocess.run(["launchctl", "load", "-w", ziel], capture_output=True,
+                       text=True)
+    if r.returncode != 0:
+        warn("Could not enable the startup item: %s"
+             % (r.stderr or "").strip()[:200])
+        return
+    good("Ollama now starts at login and restarts itself if it stops.")
+    info("Listening on %s. Startup item: %s" % (value, ziel))
+
+
+def _neustart_windows() -> None:
+    """Restart Ollama so it picks up the new OLLAMA_HOST."""
+    try:
+        subprocess.run(["taskkill", "/IM", "ollama.exe", "/F"],
+                       capture_output=True)
+        subprocess.run(["taskkill", "/IM", "ollama app.exe", "/F"],
+                       capture_output=True)
+        time.sleep(2)
+        pfad = shutil.which("ollama")
+        if pfad:
+            subprocess.Popen([pfad, "serve"],
+                             creationflags=getattr(subprocess,
+                                                   "CREATE_NO_WINDOW", 0))
+            time.sleep(2)
+            good("Ollama restarted with the new setting.")
+        else:
+            info("Start Ollama again from the Start menu to apply it.")
+    except Exception as exc:
+        warn("Could not restart Ollama automatically: %s" % exc)
+        info("Quit Ollama in the system tray and start it again.")
+
+
 def bind_permanently(bind: str) -> None:
     """Make the bind address survive a restart. Every system has its own way,
     and none of them is `ollama serve` — on macOS the menu-bar app wins, on
@@ -584,13 +855,18 @@ def bind_permanently(bind: str) -> None:
     system = platform.system()
     value = "%s:%d" % (bind, OLLAMA_PORT)
     if system == "Darwin":
-        try:
-            subprocess.check_call(["launchctl", "setenv", "OLLAMA_HOST", value])
-            good("OLLAMA_HOST=%s set for this login session." % value)
-            info("To keep it across reboots, add this to your shell profile:")
-            info("  launchctl setenv OLLAMA_HOST %s" % value)
-        except Exception as exc:
-            warn("Could not set OLLAMA_HOST: %s" % exc)
+        # 🔴 `launchctl setenv` ALONE LASTS UNTIL THE NEXT REBOOT, and the old
+        #    version of this file said so and then handed the problem to the
+        #    user: "add this to your shell profile". Nobody does. The result,
+        #    measured on a real machine: after a restart Ollama was not running
+        #    at all, and when started by hand it listened on 127.0.0.1 only —
+        #    so DocuSort on another box could not reach it, and the message it
+        #    showed was "not reachable", which says nothing about why.
+        #
+        # 🔑 A LaunchAgent answers both halves at once: it starts Ollama at
+        #    login, restarts it if it dies, and carries OLLAMA_HOST with it so
+        #    the setting cannot drift away from the process it belongs to.
+        _launchagent_darwin(value)
     elif system == "Linux":
         # A service is set up and restarted in `serve()` — nothing to say here.
         # Without one, Ollama is started by hand and there is nothing to make
@@ -602,9 +878,17 @@ def bind_permanently(bind: str) -> None:
             subprocess.check_call(["setx", "OLLAMA_HOST", value],
                                   stdout=subprocess.DEVNULL)
             good("OLLAMA_HOST=%s stored for your user account." % value)
-            info("Quit Ollama in the system tray and start it again to apply it.")
         except Exception as exc:
-            warn("Could not store OLLAMA_HOST: %s" % exc)
+            return warn("Could not store OLLAMA_HOST: %s" % exc)
+        # 🔴 `setx` writes the value for FUTURE processes. The Ollama already
+        #    running in the tray keeps the old one, so without this the setting
+        #    looks applied and nothing changes until the next reboot — the kind
+        #    of "it says it worked" that costs an evening.
+        _neustart_windows()
+        # The Windows installer registers Ollama to start with the account, so
+        # there is nothing further to make permanent. Said out loud rather than
+        # left for the reader to wonder about.
+        info("Ollama starts with your account; the setting is kept.")
 
 
 def pull(model: str) -> bool:
@@ -693,7 +977,16 @@ def main() -> int:
         bind, visible = "0.0.0.0", mine
         info("DocuSort runs elsewhere; it will reach this machine at %s." % mine)
 
-    # 3. Ollama
+    # 3. What can this machine actually do?
+    # 🔴 BEFORE installing anything. Somebody whose machine cannot run a model
+    #    should learn that before several gigabytes come down the line, not
+    #    after. And they should be told what to do instead.
+    hw = hardware_check()
+    if hw["verdict"] == "no":
+        stop("This machine cannot run a local model. Nothing was installed.",
+             code=0)
+
+    # 4. Ollama
     install_ollama()
 
     step("Checking Ollama")
@@ -780,7 +1073,11 @@ def main() -> int:
         good("Ollama answers. No model on it yet — fetching one now.")
 
     # 4. Model — take what is already there before downloading gigabytes.
-    model = a.model.strip() or pick_model(modelle) or DEFAULT_MODEL
+    # 🔑 The measurement decides, not a fixed default: on a machine with
+    #    little memory the recommended model would swap and take hours.
+    #    An explicit --model always wins — the person asking knows their box.
+    model = (a.model.strip() or pick_model(modelle)
+             or hw.get("model") or DEFAULT_MODEL)
     if model not in modelle:
         if not pull(model):
             if model != SMALL_MODEL and ask_yes_no(
@@ -794,7 +1091,13 @@ def main() -> int:
     else:
         good("Model %s is already there." % model)
 
-    # 5. Tell DocuSort — and let DOCUSORT say whether it works.
+    # Measure what a document really costs HERE, now that the model is there.
+    # 🔑 A number from the machine itself beats any estimate from core counts,
+    #    and it is the one thing that tells somebody whether this is going to
+    #    work for them before they import three hundred documents.
+    speed_check("http://127.0.0.1:%d" % OLLAMA_PORT, model)
+
+    # 6. Tell DocuSort — and let DOCUSORT say whether it works.
     step("Telling DocuSort, and asking it to try the model")
     info("The first answer loads the model into memory — this can take a minute.")
     try:
