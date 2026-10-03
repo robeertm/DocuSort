@@ -60,6 +60,10 @@ class AISettings:
     base_url: str = ""           # only used by openai_compat (Ollama, Groq, ...)
     max_text_chars: int = 12000
     min_confidence: float = 0.65
+    # 🔑 0 = KEINE ZEITGRENZE. Bei einem lokalen Modell kostet Zeit nichts
+    # ausser Zeit, und ein Abbruch kurz vor der Antwort wirft die ganze
+    # Rechenzeit weg. Bei einem Anbieter in der Wolke sollte hier eine echte
+    # Zahl stehen — dort kostet eine haengende Anfrage Geld.
     timeout_seconds: int = 60
     # Output-token cap for a single classification. The classifier only
     # ever emits a tiny JSON object, so a few hundred tokens is plenty.

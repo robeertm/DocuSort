@@ -88,7 +88,14 @@
            :class="ai.restartOk ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
            x-text="ai.restartMessage"></div>
       <div class="ml-auto flex gap-2">
-        <button type="button" @click="restartService()"
+        {# 🔴 Der Knopf stand immer da, auch wenn gar nichts neu zu starten war
+           — und daneben ein Speichern-Knopf, der frueher IMMER „Neustart
+           noetig" meldete. Seit 0.84.0 schaltet das Speichern selbst um; der
+           Knopf erscheint nur noch, wenn die Antwort wirklich sagt, dass einer
+           aussteht. Ein Knopf, den man nie braucht, laesst einen zweifeln, ob
+           man ihn nicht doch braucht. #}
+        <button type="button" @click="restartService()" x-show="ai.restartHint"
+                x-cloak
                 :disabled="ai.restarting"
                 :class="ai.restartHint
                     ? 'rounded-xl px-4 py-2 text-sm font-medium border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-50'
@@ -128,47 +135,23 @@
       </div>
       <p class="text-ink-400 text-sm mb-4">{{ t('settings.local_ai.subtitle') }}</p>
 
-      <div class="flex items-center gap-3 flex-wrap mb-1">
-        <button type="button" @click="search()" :disabled="searching"
-                class="rounded-xl px-4 py-2 text-sm font-medium border border-ink-700
-                       hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed">
-          <span x-show="!searching">🔍 {{ t('settings.local_ai.search') }}</span>
-          <span x-show="searching" x-cloak>{{ t('settings.local_ai.searching') }}</span>
-        </button>
-        <span class="text-xs text-ink-500" x-show="searched && !finds.length" x-cloak
-              x-text="tr('settings.local_ai.nothing')"></span>
-      </div>
-
-      <!-- Every place DocuSort can reach one. Usually exactly one. -->
-      <template x-for="(f, i) in finds" :key="f.url">
-        <div class="mt-4 rounded-xl bg-ink-900/40 border border-ink-700 p-3
-                    flex items-end gap-3 flex-wrap">
-          <div class="grow min-w-[12rem]">
-            <label class="block text-xs text-ink-500 mb-1">{{ t('settings.local_ai.address') }}</label>
-            <div class="font-mono text-sm break-all" x-text="f.url"></div>
-          </div>
-          <div>
-            <label class="block text-xs text-ink-500 mb-1">{{ t('settings.local_ai.model') }}</label>
-            <select x-model="f.chosen"
-                    class="rounded-lg bg-ink-900/60 border border-ink-700 px-3 py-1.5 text-sm font-mono">
-              <template x-for="m in f.models" :key="m">
-                <option :value="m" x-text="m"></option>
-              </template>
-            </select>
-          </div>
-          <button type="button" @click="use(f)" :disabled="applying || !f.chosen"
-                  class="rounded-xl px-4 py-2 text-sm font-medium border border-cyan-500/40
-                         bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20
-                         disabled:opacity-50 disabled:cursor-not-allowed">
-            <span x-show="!applying">{{ t('settings.local_ai.use') }}</span>
-            <span x-show="applying" x-cloak>{{ t('setup.saving') }}</span>
-          </button>
-        </div>
-      </template>
-
-      <div x-show="message" x-cloak class="mt-4 text-xs rounded-lg px-3 py-2"
-           :class="ok ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'"
-           x-text="message"></div>
+      {# 🔴 HIER STAND EINE ZWEITE MODELLSUCHE.
+         Sie konnte genau einen Rechner setzen, ueberschrieb damit die
+         Grundeinstellung und verlangte einen Neustart. Auf der Startseite
+         steht seit 0.83.0 dieselbe Suche — nur dass sie MEHRERE Rechner
+         verwalten kann, ohne Neustart umschaltet und den Zustand jedes
+         Rechners anzeigt. Zwei Wege fuer dieselbe Sache, von denen einer
+         schlechter ist, sind keine Auswahl: dann weiss niemand mehr, welcher
+         der richtige war.
+         Was hier BLEIBT, ist das, wofuer es keinen zweiten Ort gibt: der
+         Anbieter samt Schluessel (oben, auch fuer die Wolke) und der
+         Einrichter fuer einen Rechner, auf dem noch gar kein Ollama laeuft. #}
+      <a href="/" class="inline-flex items-center gap-2 rounded-xl px-4 py-2
+                         text-sm font-medium border border-cyan-500/40
+                         bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">
+        🖥 {{ t('settings.local_ai.manage_on_start') }}
+      </a>
+      <p class="text-xs text-ink-500 mt-2">{{ t('settings.local_ai.manage_hint') }}</p>
 
       <!-- For the install that has no Ollama at all. -->
       <div class="mt-6 rounded-xl bg-ink-900/40 border border-cyan-500/20 p-4">

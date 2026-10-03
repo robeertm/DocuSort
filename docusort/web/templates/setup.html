@@ -83,6 +83,47 @@
                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm font-mono
                       focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
         <div class="text-xs text-ink-500 mt-1">{{ t('setup.step_ai.base_url_hint') }}</div>
+
+        {# 🔴 HIER STAND NUR EIN LEERES FELD. Die Einrichtung verlangte vom
+           Benutzer eine Adresse, die er im Zweifel nicht kennt — und das ist
+           der ALLERERSTE Schritt eines frisch installierten DocuSort. Ein
+           Knopf, der nachsieht, ist genau das, was an dieser Stelle fehlte.
+           Er fragt dieselben Adressen wie die Startseite: die, die sich
+           ohnehin zu erkennen geben, darunter der Rechner, an dem gerade
+           jemand sitzt. #}
+        <div class="mt-3">
+          <button type="button" @click="sucheModelle()" :disabled="sucht"
+                  class="rounded-xl px-4 py-2 text-sm font-medium border border-cyan-500/40
+                         bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20
+                         disabled:opacity-50 disabled:cursor-wait">
+            <span x-show="!sucht">🔍 {{ t('setup.step_ai.find') }}</span>
+            <span x-show="sucht" x-cloak>{{ t('setup.step_ai.finding') }}</span>
+          </button>
+          <button type="button" @click="sucheModelle(true)" :disabled="sucht"
+                  class="rounded-xl px-4 py-2 text-sm font-medium border border-ink-700
+                         text-ink-300 hover:bg-ink-800 ml-2
+                         disabled:opacity-50 disabled:cursor-wait">
+            {{ t('setup.step_ai.find_scan') }}
+          </button>
+          <span class="text-xs text-ink-500 ml-2" x-show="suchMeldung" x-cloak
+                x-text="suchMeldung"></span>
+        </div>
+
+        <div x-show="funde.length" x-cloak class="mt-3 space-y-2">
+          <template x-for="f in funde" :key="f.url">
+            <button type="button" @click="nimmFund(f)"
+                    class="w-full text-left rounded-xl border px-3 py-2 text-sm
+                           hover:bg-cyan-500/10"
+                    :class="baseUrl === f.url + '/v1'
+                      ? 'border-cyan-500/60 bg-cyan-500/10'
+                      : 'border-ink-700 bg-ink-900/40'">
+              <span class="font-mono" x-text="f.url"></span>
+              <span class="text-ink-400"
+                    x-text="' · ' + (f.suggested || '—') + ' · '
+                            + f.models.length + ' ' + tr('setup.step_ai.models')"></span>
+            </button>
+          </template>
+        </div>
       </div>
     </template>
 
@@ -412,6 +453,33 @@ function setupWizard() {
 
     // Step 1
     lang: '{{ lang }}',
+    /* The very first step of a fresh install asked for an address the user
+       may well not know. This looks for one instead — the same addresses the
+       start page asks: the ones that announce themselves anyway. */
+    async sucheModelle(scan) {
+      this.sucht = true; this.suchMeldung = '';
+      try {
+        const r = await fetch('/api/local-ai/probe'
+                              + (scan ? '?scan=1' : ''));
+        const d = await r.json().catch(() => ({}));
+        this.funde = (d.finds || []);
+        if (!this.funde.length) {
+          this.suchMeldung = tr('setup.step_ai.find_none');
+        } else if (this.funde.length === 1) {
+          /* Exactly one is the normal case — take it rather than making
+             somebody click a list of one. */
+          this.nimmFund(this.funde[0]);
+        }
+      } catch (e) {
+        this.suchMeldung = tr('setup.step_ai.find_none');
+      } finally { this.sucht = false; }
+    },
+    nimmFund(f) {
+      this.baseUrl = f.url.replace(/\/$/, '') + '/v1';
+      if (f.suggested) this.model = f.suggested;
+      this.suchMeldung = '';
+    },
+
     async selectLang(code) {
       this.lang = code;
       try {
@@ -430,6 +498,9 @@ function setupWizard() {
     provider: '{{ current_provider }}' || 'anthropic',
     model:    '{{ current_model }}'    || 'claude-haiku-4-5-20251001',
     baseUrl:  '{{ current_base_url }}' || '',
+    funde: [],
+    sucht: false,
+    suchMeldung: '',
     apiKey:   '',
     webHost:  '{{ web_host }}'         || '0.0.0.0',
     webPort:  {{ web_port }}           || 9876,

@@ -3532,7 +3532,7 @@ def create_app(
     # path is the openai_compat provider pointing at localhost:11434.
     # These two endpoints (probe + apply) make that a one-click setup.
     @app.get("/api/local-ai/probe")
-    def api_local_ai_probe(request: Request, url: str = ""):
+    def api_local_ai_probe(request: Request, url: str = "", scan: int = 0):
         """Where can DOCUSORT reach an Ollama?
 
         🔴 Asked from the server's side, never from the browser's. The browser
@@ -3545,6 +3545,17 @@ def create_app(
         client = request.client.host if request.client else ""
         configured = url.strip() or (settings.ai.base_url or "")
         finds = local_ai.discover(configured, client)
+        # 🔑 Der zweite, ausdrueckliche Schritt: das Netz absuchen. Ohne ihn
+        #    findet die Einrichtung nur Rechner, die sich ohnehin zu erkennen
+        #    geben — ein Windows-PC mit Grafikkarte irgendwo im Haus gehoert
+        #    nicht dazu. 🔴 Nie von allein: 254 Verbindungen in ein Netz sehen
+        #    von aussen aus wie ein Portscan.
+        if scan:
+            bekannt = {e["url"].rstrip("/") for e in finds}
+            for e in local_ai.scan_netz(client_ip=client):
+                if e["url"].rstrip("/") not in bekannt:
+                    finds.append(e)
+                    bekannt.add(e["url"].rstrip("/"))
         best = finds[0] if finds else None
         return {
             "finds": finds,
@@ -3579,9 +3590,75 @@ def create_app(
         settings.ai.provider = "openai_compat"
         settings.ai.model    = model
         settings.ai.base_url = base_url
-        return {"ok": True, "restart_required": True, "verified": ok,
+
+        # 🔴 HIER ENDETE DIESER WEG FRUEHER MIT `restart_required: True` — und
+        #    damit gab es ZWEI Welten, die dasselbe beschrieben: die
+        #    Grundeinstellung hier und die Rechenorte auf der Startseite. Wer
+        #    hier einen Rechner waehlte, sah ihn dort nicht, und umgekehrt.
+        #    „ich kann hier was einstellen und da auch, welches ist das
+        #    richtige" — genau das.
+        #
+        # 🔑 Es ist EIN Zustand mit zwei Ansichten: der hier gewaehlte Rechner
+        #    wird auch als Rechenort eingetragen (falls er noch nicht
+        #    dasteht) und sofort aktiv — ohne Neustart, denn der Halter kann
+        #    tauschen. Die Einstellungsseite ist damit der Weg fuer die ERSTE
+        #    Einrichtung, die Startseite der fuers taegliche Umschalten; beide
+        #    zeigen dieselbe Wahrheit.
+        from .. import ai_targets as _t
+        neu_aktiv, eingetragen = "", False
+        try:
+            vorhandene = [dict(r) for r in
+                          (getattr(settings.ai, "targets", None) or [])
+                          if isinstance(r, dict)]
+            schon = next(
+                (r for r in vorhandene
+                 if (r.get("base_url") or "").rstrip("/") == base_url.rstrip("/")),
+                None)
+            if schon is None and vorhandene:
+                # Nur ergaenzen, wenn der Benutzer ueberhaupt Rechenorte fuehrt.
+                # Wer keine hat, braucht keine — dann ist die Grundeinstellung
+                # die ganze Wahrheit und eine Liste mit einem Eintrag waere
+                # eine Auswahl ohne Wahl.
+                from urllib.parse import urlsplit
+                rechner = urlsplit(url).hostname or url
+                belegt = {r.get("key") for r in vorhandene}
+                schluessel, n = rechner, 2
+                while schluessel in belegt:
+                    schluessel = f"{rechner}-{n}"
+                    n += 1
+                vorhandene.append({"key": schluessel, "label": rechner,
+                                   "provider": "openai_compat", "model": model,
+                                   "base_url": base_url})
+                settings_writer.update_ai_targets(
+                    targets=vorhandene, config_dir=settings.config_dir)
+                settings.ai.targets = vorhandene
+                schon = vorhandene[-1]
+                eingetragen = True
+            elif schon is not None and schon.get("model") != model:
+                schon["model"] = model
+                settings_writer.update_ai_targets(
+                    targets=vorhandene, config_dir=settings.config_dir)
+                settings.ai.targets = vorhandene
+            if schon and hasattr(classifier, "wechsle"):
+                classifier.wechsle(schon["key"])
+                settings_writer.update_ai_active_target(
+                    key=schon["key"], config_dir=settings.config_dir)
+                settings.ai.active_target = schon["key"]
+                neu_aktiv = schon["key"]
+        except Exception as exc:  # noqa: BLE001
+            # 🔴 Das Speichern selbst ist schon passiert und gilt. Scheitert
+            #    nur das Umschalten, ist der alte Rechenort weiter aktiv — und
+            #    DANN stimmt „Neustart noetig" wieder, also sagen wir es.
+            logger.warning("Grundeinstellung gespeichert, Umschalten ging "
+                           "nicht: %s", exc)
+
+        # Ohne Halter (KI war noch gar nicht eingerichtet) greift die neue
+        # Einstellung erst beim naechsten Start — das ist dann die Wahrheit.
+        sofort = bool(neu_aktiv) or hasattr(classifier, "wechsle")
+        return {"ok": True, "restart_required": not sofort, "verified": ok,
                 "answer": said, "provider": "openai_compat",
-                "base_url": base_url, "model": model}
+                "base_url": base_url, "model": model,
+                "active": neu_aktiv, "added_target": eingetragen}
 
     # ------------------------------------------------- Rechenort umschalten
     # „ich brauche schnell das dokument in docusort dann will ich den mac
@@ -3810,7 +3887,13 @@ def create_app(
         gefunden = local_ai.discover(settings.ai.base_url or "", klient)
         bekannt = {e["url"].rstrip("/") for e in gefunden}
         if scan:
-            for e in local_ai.scan_netz():
+            # 🔴 Das Netz des BROWSERS, nicht das eigene: DocuSort läuft meist
+            #    in einem Container, dessen eigene Adresse im Docker-Netz liegt
+            #    (gemessen 172.26.0.2). Von dort „das eigene /24" zu scannen
+            #    durchsucht das Docker-Netz und findet darin das Gateway — den
+            #    eigenen Wirt, angezeigt als 172.26.0.1. Die Rechner im Haus
+            #    findet man so nie.
+            for e in local_ai.scan_netz(client_ip=klient):
                 if e["url"].rstrip("/") not in bekannt:
                     gefunden.append(e)
                     bekannt.add(e["url"].rstrip("/"))
@@ -4140,14 +4223,44 @@ def create_app(
             provider=provider, model=model, base_url=base_url,
             api_key=api_key, config_dir=settings.config_dir,
         )
-        # Mirror into the live AppSettings so the next request sees the new
-        # values without a restart for read-only purposes (the running
-        # classifier still references the old provider — we expose a
-        # "restart required" flag so the UI can prompt).
         settings.ai.provider = provider
         settings.ai.model    = model
         settings.ai.base_url = base_url
-        return {"ok": True, "restart_required": True}
+
+        # 🔑 Und jetzt auch wirklich umstellen. Frueher stand hier nur ein
+        #    Spiegel fuer lesende Zwecke und ein `restart_required: True` —
+        #    der laufende Klassifizierer behielt seinen alten Anbieter, bis
+        #    jemand den Dienst neu startete. Seit es den Halter gibt
+        #    (`ai_targets.ClassifierHandle`), ist das nicht mehr noetig, und
+        #    zwei verschiedene Antworten auf dieselbe Frage — hier Neustart,
+        #    auf der Startseite keiner — waeren genau die Art Widerspruch,
+        #    bei der niemand mehr weiss, was gilt.
+        #
+        # 🔴 Das abgeleitete Ziel beschreibt die Grundeinstellung. Nach dem
+        #    Schreiben ist das ein ANDERER Rechenort als vorher, also wird
+        #    genau darauf geschaltet.
+        sofort = False
+        try:
+            from .. import ai_targets as _t
+            if hasattr(classifier, "wechsle"):
+                liste = _t.ziele(settings, bridge_verbunden=False)
+                passend = next(
+                    (z for z in liste
+                     if z.provider == provider
+                     and (z.base_url or "").rstrip("/") == (base_url or "").rstrip("/")),
+                    None)
+                if passend is not None:
+                    classifier.wechsle(passend.key)
+                    settings_writer.update_ai_active_target(
+                        key=passend.key, config_dir=settings.config_dir)
+                    settings.ai.active_target = passend.key
+                    sofort = True
+        except Exception as exc:  # noqa: BLE001
+            # Gespeichert ist gespeichert; nur das sofortige Umstellen ging
+            # nicht — dann stimmt „Neustart noetig" wieder, und das sagen wir.
+            logger.warning("KI-Einstellung gespeichert, Umstellen ging nicht: %s",
+                           exc)
+        return {"ok": True, "restart_required": not sofort}
 
     # ------------------------------------------------------------- Local AI Bridge
     # The Mac client opens an outbound WebSocket to /api/llm-bridge/ws

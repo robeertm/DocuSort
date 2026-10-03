@@ -98,6 +98,19 @@ class OpenAICompatProvider(Provider):
         # when given (long extractions on a local Ollama can take
         # several minutes).
         request_timeout = timeout if timeout is not None else self.timeout
+        # 🔑 0 (oder weniger) HEISST: KEINE ZEITGRENZE — rechnen lassen.
+        #    Bei einem lokalen Modell kostet die Zeit nichts ausser Zeit, und
+        #    ein Abbruch kurz vor der Antwort wirft die GANZE Rechenzeit weg.
+        #    Gemessen auf einer Synology ohne Grafikkarte: ein Dokument lief
+        #    ueber zwoelf Minuten, und das war kein Fehler, sondern die
+        #    Geschwindigkeit dieser Maschine.
+        #
+        # 🔴 Das betrifft NUR das Warten auf die Antwort. Ist der Rechner gar
+        #    nicht da, scheitert schon der VERBINDUNGSAUFBAU, und der hat
+        #    seine eigene, kurze Grenze im Betriebssystem — es haengt also
+        #    nicht ewig an einem Rechner, den es nicht gibt.
+        if request_timeout is not None and request_timeout <= 0:
+            request_timeout = None
         body: dict[str, Any] = {
             "model": model,
             "max_tokens": max_output_tokens,

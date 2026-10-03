@@ -80,9 +80,14 @@ def build_provider(name: str, *, api_key: str, base_url: str = "",
         # den Boden an. Wer `openai_compat` gegen Groq oder Mistral benutzt
         # (schnell, in der Wolke), merkt davon nichts — eine Grenze, die nie
         # erreicht wird, kostet nichts.
+        # 🔑 `timeout_seconds: 0` heisst „rechnen lassen" und muss den Boden
+        #    UEBERLEBEN. `max(0*3, 600)` waere 600 gewesen — die Einstellung
+        #    haette nichts bewirkt, und das ist die schlimmste Art Einstellung:
+        #    eine, die aussieht, als taete sie etwas.
         return OpenAICompatProvider(
             api_key=api_key or "ollama", base_url=base_url,
-            timeout=max(timeout * 3, 600),
+            timeout=0 if timeout is not None and timeout <= 0
+                      else max(timeout * 3, 600),
         )
     if name == "bridge":
         from .bridge_provider import BridgeProvider
@@ -90,7 +95,9 @@ def build_provider(name: str, *, api_key: str, base_url: str = "",
         # local inference on a 7B model can take 30–90 s for a long
         # bank statement, and we don't want a clock check to kill a
         # call that's almost done.
-        return BridgeProvider(default_timeout=max(timeout * 3, 180))
+        return BridgeProvider(
+            default_timeout=0 if timeout is not None and timeout <= 0
+                              else max(timeout * 3, 180))
     raise ValueError(f"Unknown AI provider: {name!r}. Pick one of {PROVIDERS}")
 
 
