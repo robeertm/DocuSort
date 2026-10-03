@@ -314,11 +314,12 @@ def _ist_docker_netz(ip: str) -> bool:
 
     🔴 DAS IST DER UNTERSCHIED ZWISCHEN „mein Haus" UND „mein Container".
     DocuSort läuft meistens in einem Container, und dessen eigene Adresse ist
-    die des Docker-Netzes — gemessen: 172.26.0.2. Wer von dort „das eigene
+    die des Docker-Netzes (irgendwo in 172.16/12). Wer von dort „das eigene
     /24" absucht, durchsucht das Docker-Netz und findet darin genau eine
     Adresse: das Gateway, also den eigenen Wirt. Als Fund angezeigt heißt das
-    `172.26.0.1`, und die Frage des Benutzers lautete zu Recht: welches Gerät
-    soll das sein? Die Rechner im Haus findet man so NIE.
+    eine Adresse, die zu keinem Geraet im Haus passt — und die Frage des
+    Benutzers lautete zu Recht: welches Geraet soll das sein? Die Rechner im
+    Haus findet man so NIE.
     """
     teile = ip.split(".")
     if len(teile) != 4 or teile[0] != "172":

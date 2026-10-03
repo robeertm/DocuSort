@@ -3889,9 +3889,10 @@ def create_app(
         if scan:
             # 🔴 Das Netz des BROWSERS, nicht das eigene: DocuSort läuft meist
             #    in einem Container, dessen eigene Adresse im Docker-Netz liegt
-            #    (gemessen 172.26.0.2). Von dort „das eigene /24" zu scannen
+            #    (irgendwo in 172.16/12). Von dort „das eigene /24" zu scannen
             #    durchsucht das Docker-Netz und findet darin das Gateway — den
-            #    eigenen Wirt, angezeigt als 172.26.0.1. Die Rechner im Haus
+            #    eigenen Wirt, angezeigt als eine Adresse, die zu keinem
+            #    Geraet im Haus passt. Die Rechner im Haus
             #    findet man so nie.
             for e in local_ai.scan_netz(client_ip=klient):
                 if e["url"].rstrip("/") not in bekannt:
