@@ -422,6 +422,15 @@ def _build_user_message(text: str, max_chars: int) -> str:
     )
 
 
+# Die Felder, an denen eine Einordnung zu erkennen ist. Fehlen sie ALLE, war
+# die Antwort etwas anderes — und das ist ein Fehlschlag, kein Ergebnis.
+_EINORDNUNGS_FELDER = ("category", "sender", "subject", "confidence")
+
+
+def _ist_einordnung(data: dict[str, Any]) -> bool:
+    return any(k in data for k in _EINORDNUNGS_FELDER)
+
+
 def _parse_response(raw: str) -> dict[str, Any]:
     """Extract the first valid JSON object from the model's reply.
 
@@ -512,12 +521,20 @@ class Classifier:
         body = text
         pseudo = None
 
-        # User runs locally on Ollama — no per-token cost concern. We
-        # floor the text limit at 200k so that the configured value
-        # (default 12k) is treated as a minimum, never a hard cap.
-        # 200k is generous enough for any realistic single document
-        # while still bounding pathological OCR output.
-        user = _build_user_message(body, max(self.settings.max_text_chars, 200_000))
+        # 🔴 HIER STAND EIN BODEN VON 200 000 ZEICHEN, und die Begruendung war
+        #    die Kosten: lokal zahlt niemand pro Token, also schade mehr Text
+        #    nicht. Das uebersah das KONTEXTFENSTER. Gemessen am 03.10.2026 in
+        #    Ollamas eigenem Protokoll:
+        #        "truncating input prompt" limit=4098 prompt=15119 keep=4
+        #    Der Prompt wurde auf die LETZTEN 4098 Token gekuerzt — der
+        #    Systemteil mit den Kategorien und der Anweisung stand am ANFANG und
+        #    war damit weg. Mehr Text zu schicken, als hineinpasst, macht die
+        #    Einordnung nicht besser, sondern unmoeglich.
+        #    Jetzt gilt wieder der Regler `ai.max_text_chars` (Vorgabe 12 000).
+        #    Wer ein grosses Fenster hat, stellt ihn hoch; wer ein kleines hat,
+        #    runter. Und wenn es trotzdem nicht reicht, faellt das jetzt auf:
+        #    siehe `_ist_einordnung`.
+        user = _build_user_message(body, self.settings.max_text_chars)
         logger.debug("Calling %s model=%s, text_len=%d, pseudo=%s",
                      self.provider.name, self.settings.model, len(text),
                      bool(pseudo))
@@ -562,6 +579,23 @@ class Classifier:
                 raise
             try:
                 data = _parse_response(resp.raw_text)
+                # 🔴 Gueltiges JSON ist noch keine Einordnung. Gemessen am
+                #    03.10.2026: ein Steuerformular kam als sauberes JSON mit
+                #    name/taxIDNumber/earnings zurueck — das Modell hatte das
+                #    Dokument AUSGEWERTET statt eingeordnet, weil Ollama den
+                #    Prompt auf 4098 Token gekuerzt und dabei den Systemteil
+                #    verworfen hatte ("truncating input prompt … keep=4").
+                #    Jedes data.get(...) fiel danach auf seine Vorgabe zurueck,
+                #    und heraus kam ein zuversichtlich aussehendes
+                #    "Sonstiges / Unbekannt / 0.5" mit leerer Begruendung.
+                #    Ein Fehler, der als Befund durchgeht, ist schlimmer als ein
+                #    Absturz: hier wird er einer.
+                if not _ist_einordnung(data):
+                    raise ValueError(
+                        "Model answered with a different schema (keys: %s) — "
+                        "the classification instructions probably did not reach "
+                        "it; check the model's context window." %
+                        ", ".join(sorted(data)[:8]))
                 break
             except ValueError as exc:
                 last_exc = exc

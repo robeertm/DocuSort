@@ -7,6 +7,37 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.79.0] - 2026-10-03
+
+### Fixed
+
+**A reply that is not a classification is now a failure, not a result.** Three
+imported documents in a row were filed as *Sonstiges / Unbekannt / Dokument*
+with confidence 0.50 and an empty reasoning. Those are exactly the fallback
+values in `Classification(...)`, which is what you get when the parsed JSON
+carries none of the expected keys. The model had answered with perfectly valid
+JSON — of its own schema:
+
+    {"name": "...", "taxIDNumber": "...", "earnings": {...}, "childBenefits": 2728}
+
+It had *extracted* the tax form instead of classifying it, because it never saw
+the instruction to classify. Measured in Ollama's own log:
+
+    "truncating input prompt" limit=4098 prompt=15119 keep=4 new=4098
+
+The prompt was cut to its last 4098 tokens, and the system prompt — the
+categories, the schema, the instruction — sits at the front. Every
+`data.get(..., default)` then produced a confident-looking answer out of
+nothing. A fault that reads as a finding is worse than a crash; it is one now:
+the reply is rejected, the usual retry runs, and the document goes to review
+with the model's own key list in the reason.
+
+**The text limit works again.** The classifier floored it at 200 000
+characters, reasoning that a local model costs nothing per token. That ignored
+the context window: sending more than fits does not improve the answer, it
+removes the question. `ai.max_text_chars` (default 12 000) is the knob again —
+raise it for a large window, lower it for a small one.
+
 ## [0.78.1] - 2026-10-03
 
 ### Changed
