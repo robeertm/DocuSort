@@ -7,6 +7,30 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.86.6] - 2026-10-04
+
+### Fixed
+
+🔴 **A word in one field threw away the whole classification.** The
+instructions ask for `confidence` as a number between 0 and 1, but local models
+happily answer `"high"`, `"low"` or `"LO"` — and `float("high")` raises. The
+exception was caught upstream and the document was filed as *Sonstiges /
+Unbekannt / 0.00*, **even though category, sender and date were all there**.
+
+Measured while importing 128 documents: **11 of them**, one in twelve. A
+complete classification discarded over the spelling of a single field — and the
+least important one at that, since confidence only decides whether a human
+takes a second look.
+
+Words are now read as what they are: *approximately*. `high` lands **below**
+the auto-file threshold, so the document still goes to review — but with its
+category, its sender and its date. No number is invented that pretends the
+model gave one.
+
+Also normalised along the way: `85` and `"85"` now mean the same thing (85 %).
+The percent rule previously applied only to the string path, so the value
+depended on whether the model happened to put quotes around it.
+
 ## [0.86.5] - 2026-10-03
 
 ### Fixed

@@ -489,6 +489,67 @@ _LOCAL_PROVIDERS = ("openai_compat", "bridge")
 # the LLM picks for category stands.
 
 
+# ---------------------------------------------------------------- Zuversicht
+# 🔴 EIN WORT STATT EINER ZAHL WARF DIE GANZE EINORDNUNG WEG.
+#
+# Die Anweisung verlangt `confidence` als Zahl zwischen 0 und 1. Lokale Modelle
+# antworten aber gern mit `"high"`, `"low"` oder `"LO"` — und `float("high")`
+# wirft. Die Ausnahme fing die Verarbeitung ab und legte das Dokument als
+# „Sonstiges / Unbekannt / 0.00" ab, OBWOHL Kategorie, Absender und Datum
+# sauber dastanden. Gemessen am 03.10.2026 beim Import von 128 Dokumenten:
+# 11 Stueck, also jedes zwoelfte — eine vollstaendige Einordnung, weggeworfen
+# wegen der Schreibweise EINES Feldes.
+#
+# 🔑 Die Zuversicht ist die am wenigsten wichtige Angabe von allen: sie
+# entscheidet nur, ob ein Mensch nochmal draufschaut. Sie darf niemals die
+# Kategorie mitreissen.
+#
+# 🔴 WAS HIER NICHT PASSIERT: aus einem Wort eine Zahl ERFINDEN, die so tut,
+# als haette das Modell sie genannt. Ein Wort bedeutet „ungefaehr", und genau
+# das wird daraus — ein Wert UNTER der Schwelle, bei der DocuSort von selbst
+# ablegt. Das Dokument geht also zur Durchsicht, aber MIT seiner Kategorie,
+# seinem Absender und seinem Datum. Das ist die ehrliche Lesart: wir wissen,
+# WAS es ist, und wir wissen nicht, wie sicher sich das Modell war.
+_WORT_ZUVERSICHT = {
+    "high": 0.6, "hoch": 0.6, "sicher": 0.6, "certain": 0.6, "very high": 0.6,
+    "medium": 0.5, "mittel": 0.5, "moderate": 0.5, "unsure": 0.4,
+    "low": 0.3, "niedrig": 0.3, "gering": 0.3, "very low": 0.2,
+}
+
+
+def _zuversicht(roh: Any) -> float:
+    """Was das Modell zur Sicherheit gesagt hat, als Zahl zwischen 0 und 1.
+
+    🔴 Wirft NIE. Eine unlesbare Zuversicht ist kein Grund, eine gute
+    Einordnung zu verlieren — im Zweifel geht das Dokument zur Durchsicht.
+    """
+    if roh is None:
+        return 0.5
+    if isinstance(roh, bool):          # True/False ist keine Zuversicht
+        return 0.5
+    if isinstance(roh, (int, float)):
+        wert = float(roh)
+    else:
+        text = str(roh).strip().lower().rstrip("%").strip()
+        if text in _WORT_ZUVERSICHT:
+            return _WORT_ZUVERSICHT[text]
+        # „LO", „HI" und aehnliche Abkuerzungen ueber den Anfang erkennen.
+        for wort, wert in _WORT_ZUVERSICHT.items():
+            if len(text) >= 2 and wort.startswith(text):
+                return wert
+        try:
+            wert = float(text.replace(",", "."))
+        except (TypeError, ValueError):
+            return 0.5
+    # 🔴 „85" meint 85 %, nicht das 85-fache — und zwar EGAL, ob es als Zahl
+    #    oder als Zeichenkette kam. Stand diese Zeile nur im Zweig fuer Text,
+    #    ergab `"85"` 0,85 und `85` dagegen 1,0: dieselbe Angabe, zwei
+    #    Ergebnisse, je nachdem wie das Modell seine Anfuehrungszeichen setzt.
+    if wert > 1.0:
+        wert = wert / 100.0
+    return max(0.0, min(1.0, wert))
+
+
 class Classifier:
     def __init__(self, api_key: str, settings: AISettings,
                  categories: list[dict[str, Any]],
@@ -665,7 +726,7 @@ class Classifier:
             date=str(data.get("date", date.today().isoformat())).strip(),
             sender=str(data.get("sender", "")).strip() or "Unbekannt",
             subject=str(data.get("subject", "")).strip() or "Dokument",
-            confidence=float(data.get("confidence", 0.5)),
+            confidence=_zuversicht(data.get("confidence")),
             reasoning=str(data.get("reasoning", "")).strip(),
             input_tokens=resp.input_tokens,
             output_tokens=resp.output_tokens,
