@@ -7,7 +7,7 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
-## [0.86.4] - 2026-10-03
+## [0.86.5] - 2026-10-03
 
 ### Fixed
 
@@ -39,8 +39,14 @@ running.** Two defects at one box:
   now says what there always is in that moment: how much is waiting.
 - **The idle block was three times the height of a work row**, so during a
   batch import the box — and the whole page below it — resized every few
-  seconds. One container with a fixed minimum height now holds all three
-  states, and exactly one of them is ever shown.
+  seconds.
+
+One container now holds all three states and exactly one of them is ever
+shown. 🔴 A *minimum* height was not enough — it stops the box shrinking, not
+growing, and the pipeline runs up to four documents at once. The height is
+fixed at two rows and scrolls beyond that, so an empty box and a busy one are
+the same size. Two rows rather than one because the common case should not
+show a scrollbar.
 
 ## [0.86.3] - 2026-10-03
 
