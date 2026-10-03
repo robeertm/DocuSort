@@ -7,6 +7,26 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.86.2] - 2026-10-03
+
+### Fixed
+
+🔴 **With nothing measured yet, the order in the configuration file decided
+where a document went.** All machines start from the same neutral assumption,
+so `min()` simply took the first one in the list. Caught one minute after
+rolling 0.86.1 out: the first document went to the NAS instead of the laptop
+and took fourteen minutes instead of eleven seconds, because `nas` happens to
+be written above `mac`.
+
+The order of lines in a file says nothing about speed. The machine the user
+chose does. A tie is now broken in favour of the selected target, which at the
+very first document is the only hint that exists at all. A real measurement
+still wins over the hint — the preference decides ties, nothing more.
+
+🔑 This is the other half of the fix in 0.86.1. Remembering the timings helps
+from the *second* start onwards; on the first there is no file yet. Together
+they cover both.
+
 ## [0.86.1] - 2026-10-03
 
 ### Fixed
