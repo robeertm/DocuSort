@@ -363,7 +363,26 @@ def _eigene_adresse() -> str:
         return ""
 
 
-def _eigenes_netz(client_ip: str = "") -> tuple[str, str] | None:
+def _ist_tailnet(ip: str) -> bool:
+    """CGNAT-Bereich 100.64.0.0/10 — dort liegen Tailscale-Adressen.
+
+    🔴 Eine solche Adresse ist als Grundlage fuer eine Netzsuche untauglich:
+    sie beschreibt ein Overlay, in dem jeder Rechner allein steht, und sie
+    sagt nichts ueber das Haus. Wer DocuSort ueber Tailscale oeffnet, kommt
+    mit so einer Adresse an — und dann wurde 100.x abgesucht statt des
+    Hausnetzes, in dem die Rechner wirklich stehen.
+    """
+    teile = ip.split(".")
+    if len(teile) != 4 or teile[0] != "100":
+        return False
+    try:
+        return 64 <= int(teile[1]) <= 127
+    except ValueError:
+        return False
+
+
+def _eigenes_netz(client_ip: str = "",
+                  hinweise: list[str] | None = None) -> tuple[str, str] | None:
     """Welches /24 soll durchsucht werden, und welche Adresse ist die eigene.
 
     🔑 DIE ADRESSE DES BROWSERS ENTSCHEIDET. Wer die Seite offen hat, sitzt im
@@ -377,8 +396,27 @@ def _eigenes_netz(client_ip: str = "") -> tuple[str, str] | None:
     eigene = _eigene_adresse()
     kandidaten = []
     k = (client_ip or "").strip()
-    if k and not k.startswith("127.") and ":" not in k:
+    # 🔴 Die Adresse des Browsers ist die beste Auskunft — aber nur, wenn sie
+    #    aus einem echten Netz kommt. Ueber Tailscale geoeffnet kommt sie aus
+    #    100.64/10, und dann waere die Suche in einem Overlay unterwegs, in dem
+    #    jeder Rechner allein steht.
+    if (k and not k.startswith("127.") and ":" not in k
+            and not _ist_tailnet(k) and not _ist_docker_netz(k)):
         kandidaten.append(k)
+    # 🔑 Die schon eingetragenen Rechner verraten das Hausnetz. Wer
+    #    `http://10.0.0.5:11434/v1` als Ziel hat, hat ein 10.0.0.x-Netz — das
+    #    ist eine vorhandene Tatsache, keine Vermutung, und sie hilft genau
+    #    dann, wenn der Browser ueber einen Tunnel kommt.
+    from urllib.parse import urlsplit as _us
+    for roh in (hinweise or []):
+        try:
+            h = _us(roh if "//" in roh else "http://" + roh).hostname or ""
+        except ValueError:
+            continue
+        if (h and not h.startswith("127.") and ":" not in h
+                and not _ist_tailnet(h) and not _ist_docker_netz(h)
+                and h.replace(".", "").isdigit()):
+            kandidaten.append(h)
     if eigene and not eigene.startswith("127.") and not _ist_docker_netz(eigene):
         kandidaten.append(eigene)
     for ip in kandidaten:
@@ -411,7 +449,8 @@ def _name_zu(ip: str) -> str:
         _s.setdefaulttimeout(alt)
 
 
-def scan_netz(timeout: float = SCAN_TIMEOUT, client_ip: str = "") -> list[dict]:
+def scan_netz(timeout: float = SCAN_TIMEOUT, client_ip: str = "",
+              hinweise: list[str] | None = None) -> list[dict]:
     """Das Netz des Benutzers nach Ollama absuchen.
 
     Gibt dieselbe Form zurück wie `discover()`: url, models, suggested — dazu
@@ -419,7 +458,7 @@ def scan_netz(timeout: float = SCAN_TIMEOUT, client_ip: str = "") -> list[dict]:
     die dieser Container nach draußen geht; das ist der eigene Wirt und kein
     fremdes Gerät).
     """
-    netz = _eigenes_netz(client_ip)
+    netz = _eigenes_netz(client_ip, hinweise)
     if netz is None:
         logger.info("Netzsuche: eigene Adresse nicht ermittelbar, "
                     "es wird nicht gescannt")

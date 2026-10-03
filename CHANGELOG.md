@@ -7,6 +7,32 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.85.3] - 2026-10-03
+
+### Fixed
+
+🔴 **The network scan searched the tunnel instead of the house.** It took the
+subnet of whichever address the browser arrived from. Open DocuSort over
+Tailscale and that is a `100.64/10` address — so the scan swept an overlay in
+which every machine stands alone, and the machines actually sitting in the
+house were never found. Reported as: press *Also scan the network* and it
+finds nothing.
+
+The subnet is now taken from the first source that can actually describe a
+real network, in this order:
+
+1. the browser's address — **unless** it is a Tailnet/CGNAT or Docker address,
+2. the machines already configured as targets: an entry pointing at
+   `10.0.0.5` says the house is `10.0.0.x`. That is an existing fact rather
+   than a guess, and it is exactly what helps when the browser arrives through
+   a tunnel,
+3. our own address, unless that is a Docker one.
+
+If none of them yields a real network, nothing is scanned — better nothing
+than the wrong network. This is the same mistake as the Docker one fixed in
+0.84.0, in a second place: an address that works between two machines does not
+describe where "here" is.
+
 ## [0.85.2] - 2026-10-03
 
 ### Fixed
