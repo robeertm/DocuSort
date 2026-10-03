@@ -89,6 +89,28 @@ class OpenAICompatProvider(Provider):
             "parameters": det.get("parameter_size"),
             "quantisation": det.get("quantization_level"),
         })
+        # 🔑 RECHNET DIE GRAFIKKARTE ODER DER HAUPTPROZESSOR?
+        #
+        # Das ist die eine Zahl, die den Unterschied zwischen zehn Sekunden
+        # und vierzehn Minuten erklaert, und Ollama legt sie offen: `size_vram`
+        # ist der Anteil des Modells, der im Grafikspeicher liegt. Auf einem
+        # Mac mit Metal ist er gleich `size` — alles auf der GPU. Auf einem
+        # Server ohne Grafikkarte ist er 0.
+        #
+        # 🔴 Von AUSSEN ist das sonst nicht zu erfahren. DocuSort laeuft nicht
+        #    auf jener Maschine und soll dort auch nichts installieren muessen
+        #    („niemand soll was installieren muessen"). CPU und RAM des fremden
+        #    Rechners bleiben deshalb unsichtbar — aber WOMIT dort gerechnet
+        #    wird, sagt Ollama selbst, und das ist die nuetzlichere Haelfte.
+        groesse = m.get("size") or 0
+        vram = m.get("size_vram")
+        if vram is not None and groesse:
+            anteil = max(0.0, min(1.0, float(vram) / float(groesse)))
+            info["vram"] = int(vram)
+            info["gpu_anteil"] = round(anteil, 3)
+            info["rechenwerk"] = ("gpu" if anteil >= 0.99
+                                  else "cpu" if anteil <= 0.01
+                                  else "gemischt")
         return info
 
     def classify(self, *, system_prompt, user_prompt, model,

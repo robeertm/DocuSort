@@ -306,9 +306,27 @@ def zustand(t: Target, *, timeout: float = _MESS_TIMEOUT) -> dict[str, Any]:
     # Anfrage, ist aber kein Fehler — darum nur eine Angabe, kein Zustand.
     try:
         ps = _hole_json(wurzel + "/api/ps", timeout)
-        laufend = [str(m.get("name") or "") for m in (ps.get("models") or [])]
+        modelle = ps.get("models") or []
+        laufend = [str(m.get("name") or "") for m in modelle]
         d["geladen"] = any(n.split(":latest")[0] == gesucht.split(":latest")[0]
                            for n in laufend)
+        # 🔑 Womit rechnet dieser Rechenort — Grafikkarte oder Hauptprozessor?
+        #    `size_vram` sagt es, und es ist die Zahl, die den Unterschied
+        #    zwischen Sekunden und Minuten erklaert. Mehr ist ueber eine fremde
+        #    Maschine ohnehin nicht zu erfahren, ohne dort etwas zu
+        #    installieren — und das soll niemand muessen.
+        for m in modelle:
+            if m.get("name", "").split(":latest")[0] != gesucht.split(":latest")[0]:
+                continue
+            groesse = m.get("size") or 0
+            vram = m.get("size_vram")
+            if vram is None or not groesse:
+                break
+            anteil = max(0.0, min(1.0, float(vram) / float(groesse)))
+            d["gpu_anteil"] = round(anteil, 3)
+            d["rechenwerk"] = ("gpu" if anteil >= 0.99
+                               else "cpu" if anteil <= 0.01 else "gemischt")
+            break
     except Exception:  # noqa: BLE001
         pass
     return d
@@ -464,11 +482,18 @@ class ClassifierHandle:
 
     def __init__(self, settings: Any, baue: Callable[[Target], Any],
                  *, start: Target, aktiv: Any) -> None:
+        from . import ai_pool
         self._settings = settings
         self._baue = baue
         self._ziel = start
         self._aktiv = aktiv
         self._schloss = threading.RLock()
+        # 🔑 Der Verteiler haelt je Rechenort EINEN Klassifizierer. Der schon
+        #    gebaute aktive kommt gleich hinein, damit der Aufbau nicht zweimal
+        #    passiert.
+        self._verteiler = ai_pool.Verteiler(
+            lambda t: self._baue(t))
+        self._verteiler._gebaut[start.key] = aktiv
 
     # ------------------------------------------------------------- Auskunft
     @property
@@ -482,19 +507,137 @@ class ClassifierHandle:
         return self._aktiv
 
     # -------------------------------------------------------------- Arbeiten
-    def classify(self, text: str) -> Any:
-        # 🔴 EINMAL holen, dann damit zu Ende arbeiten. Wer hier
-        #    `self._aktiv.classify(...)` schreibt, laesst einen Wechsel
-        #    mitten in die laufende Anfrage greifen.
-        aktiv = self._aktiv
-        return aktiv.classify(text)
+    def classify(self, text: str, *, was: str = "") -> Any:
+        """Ein Dokument einordnen — auf dem Rechenort, der am fruehesten fertig
+        ist.
+
+            „docusort sollte auch umschalten koennen, wenn der mac nicht da ist
+             wird auf dem nas gerechnet ist der mac da wieder dort oder auf
+             beiden jenachdem wie die last an dokumenten ist"
+
+        Die Wahl trifft `ai_pool.waehle()`; hier steht nur, was daraus folgt.
+
+        🔴 EIN WECHSEL ZERREISST KEINE LAUFENDE EINORDNUNG. Der Klassifizierer
+        wird EINMAL geholt und damit zu Ende gearbeitet.
+
+        🔴 SCHEITERT EIN RECHENORT, WIRD DAS DOKUMENT NICHT WEGGEWORFEN. Es
+        geht an den naechstbesten — genau der Fall „wenn der mac nicht da ist
+        wird auf dem nas gerechnet". Erst wenn KEINER mehr kann, fliegt ein
+        `TransientProviderError`, und den behandelt die Verarbeitungskette
+        schon seit Langem richtig: das Dokument bleibt im Eingang liegen und
+        wird spaeter erneut versucht, statt als „fehlgeschlagen" zu enden.
+        """
+        from . import ai_pool
+        from .providers import ProviderError, TransientProviderError
+
+        automatisch = self._automatisch()
+        kandidaten = self._kandidaten()
+        letzter: Exception | None = None
+        versucht: list[str] = []
+
+        while kandidaten:
+            # 🔴 ZWEI VERSCHIEDENE FRAGEN, und sie duerfen nicht verwechselt
+            #    werden. Automatisch heisst „wer ist am fruehesten fertig".
+            #    Fest heisst „der gewaehlte, und nur wenn der nicht kann, der
+            #    naechste" — da waere die Bestenwahl ein Betrug an der
+            #    getroffenen Entscheidung.
+            if automatisch:
+                key = ai_pool.waehle(kandidaten)
+            else:
+                key = next((k for k in kandidaten
+                            if ai_pool.zustand_von(k) in ("", ZUSTAND_BEREIT)),
+                           "")
+            if not key:
+                break
+            ziel = next((t for t in self._liste() if t.key == key), None)
+            if ziel is None:
+                kandidaten.remove(key)
+                continue
+            versucht.append(key)
+            kandidaten.remove(key)
+            try:
+                klass = self._verteiler.hole(ziel)
+            except Exception as exc:  # noqa: BLE001 — ein Ziel, das sich nicht
+                # bauen laesst (fehlender Schluessel), ist fuer dieses Dokument
+                # einfach keins. Die anderen bleiben.
+                logger.warning("Rechenort %s laesst sich nicht aufbauen: %s",
+                               key, exc)
+                letzter = exc
+                continue
+            try:
+                with ai_pool.platz(key, was):
+                    return klass.classify(text)
+            except ProviderError as exc:
+                # 🔑 Der Rechenort hat geantwortet, dass er nicht kann — oder
+                #    gar nicht. Beides macht ihn fuer die naechste Wahl
+                #    unbrauchbar, bis der Waechter ihn wieder misst.
+                ai_pool.setze_zustand(key, ZUSTAND_TOT)
+                letzter = exc
+                logger.warning("Rechenort %s hat die Einordnung nicht "
+                               "geschafft (%s) — naechster Versuch woanders",
+                               key, exc)
+
+        if letzter is None:
+            # Kein einziger Rechenort war waehlbar. Das ist derselbe Zustand
+            # wie ein ausgefallener Anbieter und wird genauso behandelt.
+            raise TransientProviderError(
+                "Kein Rechenort bereit (geprueft: %s)"
+                % (", ".join(versucht) or "keiner"))
+        raise TransientProviderError(
+            "Alle Rechenorte haben abgelehnt (%s): %s"
+            % (", ".join(versucht), letzter)) from letzter
+
+    # ------------------------------------------------------- Wahl der Kandidaten
+    def _liste(self) -> list[Target]:
+        return ziele(self._settings, bridge_verbunden=_bridge_verbunden())
+
+    def _automatisch(self) -> bool:
+        """Verteilt DocuSort selbst, oder hat jemand einen Rechner festgelegt?
+
+        🔑 Vorgabe ist automatisch. Wer `ai.verteilen: fest` in die
+        config.yaml schreibt oder den Schalter auf der Einstellungsseite
+        umlegt, bekommt wieder genau den Rechner, den er gewaehlt hat — und
+        auch dann noch den Ausweichweg, wenn der ausfaellt. Ein festgelegter
+        Rechner ist eine Bevorzugung, keine Selbstabschaltung.
+        """
+        try:
+            return str(getattr(self._settings.ai, "verteilen", "auto")
+                       or "auto").strip().lower() != "fest"
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _kandidaten(self) -> list[str]:
+        liste = self._liste()
+        eigen = self._ziel.key
+        alle = [t.key for t in liste]
+        if eigen not in alle:
+            alle.insert(0, eigen)
+        if self._automatisch():
+            return alle
+        # Fest gewaehlt: der eigene zuerst, die anderen nur als Ausweichweg.
+        return [eigen] + [k for k in alle if k != eigen]
 
     # -------------------------------------------------------------- Wechseln
-    def wechsle(self, key: str) -> Target:
+    def vergiss(self, key: str) -> None:
+        """Den zwischengespeicherten Klassifizierer eines Ziels wegwerfen.
+
+        🔴 Noetig, sobald sich die EINTRAGUNG dieses Ziels aendert — eine neue
+        Adresse, ein anderes Modell. Der gebaute Klassifizierer zeigt sonst
+        weiter auf die alte Adresse, und niemand saehe, warum.
+        """
+        self._verteiler.vergiss(key)
+
+    def wechsle(self, key: str, *, von_hand: bool = True) -> Target:
         """Auf ein anderes Ziel umstellen. Wirft `KeyError`, wenn es den
         Schluessel nicht gibt, und laesst bei einem Baufehler das ALTE Ziel
         stehen — 🔴 ein fehlgeschlagener Wechsel darf die Installation nicht
-        ohne Klassifizierer zuruecklassen."""
+        ohne Klassifizierer zuruecklassen.
+
+        `von_hand=False` fuer Wechsel, die DocuSort selbst ausloest — etwa
+        wenn der laufende Rechenort aus der Liste genommen wird. 🔴 Ein solcher
+        Zwangswechsel darf die Verteilung nicht abschalten: der Benutzer hat
+        einen Rechner GELOESCHT, nicht einen gewaehlt.
+        """
         with self._schloss:
             vorhandene = ziele(self._settings,
                                bridge_verbunden=_bridge_verbunden())
@@ -508,9 +651,25 @@ class ClassifierHandle:
             alt = self._ziel
             self._aktiv = neu
             self._ziel = neu_ziel
-            logger.info("KI-Ziel gewechselt: %s -> %s (Anbieter %s, Modell %s)",
+            # 🔑 EINEN RECHNER VON HAND ZU WAEHLEN IST DIE ANSAGE, NICHT MEHR
+            #    SELBST ZU VERTEILEN. Sonst haette die Oberflaeche zwei Haende
+            #    am selben Lenkrad: man drueckt „MacBook Pro", und das naechste
+            #    Dokument landet trotzdem woanders, weil die Verteilung es fuer
+            #    besser hielt. Genau diese Sorte Doppeldeutigkeit soll es nicht
+            #    geben („keine doppelten sachen oder ich kann hier was
+            #    einstellen und da auch, welches ist das richtige").
+            #
+            #    Zurueck zur Verteilung fuehrt der Schalter daneben — ein Weg
+            #    hin, ein Weg zurueck, und beide sagen, was sie tun.
+            if von_hand:
+                try:
+                    self._settings.ai.verteilen = "fest"
+                except Exception:  # noqa: BLE001 — eine Einstellung ohne
+                    pass           # dieses Feld ist eine alte.
+            logger.info("KI-Ziel gewechselt: %s -> %s (Anbieter %s, Modell %s)%s",
                         alt.key, neu_ziel.key, neu_ziel.provider,
-                        neu_ziel.model or "?")
+                        neu_ziel.model or "?",
+                        " — ab jetzt fest" if von_hand else " (erzwungen)")
             return neu_ziel
 
     # ------------------------------------------- alles andere durchreichen
@@ -599,6 +758,14 @@ def starte_waechter(settings: Any) -> None:
             try:
                 liste = ziele(settings, bridge_verbunden=_bridge_verbunden())
                 lage = zustaende(liste)
+                # 🔑 Derselbe Blick beantwortet zwei Fragen. Der Waechter misst
+                #    ohnehin jeden Rechenort — der Verteiler braucht genau
+                #    diese Messung und soll sie nicht vor jedem Dokument
+                #    wiederholen. Das ist auch der Weg zurueck: ein Rechner,
+                #    den eine gescheiterte Einordnung als tot markiert hat,
+                #    wird hier wieder `bereit`, sobald er antwortet.
+                from . import ai_pool
+                ai_pool.setze_zustaende(lage)
                 for t in liste:
                     jetzt = (lage.get(t.key) or {}).get("zustand", ZUSTAND_OFFEN)
                     if jetzt == ZUSTAND_OFFEN:

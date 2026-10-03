@@ -56,7 +56,38 @@ def _sha256(path: Path, chunk_size: int = 1 << 16) -> str:
 
 def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Database):
     log = logging.getLogger("docusort.pipeline")
-    sem = threading.BoundedSemaphore(max(1, settings.ocr.max_parallel))
+    # ZWEI ENGSTELLEN, UND SIE SIND VERSCHIEDEN.
+    #
+    # Bisher hielt EINE Sperre das ganze Dokument — Texterkennung, Einordnung
+    # und Ablage zusammen. Das war richtig, solange die Einordnung dort lief,
+    # wo auch die Texterkennung lief. Mit mehreren Rechenorten ist es die
+    # Bremse: der Mac rechnet elf Sekunden, die NAS vierzehn Minuten, und
+    # trotzdem konnte nie mehr als ein Rechenort gleichzeitig etwas tun.
+    #
+    #   `ocr_sem`  — die Texterkennung ist speicherhungrig und laeuft IMMER
+    #                auf diesem Rechner. Ihre Grenze bleibt `ocr.max_parallel`,
+    #                unveraendert; das ist der Schutz vor dem Speichertod.
+    #   `kette`    — wie viele Dokumente ueberhaupt gleichzeitig unterwegs sein
+    #                duerfen: die Texterkennungsplaetze plus einen je
+    #                Rechenort. Mehr braucht es nicht, denn jeder Rechenort
+    #                nimmt ohnehin nur ein Dokument auf einmal (`ai_pool`), und
+    #                weniger waere eine Grenze, die niemandem nuetzt.
+    #
+    # 🔴 Die Zahl der Rechenorte wird EINMAL beim Aufbau bestimmt. Wer spaeter
+    #    einen hinzufuegt, faehrt bis zum naechsten Start etwas vorsichtiger —
+    #    die ungefaehrliche Richtung. Eine Sperre, die sich zur Laufzeit
+    #    aufbohrt, ist das Risiko nicht wert.
+    try:
+        from . import ai_targets as _ziele_modul
+        _orte = max(1, len(_ziele_modul.ziele(settings)))
+    except Exception:  # noqa: BLE001
+        _orte = 1
+    ocr_sem = threading.BoundedSemaphore(max(1, settings.ocr.max_parallel))
+    sem = threading.Semaphore(max(1, settings.ocr.max_parallel) + _orte)
+    log.info("Verarbeitung: %d Texterkennungsplaetze, %d Rechenort(e), "
+             "bis zu %d Dokumente gleichzeitig unterwegs",
+             max(1, settings.ocr.max_parallel), _orte,
+             max(1, settings.ocr.max_parallel) + _orte)
     # Files currently being processed. The periodic inbox rescan (added for
     # transient-error auto-retry) and the watchdog can both hand us the same
     # path; this guard stops the same document being classified twice at once.
@@ -148,7 +179,10 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             return
 
         _activity.work_stage(path.name, _activity.STAGE_OCR)
-        ocr_res: OcrResult = extract_text(path, settings.ocr)
+        # 🔑 Nur HIER gilt die Texterkennungsgrenze. Frueher umschloss sie auch
+        #    die Einordnung — und damit die laengste Wartezeit der ganzen Kette.
+        with ocr_sem:
+            ocr_res: OcrResult = extract_text(path, settings.ocr)
 
         if not ocr_res.text:
             log.warning("No text extracted from %s – routing to review", path.name)
@@ -160,7 +194,9 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         else:
             try:
                 _activity.work_stage(path.name, _activity.STAGE_AI)
-                cls = classifier.classify(ocr_res.text)
+                # Der Dateiname geht mit, damit die Startseite sagen kann, WAS
+                # ein Rechenort gerade rechnet — nicht nur, DASS er rechnet.
+                cls = classifier.classify(ocr_res.text, was=path.name)
                 log.info(
                     "Classified %s -> %s / %s / %s (conf=%.2f, $%.4f)",
                     path.name, cls.category, cls.date, cls.sender,
@@ -352,6 +388,9 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         except Exception as exc:  # noqa: BLE001
             log.warning("Fristen: Abgleich konnte nicht angemeldet werden: %s", exc)
 
+    # Wie viele Dokumente gleichzeitig sinnvoll sind — die Stapelwege lesen
+    # es hier ab, statt die Zahl ein zweites Mal auszurechnen.
+    process.gleichzeitig = max(1, settings.ocr.max_parallel) + _orte  # type: ignore[attr-defined]
     return process
 
 
@@ -431,6 +470,23 @@ def _rescan_inbox_forever(settings: AppSettings, pipeline, interval_s: int = 300
         if not leftover:
             continue
         log.info("Inbox rescan: retrying %d leftover file(s)", len(leftover))
+        # 🔑 Auch der Nachlauf darf verteilen. Genau hier landen die Dokumente,
+        #    die ein Ausfall liegengelassen hat — und wenn der Rechner wieder
+        #    da ist, sollen sie nicht einzeln hintereinander aufgeholt werden.
+        gleichzeitig = max(1, int(getattr(pipeline, "gleichzeitig", 1) or 1))
+        if gleichzeitig > 1 and len(leftover) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _eins(p):
+                try:
+                    pipeline(p)
+                except Exception:
+                    log.exception("Inbox rescan failed for %s", p)
+
+            with ThreadPoolExecutor(max_workers=gleichzeitig,
+                                    thread_name_prefix="nachlauf") as pool:
+                list(pool.map(_eins, leftover))
+            continue
         for p in leftover:
             try:
                 pipeline(p)
@@ -816,7 +872,8 @@ def main(argv: list[str] | None = None) -> int:
     pipeline = _build_pipeline(settings, classifier, db)
 
     if args.once:
-        process_existing(settings.paths.inbox, pipeline)
+        process_existing(settings.paths.inbox, pipeline,
+                         getattr(pipeline, "gleichzeitig", 1))
         log.info("One-shot mode finished.")
         return 0
 
@@ -827,7 +884,8 @@ def main(argv: list[str] | None = None) -> int:
     # when this thread races with watcher-spawned per-file threads.
     threading.Thread(
         target=process_existing,
-        args=(settings.paths.inbox, pipeline),
+        args=(settings.paths.inbox, pipeline,
+              getattr(pipeline, "gleichzeitig", 1)),
         name="process-existing",
         daemon=True,
     ).start()

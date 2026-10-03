@@ -231,6 +231,20 @@
       </div>
     </div>
 
+    {# 🔴 DIESE DREI KAESTEN GEHOEREN DEM RECHNER, AUF DEM DOCUSORT LAEUFT —
+       und bis hier eine Ueberschrift stand, musste man das raten. Die Frage
+       kam prompt: „hier sehen wir ja cpu, ram und eingang an dokumenten, aber
+       das ist bestimmt das vom ollama nas container oder?"
+
+       Sie ist berechtigt und die Antwort ist: ja, von diesem Rechner, und das
+       ist auch richtig so — Texterkennung, Eingang und Ablage passieren hier,
+       egal wo das Modell steht. Was NICHT hierher gehoert, ist die Arbeit des
+       Modells; die steht weiter unten bei dem Rechner, der sie tut. #}
+    <div class="text-[11px] uppercase tracking-wider text-ink-500 mb-1.5">
+      {{ t('hub.sys.self') }}
+      <span class="text-ink-400 normal-case" x-text="sys.host ? '· ' + sys.host : ''"></span>
+    </div>
+
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
       <!-- CPU -->
       <div class="rounded-xl border border-ink-700 p-3">
@@ -291,10 +305,6 @@
        ANBIETER sagt es (Provider.runtime()) — nur er kann es wissen. #}
     <div class="mt-3 space-y-2.5">
       <div>
-        <div class="text-[11px] uppercase tracking-wider text-ink-500 mb-1.5">
-          {{ t('hub.sys.this_machine') }}
-          <span class="text-ink-400 normal-case" x-text="sys.host ? '· ' + sys.host : ''"></span>
-        </div>
         <div class="space-y-1">
           <div class="flex items-center gap-2 text-xs">
             <span class="h-2 w-2 rounded-full bg-emerald-400 shrink-0"></span>
@@ -319,6 +329,136 @@
         </div>
       </div>
 
+      {# WO GERECHNET WIRD — und zwar je Rechner, mit seinem eigenen Verlauf.
+
+         Der Einwand, der diesen Block ausgeloest hat:
+
+             „eigentlich muesste immer der verlauf gezeigt werden der gerade
+              aktiv ist, in dem fall der mac mit gpu denn dort laeuft ja das
+              model"
+
+         🔴 DIE EHRLICHE EINSCHRAENKUNG ZUERST: CPU und Arbeitsspeicher EINER
+            FREMDEN MASCHINE kann DocuSort nicht messen. Dort laeuft nichts von
+            uns, und dort soll auch nichts installiert werden muessen — das ist
+            eine ausdrueckliche Zusage („niemand soll was installieren
+            muessen"), keine Bequemlichkeit. Eine erfundene Prozentzahl waere
+            schlimmer als keine.
+
+         🔑 WAS WIR STATTDESSEN WIRKLICH WISSEN, und es ist das Nuetzlichere:
+            * WOMIT dort gerechnet wird — Ollama verraet mit `size_vram`, ob
+              das Modell im Grafikspeicher liegt oder im Hauptspeicher. Genau
+              das trennt zehn Sekunden von vierzehn Minuten.
+            * WIE SCHNELL dieser Rechner fuer UNS ist — Sekunden je Dokument,
+              gemessen an den echten Einordnungen dieser Installation. Diese
+              Zahl gehoert uns, denn wir sind es, die darauf warten.
+            * WAS ER GERADE TUT — welches Dokument, seit wann, wie viele warten.
+
+         Der Verlauf unter jeder Karte zeigt deshalb die letzten Dokumente
+         DIESES Rechenortes. Er faengt leer an und fuellt sich mit der Arbeit;
+         ein Rechner, der noch nie etwas gerechnet hat, behauptet keine Zahl. #}
+      <div x-show="rechenorteZeigen" x-cloak>
+        <div class="flex items-baseline justify-between gap-2 mb-1.5">
+          <div class="text-[11px] uppercase tracking-wider text-ink-500">
+            {{ t('hub.sys.compute_places') }}
+          </div>
+          {# Der Schalter steht NUR da, wo er etwas aendern kann: bei einem
+             einzigen Rechenort gibt es nichts zu verteilen. #}
+          <button type="button" x-show="ziellisteZeigen" x-cloak
+                  @click="verteilenUmschalten()"
+                  :disabled="verteilenBusy"
+                  :title="tr('hub.sys.auto_hint')"
+                  class="text-[11px] px-2 py-0.5 rounded-md border transition-colors
+                         disabled:opacity-60 disabled:cursor-wait"
+                  :class="verteiltAuto
+                    ? 'border-emerald-400/60 bg-emerald-400/10 text-emerald-200'
+                    : 'border-ink-700 text-ink-400 hover:text-ink-200'">
+            <span x-text="verteiltAuto ? tr('hub.sys.auto_on')
+                                       : tr('hub.sys.auto_off')"></span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <template x-for="z in aiZiele" :key="z.key">
+            <div class="rounded-xl border p-3 transition-colors"
+                 :class="z.key === aiAktiv && !verteiltAuto
+                           ? 'border-emerald-400/60 bg-emerald-400/5'
+                           : (rechnetGerade(z) ? 'border-cyan-400/50 bg-cyan-400/5'
+                                               : 'border-ink-700')">
+              <div class="flex items-center gap-2">
+                <span class="h-2 w-2 rounded-full shrink-0" :class="ampelFuer(z)"></span>
+                <span class="flex-1 truncate text-xs"
+                      x-text="z.label || z.model || z.provider"></span>
+                <span class="text-[10px] text-ink-500" x-text="rechenwerkText(z)"></span>
+              </div>
+
+              {# Die grosse Zahl ist die, auf die es ankommt: wie lange DIESER
+                 Rechner fuer EIN Dokument braucht. Keine Messung, keine Zahl —
+                 „noch nicht gemessen" ist eine ehrlichere Auskunft als eine
+                 aus Kernen hochgerechnete Schaetzung. Die NAS hat mehr RAM und
+                 gleich viele Kerne wie der Laptop und ist 76-mal langsamer. #}
+              <div class="mt-0.5 flex items-baseline gap-1.5">
+                <span class="text-2xl font-semibold tabular-nums"
+                      :class="tempoFarbe(z)" x-text="tempoZahl(z)"></span>
+                <span class="text-[10px] text-ink-500" x-text="tempoEinheit(z)"></span>
+              </div>
+
+              <svg viewBox="0 0 100 28" preserveAspectRatio="none"
+                   class="mt-1 w-full h-8 overflow-visible"
+                   x-show="(z.last && z.last.verlauf || []).length > 1" x-cloak>
+                <polyline :points="spark(z.last && z.last.verlauf, null)" fill="none"
+                          stroke="currentColor" stroke-width="1.5"
+                          vector-effect="non-scaling-stroke"
+                          class="text-cyan-400/80" stroke-linejoin="round"
+                          stroke-linecap="round"/>
+              </svg>
+              <div class="mt-1 text-[11px] text-ink-500 truncate"
+                   x-text="arbeitText(z)"></div>
+
+              <div class="mt-2 flex flex-wrap gap-1">
+                <button type="button" x-show="ziellisteZeigen" x-cloak
+                        @click="zielWaehlen(z.key)"
+                        :disabled="zielWechselt || zustandVon(z) === 'tot'"
+                        class="px-2 py-0.5 text-[11px] rounded-md border transition-colors
+                               disabled:opacity-60 disabled:cursor-not-allowed"
+                        :class="z.key === aiAktiv
+                          ? 'border-emerald-400/60 text-emerald-200'
+                          : 'border-ink-700 text-ink-400 hover:text-ink-100'"
+                        x-text="z.key === aiAktiv ? tr('hub.sys.chosen')
+                                                  : tr('hub.sys.choose')"></button>
+                <button type="button" x-show="kannWecken(z)" x-cloak
+                        @click="zielWecken(z.key)" :disabled="zielBusy === z.key"
+                        class="px-2 py-0.5 text-[11px] rounded-md border border-ink-700
+                               text-amber-200 hover:bg-amber-400/10
+                               disabled:opacity-60 disabled:cursor-wait"
+                        x-text="zielBusy === z.key ? tr('hub.sys.waking')
+                                                   : tr('hub.sys.wake')"></button>
+                <button type="button" x-show="kannHolen(z)" x-cloak
+                        @click="zielHolen(z.key)" :disabled="zielBusy === z.key"
+                        class="px-2 py-0.5 text-[11px] rounded-md border border-ink-700
+                               text-cyan-200 hover:bg-cyan-400/10
+                               disabled:opacity-60 disabled:cursor-wait"
+                        x-text="zielBusy === z.key ? tr('hub.sys.pulling')
+                                                   : tr('hub.sys.pull')"></button>
+                {# Nur was in der Konfiguration STEHT, laesst sich entfernen —
+                   das abgeleitete Ziel ist der Rueckfall und darf nicht weg,
+                   sonst kann die Installation am Ende gar nichts mehr. #}
+                <button type="button" x-show="!z.derived" x-cloak
+                        @click="zielEntfernen(z)" :disabled="zielBusy === z.key"
+                        class="px-2 py-0.5 text-[11px] rounded-md border border-ink-700
+                               text-ink-400 hover:text-rose-300 hover:bg-rose-400/10
+                               disabled:opacity-60 disabled:cursor-wait"
+                        :title="tr('hub.find.remove')">✕</button>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="mt-1 text-[11px]" x-show="zielMeldung" x-cloak
+             :class="zielFehler ? 'text-rose-300' : 'text-ink-400'"
+             x-text="zielMeldung"></div>
+      </div>
+
+      {# Die Einzelheiten zum geladenen Modell — Groesse, Quantisierung — beim
+         Rechner, der es gerade haelt. #}
       <div>
         <div class="text-[11px] uppercase tracking-wider text-ink-500 mb-1.5">
           {{ t('hub.sys.model_machine') }}
@@ -338,94 +478,21 @@
         </div>
       </div>
 
-      {# WO SOLL GERECHNET WERDEN — die Wahl, nicht nur die Anzeige.
-         „ich brauche schnell das dokument in docusort dann will ich den mac
-          waehlen koennen […] und wenn ich zeit habe und er die nacht zeit hat
-          soll es auf dem nas rechnen"
+      {# 🔴 HIER STAND EIN ZWEITER STREIFEN MIT DENSELBEN RECHNERN — Name,
+         Ampel, dieselben Knoepfe, nur kleiner. Zwei Stellen fuer dieselbe
+         Sache sind genau das, was nicht sein soll („keine doppelten sachen
+         oder ich kann hier was einstellen und da auch, welches ist das
+         richtige"). Die Karten oben koennen alles, was dieser Streifen
+         konnte, und sagen zusaetzlich, was der Rechner leistet. #}
 
-         🔴 Drei Bedingungen, und alle drei sind MESSUNGEN, keine Annahmen:
-         (1) `ai_ziel.anzahl > 1` — wer nur einen Anbieter eingerichtet hat,
-             sieht nichts; eine Auswahl mit einem Eintrag ist keine Auswahl.
-             Genau das ist der Fall bei jedem, der dieses Repo frisch klont.
-         (2) `ai_ziel.umschaltbar` — ohne den Halter aus `ai_targets.py` wuerde
-             ein Knopf hier nichts tun.
-         (3) `aiZiele.length` — die Liste kommt von einem Weg, den NUR ein
-             Admin aufrufen darf. Ein normales Konto bekommt 403, die Liste
-             bleibt leer, und der Umschalter erscheint gar nicht. So steht hier
-             kein Knopf, den der Betrachter nicht druecken darf. #}
-      {# 🔴 ZWEI GETRENNTE FRAGEN, UND SIE HINGEN AN EINER BEDINGUNG.
-         Der UMSCHALTER lohnt nur bei mehr als einem Rechner. Die SUCHE lohnt
-         gerade dann, wenn es nur einen gibt. Beides stand im selben Block:
-         wer seinen zweiten Rechner entfernte, verlor damit auch die Knoepfe,
-         mit denen er einen neuen finden koennte — eine Sackgasse, aus der nur
-         noch die config.yaml herausfuehrt. Gefunden hat das der Benutzer,
-         nicht ich: „jetzt habe ich das macbook geloescht und jetzt sind die
-         buttons ganz weg zum im netzwerk suchen". #}
-      <div x-show="ziellisteZeigen" x-cloak>
-        <div class="text-[11px] uppercase tracking-wider text-ink-500 mb-1.5">
-          {{ t('hub.sys.target_switch') }}
-        </div>
-        <div class="flex flex-wrap gap-1.5">
-          <template x-for="z in aiZiele" :key="z.key">
-            {# Ein Name ist kein Zustand. Jeder Knopf traegt deshalb eine
-               Ampel und sagt im Klartext, was dort los ist — und wenn
-               DocuSort etwas dagegen tun kann, steht der Knopf daneben. #}
-            <span class="inline-flex items-center rounded-md border overflow-hidden"
-                  :class="z.key === aiAktiv
-                    ? 'border-emerald-400/60 bg-emerald-400/10'
-                    : 'border-ink-700 bg-ink-800/60'">
-              <button type="button"
-                      @click="zielWaehlen(z.key)"
-                      :disabled="zielWechselt || zustandVon(z) === 'tot'"
-                      :title="z.base_url || z.provider"
-                      class="px-2 py-1 text-xs transition-colors
-                             disabled:opacity-60 disabled:cursor-not-allowed"
-                      :class="z.key === aiAktiv ? 'text-emerald-200'
-                                                : 'text-ink-300 hover:text-ink-100'">
-                <span class="inline-block h-2 w-2 rounded-full mr-1.5 align-middle"
-                      :class="ampelFuer(z)"></span>
-                <span x-text="z.label || z.model || z.provider"></span>
-                <span class="text-ink-400" x-text="' · ' + zustandText(z)"></span>
-              </button>
-              <button type="button" x-show="kannWecken(z)" x-cloak
-                      @click="zielWecken(z.key)" :disabled="zielBusy === z.key"
-                      class="px-2 py-1 text-xs border-l border-ink-700
-                             text-amber-200 hover:bg-amber-400/10
-                             disabled:opacity-60 disabled:cursor-wait"
-                      x-text="zielBusy === z.key ? tr('hub.sys.waking')
-                                                 : tr('hub.sys.wake')"></button>
-              <button type="button" x-show="kannHolen(z)" x-cloak
-                      @click="zielHolen(z.key)" :disabled="zielBusy === z.key"
-                      class="px-2 py-1 text-xs border-l border-ink-700
-                             text-cyan-200 hover:bg-cyan-400/10
-                             disabled:opacity-60 disabled:cursor-wait"
-                      x-text="zielBusy === z.key ? tr('hub.sys.pulling')
-                                                 : tr('hub.sys.pull')"></button>
-              {# Nur was in der Konfiguration STEHT, laesst sich entfernen —
-                 das abgeleitete Ziel ist der Rueckfall und darf nicht weg,
-                 sonst kann die Installation am Ende gar nichts mehr. #}
-              <button type="button" x-show="!z.derived" x-cloak
-                      @click="zielEntfernen(z)" :disabled="zielBusy === z.key"
-                      class="px-2 py-1 text-xs border-l border-ink-700
-                             text-ink-400 hover:text-rose-300 hover:bg-rose-400/10
-                             disabled:opacity-60 disabled:cursor-wait"
-                      :title="tr('hub.find.remove')">✕</button>
-            </span>
-          </template>
-        </div>
-        <div class="mt-1 text-[11px]" x-show="zielMeldung" x-cloak
-             :class="zielFehler ? 'text-rose-300' : 'text-ink-400'"
-             x-text="zielMeldung"></div>
+      {# EINEN KNOPF DRUECKEN UND DOCUSORT FINDET, WAS DA IST.
+         Erst werden nur die Adressen gefragt, die sich ohnehin zu erkennen
+         geben — darunter der Rechner, an dem gerade jemand sitzt. Das
+         fasst kein fremdes Geraet an. Das Absuchen des eigenen Netzes ist
+         ein zweiter, ausdruecklicher Schritt: 254 Verbindungen sehen von
+         aussen aus wie ein Portscan, und das tut man nicht ungefragt.
 
-        {# EINEN KNOPF DRUECKEN UND DOCUSORT FINDET, WAS DA IST.
-           Erst werden nur die Adressen gefragt, die sich ohnehin zu erkennen
-           geben — darunter der Rechner, an dem gerade jemand sitzt. Das
-           fasst kein fremdes Geraet an. Das Absuchen des eigenen Netzes ist
-           ein zweiter, ausdruecklicher Schritt: 254 Verbindungen sehen von
-           aussen aus wie ein Portscan, und das tut man nicht ungefragt. #}
-      </div>
-
-      {# Die Suche steht fuer sich — sichtbar, sobald die Liste ueberhaupt
+         Die Suche steht fuer sich — sichtbar, sobald die Liste ueberhaupt
          geladen werden konnte, also fuer jeden, der sie auch benutzen darf.
          Unabhaengig davon, wie viele Rechner schon eingetragen sind. #}
       <div x-show="suchknoepfeZeigen" x-cloak>
@@ -980,10 +1047,103 @@ function dashboard() {
       if (z.zustand === 'bereit' && z.geladen === false) return tr('hub.sys.cold');
       return tr('hub.sys.state.' + z.zustand);
     },
-    zustandVon(z) { return (z.state && z.state.zustand) || 'offen'; },
+    /* ---------- Was ein Rechenort leistet ----------
+       🔑 ZWEI QUELLEN, EINE WAHRHEIT. `aiZiele` kommt aus dem Admin-Weg und
+       traegt die Liste samt Adresse; es wird selten geholt. `ai_ziel.orte`
+       kommt mit der Startseiten-Abfrage alle zweieinhalb Sekunden und traegt
+       Zustand, Tempo und was gerade gerechnet wird — ohne Adresse, damit es
+       jedes angemeldete Konto sehen darf. Fuer die Anzeige gewinnt IMMER die
+       frischere; `z.last` ist nur der Rueckfall fuer den Augenblick, in dem
+       die Liste schon da ist und die erste Abfrage noch laeuft. */
+    lastVon(z) {
+      const live = (this.state.ai_ziel && this.state.ai_ziel.orte) || {};
+      return live[z.key] || z.last || {};
+    },
+    get rechenorteZeigen() { return this.aiZiele.length > 0; },
+    get verteiltAuto() {
+      const v = (this.state.ai_ziel || {}).verteilen;
+      /* Keine Angabe heisst automatisch — das ist die Vorgabe, und eine
+         fehlende Antwort darf keine andere Betriebsart vortaeuschen. */
+      return v !== 'fest';
+    },
+    verteilenBusy: false,
+    async verteilenUmschalten() {
+      const neu = this.verteiltAuto ? 'fest' : 'auto';
+      this.verteilenBusy = true;
+      try {
+        const r = await fetch('/api/ai/verteilen', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modus: neu }),
+        });
+        if (r.ok && this.state.ai_ziel) this.state.ai_ziel.verteilen = neu;
+      } catch (e) { /* die naechste Abfrage sagt die Wahrheit */ }
+      this.verteilenBusy = false;
+      this.refresh();
+    },
+    /* Grafikkarte oder Hauptprozessor — die Zahl, die zehn Sekunden von
+       vierzehn Minuten trennt. Steht sie nicht fest, steht da nichts: ein
+       Rechner, der sein Modell gerade nicht geladen hat, verraet es nicht. */
+    rechenwerkText(z) {
+      const w = this.lastVon(z).rechenwerk;
+      if (!w) return '';
+      return tr('hub.sys.unit.' + w);
+    },
+    /* Sekunden je Dokument, gemessen an den echten Einordnungen DIESER
+       Installation. 🔴 Nie geschaetzt: ohne Messung steht hier ein Strich,
+       nicht eine aus Kernen hochgerechnete Zahl. Die NAS hat mehr
+       Arbeitsspeicher als der Laptop und braucht 76-mal so lange. */
+    tempoZahl(z) {
+      const s = this.lastVon(z).s_pro_dokument;
+      if (s === null || s === undefined) return '–';
+      if (s < 90) return s.toFixed(0);
+      return (s / 60).toFixed(s < 600 ? 1 : 0);
+    },
+    tempoEinheit(z) {
+      const s = this.lastVon(z).s_pro_dokument;
+      if (s === null || s === undefined) return tr('hub.sys.unmeasured');
+      return (s < 90 ? tr('hub.sys.sec_per_doc') : tr('hub.sys.min_per_doc'));
+    },
+    tempoFarbe(z) {
+      const l = this.lastVon(z);
+      if (l.s_pro_dokument === null || l.s_pro_dokument === undefined)
+        return 'text-ink-400';
+      return l.rechnet_seit_s !== null && l.rechnet_seit_s !== undefined
+        ? 'text-cyan-300' : 'text-ink-200';
+    },
+    rechnetGerade(z) {
+      const s = this.lastVon(z).rechnet_seit_s;
+      return s !== null && s !== undefined;
+    },
+    /* „darf ruhig schnattern": was dieser Rechner gerade tut, im Klartext. */
+    arbeitText(z) {
+      const l = this.lastVon(z);
+      const teile = [];
+      if (this.rechnetGerade(z)) {
+        const seit = this.dauer(Math.round(l.rechnet_seit_s));
+        teile.push(tr('hub.sys.computing') + (seit ? ' · ' + seit : '')
+                   + (l.rechnet_an ? ' · ' + l.rechnet_an : ''));
+      } else if (this.zustandVon(z) === 'bereit') {
+        teile.push(tr('hub.sys.idle'));
+      }
+      if (l.wartend > 0) teile.push(l.wartend + ' ' + tr('hub.sys.waiting'));
+      return teile.join(' · ');
+    },
+    zustandVon(z) {
+      /* 🔴 Der Zustand kommt bevorzugt aus der frischen Abfrage. Sonst zeigte
+         eine Karte bis zu dreissig Sekunden lang „bereit" fuer einen Rechner,
+         den DocuSort laengst nicht mehr erreicht — und genau danach richtet
+         sich, ob die Knoepfe anklickbar sind. */
+      const live = this.lastVon(z).zustand;
+      return live || (z.state && z.state.zustand) || 'offen';
+    },
+    geladenVon(z) {
+      const l = this.lastVon(z);
+      if (l.geladen !== null && l.geladen !== undefined) return l.geladen;
+      return z.state ? z.state.geladen : undefined;
+    },
     zustandText(z) {
       const s = this.zustandVon(z);
-      if (s === 'bereit' && z.state && z.state.geladen === false)
+      if (s === 'bereit' && this.geladenVon(z) === false)
         return tr('hub.sys.state.bereit') + ' · ' + tr('hub.sys.cold');
       return tr('hub.sys.state.' + s);
     },
@@ -992,14 +1152,12 @@ function dashboard() {
       if (s === 'tot')         return 'bg-rose-400';
       if (s === 'ohne_modell') return 'bg-amber-400';
       if (s === 'offen')       return 'bg-ink-400';
-      return (z.state && z.state.geladen === false) ? 'bg-amber-400'
-                                                    : 'bg-emerald-400';
+      return this.geladenVon(z) === false ? 'bg-amber-400' : 'bg-emerald-400';
     },
     /* Only offer what this target can actually do right now. A button that
        cannot work is worse than no button. */
     kannWecken(z) {
-      return this.zustandVon(z) === 'bereit'
-          && z.state && z.state.geladen === false;
+      return this.zustandVon(z) === 'bereit' && this.geladenVon(z) === false;
     },
     kannHolen(z) { return this.zustandVon(z) === 'ohne_modell'; },
     async zielWecken(key) {

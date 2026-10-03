@@ -511,7 +511,11 @@ class Classifier:
         self.holder_names = list(holder_names or [])
         self.pseudonymize = pseudonymize
 
-    def classify(self, text: str) -> Classification:
+    def classify(self, text: str, *, was: str = "") -> Classification:
+        """`was` ist der Dateiname und dient nur der Anzeige. Er steht hier,
+        damit der Halter (`ai_targets.ClassifierHandle`) und der nackte
+        Klassifizierer DIESELBE Form haben — eine Aufrufstelle soll nicht
+        wissen muessen, welches von beiden sie gerade vor sich hat."""
         # v0.33.0 removed the LLM-pseudonymisation path along with
         # the rest of the statement-extraction module. The
         # classifier prompt itself is generic ("what kind of

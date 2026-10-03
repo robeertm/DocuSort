@@ -3742,17 +3742,55 @@ def create_app(
             # 🔴 Gemessen, nicht geraten — und OHNE Adresse: diese Antwort
             #    sieht jedes angemeldete Konto.
             from .. import ai_targets as _t
+            from .. import ai_pool as _p
             lage = _t.zustaende(liste)
+            # 🔑 Dieselbe Messung dient zwei Zwecken. Die Startseite fragt
+            #    ohnehin im Sekundentakt nach — der Verteiler bekommt damit
+            #    einen viel frischeren Blick, als der Waechter im
+            #    Zwei-Minuten-Takt liefern koennte, und ein Rechner, der
+            #    zurueckkommt, wird fast sofort wieder benutzt.
+            _p.setze_zustaende(lage)
             meiner = lage.get(key) or {}
             tot = sum(1 for z in lage.values()
                       if z.get("zustand") == _t.ZUSTAND_TOT)
+            stand = _p.stand(liste)
+            # WAS JEDER RECHENORT GERADE TUT UND WIE SCHNELL ER IST — der Teil,
+            # der „ruhig schnattern" darf. Er haengt an DIESER Abfrage, weil
+            # die Startseite sie ohnehin alle zweieinhalb Sekunden stellt; die
+            # Karten sind damit so lebendig wie die Arbeit selbst.
+            #
+            # 🔴 HIER STEHT KEINE ADRESSE. Diese Antwort sieht jedes
+            #    angemeldete Konto, nicht nur ein Admin — Name, Zustand und
+            #    Geschwindigkeit ja, wo der Rechner im Netz steht nicht.
+            orte = {}
+            for t in liste:
+                z = lage.get(t.key) or {}
+                l = stand.get(t.key) or {}
+                orte[t.key] = {
+                    "label": t.label or t.model or t.provider,
+                    "zustand": z.get("zustand") or _t.ZUSTAND_OFFEN,
+                    "geladen": z.get("geladen"),
+                    "rechenwerk": z.get("rechenwerk") or "",
+                    "s_pro_dokument": l.get("s_pro_dokument"),
+                    "verlauf": l.get("verlauf") or [],
+                    "wartend": l.get("wartend") or 0,
+                    "rechnet_seit_s": l.get("rechnet_seit_s"),
+                    "rechnet_an": l.get("rechnet_an") or "",
+                }
             return {
                 "key": key,
                 "label": getattr(jetzt, "label", "") or "",
                 "anzahl": len(liste),
                 "zustand": meiner.get("zustand") or _t.ZUSTAND_OFFEN,
                 "geladen": meiner.get("geladen"),
+                "rechenwerk": meiner.get("rechenwerk") or "",
                 "tot": tot,
+                # „auto" = DocuSort waehlt je Dokument selbst; „fest" = der
+                # gewaehlte Rechner, mit Ausweichweg.
+                "verteilen": getattr(settings.ai, "verteilen", "auto"),
+                "orte": orte,
+                "bereit": sum(1 for z in lage.values()
+                              if z.get("zustand") == _t.ZUSTAND_BEREIT),
                 # Ohne Halter kann nicht gewechselt werden (etwa in Tests, die
                 # einen echten Classifier einsetzen). Das ehrlich sagen, statt
                 # einen Umschalter zu zeigen, der nichts tut.
@@ -3760,7 +3798,8 @@ def create_app(
             }
         except Exception:  # noqa: BLE001
             return {"key": "", "label": "", "anzahl": 0, "umschaltbar": False,
-                    "zustand": "offen", "tot": 0}
+                    "zustand": "offen", "tot": 0, "verteilen": "auto",
+                    "orte": {}, "bereit": 0, "rechenwerk": ""}
 
     @app.get("/api/ai/targets")
     def api_ai_targets():
@@ -3774,16 +3813,26 @@ def create_app(
         Zeitgrenze, damit ein toter Rechner die Seite nicht aufhaelt.
         """
         from .. import ai_targets as _t
+        from .. import ai_pool as _p
         liste, key = _ai_ziele_jetzt()
         lage = _t.zustaende(liste)
+        _p.setze_zustaende(lage)
+        stand = _p.stand(liste)
         raus = []
         for ziel in liste:
             d = ziel.as_dict()
             d["state"] = lage.get(ziel.key) or {"zustand": _t.ZUSTAND_OFFEN}
+            # 🔑 WAS DIESER RECHNER WIRKLICH LEISTET — gemessen an den echten
+            #    Einordnungen dieser Installation, nicht an Kernen oder RAM.
+            #    Von einer fremden Maschine ist CPU und Speicher nicht zu
+            #    erfahren, ohne dort etwas zu installieren; die Sekunden je
+            #    Dokument dagegen gehoeren uns, denn wir warten darauf.
+            d["last"] = stand.get(ziel.key) or {}
             raus.append(d)
         return {
             "active": key,
             "switchable": hasattr(classifier, "wechsle"),
+            "verteilen": getattr(settings.ai, "verteilen", "auto"),
             "targets": raus,
         }
 
@@ -3879,6 +3928,11 @@ def create_app(
             settings_writer.update_ai_active_target(
                 key=ziel.key, config_dir=settings.config_dir)
             settings.ai.active_target = ziel.key
+            # Der Halter hat beim Wechsel schon auf „fest" gestellt — eine
+            # Wahl von Hand ist eine Wahl. Hier wird sie nur haltbar gemacht,
+            # damit sie einen Neustart uebersteht.
+            settings_writer.update_ai_verteilen(
+                modus="fest", config_dir=settings.config_dir)
         except Exception as exc:  # noqa: BLE001
             gemerkt = False
             logger.warning("KI-Ziel %s laeuft, liess sich aber nicht merken: %s",
@@ -3887,10 +3941,45 @@ def create_app(
         return {
             "ok": True, "active": ziel.key, "label": ziel.label,
             "provider": ziel.provider, "model": ziel.model,
+            "verteilen": getattr(settings.ai, "verteilen", "fest"),
             "persisted": gemerkt, "restart_required": False,
             "runtime": _modell_laeuft_auf(),
             "targets": [t.as_dict() for t in liste],
         }
+
+    @app.post("/api/ai/verteilen")
+    def api_ai_verteilen(payload: dict):
+        """Selbst verteilen oder bei einem Rechner bleiben.
+
+            „docusort sollte auch umschalten koennen, wenn der mac nicht da ist
+             wird auf dem nas gerechnet ist der mac da wieder dort oder auf
+             beiden jenachdem wie die last an dokumenten ist"
+
+        🔑 Das ist die Vorgabe und braucht keine Bedienung — der Schalter ist
+        fuer den anderen Fall da: wer aus einem Grund, den nur er kennt, genau
+        einen Rechner will („der NAS soll nachts rechnen, auch wenn der Mac
+        waere schneller"), stellt auf `fest`. Auch dann bleibt der Ausweichweg:
+        faellt der gewaehlte Rechner aus, rechnet ein anderer, statt das
+        Dokument liegen zu lassen.
+        """
+        from .. import settings_writer
+        modus = str((payload or {}).get("modus") or "").strip().lower()
+        if modus not in ("auto", "fest"):
+            raise HTTPException(400, "modus must be auto or fest")
+        # 🔴 Erst die laufende Einstellung, dann die Datei. Scheitert das
+        #    Schreiben, arbeitet DocuSort trotzdem schon so — das sagen wir,
+        #    statt die Aenderung stillschweigend zurueckzunehmen.
+        settings.ai.verteilen = modus
+        gemerkt = True
+        try:
+            settings_writer.update_ai_verteilen(
+                modus=modus, config_dir=settings.config_dir)
+        except Exception as exc:  # noqa: BLE001
+            gemerkt = False
+            logger.warning("Verteilmodus %s laeuft, liess sich aber nicht "
+                           "merken: %s", modus, exc)
+        logger.info("Rechenort-Wahl: %s", modus)
+        return {"ok": True, "verteilen": modus, "persisted": gemerkt}
 
     # ------------------------------- Rechner finden, anlegen, wieder loswerden
     # Der Weg, den der Auftrag beschreibt: „er drueckt nur einen Knopf, es wird
@@ -3980,6 +4069,10 @@ def create_app(
         settings_writer.update_ai_targets(targets=vorhanden,
                                           config_dir=settings.config_dir)
         settings.ai.targets = vorhanden
+        # Ein gleich benannter Schluessel koennte frueher auf etwas anderes
+        # gezeigt haben — den alten Bau wegwerfen, statt ihn zu erben.
+        if hasattr(classifier, "vergiss"):
+            classifier.vergiss(schluessel)
         liste, aktiv = _ai_ziele_jetzt()
         return {"ok": True, "key": schluessel,
                 "targets": [t.as_dict() for t in liste], "active": aktiv}
@@ -4002,10 +4095,16 @@ def create_app(
         # 🔴 Lief dieser Rechenort gerade, muss etwas anderes uebernehmen —
         #    sonst zeigt die Installation auf einen Ort, den es nicht mehr gibt.
         liste, aktiv = _ai_ziele_jetzt()
+        # Der gebaute Klassifizierer dieses Ziels ist jetzt wertlos.
+        if hasattr(classifier, "vergiss"):
+            classifier.vergiss(key)
         if (getattr(classifier, "ziel", None)
                 and classifier.ziel.key == key and liste):
             try:
-                classifier.wechsle(liste[0].key)
+                # 🔴 `von_hand=False`: hier loescht jemand einen Rechner, er
+                #    waehlt keinen. Ein Zwangswechsel darf die automatische
+                #    Verteilung nicht stillschweigend abschalten.
+                classifier.wechsle(liste[0].key, von_hand=False)
                 settings_writer.update_ai_active_target(
                     key=liste[0].key, config_dir=settings.config_dir)
                 settings.ai.active_target = liste[0].key
