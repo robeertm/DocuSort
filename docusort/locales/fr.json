@@ -1569,5 +1569,15 @@
   "inv.title": "Factures",
   "inv.to": "au",
   "inv.unconfirmed": "non confirmée — aucun mouvement d'argent derrière",
-  "inv.untick": "décocher"
+  "inv.untick": "décocher",
+  "hub.sys.title": "Machine",
+  "hub.sys.cpu": "Processeur",
+  "hub.sys.ram": "Mémoire",
+  "hub.sys.queue": "Boîte d'entrée",
+  "hub.sys.cores": "cœurs",
+  "hub.sys.load": "charge",
+  "hub.sys.disk": "Disque libre",
+  "hub.sys.self": "DocuSort lui-même",
+  "hub.sys.working": "en cours depuis",
+  "hub.sys.window": "30 dernières min"
 }

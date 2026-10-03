@@ -1,0 +1,186 @@
+"""Was die Maschine gerade tut — CPU, Speicher, Platte, Eingang.
+
+Warum das hier liegt und nicht im Container-Manager: wer DocuSort zuschaut,
+will an EINER Stelle sehen, ob gerade gearbeitet wird. Die KI-Kachel zaehlt nur
+LLM-Aufrufe; waehrend OCR laeuft steht dort "KI im Leerlauf", obwohl vier Kerne
+gluehen. Genau diese Luecke schliesst dieses Modul.
+
+🔴 Wir laufen im Container, aber `/proc/stat` und `/proc/meminfo` zeigen die
+   Werte des WIRTS (Synology hat kein lxcfs). Das ist Absicht und auch das,
+   was im Container-Manager steht — die Zahlen sind also vergleichbar.
+🔴 Nichts hier darf die Anwendung umbringen: jede Messung faellt einzeln auf
+   None zurueck, und der Faden stirbt nie an einer Ausnahme.
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import threading
+import time
+from collections import deque
+from typing import Any
+
+TAKT_S = 10          # wie oft gemessen wird
+PUNKTE = 180         # 180 × 10 s = 30 Minuten Verlauf
+
+_sperre = threading.Lock()
+_verlauf: deque[dict[str, Any]] = deque(maxlen=PUNKTE)
+_letzte_cpu: tuple[int, int] | None = None   # (arbeit, gesamt)
+_faden: threading.Thread | None = None
+_inbox: str = ""
+_library: str = ""
+
+
+# ----------------------------------------------------------------- Messungen
+def _cpu_prozent() -> float | None:
+    """Auslastung aller Kerne zusammen, 0..100, aus zwei /proc/stat-Blicken."""
+    global _letzte_cpu
+    try:
+        with open("/proc/stat", encoding="utf-8") as fh:
+            teile = fh.readline().split()
+    except OSError:
+        return None
+    if len(teile) < 5 or teile[0] != "cpu":
+        return None
+    werte = [int(x) for x in teile[1:8] if x.isdigit()]
+    gesamt = sum(werte)
+    leerlauf = werte[3] + (werte[4] if len(werte) > 4 else 0)   # idle + iowait
+    arbeit = gesamt - leerlauf
+    vorher = _letzte_cpu
+    _letzte_cpu = (arbeit, gesamt)
+    if vorher is None:
+        return None            # erster Blick hat keinen Bezug
+    d_arbeit = arbeit - vorher[0]
+    d_gesamt = gesamt - vorher[1]
+    if d_gesamt <= 0:
+        return None
+    return round(max(0.0, min(100.0, 100.0 * d_arbeit / d_gesamt)), 1)
+
+
+def _speicher() -> dict[str, Any]:
+    try:
+        werte = {}
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for z in fh:
+                k, _, rest = z.partition(":")
+                werte[k] = int(rest.split()[0]) * 1024
+        gesamt = werte.get("MemTotal") or 0
+        frei = werte.get("MemAvailable")
+        if frei is None:
+            frei = (werte.get("MemFree") or 0) + (werte.get("Cached") or 0)
+        benutzt = max(0, gesamt - frei)
+        return {"gesamt": gesamt, "benutzt": benutzt,
+                "prozent": round(100.0 * benutzt / gesamt, 1) if gesamt else None}
+    except (OSError, ValueError, IndexError):
+        return {"gesamt": None, "benutzt": None, "prozent": None}
+
+
+def _last() -> list[float] | None:
+    try:
+        return [round(x, 2) for x in os.getloadavg()]
+    except (OSError, AttributeError):
+        return None
+
+
+def _eigener_speicher() -> int | None:
+    """RSS des DocuSort-Prozesses selbst — der Teil, den WIR verursachen."""
+    try:
+        with open("/proc/self/status", encoding="utf-8") as fh:
+            for z in fh:
+                if z.startswith("VmRSS:"):
+                    return int(z.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _platte(pfad: str) -> dict[str, Any]:
+    try:
+        g, b, f = shutil.disk_usage(pfad)
+        return {"gesamt": g, "benutzt": b, "frei": f,
+                "prozent": round(100.0 * b / g, 1) if g else None}
+    except OSError:
+        return {"gesamt": None, "benutzt": None, "frei": None, "prozent": None}
+
+
+def _eingang(pfad: str) -> dict[str, Any]:
+    """Wie viel liegt im Eingang und seit wann — das ist die ehrliche Antwort
+    auf „passiert gerade etwas?", auch wenn die KI noch gar nicht dran ist."""
+    try:
+        namen = [n for n in os.listdir(pfad) if not n.startswith(".")]
+    except OSError:
+        return {"anzahl": 0, "aeltester_s": None, "aeltester_name": None}
+    aeltester_s, aeltester_name = None, None
+    jetzt = time.time()
+    for n in namen:
+        try:
+            alter = jetzt - os.path.getmtime(os.path.join(pfad, n))
+        except OSError:
+            continue
+        if aeltester_s is None or alter > aeltester_s:
+            aeltester_s, aeltester_name = alter, n
+    return {"anzahl": len(namen),
+            "aeltester_s": int(aeltester_s) if aeltester_s is not None else None,
+            "aeltester_name": aeltester_name}
+
+
+# ------------------------------------------------------------------- Sammler
+def _einmal_messen() -> None:
+    probe = {
+        "t": int(time.time()),
+        "cpu": _cpu_prozent(),
+        "ram": _speicher().get("prozent"),
+        "eingang": _eingang(_inbox).get("anzahl") if _inbox else 0,
+    }
+    with _sperre:
+        _verlauf.append(probe)
+
+
+def _schleife() -> None:
+    _cpu_prozent()                      # Bezugspunkt setzen
+    while True:
+        try:
+            _einmal_messen()
+        except Exception:               # noqa: BLE001 — der Faden stirbt nie
+            pass
+        time.sleep(TAKT_S)
+
+
+def start(inbox: str, library: str) -> None:
+    """Einmal beim Hochfahren rufen. Mehrfachaufrufe sind folgenlos."""
+    global _faden, _inbox, _library
+    _inbox, _library = str(inbox), str(library)
+    if _faden is not None and _faden.is_alive():
+        return
+    _faden = threading.Thread(target=_schleife, name="system-stats", daemon=True)
+    _faden.start()
+
+
+# ----------------------------------------------------------------- Auskunft
+def snapshot() -> dict[str, Any]:
+    """Momentaufnahme + Verlauf, fertig fuer die Startseite."""
+    with _sperre:
+        verlauf = list(_verlauf)
+    sp = _speicher()
+    eing = _eingang(_inbox) if _inbox else {"anzahl": 0, "aeltester_s": None,
+                                            "aeltester_name": None}
+    # 🔑 Der jüngste CPU-Wert kommt aus dem Verlauf, nicht aus einer frischen
+    #    Messung: zwei Blicke im Abstand von Millisekunden ergeben Rauschen.
+    cpu_jetzt = next((p["cpu"] for p in reversed(verlauf) if p["cpu"] is not None), None)
+    return {
+        "takt_s": TAKT_S,
+        "kerne": os.cpu_count(),
+        "cpu": cpu_jetzt,
+        "ram": sp,
+        "last": _last(),
+        "eigener_speicher": _eigener_speicher(),
+        "platte": _platte(_library or "/"),
+        "eingang": eing,
+        # Verlauf als drei schlanke Reihen — die Seite zeichnet daraus Linien.
+        "verlauf": {
+            "t":       [p["t"] for p in verlauf],
+            "cpu":     [p["cpu"] for p in verlauf],
+            "ram":     [p["ram"] for p in verlauf],
+            "eingang": [p["eingang"] for p in verlauf],
+        },
+    }

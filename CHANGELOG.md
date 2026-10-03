@@ -7,6 +7,35 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.77.0] - 2026-10-03
+
+### Added
+
+**The start page now shows what the machine is doing.** The AI badge in the
+header counts LLM calls and nothing else. While a scan goes through OCR it
+therefore says "AI idle" — and the owner, watching four cores at 400 % in the
+Container Manager, reasonably concluded the badge was lying. It was not; it
+was answering a narrower question than the one being asked.
+
+A *Machine* card now sits on the dashboard with three small plots over the
+last 30 minutes: CPU, memory and inbox depth, with the current numbers above
+them, plus load average, free disk and DocuSort's own resident size. When
+something sits in the inbox the card says so with a pulsing dot and how long
+it has been there — that is the honest answer to "is anything happening?",
+whichever stage the pipeline is in.
+
+- `system_stats.py` samples `/proc/stat`, `/proc/meminfo`, the load average
+  and the inbox every 10 s into a 180-point ring. Inside a container these
+  files report the *host*, which is deliberate: the numbers then match what
+  the Container Manager shows.
+- The snapshot rides along on the existing `/api/dashboard` answer, which the
+  page already polls every few seconds. No second endpoint, no second timer.
+- Gaps in the history are skipped when drawing, never plotted as zero — a
+  missed sample must not look like a collapse to idle.
+- Every measurement falls back to `null` on its own, and the sampler thread
+  cannot die of an exception; a page that shows a dash is better than a page
+  that does not load.
+
 ## [0.76.1] - 2026-10-02
 
 ### Fixed

@@ -180,6 +180,84 @@
     </a>
   </section>
 
+  <!-- =========== MASCHINE =========== -->
+  {# Warum diese Karte: die KI-Kachel oben zaehlt nur LLM-Aufrufe. Waehrend OCR
+     laeuft steht dort „KI im Leerlauf", obwohl vier Kerne gluehen — genau diese
+     Frage („arbeitet das Ding ueberhaupt?") beantwortet hier der Verlauf. #}
+  <section class="card p-4 sm:p-5" x-show="sys" x-cloak>
+    <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+      <h2 class="text-sm font-medium text-ink-300">{{ t('hub.sys.title') }}</h2>
+      <div class="text-[11px] text-ink-500 flex items-center gap-2">
+        <span x-show="sysBusy" x-cloak class="inline-flex items-center gap-1 text-cyan-300">
+          <span class="relative inline-flex h-2 w-2">
+            <span class="absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-60 animate-ping"></span>
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-cyan-400"></span>
+          </span>
+          <span x-text="sysBusyText"></span>
+        </span>
+        <span>{{ t('hub.sys.window') }}</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+      <!-- CPU -->
+      <div class="rounded-xl border border-ink-700 p-3">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.sys.cpu') }}</span>
+          <span class="text-[10px] text-ink-500 tabular-nums"
+                x-text="(sys.kerne || '?') + ' ' + tr('hub.sys.cores')"></span>
+        </div>
+        <div class="mt-0.5 text-2xl font-semibold tabular-nums"
+             :class="(sys.cpu || 0) >= 80 ? 'text-amber-300' : 'text-emerald-300'"
+             x-text="sys.cpu === null || sys.cpu === undefined ? '–' : sys.cpu.toFixed(0) + ' %'"></div>
+        <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="mt-1 w-full h-8 overflow-visible">
+          <polyline :points="spark(sys.verlauf && sys.verlauf.cpu, 100)" fill="none"
+                    stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"
+                    class="text-emerald-400/80" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+      </div>
+
+      <!-- Arbeitsspeicher -->
+      <div class="rounded-xl border border-ink-700 p-3">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.sys.ram') }}</span>
+          <span class="text-[10px] text-ink-500 tabular-nums" x-text="gb(sys.ram && sys.ram.gesamt)"></span>
+        </div>
+        <div class="mt-0.5 text-2xl font-semibold tabular-nums"
+             :class="(sys.ram && sys.ram.prozent || 0) >= 90 ? 'text-amber-300' : 'text-cyan-300'"
+             x-text="sys.ram && sys.ram.prozent !== null ? sys.ram.prozent.toFixed(0) + ' %' : '–'"></div>
+        <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="mt-1 w-full h-8 overflow-visible">
+          <polyline :points="spark(sys.verlauf && sys.verlauf.ram, 100)" fill="none"
+                    stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"
+                    class="text-cyan-400/80" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+      </div>
+
+      <!-- Eingang -->
+      <div class="rounded-xl border border-ink-700 p-3">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.sys.queue') }}</span>
+          <span class="text-[10px] text-ink-500 tabular-nums" x-text="loadText"></span>
+        </div>
+        <div class="mt-0.5 text-2xl font-semibold tabular-nums"
+             :class="(sys.eingang && sys.eingang.anzahl || 0) > 0 ? 'text-amber-300' : 'text-ink-300'"
+             x-text="(sys.eingang && sys.eingang.anzahl) || 0"></div>
+        <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="mt-1 w-full h-8 overflow-visible">
+          <polyline :points="spark(sys.verlauf && sys.verlauf.eingang, null)" fill="none"
+                    stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"
+                    class="text-amber-400/80" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="mt-2.5 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-ink-500">
+      <span>{{ t('hub.sys.disk') }}: <span class="tabular-nums text-ink-400"
+            x-text="gb(sys.platte && sys.platte.frei)"></span></span>
+      <span>{{ t('hub.sys.self') }}: <span class="tabular-nums text-ink-400"
+            x-text="mb(sys.eigener_speicher)"></span></span>
+    </div>
+  </section>
+
   <!-- =========== FÄLLIG DEMNÄCHST =========== -->
   <section class="card p-4 sm:p-5" x-show="(state.deadlines || []).length > 0" x-cloak>
     <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
@@ -405,7 +483,7 @@
 function dashboard() {
   return {
     state: { counts: {}, recent: [], failed: [], deadlines: [], bridge: {connected: false},
-             in_flight: 0, bulk_job: null },
+             in_flight: 0, bulk_job: null, system: null },
     loading: false,
     lastUpdate: '',
     pollHandle: null,
@@ -415,6 +493,60 @@ function dashboard() {
     matching: false,
     matchMsg: '',
     get bulk() { return this.state.bulk_job; },
+
+    /* ---------- Machine ---------- */
+    get sys() { return this.state.system || null; },
+    /* Whether the chain is working is a wider question than whether an LLM
+       call is in flight. While anything sits in the inbox the chain is busy —
+       even when the AI badge above reports idle because OCR is the stage. */
+    get sysBusy() {
+      const e = this.sys && this.sys.eingang;
+      return !!(e && e.anzahl > 0);
+    },
+    get sysBusyText() {
+      const e = this.sys && this.sys.eingang;
+      if (!e || !e.anzahl) return '';
+      const s = e.aeltester_s;
+      if (s === null || s === undefined) return tr('hub.sys.working');
+      const m = Math.floor(s / 60);
+      const dauer = m >= 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min'
+                  : (m >= 1 ? m + ' min' : s + ' s');
+      return tr('hub.sys.working') + ' ' + dauer;
+    },
+    get loadText() {
+      const l = this.sys && this.sys.last;
+      return (l && l.length) ? tr('hub.sys.load') + ' ' + l[0].toFixed(2) : '';
+    },
+    /* Points for a sparkline inside viewBox 0 0 100 28.
+       maxFest = 100 for percentages, so two plots stay comparable;
+       null = scale to the data (inbox depth has no natural ceiling).
+       Gaps (null) are skipped, never drawn as 0 — otherwise the line
+       claims a collapse to idle that never happened. */
+    spark(werte, maxFest) {
+      if (!werte || !werte.length) return '';
+      const n = werte.length;
+      let max = maxFest;
+      if (max === null || max === undefined) {
+        max = Math.max(1, ...werte.filter(v => v !== null && v !== undefined));
+      }
+      const punkte = [];
+      for (let i = 0; i < n; i++) {
+        const v = werte[i];
+        if (v === null || v === undefined) continue;
+        const x = n === 1 ? 100 : (i / (n - 1)) * 100;
+        const y = 27 - Math.max(0, Math.min(1, v / max)) * 26;
+        punkte.push(x.toFixed(1) + ',' + y.toFixed(1));
+      }
+      return punkte.join(' ');
+    },
+    gb(b) {
+      if (b === null || b === undefined) return '–';
+      return (b / 1073741824).toFixed(1) + ' GB';
+    },
+    mb(b) {
+      if (b === null || b === undefined) return '–';
+      return (b / 1048576).toFixed(0) + ' MB';
+    },
     /* Was auf dem Abzeichen steht: Modell und Gegenstelle, nicht ein fester
        Name. „nicht erreichbar" wird nur angehaengt, wenn wirklich nachgesehen
        wurde — bei einem Anbieter in der Wolke steht gar nichts dahinter. */
