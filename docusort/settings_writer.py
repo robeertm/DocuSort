@@ -92,6 +92,29 @@ def update_ai_active_target(*, key: str, config_dir: Path | None = None) -> Path
     return _write_raw(cfg, config_dir)
 
 
+def update_ai_targets(*, targets: list, config_dir: Path | None = None) -> Path:
+    """Die benannten Rechenorte schreiben (`ai.targets`).
+
+    🔴 Nur dieser EINE Schluessel wird angefasst. Anbieter, Modell und Adresse
+    des eingerichteten Rueckfalls bleiben stehen — wer alle Rechenorte wieder
+    entfernt, landet dort, nicht im Nichts.
+    """
+    cfg = _read_raw(config_dir)
+    ai = cfg.get("ai") or {}
+    sauber = []
+    for roh in (targets or []):
+        if not isinstance(roh, dict):
+            continue
+        eintrag = {k: roh.get(k) for k in
+                   ("key", "label", "provider", "model", "base_url", "note")
+                   if roh.get(k)}
+        if eintrag.get("provider") and eintrag.get("key"):
+            sauber.append(eintrag)
+    ai["targets"] = sauber
+    cfg["ai"] = ai
+    return _write_raw(cfg, config_dir)
+
+
 def update_paths(
     *,
     inbox: str = "",

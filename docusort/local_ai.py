@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import secrets
 import threading
 import time
 import urllib.request
+
+logger = logging.getLogger(__name__)
 
 OLLAMA_PORT = 11434
 PROBE_TIMEOUT = 2.0        # per address; they are asked side by side
@@ -51,11 +54,35 @@ def models_at(base: str, timeout: float = PROBE_TIMEOUT) -> list[str]:
 
 
 def usable_model(models: list[str]) -> str:
-    """The model DocuSort is most likely to get on with."""
+    """The model DocuSort is most likely to get on with.
+
+    🔴 ZWEI DURCHGAENGE, UND DIE REIHENFOLGE IST DER GANZE PUNKT. Vorher lief
+    nur EINE Schleife, die auch auf die FAMILIE passte: `want.split(":")[0]`
+    macht aus `qwen2.5:7b-instruct` ein `qwen2.5`, und darauf passt auch
+    `qwen2.5:3b-instruct`. Lagen beide auf einem Rechner, gewann das kleinere —
+    einfach weil Ollama es zuerst auflistet.
+
+    Das ist kein Schoenheitsfehler. Gemessen an derselben Stromrechnung auf dem
+    echten Weg des Programms: das 3B-Modell brauchte 186 s und legte sie unter
+    „Haus", das 7B 465 s und legte sie unter „Rechnungen" — dorthin, wo sie
+    hingehoert. Das kleinere Modell ist nicht die schnellere Variante derselben
+    Arbeit, es ist eine schlechtere Arbeit.
+
+    Also: erst ein GENAUER Treffer ueber die ganze Wunschliste, und nur wenn
+    keiner dabei ist, ein Familientreffer.
+    """
     usable = [m for m in models if not any(u in m.lower() for u in UNUSABLE)]
+    # 🔑 `:latest` ist Ollamas stillschweigende Marke — `qwen2.5:7b-instruct`
+    #    und `qwen2.5:7b-instruct:latest` sind dasselbe Modell.
+    def _blank(n: str) -> str:
+        return n[:-7] if n.endswith(":latest") else n
     for want in WISH:
         for m in usable:
-            if m == want or m.split(":")[0] == want.split(":")[0]:
+            if _blank(m) == want:
+                return m
+    for want in WISH:
+        for m in usable:
+            if _blank(m).split(":")[0] == want.split(":")[0]:
                 return m
     return usable[0] if usable else ""
 
@@ -259,3 +286,117 @@ def spend_setup_ticket(token: str) -> None:
     with _ticket_lock:
         _tickets.pop(_hash(token), None)
         _schreibe_tickets()
+
+
+# ------------------------------------------------------- Suche im eigenen Netz
+# „es wird ermittelt was gibt es für Hardware in der Umgebung"
+#
+# 🔴 EIN NETZSCAN IST NICHTS, WAS MAN NEBENBEI TUT. 254 Verbindungen in ein
+#    fremdes Netz sehen von außen aus wie ein Portscan, und in einem Firmennetz
+#    ist das ein Vorfall. Deshalb:
+#      · nur auf ausdrücklichen Knopfdruck, nie beim Laden einer Seite,
+#      · nur der EINE Port, auf dem Ollama lauscht,
+#      · nur das eigene /24, nie ein größerer Bereich,
+#      · kurze Zeitgrenze, damit es Sekunden dauert und nicht Minuten.
+#
+# 🔑 Und zuerst wird ohne Scan gefragt: `discover()` kennt schon die Adressen,
+#    die etwas über sich verraten haben — die Gegenstelle des Browsers vor
+#    allem. Wer die Seite von seinem Arbeitsrechner aus offen hat, wird dort
+#    gefunden, ohne dass ein einziges fremdes Gerät angefasst wird.
+
+SCAN_PORT = OLLAMA_PORT
+SCAN_TIMEOUT = 0.35          # je Adresse; parallel, also nicht die Summe
+SCAN_WORKERS = 64
+
+
+def _eigenes_netz() -> tuple[str, str] | None:
+    """Die eigene Adresse und ihr /24 — oder None, wenn das nicht zu
+    ermitteln ist. 🔴 Nie raten: ohne eigene Adresse wird nicht gescannt."""
+    import socket as _s
+    try:
+        s = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+        try:
+            # Verbindet nichts, fragt nur die Routing-Tabelle, welche eigene
+            # Adresse für ein Ziel draußen benutzt würde.
+            s.connect(("192.0.2.1", 9))
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return None
+    if not ip or ip.startswith("127."):
+        return None
+    teile = ip.split(".")
+    if len(teile) != 4:
+        return None
+    return ip, ".".join(teile[:3])
+
+
+def scan_netz(timeout: float = SCAN_TIMEOUT) -> list[dict]:
+    """Das eigene /24 nach Ollama absuchen.
+
+    Gibt dieselbe Form zurück wie `discover()`: url, models, suggested.
+    """
+    netz = _eigenes_netz()
+    if netz is None:
+        logger.info("Netzsuche: eigene Adresse nicht ermittelbar, "
+                    "es wird nicht gescannt")
+        return []
+    eigene, praefix = netz
+    import socket as _s
+    from concurrent.futures import ThreadPoolExecutor
+
+    def offen(host: str) -> str | None:
+        try:
+            with _s.create_connection((host, SCAN_PORT), timeout) as _:
+                return host
+        except Exception:
+            return None
+
+    adressen = [f"{praefix}.{n}" for n in range(1, 255)]
+    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        treffer = [h for h in pool.map(offen, adressen) if h]
+
+    # 🔑 Ein offener Port ist noch kein Ollama. Erst die Modellliste beweist es
+    #    — und sie ist zugleich das, was der Benutzer sehen will.
+    gefunden: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(16, max(1, len(treffer)))) as pool:
+        def pruefe(host: str) -> dict | None:
+            url = f"http://{host}:{SCAN_PORT}"
+            modelle = models_at(url, timeout=2.0)
+            if modelle is None:
+                return None
+            return {"url": url, "models": modelle,
+                    "suggested": usable_model(modelle),
+                    "self": host == eigene}
+        for e in pool.map(pruefe, treffer):
+            if e:
+                gefunden.append(e)
+    logger.info("Netzsuche: %d Adresse(n) offen, %d davon mit Ollama",
+                len(treffer), len(gefunden))
+    return gefunden
+
+
+def modell_loeschen(base: str, model: str, timeout: float = 30.0) -> tuple[bool, str]:
+    """Ein Modell auf einem Ollama löschen.
+
+    🔴 Das gibt mehrere Gigabyte frei und ist nicht rückgängig zu machen —
+    der Aufrufer muss nachfragen, bevor er das hier ruft.
+    """
+    import json as _j
+    from urllib import request as _r, error as _e
+    wurzel = (base or "").rstrip("/")
+    if wurzel.endswith("/v1"):
+        wurzel = wurzel[:-3].rstrip("/")
+    daten = _j.dumps({"model": model}).encode("utf-8")
+    req = _r.Request(wurzel + "/api/delete", data=daten, method="DELETE",
+                     headers={"Content-Type": "application/json"})
+    try:
+        with _r.urlopen(req, timeout=timeout) as r:
+            r.read()
+        return True, ""
+    except _e.HTTPError as exc:
+        return False, (exc.read().decode("utf-8", "replace")[:200]
+                       or f"HTTP {exc.code}")
+    except Exception as exc:  # noqa: BLE001
+        return False, type(exc).__name__

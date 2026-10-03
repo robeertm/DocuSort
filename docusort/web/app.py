@@ -3774,6 +3774,148 @@ def create_app(
             "targets": [t.as_dict() for t in liste],
         }
 
+    # ------------------------------- Rechner finden, anlegen, wieder loswerden
+    # Der Weg, den der Auftrag beschreibt: „er drueckt nur einen Knopf, es wird
+    # ermittelt was gibt es fuer Hardware in der Umgebung, das Modell wird
+    # heruntergeladen und in Zukunft immer benutzt — oder er hat mehrere
+    # Hardware-Geraete die er nutzen kann und kann sie auswaehlen".
+    #
+    # 🔴 UND WIEDER WEG: „der Nutzer muss auch die Modelle von der Hardware
+    #    wieder loeschen koennen, ohne groessere Umstaende." Mehrere Gigabyte,
+    #    die niemand mehr braucht, auf einem Rechner, zu dem man sich sonst
+    #    erst per SSH verbinden muesste.
+
+    def _ziel_konfig() -> list[dict]:
+        """Die Rechenorte, wie sie in der config.yaml STEHEN — nicht die
+        abgeleiteten. Nur diese lassen sich aendern."""
+        return [dict(r) for r in (getattr(settings.ai, "targets", None) or [])
+                if isinstance(r, dict)]
+
+    @app.post("/api/ai/targets/discover")
+    def api_ai_discover(request: Request, payload: dict | None = None):
+        """Welche Rechner im Haus koennen rechnen?
+
+        Ohne `scan` werden nur die Adressen gefragt, die sich ohnehin zu
+        erkennen geben — darunter die Gegenstelle dieses Browsers, also der
+        Rechner, an dem gerade jemand sitzt. Das fasst kein fremdes Geraet an.
+
+        🔴 Mit `scan` wird das eigene /24 abgesucht. Das ist ein bewusster
+        Schritt und darum ein eigener Schalter: 254 Verbindungen in ein Netz
+        sehen von aussen aus wie ein Portscan, und in einem Firmennetz ist das
+        ein Vorfall. Niemals beim Laden einer Seite, immer nur auf Knopfdruck.
+        """
+        from .. import local_ai
+        scan = bool((payload or {}).get("scan"))
+        klient = getattr(getattr(request, "client", None), "host", "") or ""
+        gefunden = local_ai.discover(settings.ai.base_url or "", klient)
+        bekannt = {e["url"].rstrip("/") for e in gefunden}
+        if scan:
+            for e in local_ai.scan_netz():
+                if e["url"].rstrip("/") not in bekannt:
+                    gefunden.append(e)
+                    bekannt.add(e["url"].rstrip("/"))
+        # Was davon ist schon eingetragen? Sonst legt jemand denselben Rechner
+        # zweimal an und waehlt danach zwischen zwei gleichen Knoepfen.
+        schon = {(r.get("base_url") or "").rstrip("/").removesuffix("/v1").rstrip("/")
+                 for r in _ziel_konfig()}
+        for e in gefunden:
+            e["known"] = e["url"].rstrip("/") in schon
+        return {"found": gefunden, "scanned": scan}
+
+    @app.post("/api/ai/targets/add")
+    def api_ai_target_add(payload: dict):
+        """Einen gefundenen Rechner als Rechenort eintragen."""
+        from .. import ai_targets as _t, settings_writer
+        url = str((payload or {}).get("url") or "").strip().rstrip("/")
+        model = str((payload or {}).get("model") or "").strip()
+        label = str((payload or {}).get("label") or "").strip()
+        if not url or not model:
+            raise HTTPException(400, "url and model required")
+        basis = url if url.endswith("/v1") else url + "/v1"
+        from urllib.parse import urlsplit
+        rechner = urlsplit(url).hostname or url
+        schluessel = str((payload or {}).get("key") or "").strip() or rechner
+        # 🔑 Schluessel muessen eindeutig sein — sonst zeigt ein gemerkter
+        #    Wechsel spaeter auf den falschen Rechner.
+        vorhanden = _ziel_konfig()
+        belegt = {r.get("key") for r in vorhanden}
+        grund, n = schluessel, 2
+        while schluessel in belegt:
+            schluessel = f"{grund}-{n}"
+            n += 1
+        vorhanden.append({
+            "key": schluessel, "label": label or rechner,
+            "provider": "openai_compat", "model": model, "base_url": basis,
+        })
+        settings_writer.update_ai_targets(targets=vorhanden,
+                                          config_dir=settings.config_dir)
+        settings.ai.targets = vorhanden
+        liste, aktiv = _ai_ziele_jetzt()
+        return {"ok": True, "key": schluessel,
+                "targets": [t.as_dict() for t in liste], "active": aktiv}
+
+    @app.post("/api/ai/targets/remove")
+    def api_ai_target_remove(payload: dict):
+        """Einen Rechenort aus der Liste nehmen. Das loescht nichts auf dem
+        Rechner selbst — nur DocuSort hoert auf, ihn anzubieten."""
+        from .. import settings_writer
+        key = str((payload or {}).get("key") or "").strip()
+        if not key:
+            raise HTTPException(400, "key required")
+        vorhanden = _ziel_konfig()
+        bleibt = [r for r in vorhanden if r.get("key") != key]
+        if len(bleibt) == len(vorhanden):
+            raise HTTPException(404, f"unknown target: {key}")
+        settings_writer.update_ai_targets(targets=bleibt,
+                                          config_dir=settings.config_dir)
+        settings.ai.targets = bleibt
+        # 🔴 Lief dieser Rechenort gerade, muss etwas anderes uebernehmen —
+        #    sonst zeigt die Installation auf einen Ort, den es nicht mehr gibt.
+        liste, aktiv = _ai_ziele_jetzt()
+        if (getattr(classifier, "ziel", None)
+                and classifier.ziel.key == key and liste):
+            try:
+                classifier.wechsle(liste[0].key)
+                settings_writer.update_ai_active_target(
+                    key=liste[0].key, config_dir=settings.config_dir)
+                settings.ai.active_target = liste[0].key
+                aktiv = liste[0].key
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Nach dem Entfernen von %s liess sich nicht "
+                             "umschalten: %s", key, exc)
+        return {"ok": True, "targets": [t.as_dict() for t in liste],
+                "active": aktiv}
+
+    @app.post("/api/ai/target/model/delete")
+    def api_ai_model_delete(payload: dict):
+        """Ein Modell auf dem Zielrechner loeschen — gibt Gigabyte frei.
+
+        🔴 Nicht rueckgaengig zu machen. Die Oberflaeche fragt vorher nach;
+        hier wird zusaetzlich das Modell verweigert, das dieser Rechenort
+        gerade BENUTZT, solange er der aktive ist — sonst loescht ein Klick
+        die Grundlage der laufenden Einordnung.
+        """
+        from .. import local_ai
+        key = str((payload or {}).get("key") or "").strip()
+        model = str((payload or {}).get("model") or "").strip()
+        liste, aktiv = _ai_ziele_jetzt()
+        ziel = next((t for t in liste if t.key == key), None)
+        if ziel is None:
+            raise HTTPException(404, f"unknown target: {key}")
+        if not model:
+            raise HTTPException(400, "model required")
+        if key == aktiv and model.split(":latest")[0] == (
+                ziel.model or "").split(":latest")[0]:
+            raise HTTPException(
+                409, "that is the model this machine is using right now — "
+                     "switch to another machine first")
+        ok, grund = local_ai.modell_loeschen(ziel.base_url, model)
+        if not ok:
+            raise HTTPException(502, grund or "delete failed")
+        logger.info("Modell %s auf %s geloescht", model, key)
+        from .. import ai_targets as _t
+        return {"ok": True, "state": _t.zustand(ziel)}
+
     @app.post("/api/local-ai/apply")
     def api_local_ai_apply(payload: dict):
         return _local_ai_apply(payload.get("url") or "", payload.get("model") or "")
