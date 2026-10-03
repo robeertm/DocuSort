@@ -7,6 +7,42 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.85.2] - 2026-10-03
+
+### Fixed
+
+🔴 **Setup wrote an address DocuSort could not reach, after downloading
+4.7 GB.** The setup script asked its own routing table which of its addresses
+would be used to reach DocuSort, and sent that. From that machine's point of
+view the answer was correct — and still wrong: DocuSort had been opened over
+Tailscale, so the routing table answered with the machine's *Tailscale*
+address. DocuSort runs in a container, and a container does not reach the
+host's Tailnet; only the host does.
+
+Measured on a real run: Ollama installed, bound, 4.7 GB pulled, speed measured
+at 125 tokens/s — and then `Connection timed out` at the handover, with
+everything on that side working perfectly. The address was written anyway, so
+the install was left pointing at something unreachable.
+
+**Only DocuSort can answer this**, because it is the one that has to reach the
+other machine. The setup now sends *every* address it has — best guess first,
+Tailnet and CGNAT addresses last, since those often work between two machines
+and specifically not out of a container — and DocuSort tries them in order and
+keeps the one that **answers**. If none do, the error names every address that
+was tried, because somebody who just waited for gigabytes should not have to
+guess.
+
+- New `local_ai.antwortet()`. 🔑 "Does it answer?" is not the same question as
+  "does it have models?": `models_at()` returns an empty list for *both* a
+  dead address and a freshly installed Ollama with no model yet. Using it to
+  pick an address would declare a working Ollama dead.
+- **An unreachable address is still saved, but never becomes the active
+  target.** Somebody who just waited for gigabytes should not lose the setting
+  — the machine may come back in ten minutes. But activating it is what left a
+  real install unable to classify anything at all. It is written as a target,
+  reported as `verified: false` with the reason, and the install keeps
+  computing where it can.
+
 ## [0.85.1] - 2026-10-03
 
 ### Fixed

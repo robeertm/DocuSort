@@ -933,6 +933,68 @@ def split(origin: str):
                                                    (443 if t.scheme == "https" else 80))
 
 
+def my_addresses(host: str, port: int) -> list:
+    """Every IPv4 address this machine could be reached at — best guess first.
+
+    🔴 WHY A LIST AND NOT ONE ADDRESS. `my_address()` below asks the routing
+    table which of our addresses would be used to reach DocuSort, and returns
+    it. That is correct from THIS machine's point of view — and it was still
+    wrong, measured on a real install:
+
+    DocuSort was opened over Tailscale, so the routing table answered with
+    this machine's Tailscale address. DocuSort itself, however, runs in a
+    container, and a container does not reach the host's Tailnet — only the
+    host does. The setup downloaded 4.7 GB, measured the speed, wrote the
+    address and then died at the handover with "Connection timed out", with
+    everything on this side working perfectly.
+
+    🔑 ONLY DOCUSORT CAN ANSWER THIS. It is the one that has to reach us. So
+    we stop guessing, send every address we have, and let it try them.
+    """
+    raus = []
+
+    def add(ip: str) -> None:
+        ip = (ip or "").strip()
+        if ip and not ip.startswith("127.") and ip not in raus:
+            raus.append(ip)
+
+    add(my_address(host, port))        # the routing table's answer goes first
+    try:
+        import subprocess as _sp
+        if platform.system() == "Windows":
+            out = _sp.check_output(["ipconfig"], text=True, timeout=10)
+            for zeile in out.splitlines():
+                if "IPv4" in zeile and ":" in zeile:
+                    add(zeile.split(":")[-1].strip())
+        else:
+            for befehl in (["ifconfig"], ["ip", "-4", "addr"]):
+                try:
+                    out = _sp.check_output(befehl, text=True, timeout=10,
+                                           stderr=_sp.DEVNULL)
+                except Exception:
+                    continue
+                for zeile in out.split():
+                    pass
+                import re as _re
+                for treffer in _re.findall(
+                        r"inet\s+(?:addr:)?(\d{1,3}(?:\.\d{1,3}){3})", out):
+                    add(treffer)
+                break
+    except Exception:
+        pass
+    # 🔑 Tailnet- und CGNAT-Adressen ans ENDE: sie funktionieren oft zwischen
+    #    zwei Rechnern und gerade nicht aus einem Container heraus. Sie werden
+    #    nicht weggeworfen — manchmal sind sie der einzige Weg.
+    def spaet(ip: str) -> int:
+        teile = ip.split(".")
+        try:
+            return 1 if (teile[0] == "100" and 64 <= int(teile[1]) <= 127) else 0
+        except (IndexError, ValueError):
+            return 0
+    raus.sort(key=spaet)
+    return raus or ["127.0.0.1"]
+
+
 def my_address(host: str, port: int) -> str:
     """The address THIS machine has from DocuSort's point of view.
 
@@ -1126,9 +1188,16 @@ def main() -> int:
     step("Telling DocuSort, and asking it to try the model")
     info("The first answer loads the model into memory — this can take a minute.")
     try:
+        # 🔑 Alle Adressen mitschicken; DocuSort probiert sie durch und nimmt
+        #    die, die es WIRKLICH erreicht. `url` bleibt fuer aeltere Stände.
+        alle = ["http://%s:%d" % (ip, OLLAMA_PORT)
+                for ip in my_addresses(host, port)] if not here else [target]
         res = post(origin + "/api/local-ai/adopt",
-                   {"ticket": a.ticket, "url": target, "model": model},
+                   {"ticket": a.ticket, "url": target, "urls": alle,
+                    "model": model},
                    VERIFY_WAIT, a.insecure)
+        if res.get("url") and res["url"].rstrip("/v1").rstrip("/") != target:
+            info("DocuSort reaches this machine at %s" % res["url"])
     except Exception as exc:
         # 🔴 Hier war alles schon getan: Ollama laeuft, gebunden, Modell
         #    heruntergeladen — und dann starb es an der UEBERGABE. Wer

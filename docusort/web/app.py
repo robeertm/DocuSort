@@ -3567,7 +3567,8 @@ def create_app(
             "suggested": best["suggested"] if best else "",
         }
 
-    def _local_ai_apply(url: str, model: str) -> dict:
+    def _local_ai_apply(url: str, model: str, *, erreichbar: bool | None = None,
+                        versucht: list | None = None) -> dict:
         """Write the setting AND ask the model whether it actually answers.
 
         🔴 "Saved" is not "works" — the same separation the upload path uses.
@@ -3606,6 +3607,42 @@ def create_app(
         #    zeigen dieselbe Wahrheit.
         from .. import ai_targets as _t
         neu_aktiv, eingetragen = "", False
+        # 🔴 EINE UNERREICHBARE ADRESSE WIRD NIE DAS AKTIVE ZIEL. Sie wird
+        #    eingetragen (der Rechner kann spaeter hochfahren), aber gerechnet
+        #    wird weiter dort, wo es geht. Anders herum stand eine
+        #    Installation schon einmal ganz ohne Rechner da.
+        if erreichbar is False:
+            try:
+                vorhandene = [dict(r) for r in
+                              (getattr(settings.ai, "targets", None) or [])
+                              if isinstance(r, dict)]
+                if not any((r.get("base_url") or "").rstrip("/")
+                           == base_url.rstrip("/") for r in vorhandene):
+                    from urllib.parse import urlsplit as _us
+                    rechner = _us(url).hostname or url
+                    belegt = {r.get("key") for r in vorhandene}
+                    sch, n = rechner, 2
+                    while sch in belegt:
+                        sch = f"{rechner}-{n}"; n += 1
+                    vorhandene.append({"key": sch, "label": rechner,
+                                       "provider": "openai_compat",
+                                       "model": model, "base_url": base_url})
+                    settings_writer.update_ai_targets(
+                        targets=vorhandene, config_dir=settings.config_dir)
+                    settings.ai.targets = vorhandene
+                    eingetragen = True
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Ziel liess sich nicht eintragen: %s", exc)
+            grund = ("DocuSort cannot reach this machine on any of its "
+                     "addresses: " + ", ".join(versucht or [url]))
+            return {"ok": True, "restart_required": False, "verified": False,
+                    # 🔑 Die Begruendung gehoert in dasselbe Feld wie sonst die
+                    #    Antwort des Modells — der Aufrufer liest EIN Feld.
+                    "answer": grund, "provider": "openai_compat",
+                    "base_url": base_url, "model": model,
+                    "active": "", "added_target": eingetragen,
+                    "reachable": False, "tried": versucht or [url],
+                    "detail": grund}
         try:
             vorhandene = [dict(r) for r in
                           (getattr(settings.ai, "targets", None) or [])
@@ -4337,7 +4374,57 @@ def create_app(
         if not local_ai.check_setup_ticket(ticket):
             raise HTTPException(401, "setup ticket invalid or expired — "
                                      "download the setup again")
-        return _local_ai_apply(payload.get("url") or "", payload.get("model") or "")
+        # 🔴 DIE ADRESSE WIRD GEMESSEN, NICHT GEGLAUBT. Das Einrichtungsskript
+        #    fragte frueher seine eigene Routing-Tabelle, welche Adresse es fuer
+        #    DocuSort benutzen wuerde, und schickte die. Aus Sicht jenes
+        #    Rechners richtig — und trotzdem falsch: wird DocuSort ueber
+        #    Tailscale geoeffnet, antwortet die Routing-Tabelle mit der
+        #    Tailscale-Adresse, und ein Container erreicht das Tailnet des
+        #    Wirts nicht, nur der Wirt selbst. An einem echten Durchlauf
+        #    gemessen: 4,7 GB geladen, Geschwindigkeit gemessen, Adresse
+        #    eingetragen — und dann „Connection timed out" bei der Uebergabe,
+        #    obwohl auf jener Seite alles lief.
+        #
+        # 🔑 NUR DOCUSORT KANN DAS BEANTWORTEN, denn es muss die Gegenstelle
+        #    erreichen. Das Skript schickt jetzt alle seine Adressen; hier wird
+        #    durchprobiert und die genommen, die ANTWORTET.
+        model = payload.get("model") or ""
+        kandidaten = [str(u).strip() for u in (payload.get("urls") or []) if u]
+        einzeln = str(payload.get("url") or "").strip()
+        if einzeln and einzeln not in kandidaten:
+            kandidaten.insert(0, einzeln)
+        if not kandidaten:
+            raise HTTPException(400, "url required")
+
+        gewaehlt, versucht = "", []
+        for roh in kandidaten:
+            wurzel = roh.rstrip("/")
+            if wurzel.endswith("/v1"):
+                wurzel = wurzel[:-3].rstrip("/")
+            versucht.append(wurzel)
+            # 🔑 `antwortet()`, nicht `models_at()`: ein frisch installiertes
+            #    Ollama ohne Modelle gibt dort eine leere Liste — genau wie
+            #    eine Adresse, an der niemand lauscht.
+            if local_ai.antwortet(wurzel, timeout=4.0):
+                gewaehlt = wurzel
+                break
+        if not gewaehlt:
+            # 🔴 NICHT ABLEHNEN. Wer gerade Gigabyte geladen hat, soll die
+            #    Einstellung nicht verlieren — der Rechner kann in zehn
+            #    Minuten erreichbar sein. Gespeichert wird die beste
+            #    Vermutung; `_local_ai_apply` meldet ehrlich
+            #    `verified: false`, und — das ist der Punkt — macht sie NICHT
+            #    zum aktiven Ziel. Genau daran ist ein echter Durchlauf
+            #    gescheitert: die unerreichbare Adresse wurde aktiv, und
+            #    danach konnte die Installation gar nichts mehr einordnen.
+            logger.warning("Einrichtung: keine dieser Adressen antwortet: %s",
+                           ", ".join(versucht))
+            return _local_ai_apply(versucht[0], model, erreichbar=False,
+                                   versucht=versucht)
+        if versucht and gewaehlt != versucht[0]:
+            logger.info("Einrichtung: %s antwortete nicht, %s schon",
+                        versucht[0], gewaehlt)
+        return _local_ai_apply(gewaehlt, model)
 
     @app.post("/api/local-ai/finish")
     def api_local_ai_finish(payload: dict):

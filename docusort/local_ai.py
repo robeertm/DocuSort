@@ -53,6 +53,23 @@ def models_at(base: str, timeout: float = PROBE_TIMEOUT) -> list[str]:
     return [n for n in names if n]
 
 
+def antwortet(base: str, timeout: float = PROBE_TIMEOUT) -> bool:
+    """Antwortet an dieser Adresse ueberhaupt ein Ollama?
+
+    🔴 NICHT DASSELBE WIE „hat es Modelle". `models_at()` gibt in beiden
+    Faellen eine leere Liste zurueck: wenn niemand lauscht UND wenn ein frisch
+    installiertes Ollama noch kein Modell hat. Wer die beiden verwechselt,
+    erklaert ein fertiges Ollama fuer tot — genau der Fehler, der weiter unten
+    in dieser Datei schon einmal kommentiert ist.
+    """
+    try:
+        req = urllib.request.Request(base.rstrip("/") + "/api/tags")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
 def usable_model(models: list[str]) -> str:
     """The model DocuSort is most likely to get on with.
 
