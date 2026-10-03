@@ -21,24 +21,28 @@ nur ein Ziel, zeigt die Oberflaeche keine Auswahl, weil es nichts zu waehlen
 gibt. Das ist dieselbe Regel wie auf der Einstellungsseite: nur anbieten, was
 diese Installation wirklich kann.
 
-Beispiel fuer `config.yaml` — rein illustrativ, jeder tragt seine eigenen ein:
+Beispiel fuer `config.yaml` — rein illustrativ, jeder traegt seine eigenen
+ein. 🔑 Die Adressen stammen aus dem Dokumentationsbereich (RFC 5737,
+192.0.2.0/24): ein Leser kann ein Beispiel nicht von jemandes wirklicher
+Maschine unterscheiden, und eine echt aussehende private Adresse in einem
+oeffentlichen Repo verraet das Teilnetz dessen, der sie hingeschrieben hat.
 
     ai:
       provider: openai_compat          # das bleibt der Rueckfall
       model: qwen2.5:7b-instruct
-      base_url: http://10.0.0.5:11434/v1
+      base_url: http://192.0.2.5:11434/v1
       active_target: schnell
       targets:
         - key: schnell
           label: Arbeitsrechner
           provider: openai_compat
           model: qwen2.5:7b-instruct
-          base_url: http://10.0.0.7:11434/v1
+          base_url: http://192.0.2.7:11434/v1
         - key: nachts
           label: Server
           provider: openai_compat
           model: qwen2.5:7b-instruct
-          base_url: http://10.0.0.5:11434/v1
+          base_url: http://192.0.2.5:11434/v1
 
 🔑 WARUM EIN HALTER UND NICHT EIN NEUSTART. Bisher schrieb die
 Einstellungsseite den Anbieter in die Datei und meldete `restart_required`.

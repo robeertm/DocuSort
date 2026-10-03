@@ -53,9 +53,9 @@ address.** That page offered an empty field — on a fresh install, at the very
 first step. It now has the same search, including the deliberate network scan.
 
 🔴 **The network scan searched the wrong network.** DocuSort usually runs in a
-container, whose own address is on the Docker network (measured: 172.26.0.2).
+container, whose own address is on the Docker network (somewhere in 172.16/12).
 Scanning "my own /24" from there searched the Docker network and found exactly
-one thing — the gateway, i.e. its own host, shown as a bare `172.26.0.1` that
+one thing — the gateway, i.e. its own host, shown as a bare address that
 matches no device anybody owns. Machines on the actual house network were
 never found. The scan now uses the network of the *browser* that asked, which
 is the one reliable statement about where "here" is, and each find carries a
