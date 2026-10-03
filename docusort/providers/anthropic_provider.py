@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import logging
 import time
 
@@ -138,3 +140,8 @@ class AnthropicProvider(Provider):
             cache_creation_tokens=c_write, cache_read_tokens=c_read,
             cost_usd=cost,
         )
+
+    def runtime(self) -> dict[str, Any]:
+        """Runs in a data centre. There is no local load to show, and
+        inventing one would be worse than saying so."""
+        return {"where": "cloud", "provider": self.name, "reachable": True}

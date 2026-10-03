@@ -469,6 +469,7 @@ async def run_loop(*, server_url: str, token: str, model: str,
                         "model":    model,
                         "ollama":   _ollama_version_or_blank(),
                     },
+                    "stats": _eigene_last(),
                     "queued_responses": list(queued_responses),
                 }
                 await ws.send(json.dumps(hello))
@@ -490,6 +491,13 @@ async def run_loop(*, server_url: str, token: str, model: str,
                         continue
                     if msg.get("type") != "request":
                         continue
+                    # Die Last DIESES Rechners nachreichen: der Server fragt
+                    # gleich Arbeit an, und waehrend sie laeuft will die
+                    # Startseite wissen, wer gerade schwitzt.
+                    try:
+                        await ws.send(json.dumps({"type": "stats", **_eigene_last()}))
+                    except Exception:
+                        pass
                     req_id = str(msg.get("request_id", ""))
                     short  = req_id[:8] or "??"
                     redelivery = bool(msg.get("redelivery"))
@@ -588,6 +596,55 @@ def _looks_cloudy(name: str) -> bool:
     server when we know we are running locally."""
     n = name.strip().lower()
     return any(n.startswith(p) for p in _CLOUD_MODEL_PREFIXES)
+
+
+def _eigene_last() -> dict:
+    """CPU und Speicher DIESES Rechners — der, auf dem das Modell rechnet.
+
+    DocuSort liest /proc und kennt damit nur seinen eigenen Wirt. Bei einer
+    Bruecke steht das Modell hier, und eine Lastzahl ohne den Rechner dazu ist
+    wertlos. Also meldet der Rechner sich selbst.
+
+    Ohne Zusatzpakete: die Lastmittelwerte gibt es auf macOS und Linux, den
+    Speicher holen wir je Betriebssystem und lassen ihn sonst einfach weg —
+    lieber ein fehlender Wert als ein erfundener.
+    """
+    d: dict = {}
+    try:
+        kerne = os.cpu_count() or 1
+        d["cpu"] = round(min(100.0, 100.0 * os.getloadavg()[0] / kerne), 1)
+    except (OSError, AttributeError):
+        pass
+    try:
+        if sys.platform == "darwin":
+            gesamt = int(subprocess.run(["sysctl", "-n", "hw.memsize"],
+                                        capture_output=True, text=True,
+                                        timeout=3).stdout.strip())
+            seiten = subprocess.run(["vm_stat"], capture_output=True, text=True,
+                                    timeout=3).stdout
+            frei = 0
+            seitengroesse = 4096
+            for z in seiten.splitlines():
+                if "page size of" in z:
+                    seitengroesse = int(z.split("page size of")[1].split()[0])
+                for marke in ("Pages free:", "Pages inactive:", "Pages speculative:"):
+                    if z.startswith(marke):
+                        frei += int(z.split(":")[1].strip().rstrip("."))
+            benutzt = max(0, gesamt - frei * seitengroesse)
+            d["memory"] = round(100.0 * benutzt / gesamt, 1) if gesamt else None
+        else:
+            werte = {}
+            with open("/proc/meminfo", encoding="utf-8") as fh:
+                for z in fh:
+                    k, _, rest = z.partition(":")
+                    werte[k] = int(rest.split()[0]) * 1024
+            gesamt = werte.get("MemTotal") or 0
+            frei = werte.get("MemAvailable", 0)
+            if gesamt:
+                d["memory"] = round(100.0 * (gesamt - frei) / gesamt, 1)
+    except Exception:  # noqa: BLE001 — ein fehlender Wert ist kein Fehler
+        pass
+    return d
 
 
 def _ollama_version_or_blank() -> str:

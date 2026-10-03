@@ -1594,5 +1594,11 @@
   "hub.sys.ai": "AI model",
   "hub.sys.procs": "processes",
   "hub.sys.unreachable": "unreachable",
-  "hub.sys.notloaded": "no model loaded"
+  "hub.sys.notloaded": "no model loaded",
+  "hub.sys.this_machine": "This machine",
+  "hub.sys.model_machine": "The model runs on",
+  "hub.sys.where.cloud": "in the cloud",
+  "hub.sys.where.bridge": "bridge",
+  "hub.sys.where.same": "this machine",
+  "hub.sys.where.lan": "on the network"
 }
