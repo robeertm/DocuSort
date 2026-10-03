@@ -13,10 +13,9 @@ along the way rather than every single step.
 
 🔴 **With nothing measured yet, the order in the configuration file decided
 where a document went.** All machines start from the same neutral assumption,
-so `min()` simply took the first one in the list. Caught one minute after
-rolling 0.86.1 out: the first document went to the NAS instead of the laptop
-and took fourteen minutes instead of eleven seconds, because `nas` happens to
-be written above `mac`.
+so `min()` simply took the first one in the list. On an install where `nas` is
+written above `mac`, the first document after a restart would go to the slow
+machine — fourteen minutes instead of eleven seconds.
 
 The order of lines in a file says nothing about speed. The machine the user
 chose does. A tie is now broken in favour of the selected target, which at the
@@ -26,6 +25,31 @@ still wins over the hint — the preference decides ties, nothing more.
 🔑 This is the other half of the fix in 0.86.1. Remembering the timings helps
 from the *second* start onwards; on the first there is no file yet. Together
 they cover both.
+
+🔴 **The page stated two different truths about where the model runs.** The
+laptop card said *chosen*, while the badge at the top of the page showed the
+server's address. Both numbers were right on their own and useless together.
+
+Since the switcher exists, `settings.ai` means only the *fallback* — the
+provider, model and address from the configuration file that apply when no
+named target fits. What actually computes is known only to the running
+classifier. Four places had not been told:
+
+- **The badge on the home page** read the address out of the file.
+- **Four calls built `Extractor(classifier.provider, settings.ai.model)`** —
+  the running provider next to the configured model name. If the active target
+  points at a different machine with a different model, a name is sent to a
+  machine that does not know it.
+- 🔴 **Whether a bank statement may leave the house** (`finance.local_only`)
+  was decided from `settings.ai.provider`. Switch to a cloud provider while the
+  file still says `openai_compat`, and the statements would have gone there —
+  with DocuSort reporting that it was computing locally.
+- **Whether the bridge is the active provider** was answered from the file too.
+
+One helper, `ai_targets.aktive_ai()`, now answers "which settings are actually
+in use", and every place describing the running state asks it. Places that
+describe the *configuration* — the setup wizard, the settings page — keep
+reading the file, because that is what they edit.
 
 ## [0.86.1] - 2026-10-03
 
@@ -58,9 +82,8 @@ inside the file are dropped rather than trusted.
 **DocuSort picks the machine for each document — and uses several when there
 is enough work.**
 
-    "docusort should also be able to switch over: when the Mac is not there it
-     computes on the NAS, when the Mac is back it computes there again, or on
-     both depending on the document load"
+What was asked for: when one machine is away, compute on the other; when it is
+back, use it again; and with enough documents, use both.
 
 🔑 **The rule is not "spread the load". It is "send each document where it
 will finish soonest."** The difference is the whole point. Measured on one
@@ -108,9 +131,9 @@ machine it makes no difference.
 
 **The machine card says whose numbers it is showing.**
 
-    "here we see cpu, ram and documents in, but that is surely the one from
-     the ollama NAS container, right? actually it should always show the
-     history of whatever is currently active"
+The question that prompted this: are those CPU, memory and inbox figures the
+ones from the container the model runs in — and shouldn't the page always show
+the history of whichever machine is currently active?
 
 Right on both counts. The three graphs belong to the machine DocuSort runs on
 — and that is correct for them, because text recognition, the inbox and filing

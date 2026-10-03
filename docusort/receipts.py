@@ -405,8 +405,11 @@ def backfill_receipts(settings, db, classifier, *, dry_run: bool = False,
     Reads the stored OCR text from `documents.extracted_text`, so no new
     OCR cost is incurred. The LLM call is what's billed.
     """
+    # 🔴 Anbieter UND Modell aus DERSELBEN Quelle — siehe `ai_targets.aktive_ai`.
+    from .ai_targets import aktive_ai
+    _ai = aktive_ai(classifier, settings.ai)
     extractor = ReceiptExtractor(
-        classifier.provider, settings.ai.model,
+        classifier.provider, _ai.model,
         max_text_chars=settings.ai.max_text_chars,
         holder_names=settings.finance.holder_names,
         pseudonymize=settings.finance.pseudonymize,

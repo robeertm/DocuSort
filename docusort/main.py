@@ -322,8 +322,15 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         if cls.category == "Kassenzettel" and ocr_res.text:
             try:
                 from .receipts import ReceiptExtractor
+                # 🔴 Anbieter UND Modell aus DERSELBEN Quelle. Frueher stand
+                #    hier der laufende Anbieter neben dem eingestellten
+                #    Modellnamen — zeigt das aktive Ziel auf einen anderen
+                #    Rechner mit einem anderen Modell, geht ein Name an eine
+                #    Maschine, die ihn nicht kennt.
+                from .ai_targets import aktive_ai
+                _ai = aktive_ai(classifier, settings.ai)
                 extractor = ReceiptExtractor(
-                    classifier.provider, settings.ai.model,
+                    classifier.provider, _ai.model,
                     max_text_chars=settings.ai.max_text_chars,
                     holder_names=settings.finance.holder_names,
                     pseudonymize=settings.finance.pseudonymize,
