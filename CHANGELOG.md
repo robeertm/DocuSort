@@ -7,6 +7,30 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.86.1] - 2026-10-03
+
+### Fixed
+
+🔴 **What the installation had learned was thrown away on every restart.**
+The per-machine timings that decide where each document goes lived only in
+memory. After every update — and the updater runs hourly — the first document
+fell back to a blind assumption and went to whichever machine came first in
+the list. At 11 s against 835 s that is the difference between eleven seconds
+and fourteen minutes, once per update, forever. The cards on the dashboard
+also claimed "not measured yet" about machines that had been measured a
+hundred times.
+
+The timings are now kept in `ai_tempo.json` next to the configuration and read
+back at startup, so the first document after a restart goes to the right
+machine.
+
+Written at most every 20 seconds (a document takes longer than that anyway),
+and written to a temporary file that is then renamed — a crash mid-write would
+otherwise leave half a file that nothing could read. A missing, empty or
+malformed file is not an error: it is exactly the state of a freshly cloned
+repo, and then the timings are simply measured again. Implausible values
+inside the file are dropped rather than trusted.
+
 ## [0.86.0] - 2026-10-03
 
 ### Added

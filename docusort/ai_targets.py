@@ -704,6 +704,16 @@ def baue_handle(settings: Any, baue_classifier: Callable[[Any, Target], Any]):
     im Protokoll, Einrichtungsmodus), statt hier still ein anderes Ziel zu
     nehmen, das der Benutzer nie gewaehlt hat.
     """
+    # 🔑 ERST DAS GEDAECHTNIS, DANN DIE WAHL. Was diese Installation ueber die
+    #    Geschwindigkeit ihrer Rechner gelernt hat, soll einen Neustart
+    #    ueberleben — sonst faellt nach jeder Aktualisierung das erste Dokument
+    #    wieder auf eine blinde Annahme, und bei 11 s gegen 835 s ist das der
+    #    Unterschied zwischen elf Sekunden und vierzehn Minuten.
+    from . import ai_pool
+    try:
+        ai_pool.lade(getattr(settings, "config_dir", "") or ".")
+    except Exception as exc:  # noqa: BLE001 — ohne Gedaechtnis wird gemessen,
+        logger.debug("Rechenzeiten nicht geladen: %s", exc)   # das ist kein Fehler.
     vorhandene = ziele(settings, bridge_verbunden=_bridge_verbunden())
     key = aktiver_schluessel(settings, vorhandene)
     start = next((t for t in vorhandene if t.key == key), None)
