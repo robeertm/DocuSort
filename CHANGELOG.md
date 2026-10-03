@@ -7,6 +7,32 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.78.0] - 2026-10-03
+
+### Changed
+
+**The start page says who is doing what, which documents are in which state,
+and who is using what.** It previously managed to claim, on one screen, that
+nothing was running and that the machine had been working for twenty-one
+minutes. Both statements came from honest code; they measured different
+things and called both of them *running*.
+
+- **Who is doing what.** The pipeline now registers a stage per document —
+  checking, OCR, AI, filing — and the live card lists every document in flight
+  with its stage, the tool working on it (ocrmypdf, or the model's own name)
+  and how long it has been there. The idle state appears only when the work
+  register *and* the inbox are empty, so the page can no longer contradict
+  itself.
+- **Which documents are in which state.** The tiles used to show a total of
+  681 next to a review count of 2, and that 681 silently contained 122
+  duplicates. The row now reads filed · review · failed · duplicates ·
+  statements, with the total named separately, so the figures add up.
+- **Who is using what.** DocuSort and OCR are processes in our own tree and
+  are read from `/proc`, split apart by process name. The model runs in a
+  different container and is therefore *asked* rather than estimated: Ollama's
+  `/api/ps` reports the loaded model, its size and quantisation. An
+  unreachable or unloaded model says so instead of showing a dash.
+
 ## [0.77.1] - 2026-10-03
 
 ### Fixed

@@ -1579,5 +1579,20 @@
   "hub.sys.disk": "Disque libre",
   "hub.sys.self": "DocuSort lui-même",
   "hub.sys.working": "en cours depuis",
-  "hub.sys.window": "30 dernières min"
+  "hub.sys.window": "30 dernières min",
+  "hub.work.stage.pruefung": "Vérification",
+  "hub.work.stage.texterkennung": "OCR",
+  "hub.work.stage.ki": "IA",
+  "hub.work.stage.ablage": "Classement",
+  "hub.status.title": "Documents par statut",
+  "hub.status.total_suffix": "au total",
+  "hub.tile.filed": "Classés",
+  "hub.tile.duplicate": "Doublons",
+  "hub.sys.who": "Qui consomme quoi",
+  "hub.sys.docusort": "DocuSort",
+  "hub.sys.ocr": "OCR",
+  "hub.sys.ai": "Modèle IA",
+  "hub.sys.procs": "processus",
+  "hub.sys.unreachable": "injoignable",
+  "hub.sys.notloaded": "aucun modèle chargé"
 }
