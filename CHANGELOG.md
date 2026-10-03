@@ -23,7 +23,7 @@ real network, in this order:
 
 1. the browser's address — **unless** it is a Tailnet/CGNAT or Docker address,
 2. the machines already configured as targets: an entry pointing at
-   `10.0.0.5` says the house is `10.0.0.x`. That is an existing fact rather
+   `192.0.2.5` says the house is `192.0.2.x`. That is an existing fact rather
    than a guess, and it is exactly what helps when the browser arrives through
    a tunnel,
 3. our own address, unless that is a Docker one.
