@@ -7,6 +7,53 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.83.0] - 2026-10-03
+
+### Added
+
+**One button finds the machines you have, and you can get rid of them again.**
+
+Setting up a local model used to mean knowing an address and typing it in.
+Now the machine card has a *Find machines* button:
+
+- **Without scanning**, it asks only the addresses that announce themselves
+  anyway — a configured one, localhost, the sidecar container, and the machine
+  this browser is on, which is the likeliest place for a local model and the
+  one address a browser cannot tell you but the connection already knows. No
+  foreign device is touched.
+- **Scanning the subnet is a separate, deliberate press.** 254 connections
+  into a network look like a port scan from the outside, and in a company
+  network that is an incident. It is never done on page load, only the one
+  port Ollama uses, never wider than the local /24, and it finishes in about
+  a second and a half.
+- Each find shows its host, its models and which one would be used. **Add**
+  writes it to `ai.targets`; the `/v1` suffix is appended for you. Adding the
+  same machine twice gets its own key rather than two identical buttons.
+- **✕ removes a machine from the list.** Only machines you added — the derived
+  fallback stays, so an install cannot end up with nothing. Removing the one
+  that is *currently running* hands over to another target and the running
+  classifier really follows; it does not leave the install pointing at
+  something that is gone. Nothing is deleted on the machine itself, and the
+  confirmation says so, because "remove" could just as easily be read as
+  "delete several gigabytes".
+- **Models can be deleted from a machine** (`POST /api/ai/target/model/delete`)
+  — gigabytes freed without opening an SSH session. The model the active
+  machine is *using* is refused with a clear reason: switch first.
+
+### Fixed
+
+🔴 **Model suggestion picked the smaller model when both were present.** The
+match fell back to the model *family*: `want.split(":")[0]` turns
+`qwen2.5:7b-instruct` into `qwen2.5`, and `qwen2.5:3b-instruct` matches that
+too — so on a machine holding both, the one Ollama happened to list first won.
+That is not a cosmetic issue. Measured on the same electricity bill through
+the program's real path: the 3B model took 186 s and filed it under *Haus*,
+the 7B took 465 s and filed it under *Rechnungen*, where it belongs. The
+smaller model is not a faster version of the same work, it is worse work.
+There are two passes now — exact matches across the whole wish list first,
+family matches only if none hit — and `:latest` is treated as the same model
+either way. The same bug was in the setup script and is fixed there too.
+
 ## [0.82.0] - 2026-10-03
 
 ### Added

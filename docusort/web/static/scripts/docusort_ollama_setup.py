@@ -160,10 +160,35 @@ def ollama_antwortet(base: str, timeout: float = 2.0) -> bool:
 
 
 def pick_model(models: list) -> str:
+    """The model DocuSort is most likely to get on with.
+
+    🔴 ZWEI DURCHGAENGE, UND DIE REIHENFOLGE IST DER GANZE PUNKT. Vorher lief
+    nur EINE Schleife, die auch auf die FAMILIE passte: `want.split(":")[0]`
+    macht aus `qwen2.5:7b-instruct` ein `qwen2.5`, und darauf passt auch
+    `qwen2.5:3b-instruct`. Lagen beide auf einem Rechner, gewann das kleinere —
+    einfach weil Ollama es zuerst auflistet.
+
+    Das ist kein Schoenheitsfehler. Gemessen an derselben Stromrechnung auf dem
+    echten Weg des Programms: das 3B-Modell brauchte 186 s und legte sie unter
+    „Haus", das 7B 465 s und legte sie unter „Rechnungen" — dorthin, wo sie
+    hingehoert. Das kleinere Modell ist nicht die schnellere Variante derselben
+    Arbeit, es ist eine schlechtere Arbeit.
+
+    Also: erst ein GENAUER Treffer ueber die ganze Wunschliste, und nur wenn
+    keiner dabei ist, ein Familientreffer.
+    """
     usable = [m for m in models if not any(u in m.lower() for u in UNUSABLE)]
+    # 🔑 `:latest` ist Ollamas stillschweigende Marke — `qwen2.5:7b-instruct`
+    #    und `qwen2.5:7b-instruct:latest` sind dasselbe Modell.
+    def _blank(n: str) -> str:
+        return n[:-7] if n.endswith(":latest") else n
     for want in WISH:
         for m in usable:
-            if m == want or m.split(":")[0] == want.split(":")[0]:
+            if _blank(m) == want:
+                return m
+    for want in WISH:
+        for m in usable:
+            if _blank(m).split(":")[0] == want.split(":")[0]:
                 return m
     return usable[0] if usable else ""
 

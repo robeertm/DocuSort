@@ -346,12 +346,73 @@
                              disabled:opacity-60 disabled:cursor-wait"
                       x-text="zielBusy === z.key ? tr('hub.sys.pulling')
                                                  : tr('hub.sys.pull')"></button>
+              {# Nur was in der Konfiguration STEHT, laesst sich entfernen —
+                 das abgeleitete Ziel ist der Rueckfall und darf nicht weg,
+                 sonst kann die Installation am Ende gar nichts mehr. #}
+              <button type="button" x-show="!z.derived" x-cloak
+                      @click="zielEntfernen(z)" :disabled="zielBusy === z.key"
+                      class="px-2 py-1 text-xs border-l border-ink-700
+                             text-ink-400 hover:text-rose-300 hover:bg-rose-400/10
+                             disabled:opacity-60 disabled:cursor-wait"
+                      :title="tr('hub.find.remove')">✕</button>
             </span>
           </template>
         </div>
         <div class="mt-1 text-[11px]" x-show="zielMeldung" x-cloak
              :class="zielFehler ? 'text-rose-300' : 'text-ink-400'"
              x-text="zielMeldung"></div>
+
+        {# EINEN KNOPF DRUECKEN UND DOCUSORT FINDET, WAS DA IST.
+           Erst werden nur die Adressen gefragt, die sich ohnehin zu erkennen
+           geben — darunter der Rechner, an dem gerade jemand sitzt. Das
+           fasst kein fremdes Geraet an. Das Absuchen des eigenen Netzes ist
+           ein zweiter, ausdruecklicher Schritt: 254 Verbindungen sehen von
+           aussen aus wie ein Portscan, und das tut man nicht ungefragt. #}
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <button type="button" @click="rechnerSuchen(false)"
+                  :disabled="sucheLaeuft"
+                  class="px-2 py-1 rounded-md text-xs border border-ink-700
+                         bg-ink-800/60 text-ink-300 hover:border-ink-500
+                         disabled:opacity-60 disabled:cursor-wait"
+                  x-text="sucheLaeuft ? tr('hub.find.searching')
+                                      : tr('hub.find.search')"></button>
+          <button type="button" @click="rechnerSuchen(true)"
+                  :disabled="sucheLaeuft"
+                  class="px-2 py-1 rounded-md text-xs border border-ink-700
+                         bg-ink-800/60 text-ink-400 hover:border-ink-500
+                         disabled:opacity-60 disabled:cursor-wait"
+                  x-text="tr('hub.find.scan')"
+                  :title="tr('hub.find.scan_hint')"></button>
+          <span x-show="sucheMeldung" x-cloak class="text-[11px]"
+                :class="sucheFehler ? 'text-rose-300' : 'text-ink-400'"
+                x-text="sucheMeldung"></span>
+        </div>
+
+        <div x-show="funde.length" x-cloak class="mt-2 space-y-1">
+          <template x-for="f in funde" :key="f.url">
+            <div class="flex items-center gap-2 text-xs rounded-md
+                        border border-ink-700 bg-ink-800/40 px-2 py-1">
+              <span class="h-2 w-2 rounded-full bg-emerald-400 shrink-0"></span>
+              <span class="flex-1 truncate">
+                <span x-text="hostVon(f.url)"></span>
+                <span class="text-ink-400"
+                      x-text="' · ' + (f.suggested || '—') + ' · '
+                              + f.models.length + ' ' + tr('hub.find.models')"></span>
+                <span x-show="f.self" x-cloak class="text-ink-400"
+                      x-text="' · ' + tr('hub.find.self')"></span>
+              </span>
+              <span x-show="f.known" x-cloak class="text-ink-400"
+                    x-text="tr('hub.find.known')"></span>
+              <button type="button" x-show="!f.known" x-cloak
+                      @click="rechnerAnlegen(f)"
+                      :disabled="anlegen === f.url"
+                      class="px-2 py-0.5 rounded text-xs border border-emerald-400/50
+                             text-emerald-200 hover:bg-emerald-400/10
+                             disabled:opacity-60 disabled:cursor-wait"
+                      x-text="tr('hub.find.add')"></button>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -652,6 +713,11 @@ function dashboard() {
     aiZiele: [],
     aiAktiv: '',
     zielBusy: '',
+    funde: [],
+    sucheLaeuft: false,
+    sucheMeldung: '',
+    sucheFehler: false,
+    anlegen: '',
     zielWechselt: false,
     zielMeldung: '',
     zielFehler: false,
@@ -909,6 +975,84 @@ function dashboard() {
         }
       } catch (e) {
         this.zielFehler = true; this.zielMeldung = tr('hub.sys.state.tot');
+      } finally { this.zielBusy = ''; }
+    },
+    hostVon(url) {
+      try { return new URL(url).hostname; } catch (e) { return url; }
+    },
+    /* One button finds what is out there. Without `scan` only addresses that
+       announce themselves anyway are asked — including the machine this
+       browser is on, which is the likeliest place for a local model and costs
+       nothing to check. Scanning the subnet is a separate, deliberate press. */
+    async rechnerSuchen(scan) {
+      this.sucheLaeuft = true; this.sucheFehler = false;
+      this.sucheMeldung = tr('hub.find.searching');
+      try {
+        const r = await fetch('/api/ai/targets/discover', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scan: !!scan }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.sucheFehler = true;
+          this.sucheMeldung = d.detail || tr('hub.find.none');
+          return;
+        }
+        this.funde = d.found || [];
+        this.sucheMeldung = this.funde.length
+          ? ''
+          : (scan ? tr('hub.find.none_scanned') : tr('hub.find.none'));
+      } catch (e) {
+        this.sucheFehler = true; this.sucheMeldung = tr('hub.find.none');
+      } finally { this.sucheLaeuft = false; }
+    },
+    async rechnerAnlegen(f) {
+      this.anlegen = f.url; this.sucheFehler = false;
+      try {
+        const r = await fetch('/api/ai/targets/add', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: f.url, model: f.suggested,
+                                 label: this.hostVon(f.url) }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.sucheFehler = true;
+          this.sucheMeldung = d.detail || tr('hub.find.none');
+          return;
+        }
+        f.known = true;
+        await this.zieleLaden();
+        this.refresh();
+      } catch (e) {
+        this.sucheFehler = true; this.sucheMeldung = tr('hub.find.none');
+      } finally { this.anlegen = ''; }
+    },
+    /* Removing a machine from the list changes nothing ON that machine — the
+       model stays where it is. The confirmation says so, because removing
+       could just as easily be read as freeing several gigabytes.
+       🔑 No quoted phrases in this comment: the language probe reads a quoted
+       string in a script block as visible text that skipped translation, and
+       it is right to — that is how an English sentence ends up mid-page. */
+    async zielEntfernen(z) {
+      const name = z.label || z.model || z.provider;
+      if (!confirm(tr('hub.find.remove_confirm').replace('{name}', name))) return;
+      this.zielBusy = z.key;
+      try {
+        const r = await fetch('/api/ai/targets/remove', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: z.key }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.zielFehler = true;
+          this.zielMeldung = d.detail || tr('hub.sys.switch_failed');
+          return;
+        }
+        this.funde = [];
+        await this.zieleLaden();
+        this.refresh();
+      } catch (e) {
+        this.zielFehler = true; this.zielMeldung = tr('hub.sys.switch_failed');
       } finally { this.zielBusy = ''; }
     },
     get ziellisteZeigen() {
