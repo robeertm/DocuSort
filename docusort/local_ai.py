@@ -404,7 +404,7 @@ def _eigenes_netz(client_ip: str = "",
             and not _ist_tailnet(k) and not _ist_docker_netz(k)):
         kandidaten.append(k)
     # 🔑 Die schon eingetragenen Rechner verraten das Hausnetz. Wer
-    #    `http://10.0.0.5:11434/v1` als Ziel hat, hat ein 10.0.0.x-Netz — das
+    #    `http://192.0.2.5:11434/v1` als Ziel hat, hat ein 192.0.2.x-Netz — das
     #    ist eine vorhandene Tatsache, keine Vermutung, und sie hilft genau
     #    dann, wenn der Browser ueber einen Tunnel kommt.
     from urllib.parse import urlsplit as _us
