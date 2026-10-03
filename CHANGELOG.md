@@ -7,6 +7,60 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.84.0] - 2026-10-03
+
+### Changed
+
+**One state, two views — the settings page and the start page no longer
+disagree.**
+
+There were two worlds describing the same thing. The settings page wrote the
+*configured provider* and said a restart was required; the start page switched
+between *named machines* and needed none. Pick a machine in one place and the
+other did not know about it. Which one was right was anybody's guess.
+
+- **Choosing a local model in Settings now also switches, immediately.** The
+  machine you pick is added to your list of machines (when you keep one) and
+  becomes the active one without a restart — the running classifier really
+  follows, it is not just mirrored for display.
+- **Saving the AI provider no longer claims a restart is needed.** It
+  switches the running classifier instead. The flag is still returned
+  truthfully: if the switch itself fails, or there is no classifier yet
+  because nothing has been set up, the answer says a restart is required —
+  because then it is.
+- A machine already in your list is matched by address rather than added a
+  second time, and its model name is updated if you picked a different one.
+
+**`ai.timeout_seconds: 0` now means no time limit at all — let it compute.**
+On a local model, time costs nothing but time, and aborting just before the
+answer throws away the entire computation. Measured on a Synology without a
+GPU: one document ran past twelve minutes, and that was not a fault, it was
+the speed of that machine. Only the wait for the answer is unlimited — a
+machine that is not there still fails at connection time, so nothing hangs
+forever on a host that does not exist. The floor that raises short timeouts
+(`max(timeout * 3, 600)`) no longer swallows the zero: a setting that looks
+like it does something and does nothing is worse than no setting.
+
+**The settings page no longer carries a second model search.** It could set
+exactly one machine, overwrote the configured provider and asked for a
+restart; the start page does the same thing better. What stays in Settings is
+what has no second home: the provider and its API key, and the installer for a
+machine with no Ollama at all. The restart button only appears when a restart
+is genuinely pending.
+
+**The first-run setup can find a machine instead of asking you to know its
+address.** That page offered an empty field — on a fresh install, at the very
+first step. It now has the same search, including the deliberate network scan.
+
+🔴 **The network scan searched the wrong network.** DocuSort usually runs in a
+container, whose own address is on the Docker network (measured: 172.26.0.2).
+Scanning "my own /24" from there searched the Docker network and found exactly
+one thing — the gateway, i.e. its own host, shown as a bare `172.26.0.1` that
+matches no device anybody owns. Machines on the actual house network were
+never found. The scan now uses the network of the *browser* that asked, which
+is the one reliable statement about where "here" is, and each find carries a
+host name where DNS knows one.
+
 ## [0.83.0] - 2026-10-03
 
 ### Added

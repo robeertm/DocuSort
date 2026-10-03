@@ -309,9 +309,28 @@ SCAN_TIMEOUT = 0.35          # je Adresse; parallel, also nicht die Summe
 SCAN_WORKERS = 64
 
 
-def _eigenes_netz() -> tuple[str, str] | None:
-    """Die eigene Adresse und ihr /24 — oder None, wenn das nicht zu
-    ermitteln ist. 🔴 Nie raten: ohne eigene Adresse wird nicht gescannt."""
+def _ist_docker_netz(ip: str) -> bool:
+    """Liegt diese Adresse in einem Docker-Bereich (172.16.0.0/12)?
+
+    🔴 DAS IST DER UNTERSCHIED ZWISCHEN „mein Haus" UND „mein Container".
+    DocuSort läuft meistens in einem Container, und dessen eigene Adresse ist
+    die des Docker-Netzes — gemessen: 172.26.0.2. Wer von dort „das eigene
+    /24" absucht, durchsucht das Docker-Netz und findet darin genau eine
+    Adresse: das Gateway, also den eigenen Wirt. Als Fund angezeigt heißt das
+    `172.26.0.1`, und die Frage des Benutzers lautete zu Recht: welches Gerät
+    soll das sein? Die Rechner im Haus findet man so NIE.
+    """
+    teile = ip.split(".")
+    if len(teile) != 4 or teile[0] != "172":
+        return False
+    try:
+        return 16 <= int(teile[1]) <= 31
+    except ValueError:
+        return False
+
+
+def _eigene_adresse() -> str:
+    """Die Adresse, mit der dieser Rechner nach draußen ginge — oder ""."""
     import socket as _s
     try:
         s = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
@@ -319,25 +338,70 @@ def _eigenes_netz() -> tuple[str, str] | None:
             # Verbindet nichts, fragt nur die Routing-Tabelle, welche eigene
             # Adresse für ein Ziel draußen benutzt würde.
             s.connect(("192.0.2.1", 9))
-            ip = s.getsockname()[0]
+            return s.getsockname()[0] or ""
         finally:
             s.close()
     except Exception:
-        return None
-    if not ip or ip.startswith("127."):
-        return None
-    teile = ip.split(".")
-    if len(teile) != 4:
-        return None
-    return ip, ".".join(teile[:3])
+        return ""
 
 
-def scan_netz(timeout: float = SCAN_TIMEOUT) -> list[dict]:
-    """Das eigene /24 nach Ollama absuchen.
+def _eigenes_netz(client_ip: str = "") -> tuple[str, str] | None:
+    """Welches /24 soll durchsucht werden, und welche Adresse ist die eigene.
 
-    Gibt dieselbe Form zurück wie `discover()`: url, models, suggested.
+    🔑 DIE ADRESSE DES BROWSERS ENTSCHEIDET. Wer die Seite offen hat, sitzt im
+    richtigen Netz — das ist die einzige verlässliche Auskunft darüber, wo
+    „das Haus" liegt, und der Container bekommt sie geschenkt, weil die
+    Verbindung sie ohnehin mitbringt. Die eigene Adresse wird nur genommen,
+    wenn sie NICHT aus einem Docker-Netz stammt.
+
+    🔴 Ohne brauchbares Netz wird nicht gescannt, statt ein falsches zu raten.
     """
-    netz = _eigenes_netz()
+    eigene = _eigene_adresse()
+    kandidaten = []
+    k = (client_ip or "").strip()
+    if k and not k.startswith("127.") and ":" not in k:
+        kandidaten.append(k)
+    if eigene and not eigene.startswith("127.") and not _ist_docker_netz(eigene):
+        kandidaten.append(eigene)
+    for ip in kandidaten:
+        teile = ip.split(".")
+        if len(teile) == 4:
+            return eigene or ip, ".".join(teile[:3])
+    if eigene and _ist_docker_netz(eigene):
+        logger.info("Netzsuche: die eigene Adresse liegt in einem "
+                    "Docker-Netz — ohne die Adresse des Browsers lässt sich "
+                    "das Hausnetz nicht bestimmen, es wird nicht gescannt")
+    return None
+
+
+def _name_zu(ip: str) -> str:
+    """Der Rechnername zu einer Adresse, wenn das Netz ihn kennt.
+
+    🔑 „welches gerät soll das sein?" — eine nackte Zahl beantwortet das
+    nicht. Reverse-DNS beantwortet es oft, und wo nicht, bleibt es ehrlich
+    leer statt geraten.
+    """
+    import socket as _s
+    alt = _s.getdefaulttimeout()
+    try:
+        _s.setdefaulttimeout(1.0)
+        name = _s.gethostbyaddr(ip)[0]
+        return name.split(".")[0] if name else ""
+    except Exception:
+        return ""
+    finally:
+        _s.setdefaulttimeout(alt)
+
+
+def scan_netz(timeout: float = SCAN_TIMEOUT, client_ip: str = "") -> list[dict]:
+    """Das Netz des Benutzers nach Ollama absuchen.
+
+    Gibt dieselbe Form zurück wie `discover()`: url, models, suggested — dazu
+    `name` (Rechnername, wenn ermittelbar) und `gateway` (die Adresse, über
+    die dieser Container nach draußen geht; das ist der eigene Wirt und kein
+    fremdes Gerät).
+    """
+    netz = _eigenes_netz(client_ip)
     if netz is None:
         logger.info("Netzsuche: eigene Adresse nicht ermittelbar, "
                     "es wird nicht gescannt")
@@ -368,7 +432,8 @@ def scan_netz(timeout: float = SCAN_TIMEOUT) -> list[dict]:
                 return None
             return {"url": url, "models": modelle,
                     "suggested": usable_model(modelle),
-                    "self": host == eigene}
+                    "self": host == eigene,
+                    "name": _name_zu(host)}
         for e in pool.map(pruefe, treffer):
             if e:
                 gefunden.append(e)
