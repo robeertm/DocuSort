@@ -325,6 +325,12 @@ def create_app(
     #    fallen, und ein Modell-Download dauert laenger als jede Pause.
     from .. import local_ai as _local_ai
     _local_ai.set_ticket_store(str(Path(settings.config_dir) / "setup_tickets.json"))
+    # 🔑 Der Systemsammler laeuft ab hier mit, damit die Startseite sofort einen
+    #    Verlauf hat statt einer leeren Flaeche. Ein eigener Faden, taeglich
+    #    8640 Messungen -- das kostet nichts und beantwortet die Frage, die die
+    #    KI-Kachel NICHT beantwortet: arbeitet die Maschine ueberhaupt?
+    from .. import system_stats as _system_stats
+    _system_stats.start(settings.paths.inbox, settings.paths.library)
     templates_dir = Path(__file__).parent / "templates"
     static_dir = Path(__file__).parent / "static"
     static_dir.mkdir(exist_ok=True)
@@ -2062,6 +2068,10 @@ def create_app(
             "recent":        recent,
             "failed":        failed,
             "deadlines":     deadlines,
+            # Was die Maschine gerade tut. Haengt bewusst an DIESER Antwort und
+            # nicht an einem eigenen Endpunkt: die Startseite fragt ohnehin alle
+            # 2-3 s, ein zweiter Takt waere nur mehr Verkehr fuer dieselbe Sicht.
+            "system":        _system_stats.snapshot(),
             "version":       __version__,
         }
 

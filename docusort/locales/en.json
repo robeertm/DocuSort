@@ -1569,5 +1569,15 @@
   "inv.title": "Invoices",
   "inv.to": "to",
   "inv.unconfirmed": "unconfirmed — no money moved behind it",
-  "inv.untick": "undo tick"
+  "inv.untick": "undo tick",
+  "hub.sys.title": "Machine",
+  "hub.sys.cpu": "CPU",
+  "hub.sys.ram": "Memory",
+  "hub.sys.queue": "Inbox",
+  "hub.sys.cores": "cores",
+  "hub.sys.load": "load",
+  "hub.sys.disk": "Disk free",
+  "hub.sys.self": "DocuSort itself",
+  "hub.sys.working": "working for",
+  "hub.sys.window": "last 30 min"
 }

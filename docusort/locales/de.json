@@ -1569,5 +1569,15 @@
   "inv.title": "Rechnungen",
   "inv.to": "bis",
   "inv.unconfirmed": "unbestätigt — kein Geldfluss dahinter",
-  "inv.untick": "Haken weg"
+  "inv.untick": "Haken weg",
+  "hub.sys.title": "Maschine",
+  "hub.sys.cpu": "CPU",
+  "hub.sys.ram": "Arbeitsspeicher",
+  "hub.sys.queue": "Eingang",
+  "hub.sys.cores": "Kerne",
+  "hub.sys.load": "Last",
+  "hub.sys.disk": "Platte frei",
+  "hub.sys.self": "DocuSort selbst",
+  "hub.sys.working": "in Arbeit seit",
+  "hub.sys.window": "letzte 30 Min"
 }

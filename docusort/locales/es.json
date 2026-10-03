@@ -1569,5 +1569,15 @@
   "inv.title": "Facturas",
   "inv.to": "hasta",
   "inv.unconfirmed": "sin confirmar — no hay movimiento de dinero detrás",
-  "inv.untick": "quitar marca"
+  "inv.untick": "quitar marca",
+  "hub.sys.title": "Máquina",
+  "hub.sys.cpu": "CPU",
+  "hub.sys.ram": "Memoria",
+  "hub.sys.queue": "Entrada",
+  "hub.sys.cores": "núcleos",
+  "hub.sys.load": "carga",
+  "hub.sys.disk": "Disco libre",
+  "hub.sys.self": "DocuSort mismo",
+  "hub.sys.working": "trabajando desde",
+  "hub.sys.window": "últimos 30 min"
 }

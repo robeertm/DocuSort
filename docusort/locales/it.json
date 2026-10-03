@@ -1569,5 +1569,15 @@
   "inv.title": "Fatture",
   "inv.to": "al",
   "inv.unconfirmed": "non confermata — nessun movimento di denaro dietro",
-  "inv.untick": "togli spunta"
+  "inv.untick": "togli spunta",
+  "hub.sys.title": "Macchina",
+  "hub.sys.cpu": "CPU",
+  "hub.sys.ram": "Memoria",
+  "hub.sys.queue": "In entrata",
+  "hub.sys.cores": "core",
+  "hub.sys.load": "carico",
+  "hub.sys.disk": "Disco libero",
+  "hub.sys.self": "DocuSort stesso",
+  "hub.sys.working": "in lavorazione da",
+  "hub.sys.window": "ultimi 30 min"
 }
