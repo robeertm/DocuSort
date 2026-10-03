@@ -7,6 +7,91 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.86.0] - 2026-10-03
+
+### Added
+
+**DocuSort picks the machine for each document — and uses several when there
+is enough work.**
+
+    "docusort should also be able to switch over: when the Mac is not there it
+     computes on the NAS, when the Mac is back it computes there again, or on
+     both depending on the document load"
+
+🔑 **The rule is not "spread the load". It is "send each document where it
+will finish soonest."** The difference is the whole point. Measured on one
+install: 11 s per document on a laptop, 835 s on a NAS. When a second document
+arrives while the laptop is busy, the laptop is *still* the right answer —
+11 seconds of waiting plus 11 seconds of work beats 835 seconds by a mile.
+A balancer that counts idle machines sends it to the NAS and makes it
+76× slower. The slow machine joins in by itself only once the queue in front
+of the fast one is longer than one round on the slow one.
+
+So one rule answers all three cases in the request: a machine that stops
+answering is not eligible and gets nothing; when it answers again it wins the
+next document; and with enough documents several machines compute at once.
+
+- **The estimate comes from measurement, never from hardware.** Seconds per
+  document, the median of this installation's own real classifications. Not
+  from cores or RAM — the NAS in the example has *more* RAM than the laptop
+  and the same number of cores. A freshly cloned repo has no measurement and
+  starts from a neutral assumption that corrects itself after one document.
+- **Failure no longer strands a document.** If a machine refuses, the document
+  goes to the next one. Only when none can does it raise the transient error
+  that leaves the file in the inbox for a later retry — the behaviour that was
+  already there, now reached only as a last resort.
+- **One machine, one document at a time.** Two simultaneous requests to the
+  same Ollama are both roughly twice as slow, and they make the timing
+  unusable — which is what the whole decision rests on. The parallelism is
+  *between* machines.
+- **Waiting is not counted as computing.** The clock starts after the gate.
+  Measuring the queue would make a popular machine look slow, so it would get
+  less work, so it would look fast again — a pendulum instead of a measurement.
+- **Choosing a machine by hand switches to "fixed".** Otherwise the page would
+  have two hands on the same wheel: you press *MacBook Pro* and the next
+  document goes elsewhere anyway. The switch next to the cards goes back to
+  automatic. Even when fixed, a machine that drops out is bypassed.
+- **Batches may now run in parallel.** Draining the inbox at startup and the
+  periodic retry sweep were strictly sequential, which made any distribution
+  pointless — a second machine only gets work if a second document is in
+  flight. Text recognition keeps its own, unchanged limit (`ocr.max_parallel`);
+  it is memory-bound and always runs on this machine.
+
+Configurable as `ai.verteilen: auto | fest`. Default `auto`; with a single
+machine it makes no difference.
+
+### Changed
+
+**The machine card says whose numbers it is showing.**
+
+    "here we see cpu, ram and documents in, but that is surely the one from
+     the ollama NAS container, right? actually it should always show the
+     history of whatever is currently active"
+
+Right on both counts. The three graphs belong to the machine DocuSort runs on
+— and that is correct for them, because text recognition, the inbox and filing
+all happen there regardless of where the model lives. They now carry that
+heading instead of leaving it to be guessed.
+
+🔴 **What DocuSort cannot do is measure a foreign machine's CPU and RAM.**
+Nothing of ours runs there, and nothing should have to be installed — that is
+a promise, not convenience. An invented percentage would be worse than none.
+
+🔑 **What it does know about that machine is the more useful half**, and each
+compute location now has its own card showing it:
+
+- **Graphics card or main processor.** Ollama reports `size_vram`; the share of
+  the model held in graphics memory is exactly what separates ten seconds from
+  fourteen minutes.
+- **Seconds per document**, with a sparkline of the recent real
+  classifications on *that* machine. An unmeasured machine says so rather than
+  claiming a number.
+- **What it is computing right now**, since when, and how many documents are
+  waiting for it.
+
+The separate strip of target buttons is gone — it said the same things with
+less. One block now carries the state, the speed, the work and the buttons.
+
 ## [0.85.3] - 2026-10-03
 
 ### Fixed

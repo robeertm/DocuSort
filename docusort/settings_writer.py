@@ -92,6 +92,21 @@ def update_ai_active_target(*, key: str, config_dir: Path | None = None) -> Path
     return _write_raw(cfg, config_dir)
 
 
+def update_ai_verteilen(*, modus: str, config_dir: Path | None = None) -> Path:
+    """Merkt, ob DocuSort den Rechenort je Dokument selbst waehlt (`auto`) oder
+    immer den eingestellten nimmt (`fest`).
+
+    🔑 Nur dieser EINE Schluessel wird angefasst — wie bei `active_target`.
+    Unbekanntes wird zu `auto`: eine krumme Zeile in der Datei darf nicht dazu
+    fuehren, dass gar nichts mehr gewaehlt wird.
+    """
+    cfg = _read_raw(config_dir)
+    ai = cfg.get("ai") or {}
+    ai["verteilen"] = "fest" if str(modus or "").strip().lower() == "fest" else "auto"
+    cfg["ai"] = ai
+    return _write_raw(cfg, config_dir)
+
+
 def update_ai_targets(*, targets: list, config_dir: Path | None = None) -> Path:
     """Die benannten Rechenorte schreiben (`ai.targets`).
 

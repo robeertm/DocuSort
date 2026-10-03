@@ -85,6 +85,16 @@ class AISettings:
     # Schluessel des Ziels, das gerade rechnet. Leer = das erste. Hier steht
     # er, damit ein Wechsel einen Neustart uebersteht.
     active_target: str = ""
+    # Wie der Rechenort je Dokument gewaehlt wird:
+    #   "auto" — DocuSort nimmt den, der am fruehesten fertig waere, und
+    #            verteilt bei vielen Dokumenten von selbst auf mehrere.
+    #   "fest" — immer `active_target`; faellt der aus, trotzdem ein anderer,
+    #            denn ein liegengebliebenes Dokument hilft niemandem.
+    # 🔑 Vorgabe ist "auto": wer dieses Repo frisch klont, hat ohnehin genau
+    #    einen Rechenort, und dort ist die Wahl dieselbe. Erst der zweite
+    #    Rechner macht einen Unterschied, und dann ist Verteilen das, was man
+    #    sich davon verspricht.
+    verteilen: str = "auto"
 
 
 # Backwards-compatible alias — older imports of ClaudeSettings still resolve.
@@ -305,6 +315,8 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         classify_max_tokens=int(ai_cfg.get("classify_max_tokens", 1500)),
         targets=list(ai_cfg.get("targets") or []),
         active_target=str(ai_cfg.get("active_target", "") or ""),
+        verteilen=("fest" if str(ai_cfg.get("verteilen", "auto") or "auto"
+                              ).strip().lower() == "fest" else "auto"),
     )
 
     web_cfg = cfg.get("web", {})

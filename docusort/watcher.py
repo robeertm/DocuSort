@@ -76,15 +76,45 @@ class _Handler(FileSystemEventHandler):
         self._schedule(Path(event.dest_path))
 
 
-def process_existing(inbox: Path, process: Handler) -> None:
-    """Process files that were already in the inbox at startup."""
-    for item in sorted(inbox.iterdir()):
-        if item.is_file() and is_supported(item):
-            logger.info("Picking up pre-existing file %s", item.name)
-            try:
-                process(item)
-            except Exception:
-                logger.exception("Startup processing failed for %s", item)
+def process_existing(inbox: Path, process: Handler, parallel: int = 1) -> None:
+    """Process files that were already in the inbox at startup.
+
+    🔑 WARUM HIER MEHRERE GLEICHZEITIG LAUFEN DUERFEN. Diese Schleife ist der
+    Weg, den ein Stapel nimmt — ein Import, ein Scanstapel, der Nachlauf nach
+    einem Ausfall. Sie war die einzige Stelle, die Dokumente strikt
+    nacheinander abarbeitete, und damit war jede Verteilung auf mehrere
+    Rechenorte wirkungslos: ein zweiter Rechner bekommt nur dann etwas zu tun,
+    wenn ueberhaupt ein zweites Dokument unterwegs ist.
+
+    🔴 Die Grenzen stehen weiterhin woanders und bleiben wirksam: die
+    Texterkennung hat ihre eigene Sperre, jeder Rechenort nimmt nur ein
+    Dokument auf einmal, und der Doppelgaenger-Schutz in der Kette haelt
+    denselben Pfad ohnehin nur einmal. `parallel` ist eine Obergrenze, keine
+    Zusage.
+    """
+    posten = [item for item in sorted(inbox.iterdir())
+              if item.is_file() and is_supported(item)]
+    if not posten:
+        return
+
+    def _eins(item: Path) -> None:
+        logger.info("Picking up pre-existing file %s", item.name)
+        try:
+            process(item)
+        except Exception:
+            logger.exception("Startup processing failed for %s", item)
+
+    if parallel <= 1 or len(posten) == 1:
+        for item in posten:
+            _eins(item)
+        return
+
+    from concurrent.futures import ThreadPoolExecutor
+    logger.info("Eingang: %d Dokument(e), bis zu %d gleichzeitig",
+                len(posten), parallel)
+    with ThreadPoolExecutor(max_workers=parallel,
+                            thread_name_prefix="eingang") as pool:
+        list(pool.map(_eins, posten))
 
 
 def watch(inbox: Path, process: Handler, stable_seconds: int = 5) -> Observer:
