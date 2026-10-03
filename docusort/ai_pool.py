@@ -59,6 +59,18 @@ PROBEN = 15
 # echte Messung bekommt. Nach dem ersten Dokument spielt sie keine Rolle mehr.
 ANNAHME_S = 45.0
 
+# Wohin die gelernten Zeiten geschrieben werden. 🔑 Ohne das faengt jeder
+# Neustart bei null an — und der erste Rechenort waere dann der aus der Liste
+# statt der schnellste. Bei 11 s gegen 835 s heisst das: das erste Dokument
+# nach jeder Aktualisierung braucht vierzehn Minuten statt elf Sekunden, und
+# die Karten auf der Startseite behaupten „noch nicht gemessen" ueber Rechner,
+# die hundertmal gemessen wurden. Was die Installation erarbeitet hat, soll
+# sie behalten.
+_DATEI_NAME = "ai_tempo.json"
+_datei: "Path | None" = None
+_letzte_sicherung = 0.0
+_SICHER_TAKT = 20.0        # oefter schreiben lohnt nicht; ein Dokument dauert laenger
+
 _schloss = threading.RLock()
 # key -> deque[(zeitpunkt, sekunden)]
 _dauern: dict[str, deque[tuple[float, float]]] = {}
@@ -90,6 +102,71 @@ def merke_dauer(key: str, sekunden: float) -> None:
     with _schloss:
         ring = _dauern.setdefault(key, deque(maxlen=PROBEN))
         ring.append((time.time(), round(float(sekunden), 2)))
+    _sichere()
+
+
+# ------------------------------------------------- Was gelernt ist, bleibt
+def _lies_datei(pfad: "Path") -> dict:
+    import json
+    with open(pfad, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def lade(ordner: "Path | str") -> int:
+    """Die gelernten Zeiten einlesen. Gibt zurueck, fuer wie viele Rechenorte
+    etwas da war.
+
+    🔴 Nie werfen. Eine fehlende, leere oder krumme Datei ist kein Fehler,
+    sondern genau der Zustand eines frisch geklonten Repos — dann wird eben
+    wieder gemessen.
+    """
+    global _datei
+    from pathlib import Path as _P
+    _datei = _P(ordner) / _DATEI_NAME
+    try:
+        roh = _lies_datei(_datei)
+    except Exception:  # noqa: BLE001
+        return 0
+    n = 0
+    with _schloss:
+        for key, werte in (roh or {}).items():
+            sauber = [float(w) for w in (werte or [])
+                      if isinstance(w, (int, float)) and 0 < float(w) < 86400]
+            if not sauber:
+                continue
+            ring = _dauern.setdefault(str(key), deque(maxlen=PROBEN))
+            jetzt = time.time()
+            for w in sauber[-PROBEN:]:
+                ring.append((jetzt, round(w, 2)))
+            n += 1
+    if n:
+        logger.info("Rechenzeiten geladen: %d Rechenort(e) aus %s", n, _datei)
+    return n
+
+
+def _sichere() -> None:
+    """🔴 Darf unter keinen Umstaenden eine Einordnung umbringen. Schlaegt das
+    Schreiben fehl — schreibgeschuetzter Ordner, volle Platte — wird das einmal
+    vermerkt und weitergearbeitet; die Zahlen stehen ja im Speicher."""
+    global _letzte_sicherung
+    if _datei is None:
+        return
+    jetzt = time.monotonic()
+    with _schloss:
+        if jetzt - _letzte_sicherung < _SICHER_TAKT:
+            return
+        _letzte_sicherung = jetzt
+        inhalt = {k: [s for _, s in ring] for k, ring in _dauern.items() if ring}
+    try:
+        import json
+        # Erst daneben schreiben, dann umbenennen: ein Absturz mittendrin
+        # hinterlaesst sonst eine halbe Datei, und die liest beim naechsten
+        # Start niemand mehr.
+        vorlaeufig = _datei.with_suffix(".json.neu")
+        vorlaeufig.write_text(json.dumps(inhalt, indent=1), encoding="utf-8")
+        vorlaeufig.replace(_datei)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Rechenzeiten nicht gesichert (%s): %s", _datei, exc)
 
 
 def dauer_schaetzung(key: str) -> tuple[float, bool]:
@@ -285,6 +362,8 @@ def stand(ziele: list[Any] | None = None) -> dict[str, Any]:
 
 def zuruecksetzen() -> None:
     """Nur fuer Pruefstaende."""
+    global _datei
+    _datei = None
     with _schloss:
         _dauern.clear()
         _belegt.clear()
