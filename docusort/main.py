@@ -327,10 +327,10 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                 #    Modellnamen — zeigt das aktive Ziel auf einen anderen
                 #    Rechner mit einem anderen Modell, geht ein Name an eine
                 #    Maschine, die ihn nicht kennt.
-                from .ai_targets import aktive_ai
+                from .ai_targets import aktive_ai, aufgaben_anbieter
                 _ai = aktive_ai(classifier, settings.ai)
                 extractor = ReceiptExtractor(
-                    classifier.provider, _ai.model,
+                    aufgaben_anbieter(classifier), _ai.model,
                     max_text_chars=settings.ai.max_text_chars,
                     holder_names=settings.finance.holder_names,
                     pseudonymize=settings.finance.pseudonymize,
