@@ -107,7 +107,25 @@
 
     {# WER MACHT GERADE WAS — eine Zeile je Dokument mit seiner Stufe.
        Vorher stand hier nur „laeuft etwas durch die KI?"; ein Scan, der zwanzig
-       Minuten in der Texterkennung steckt, erschien damit als Leerlauf. #}
+       Minuten in der Texterkennung steckt, erschien damit als Leerlauf.
+
+       🔴 ZWEI FEHLER AUF EINMAL, BEIDE AM SELBEN KASTEN, BEIDE VOM BENUTZER
+          GEMELDET: „dieses fenster jiggelt hin und her wird groesser und
+          kleiner, soll immer gleich sein und den status zeigen".
+
+       1. EINE LUECKE. Die Arbeitsliste erschien nur bei `work.length > 0`, der
+          Leerlauftext nur bei `!anyActivity`. Dazwischen liegt ein Zustand, den
+          niemand bedacht hatte: es liegt etwas im Eingang, aber die
+          Arbeitszeile ist noch nicht geschrieben. Dann traf KEINE der beiden
+          Bedingungen zu und der Kasten war leer — ausgerechnet waehrend
+          gearbeitet wurde.
+       2. DAS SPRINGEN. Der Leerlauf-Block war mit Symbol und Abstand dreimal
+          so hoch wie eine Arbeitszeile. Beim Stapelimport wechselt das alle
+          paar Sekunden, und die ganze Seite darunter huepft mit.
+
+       Beides hat dieselbe Antwort: EIN Behaelter mit fester Mindesthoehe, und
+       darin IMMER genau eine Aussage — nie keine. #}
+    <div class="min-h-[52px] flex flex-col justify-center">
     <div x-show="(state.work || []).length > 0" x-cloak class="space-y-1.5">
       <template x-for="w in (state.work || [])" :key="w.name">
         <div class="flex items-center gap-2.5 rounded-lg border border-ink-700 px-2.5 py-2">
@@ -120,17 +138,27 @@
       </template>
     </div>
 
-    <!-- Idle state -->
-    <div x-show="!anyActivity" x-cloak class="text-sm text-ink-400 py-4 text-center">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
-           class="h-8 w-8 mx-auto mb-2 text-ink-500">
-        <path d="M5 12l5 5L20 7"/>
-      </svg>
+    {# DIE LUECKE: es laeuft etwas, aber noch keine Zeile dazu. Statt eines
+       leeren Kastens die Zahl, die es dann wirklich gibt. #}
+    <div x-show="(state.work || []).length === 0 && anyActivity" x-cloak
+         class="flex items-center gap-2.5 rounded-lg border border-ink-700 px-2.5 py-2">
+      <span class="relative inline-flex h-2 w-2 shrink-0">
+        <span class="absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-60 animate-ping"></span>
+        <span class="relative inline-flex h-2 w-2 rounded-full bg-cyan-400"></span>
+      </span>
+      <span class="min-w-0 flex-1 truncate text-sm" x-text="wartetText"></span>
+      <span class="shrink-0 text-[11px] text-ink-400 tabular-nums" x-text="sysBusyText"></span>
+    </div>
+
+    <!-- Idle state — EINE Zeile, damit der Kasten nicht die Hoehe wechselt -->
+    <div x-show="!anyActivity" x-cloak
+         class="text-sm text-ink-400 text-center">
       {{ t('hub.live.idle') }}
       <a href="/upload" class="underline hover:text-emerald-300">/upload</a>
       ·
       <a href="/finance" class="underline hover:text-emerald-300">/finance</a>
     </div>
+    </div>{# Ende des Behaelters mit fester Mindesthoehe #}
 
     <!-- LLM in flight (header dot) -->
     <div x-show="state.in_flight > 0" x-cloak
@@ -875,6 +903,16 @@ function dashboard() {
       const dauer = m >= 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min'
                   : (m >= 1 ? m + ' min' : s + ' s');
       return tr('hub.sys.working') + ' ' + dauer;
+    },
+    /* Was im Kasten steht, wenn gearbeitet wird, aber noch keine Zeile da ist.
+       🔑 Es gibt dann IMMER etwas Messbares: wie viel im Eingang liegt. Ein
+       leerer Kasten waehrend der Arbeit ist die schlechteste aller Antworten. */
+    get wartetText() {
+      const n = (this.sys && this.sys.eingang && this.sys.eingang.anzahl) || 0;
+      if (n > 0) return tr('hub.live.inbox', { n: n });
+      if (this.bulk && (this.bulk.running || this.bulk.paused))
+        return tr('hub.live.bulk');
+      return tr('hub.live.starting');
     },
     get loadText() {
       const l = this.sys && this.sys.last;

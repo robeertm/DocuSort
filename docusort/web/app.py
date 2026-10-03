@@ -1275,16 +1275,32 @@ def create_app(
 
     @app.get("/api/status/{inbox_name}")
     def upload_status(inbox_name: str):
-        """Tell the upload UI whether the pipeline is done with a given file.
+        """Tell a caller whether the pipeline is done with a given file.
 
-        States:
+        🔴 THIS LIST IS A CONTRACT, AND IT WAS WRONG. It named `done`, which
+        this endpoint never returns — the value comes straight from the
+        document row, and there it is `filed`. `duplicate` was listed but easy
+        to miss. A machine client written against this text waited for states
+        that cannot occur and sat out its own timeout on *every* document:
+        measured on one install, 60 minutes each, for a batch of 128. The
+        upload page had it right all along, because it was written against the
+        running system rather than against this paragraph.
+
+        Still running — keep polling:
           queued     — file still sits in inbox/, waiting for stable size
           processing — file still in inbox/ and has been there >5s (OCR running)
-          done       — classified and filed, doc_id + category returned
+
+        Finished — stop polling:
+          filed      — classified and filed, doc_id + category returned
           review     — classified with low confidence, doc_id returned
           failed     — OCR or classification failed, doc_id returned
           duplicate  — SHA256 matched an existing document
-          unknown    — neither in inbox nor in DB (cleaned up without record)
+
+        Neither:
+          unknown    — not in inbox and not in the DB. 🔴 Briefly normal right
+                       after an upload: the file has left the inbox and the row
+                       is not written yet. Treat it as finished only if it
+                       persists, never on the first sighting.
         """
         inbox_file = settings.paths.inbox / inbox_name
         if inbox_file.exists():
@@ -1295,7 +1311,9 @@ def create_app(
         d = db.find_by_original_name(inbox_name)
         if d:
             return {
-                "status": d["status"],  # filed | review | failed | duplicate
+                # 🔑 Straight from the row — filed | review | failed | duplicate.
+                #    NOT "done": that word appears nowhere in the pipeline.
+                "status": d["status"],
                 "doc_id": d["id"],
                 "category": d["category"],
                 "confidence": d["confidence"],
