@@ -542,7 +542,10 @@ class ClassifierHandle:
             #    naechste" — da waere die Bestenwahl ein Betrug an der
             #    getroffenen Entscheidung.
             if automatisch:
-                key = ai_pool.waehle(kandidaten)
+                # Der gewaehlte Rechner entscheidet den Gleichstand — siehe
+                # `ai_pool.waehle`. Beim ersten Dokument einer Installation
+                # ist das der einzige Hinweis, den es ueberhaupt gibt.
+                key = ai_pool.waehle(kandidaten, self._ziel.key)
             else:
                 key = next((k for k in kandidaten
                             if ai_pool.zustand_von(k) in ("", ZUSTAND_BEREIT)),

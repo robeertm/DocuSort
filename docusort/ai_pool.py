@@ -233,12 +233,25 @@ def _fertig_in(key: str) -> float:
     return rest + wartend * je_dok + je_dok
 
 
-def waehle(kandidaten: list[str]) -> str:
-    """Der Rechenort mit dem fruehesten Ende. Leere Liste -> leerer Schluessel."""
+def waehle(kandidaten: list[str], bevorzugt: str = "") -> str:
+    """Der Rechenort mit dem fruehesten Ende. Leere Liste -> leerer Schluessel.
+
+    🔴 `bevorzugt` entscheidet den GLEICHSTAND, und der ist nicht selten —
+    er ist der Normalfall beim allerersten Dokument. Solange nichts gemessen
+    ist, haben alle Rechenorte dieselbe Annahme, und `min()` nimmt dann
+    einfach den ersten aus der Liste. Genau das ist hier passiert: nach der
+    Aktualisierung auf 0.86.1 ging das erste Dokument an die NAS statt an den
+    Mac — 14 Minuten statt 11 Sekunden — weil „nas" in der Konfiguration vor
+    „mac" steht. Die Reihenfolge in einer Datei ist keine Aussage ueber
+    Geschwindigkeit; der Rechner, den der Benutzer gewaehlt hat, schon.
+
+    🔑 Das Gedaechtnis (`lade`) hilft dagegen erst ab dem ZWEITEN Start —
+    beim ersten gibt es noch keine Datei. Beides zusammen deckt beide Faelle.
+    """
     bereit = [k for k in kandidaten if zustand_von(k) in ("", "bereit")]
     if not bereit:
         return ""
-    return min(bereit, key=_fertig_in)
+    return min(bereit, key=lambda k: (_fertig_in(k), k != bevorzugt))
 
 
 # ------------------------------------------------------------- Der Verteiler
