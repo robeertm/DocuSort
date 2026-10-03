@@ -295,12 +295,31 @@ def _ki_erreichbar(basis: str) -> bool | None:
     return ok
 
 
-def _ki_lage(settings, bridge_status: dict) -> dict:
-    """Wer ist eingestellt, mit wem wird gesprochen, antwortet es?"""
+def _ki_lage(settings, bridge_status: dict, classifier: Any = None) -> dict:
+    """Wer ist eingestellt, mit wem wird gesprochen, antwortet es?
+
+    🔴 GEFRAGT WIRD DER LAUFENDE KLASSIFIZIERER, NICHT DIE DATEI.
+    `settings.ai` traegt die GRUNDEINSTELLUNG — den Rueckfall, wenn kein
+    benannter Rechenort passt. Seit es den Umschalter gibt, ist das nicht mehr
+    dasselbe wie der Rechner, auf dem gerade gerechnet wird, und diese Stelle
+    hat es nie erfahren.
+
+    Gefunden hat das ein Benutzer an zwei Angaben auf EINER Seite: oben stand
+    die Adresse aus der config.yaml, unten die des wirklich rechnenden
+    Modells, und die Karte daneben meldete einen dritten Namen als gewaehlt.
+    Beide Zahlen waren fuer sich richtig und zusammen unbrauchbar — genau die
+    Sorte Doppeldeutigkeit, die es nicht geben soll: zwei Stellen, die
+    dasselbe behaupten, und keine sagt, welche gilt.
+
+    Der Halter reicht `settings` an das AKTIVE Ziel durch; ein nackter
+    Klassifizierer traegt seine eigene. Ohne beides bleibt die
+    Grundeinstellung — besser als gar keine Angabe.
+    """
     from urllib.parse import urlsplit
-    anbieter = (getattr(settings.ai, "provider", "") or "").strip()
-    modell = (getattr(settings.ai, "model", "") or "").strip()
-    basis = (getattr(settings.ai, "base_url", "") or "").strip()
+    ai = getattr(classifier, "settings", None) or settings.ai
+    anbieter = (getattr(ai, "provider", "") or "").strip()
+    modell = (getattr(ai, "model", "") or "").strip()
+    basis = (getattr(ai, "base_url", "") or "").strip()
     if anbieter == "bridge":
         info = bridge_status.get("info") or {}
         return {"provider": anbieter, "model": info.get("model") or modell,
@@ -1030,7 +1049,7 @@ def create_app(
              "statement": statement,
              "payment": db.deadline_payment(doc_id),
              "is_statement_candidate": is_statement_candidate,
-             "ai_provider": settings.ai.provider,
+             "ai_provider": _aktiver_anbieter(),
              "shop_types": list(SHOP_TYPES),
              "item_categories": list(ITEM_CATEGORIES),
              "payment_methods": list(PAYMENT_METHODS),
@@ -1537,8 +1556,11 @@ def create_app(
             )
         try:
             from ..receipts import ReceiptExtractor
+            # 🔴 Anbieter UND Modell aus DERSELBEN Quelle, siehe
+            #    `ai_targets.aktive_ai`.
+            from ..ai_targets import aktive_ai
             extractor = ReceiptExtractor(
-                classifier.provider, settings.ai.model,
+                classifier.provider, aktive_ai(classifier, settings.ai).model,
                 max_text_chars=settings.ai.max_text_chars,
                 holder_names=settings.finance.holder_names,
                 pseudonymize=settings.finance.pseudonymize,
@@ -2091,7 +2113,7 @@ def create_app(
             "counts":        counts,
             "bridge":        bridge_status,
             # Worueber das Abzeichen auf der Startseite wirklich berichten soll.
-            "ki":            _ki_lage(settings, bridge_status),
+            "ki":            _ki_lage(settings, bridge_status, classifier),
             "in_flight":     in_flight,
             "bulk_job":      bulk_job,
             "recent":        recent,
@@ -3732,6 +3754,16 @@ def create_app(
                or _t.aktiver_schluessel(settings, liste))
         return liste, key
 
+    def _aktiver_anbieter() -> str:
+        """Welcher Anbieter rechnet GERADE. 🔴 Nie werfen — eine Seite ohne
+        diese Angabe ist unvollstaendig, eine Seite mit Ausnahme ist kaputt."""
+        try:
+            from ..ai_targets import aktive_ai
+            return (getattr(aktive_ai(classifier, settings.ai), "provider", "")
+                    or "")
+        except Exception:  # noqa: BLE001
+            return getattr(settings.ai, "provider", "") or ""
+
     def _ai_ziel_kurz() -> dict[str, Any]:
         """Fuer die Startseite: nur Name und Anzahl, keine Adressen. Nie
         werfen — eine Seite ohne diese Angabe ist unvollstaendig, eine Seite
@@ -4621,7 +4653,10 @@ def create_app(
         bridge = get_bridge()
         info   = bridge.info()
         info["token"]      = get_or_create_token(settings.config_dir)
-        info["provider_active"] = settings.ai.provider == "bridge"
+        # Rechnet die Bruecke GERADE — nicht: steht sie in der Datei.
+        from ..ai_targets import aktive_ai
+        info["provider_active"] = (
+            aktive_ai(classifier, settings.ai).provider == "bridge")
         return info
 
     @app.get("/api/bridge/installer")

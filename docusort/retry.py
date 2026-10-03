@@ -101,13 +101,21 @@ def retry_document(
 
     if cls.category == "Kontoauszug" or is_bank_lookalike:
         local_providers = ("openai_compat", "bridge")
-        is_local = settings.ai.provider in local_providers
+        # 🔴 DATENSCHUTZ: gefragt ist, wer DIESES Dokument rechnet — nicht, was
+        #    in der Datei steht. Hier entscheidet sich, ob ein Kontoauszug das
+        #    Haus verlassen darf (`finance.local_only`). Wer auf einen Anbieter
+        #    in der Wolke umschaltet, waehrend in der config.yaml noch
+        #    `openai_compat` steht, haette seine Kontoauszuege dorthin
+        #    geschickt — und DocuSort haette gemeldet, es rechne lokal.
+        from .ai_targets import aktive_ai
+        _ai = aktive_ai(classifier, settings.ai)
+        is_local = _ai.provider in local_providers
         # Same gates as the primary pipeline in main.py: respect the
         # user's local-only and review-before-send settings.
         if settings.finance.local_only and not is_local:
             logger.info(
                 "retry %d: skipped statement extraction (local_only=true, "
-                "provider=%s)", doc_id, settings.ai.provider,
+                "provider=%s)", doc_id, _ai.provider,
             )
         elif settings.finance.review_before_send and not is_local:
             with db._lock:
@@ -151,8 +159,9 @@ def _extract_statement_inline(*, doc_id: int, text: str,
     from hashlib import sha256
     from .finance import StatementExtractor
 
+    from .ai_targets import aktive_ai
     extractor = StatementExtractor(
-        classifier.provider, settings.ai.model,
+        classifier.provider, aktive_ai(classifier, settings.ai).model,
         max_text_chars=max(settings.ai.max_text_chars, 32000),
         holder_names=settings.finance.holder_names,
     )

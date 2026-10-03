@@ -464,6 +464,40 @@ def aktiver_schluessel(settings: Any, vorhandene: list[Target]) -> str:
     return schluessel[0] if schluessel else ""
 
 
+def aktive_ai(classifier: Any, ai: Any) -> Any:
+    """Die KI-Einstellung, mit der WIRKLICH gerechnet wird.
+
+    🔴 WARUM ES DAS GEBEN MUSS. `settings.ai` ist seit dem Umschalter nur noch
+    der RUECKFALL — Anbieter, Modell und Adresse aus der config.yaml, die
+    gelten, wenn kein benannter Rechenort passt. Wer rechnet, steht woanders.
+    Das auseinanderzuhalten ist keine Feinheit; es ist an vier Stellen
+    schiefgegangen, und eine davon war der Datenschutz:
+
+      · Vier Aufrufe bauten `Auswerter(classifier.provider, settings.ai.model)`
+        — den LAUFENDEN Anbieter mit dem EINGESTELLTEN Modellnamen. Zeigt das
+        aktive Ziel auf einen anderen Rechner mit einem anderen Modell, geht
+        ein Name an eine Maschine, die ihn nicht kennt.
+      · `retry.py` entschied an `settings.ai.provider`, ob ein KONTOAUSZUG das
+        Haus verlassen darf (`finance.local_only`). Wer auf einen Anbieter in
+        der Wolke umschaltet, waehrend in der Datei noch `openai_compat`
+        steht, haette seine Kontoauszuege dorthin geschickt — und DocuSort
+        haette gemeldet, es rechne lokal.
+      · Das Abzeichen auf der Startseite nannte die Adresse aus der Datei,
+        waehrend zwei Zeilen tiefer die wirkliche stand. Dieselbe Seite nannte
+        damit zwei verschiedene Rechner: oben den eingetragenen Rueckfall,
+        unten den gewaehlten. Gefunden hat das ein Benutzer am Bildschirm,
+        nicht ein Pruefstand.
+
+    🔑 Die Regel, die daraus folgt: **wer beschreibt, WAS GERADE PASSIERT,
+    fragt den Klassifizierer. Wer beschreibt, WAS EINGESTELLT IST, fragt die
+    Einstellung.** Beides ist richtig — nur nie durcheinander.
+
+    Ohne Klassifizierer (Einrichtungsmodus, Pruefstand) bleibt die
+    Grundeinstellung: besser die Vorgabe als gar keine Antwort.
+    """
+    return getattr(classifier, "settings", None) or ai
+
+
 def ai_settings_fuer(ai: Any, t: Target) -> Any:
     """Die AI-Einstellungen, aber mit Anbieter/Modell/Adresse dieses Ziels.
     Alles andere — Zeitgrenze, Textgrenze, Mindestsicherheit — bleibt wie
