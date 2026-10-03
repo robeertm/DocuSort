@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 class ProviderError(RuntimeError):
@@ -57,3 +58,25 @@ class Provider:
         much larger budget than the default 60 s.
         """
         raise NotImplementedError
+
+    def runtime(self) -> dict[str, Any]:
+        """Where this provider's model runs, and what it is using there.
+
+        The start page shows load figures, and those are only meaningful
+        with a machine attached to them: DocuSort reads /proc and that is
+        *its own* host. The model may live somewhere else entirely — on a
+        Mac across the bridge, on another box on the LAN, or in a data
+        centre nobody here can measure. Only the provider knows which,
+        so the answer belongs here and travels with it.
+
+        Keys (all optional, absent means "cannot say"):
+          where     'local' | 'lan' | 'bridge' | 'cloud'
+          host      the machine's name as far as we can tell
+          model     model id actually loaded
+          size      bytes the model occupies
+          context   usable context window in tokens
+          cpu       percent, 0..100, of that machine
+          memory    percent, 0..100, of that machine
+          reachable bool — False when we asked and got nothing
+        """
+        return {"where": "unknown", "provider": self.name}

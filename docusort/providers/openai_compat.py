@@ -48,6 +48,49 @@ class OpenAICompatProvider(Provider):
         self.api_key = api_key or "ollama"
         self.timeout = timeout
 
+    def runtime(self) -> dict[str, Any]:
+        """Ask the endpoint what it has loaded.
+
+        Ollama answers /api/ps with the running model, its size and its
+        context window. Other OpenAI-compatible servers simply 404 — then
+        we still know the HOST, which is the part the page needs most: a
+        CPU figure means nothing until you know whose CPU it is.
+        """
+        from urllib.parse import urlparse
+        wurzel = (self.base_url or "").rstrip("/")
+        if wurzel.endswith("/v1"):
+            wurzel = wurzel[:-3]
+        host = urlparse(wurzel).hostname or ""
+        lokal = host in ("127.0.0.1", "localhost", "::1", "")
+        info: dict[str, Any] = {
+            "where": "local" if lokal else "lan",
+            "provider": self.name,
+            "host": host or "localhost",
+        }
+        try:
+            req = request.Request(wurzel.rstrip("/") + "/api/ps")
+            with request.urlopen(req, timeout=3) as r:
+                d = json.loads(r.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001 — an endpoint that cannot say is not an error
+            info["reachable"] = False
+            return info
+        info["reachable"] = True
+        modelle = d.get("models") or []
+        if not modelle:
+            info["loaded"] = False
+            return info
+        m = modelle[0]
+        det = m.get("details") or {}
+        info.update({
+            "loaded": True,
+            "model": m.get("name") or m.get("model"),
+            "size": m.get("size"),
+            "context": m.get("context_length"),
+            "parameters": det.get("parameter_size"),
+            "quantisation": det.get("quantization_level"),
+        })
+        return info
+
     def classify(self, *, system_prompt, user_prompt, model,
                  max_output_tokens: int = 600,
                  timeout: float | None = None) -> ProviderResponse:

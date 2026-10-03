@@ -13,6 +13,8 @@ have something useful to show.
 
 from __future__ import annotations
 
+from typing import Any
+
 import logging
 
 from .base import (
@@ -32,6 +34,38 @@ class BridgeProvider(Provider):
         # not require an actual connection (the hub is empty until the
         # Mac client connects), so we do a lazy lookup in classify().
         self.default_timeout = float(default_timeout)
+
+    def runtime(self) -> dict[str, Any]:
+        """The model lives on the Mac at the other end of the bridge, so the
+        Mac is who we report — name, platform, model, and the load it sends
+        us itself. DocuSort's own /proc says nothing about that machine."""
+        try:
+            from ..bridge.server import get_bridge
+            b = get_bridge()
+            # 🔴 NICHT `getattr(b, "last_client_info", None)` — dieses Attribut
+            #    gibt es nicht, der Aufruf liefert still immer None (so steht es
+            #    seit Langem in app.py und meldet deshalb nie einen Mac).
+            #    Die Auskunft heisst `info()`.
+            lage_gesamt = b.info()
+            verbunden = bool(lage_gesamt.get("connected"))
+            info = lage_gesamt.get("client") or {}
+            lage = lage_gesamt.get("stats") or {}
+        except Exception:  # noqa: BLE001
+            return {"where": "bridge", "provider": self.name, "reachable": False}
+        d: dict[str, Any] = {
+            "where": "bridge",
+            "provider": self.name,
+            "reachable": bool(verbunden),
+            "host": info.get("host") or "",
+            "platform": info.get("platform") or "",
+            "model": info.get("model") or "",
+            "loaded": bool(info.get("model")),
+        }
+        if lage.get("cpu") is not None:
+            d["cpu"] = lage["cpu"]
+        if lage.get("memory") is not None:
+            d["memory"] = lage["memory"]
+        return d
 
     def classify(self, *, system_prompt: str, user_prompt: str, model: str,
                  max_output_tokens: int = 600,

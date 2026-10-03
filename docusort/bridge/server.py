@@ -54,6 +54,7 @@ class BridgeServer:
         self._pending: dict[str, _PendingRequest] = {}
         self._client = None  # FastAPI WebSocket; typed as Any to avoid hard dep
         self._client_info: dict[str, Any] = {}
+        self._client_stats: dict[str, Any] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._connected_at: float = 0.0
         self._last_request_at: float = 0.0
@@ -87,6 +88,7 @@ class BridgeServer:
             return {
                 "connected": self.is_connected(),
                 "client":    dict(self._client_info),
+                "stats":     dict(self._client_stats),
                 "connected_at":     self._connected_at,
                 "last_request_at":  self._last_request_at,
                 "calls_total":      self._calls_total,
@@ -196,6 +198,7 @@ class BridgeServer:
                 return
             self._client = None
             self._client_info = {}
+            self._client_stats = {}
             self._loop = None
             self._grace_until = time.time() + _RECONNECT_GRACE_S
             pending_n = len(self._pending)
@@ -240,6 +243,19 @@ class BridgeServer:
         responses to pending requests come back this way; pings are
         handled at the protocol layer (FastAPI's WebSocket)."""
         kind = msg.get("type")
+        if kind == "stats":
+            # 🔑 Die Last des Rechners, auf dem das MODELL rechnet. DocuSort
+            #    liest /proc und kennt damit nur SEINEN eigenen Wirt — bei einer
+            #    Bruecke steht das Modell auf einem ganz anderen Geraet, und
+            #    eine CPU-Zahl ohne den Rechner dazu ist wertlos. Nur der Mac
+            #    selbst kann das sagen, also sagt er es.
+            with self._lock:
+                self._client_stats = {
+                    "cpu":    msg.get("cpu"),
+                    "memory": msg.get("memory"),
+                    "at":     time.time(),
+                }
+            return
         if kind != "response":
             return
         req_id = str(msg.get("request_id", ""))

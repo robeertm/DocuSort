@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .base import Provider, ProviderError, ProviderResponse
 from .pricing import calculate_cost
 
@@ -52,3 +54,8 @@ class OpenAIProvider(Provider):
             input_tokens=in_tok, output_tokens=out_tok,
             cache_read_tokens=cache_read, cost_usd=cost,
         )
+
+    def runtime(self) -> dict[str, Any]:
+        """Runs in a data centre. There is no local load to show, and
+        inventing one would be worse than saying so."""
+        return {"where": "cloud", "provider": self.name, "reachable": True}

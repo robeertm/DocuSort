@@ -1594,5 +1594,11 @@
   "hub.sys.ai": "Modelo IA",
   "hub.sys.procs": "procesos",
   "hub.sys.unreachable": "inaccesible",
-  "hub.sys.notloaded": "ningún modelo cargado"
+  "hub.sys.notloaded": "ningún modelo cargado",
+  "hub.sys.this_machine": "Esta máquina",
+  "hub.sys.model_machine": "El modelo se ejecuta en",
+  "hub.sys.where.cloud": "en la nube",
+  "hub.sys.where.bridge": "puente",
+  "hub.sys.where.same": "esta máquina",
+  "hub.sys.where.lan": "en la red"
 }

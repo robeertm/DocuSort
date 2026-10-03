@@ -181,7 +181,15 @@ def _eigene_prozesse() -> dict[str, dict[str, Any]]:
     return gruppen
 
 
-def _ki_lage() -> dict[str, Any]:
+def _rechnername() -> str:
+    """Der Name DIESES Rechners. Eine Lastzahl ohne Rechner ist wertlos."""
+    try:
+        return os.uname().nodename
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _ki_lage_unbenutzt() -> dict[str, Any]:
     """Was die KI gerade belegt — gefragt, nicht geschaetzt.
 
     Ollama laeuft in einem anderen Container; sein /api/ps nennt das geladene
@@ -278,8 +286,11 @@ def snapshot() -> dict[str, Any]:
         "eigener_speicher": _eigener_speicher(),
         "platte": _platte(_library or "/"),
         "eingang": eing,
-        # Wer verbraucht was — zugeordnet, nicht geraten.
-        "verbraucher": {**_eigene_prozesse(), "ki": _ki_lage()},
+        # Wer verbraucht was AUF DIESEM RECHNER. Das Modell steht
+        # moeglicherweise woanders — danach wird der ANBIETER gefragt
+        # (Provider.runtime()), denn nur er weiss, wo es wohnt.
+        "verbraucher": _eigene_prozesse(),
+        "host": _rechnername(),
         # Verlauf als drei schlanke Reihen — die Seite zeichnet daraus Linien.
         "verlauf": {
             "t":       [p["t"] for p in verlauf],

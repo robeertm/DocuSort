@@ -7,6 +7,37 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.80.0] - 2026-10-03
+
+### Changed
+
+**The load figures now say whose load they are.** The machine card read
+`/proc`, which describes the host DocuSort runs on — and then put a model name
+beside it as if both lived in the same box. On this install they happen to, so
+it looked right. On an install whose model sits on a Mac across the bridge, or
+in a data centre, it would have been a true number about the wrong machine.
+
+Where the model runs is something only the provider can know, so the answer
+moved there: `Provider.runtime()` is part of the interface now.
+
+- `openai_compat` asks the endpoint (`/api/ps` on Ollama) for the loaded model,
+  its size, quantisation and context, and reports whether the host is this
+  machine or another one on the network.
+- `bridge` reports the Mac: its name, its platform, the model it loaded — and
+  its **own** CPU and memory, which the Mac client now sends in its hello and
+  again whenever work arrives. Nothing else could measure that machine.
+- The cloud providers answer `cloud`. There is no local load to show and
+  inventing one would be worse than saying so.
+
+The card shows two named blocks — *This machine* with DocuSort and OCR, and
+*The model runs on* with wherever that is.
+
+### Fixed
+
+**The bridge client info never showed.** `getattr(bridge, "last_client_info")`
+has no such attribute; it returned `None` every time, so the AI chip could
+never name a Mac. It reads `bridge.info()["client"]` now.
+
 ## [0.79.0] - 2026-10-03
 
 ### Fixed

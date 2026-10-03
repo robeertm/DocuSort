@@ -314,6 +314,18 @@ def _ki_lage(settings, bridge_status: dict) -> dict:
             "wo": _ki_wolke(anbieter), "lokal": False, "erreichbar": None}
 
 
+def _runtime_von(classifier: Any) -> dict[str, Any]:
+    """Frag den Anbieter, wo sein Modell rechnet. Nie werfen — eine Seite ohne
+    diese Angabe ist unvollstaendig, eine Seite mit Ausnahme ist kaputt."""
+    try:
+        p = getattr(classifier, "provider", None)
+        if p is None:
+            return {"where": "none"}
+        return p.runtime()
+    except Exception:  # noqa: BLE001
+        return {"where": "unknown"}
+
+
 def create_app(
     settings: AppSettings,
     db: Database,
@@ -330,8 +342,10 @@ def create_app(
     #    8640 Messungen -- das kostet nichts und beantwortet die Frage, die die
     #    KI-Kachel NICHT beantwortet: arbeitet die Maschine ueberhaupt?
     from .. import system_stats as _system_stats
-    _system_stats.start(settings.paths.inbox, settings.paths.library,
-                        getattr(settings.ai, "base_url", "") or "")
+    _system_stats.start(settings.paths.inbox, settings.paths.library)
+
+    def _modell_laeuft_auf() -> dict[str, Any]:
+        return _runtime_von(classifier)
     templates_dir = Path(__file__).parent / "templates"
     static_dir = Path(__file__).parent / "static"
     static_dir.mkdir(exist_ok=True)
@@ -1990,7 +2004,10 @@ def create_app(
             from ..bridge.server import get_bridge
             bridge = get_bridge()
             bridge_status["connected"] = bridge.is_connected()
-            client_info = getattr(bridge, "last_client_info", None)
+            # 🔴 `last_client_info` ist kein Attribut der Bruecke — dieser
+            #    getattr lieferte still IMMER None, und das Abzeichen nannte
+            #    darum nie einen Mac. Die Auskunft heisst `info()`.
+            client_info = (bridge.info() or {}).get("client")
             if client_info:
                 bridge_status["info"] = {
                     "host":  client_info.get("host"),
@@ -2081,6 +2098,12 @@ def create_app(
             # 2-3 s, ein zweiter Takt waere nur mehr Verkehr fuer dieselbe Sicht.
             # Wer macht gerade was — Stufe je Dokument, aelteste zuerst.
             "work":          _activity.work_snapshot(),
+            # 🔑 WO rechnet das Modell? Das weiss nur der Anbieter: auf diesem
+            #    Rechner (Ollama daneben), im LAN, auf einem Mac hinter der
+            #    Bruecke oder in der Wolke. DocuSorts /proc beschreibt immer nur
+            #    SEINEN Wirt — ohne diese Auskunft stuende auf der Seite eine
+            #    wahre Zahl ueber das falsche Geraet.
+            "modell_laeuft_auf": _modell_laeuft_auf(),
             "system":        _system_stats.snapshot(),
             "version":       __version__,
         }
