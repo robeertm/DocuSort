@@ -74,6 +74,17 @@ _jobs: dict[str, JobState] = {}
 _in_flight = 0
 _last_call_at: float = 0.0
 
+# Which document is in which stage right now. The AI counter above answers
+# only "is an LLM call in flight"; a page that asks "is anything happening"
+# needs the whole chain, because OCR alone can take twenty minutes on a scan
+# while the AI counter sits at zero and the page claims nothing is running.
+_work: dict[str, dict[str, Any]] = {}
+
+STAGE_CHECK  = "pruefung"        # duplicate check, reading the file
+STAGE_OCR    = "texterkennung"
+STAGE_AI     = "ki"
+STAGE_FILE   = "ablage"
+
 
 def get_job(name: str) -> JobState:
     """Return the (snapshot of the) job state for `name`, creating an
@@ -164,6 +175,51 @@ def end_call() -> None:
         if _in_flight > 0:
             _in_flight -= 1
         _last_call_at = time.time()
+
+
+def work_begin(name: str, size: int = 0, pages: int | None = None) -> None:
+    """A document entered the chain. Never raises — a bookkeeping hook must
+    not be able to break the pipeline it only watches."""
+    try:
+        now = time.time()
+        with _lock:
+            _work[name] = {"name": name, "stage": STAGE_CHECK, "started_at": now,
+                           "stage_since": now, "size": int(size or 0),
+                           "pages": pages}
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def work_stage(name: str, stage: str) -> None:
+    try:
+        with _lock:
+            e = _work.get(name)
+            if e is not None and e["stage"] != stage:
+                e["stage"] = stage
+                e["stage_since"] = time.time()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def work_end(name: str) -> None:
+    try:
+        with _lock:
+            _work.pop(name, None)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def work_snapshot() -> list[dict[str, Any]]:
+    """Oldest first — that is the one the user is waiting for."""
+    now = time.time()
+    with _lock:
+        werte = list(_work.values())
+    out = []
+    for e in sorted(werte, key=lambda x: x["started_at"]):
+        out.append({**e,
+                    "seit_s": int(now - e["started_at"]),
+                    "stufe_seit_s": int(now - e["stage_since"])})
+    return out
 
 
 def snapshot() -> dict[str, Any]:

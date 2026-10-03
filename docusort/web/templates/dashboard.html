@@ -58,6 +58,21 @@
       </div>
     </div>
 
+    {# WER MACHT GERADE WAS — eine Zeile je Dokument mit seiner Stufe.
+       Vorher stand hier nur „laeuft etwas durch die KI?"; ein Scan, der zwanzig
+       Minuten in der Texterkennung steckt, erschien damit als Leerlauf. #}
+    <div x-show="(state.work || []).length > 0" x-cloak class="space-y-1.5">
+      <template x-for="w in (state.work || [])" :key="w.name">
+        <div class="flex items-center gap-2.5 rounded-lg border border-ink-700 px-2.5 py-2">
+          <span class="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium"
+                :class="stufenFarbe(w.stage)" x-text="stufenName(w.stage)"></span>
+          <span class="min-w-0 flex-1 truncate text-sm" :title="w.name" x-text="w.name"></span>
+          <span class="shrink-0 text-[11px] text-ink-500 tabular-nums" x-text="werBearbeitet(w)"></span>
+          <span class="shrink-0 text-[11px] text-ink-400 tabular-nums" x-text="dauer(w.seit_s)"></span>
+        </div>
+      </template>
+    </div>
+
     <!-- Idle state -->
     <div x-show="!anyActivity" x-cloak class="text-sm text-ink-400 py-4 text-center">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -150,34 +165,53 @@
     </div>
   </section>
 
-  <!-- =========== STATS GRID =========== -->
-  <section class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-    <a href="/library" class="card p-3 hover:border-ink-600">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.docs') }}</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="(state.counts && state.counts.total) || 0"></div>
-    </a>
-    <a href="/library?status=review" class="card p-3 hover:border-amber-500/40"
-       :class="(state.counts && state.counts.review > 0) ? 'border-amber-500/40 bg-amber-500/5' : ''">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.review') }}</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums"
-           :class="(state.counts && state.counts.review > 0) ? 'text-amber-300' : ''"
-           x-text="(state.counts && state.counts.review) || 0"></div>
-    </a>
-    <a href="/library?status=failed" class="card p-3 hover:border-rose-500/40"
-       :class="(state.counts && state.counts.failed > 0) ? 'border-rose-500/40 bg-rose-500/5' : ''">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.failed') }}</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums"
-           :class="(state.counts && state.counts.failed > 0) ? 'text-rose-300' : ''"
-           x-text="(state.counts && state.counts.failed) || 0"></div>
-    </a>
-    <a href="/finance" class="card p-3 hover:border-cyan-500/40">
-      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.statements') }}</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="(state.counts && state.counts.kontoauszug) || 0"></div>
-      <div class="text-[10px] text-ink-500 mt-0.5"
-           x-show="state.counts && state.counts.empty_statements > 0" x-cloak>
-        <span x-text="state.counts && state.counts.empty_statements"></span> {{ t('hub.tile.empty_suffix') }}
+  <!-- =========== DOKUMENTE NACH STATUS =========== -->
+  {# 🔴 Vorher stand hier „DOKUMENTE 681" neben „REVIEW 2" — und 681 enthielt
+     122 Duplikate, die gar keine eigenen Dokumente sind. Eine Aufstellung muss
+     aufgehen, sonst raet der Leser, was zu was gehoert. #}
+  <section>
+    <div class="flex items-baseline justify-between gap-3 mb-2 flex-wrap">
+      <h2 class="text-sm font-medium text-ink-300">{{ t('hub.status.title') }}</h2>
+      <div class="text-[11px] text-ink-500">
+        <span x-text="(state.counts && state.counts.total) || 0"></span>
+        {{ t('hub.status.total_suffix') }}
       </div>
-    </a>
+    </div>
+    <section class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+      <a href="/library?status=filed" class="card p-3 hover:border-emerald-500/40">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.filed') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums text-emerald-300"
+             x-text="(state.counts && state.counts.filed) || 0"></div>
+      </a>
+      <a href="/library?status=review" class="card p-3 hover:border-amber-500/40"
+         :class="(state.counts && state.counts.review > 0) ? 'border-amber-500/40 bg-amber-500/5' : ''">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.review') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums"
+             :class="(state.counts && state.counts.review > 0) ? 'text-amber-300' : ''"
+             x-text="(state.counts && state.counts.review) || 0"></div>
+      </a>
+      <a href="/library?status=failed" class="card p-3 hover:border-rose-500/40"
+         :class="(state.counts && state.counts.failed > 0) ? 'border-rose-500/40 bg-rose-500/5' : ''">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.failed') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums"
+             :class="(state.counts && state.counts.failed > 0) ? 'text-rose-300' : ''"
+             x-text="(state.counts && state.counts.failed) || 0"></div>
+      </a>
+      <a href="/duplicates" class="card p-3 hover:border-ink-600">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.duplicate') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums text-ink-300"
+             x-text="(state.counts && state.counts.duplicate) || 0"></div>
+      </a>
+      <a href="/finance" class="card p-3 hover:border-cyan-500/40">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.statements') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums text-cyan-300"
+             x-text="(state.counts && state.counts.kontoauszug) || 0"></div>
+        <div class="text-[10px] text-ink-500 mt-0.5"
+             x-show="state.counts && state.counts.empty_statements > 0" x-cloak>
+          <span x-text="state.counts && state.counts.empty_statements"></span> {{ t('hub.tile.empty_suffix') }}
+        </div>
+      </a>
+    </section>
   </section>
 
   <!-- =========== MASCHINE =========== -->
@@ -250,11 +284,49 @@
       </div>
     </div>
 
+    {# WER VERBRAUCHT WAS — zugeordnet, nicht geraten.
+       DocuSort und die Texterkennung sind eigene Prozesse und stehen in /proc;
+       die KI laeuft in einem ANDEREN Container und wird deshalb ueber ihren
+       eigenen Endpunkt gefragt (/api/ps) statt geschaetzt. #}
+    <div class="mt-3">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500 mb-1.5">{{ t('hub.sys.who') }}</div>
+      <div class="space-y-1">
+        <div class="flex items-center gap-2 text-xs">
+          <span class="h-2 w-2 rounded-full bg-emerald-400 shrink-0"></span>
+          <span class="flex-1 truncate">{{ t('hub.sys.docusort') }}</span>
+          <span class="tabular-nums text-ink-400"
+                x-text="pct(sys.verbraucher && sys.verbraucher.docusort && sys.verbraucher.docusort.cpu)"></span>
+          <span class="tabular-nums text-ink-500 w-16 text-right"
+                x-text="mb(sys.verbraucher && sys.verbraucher.docusort && sys.verbraucher.docusort.rss)"></span>
+        </div>
+        <div class="flex items-center gap-2 text-xs"
+             :class="(sys.verbraucher && sys.verbraucher.ocr && sys.verbraucher.ocr.anzahl > 0) ? '' : 'opacity-50'">
+          <span class="h-2 w-2 rounded-full bg-cyan-400 shrink-0"></span>
+          <span class="flex-1 truncate">{{ t('hub.sys.ocr') }}
+            <span class="text-ink-500" x-show="sys.verbraucher && sys.verbraucher.ocr && sys.verbraucher.ocr.anzahl > 0"
+                  x-cloak x-text="'· ' + (sys.verbraucher.ocr.anzahl) + ' ' + tr('hub.sys.procs')"></span>
+          </span>
+          <span class="tabular-nums text-ink-400"
+                x-text="pct(sys.verbraucher && sys.verbraucher.ocr && sys.verbraucher.ocr.cpu)"></span>
+          <span class="tabular-nums text-ink-500 w-16 text-right"
+                x-text="mb(sys.verbraucher && sys.verbraucher.ocr && sys.verbraucher.ocr.rss)"></span>
+        </div>
+        <div class="flex items-center gap-2 text-xs"
+             :class="kiGeladen ? '' : 'opacity-50'">
+          <span class="h-2 w-2 rounded-full shrink-0"
+                :class="kiGeladen ? 'bg-amber-400' : 'bg-ink-600'"></span>
+          <span class="flex-1 truncate">{{ t('hub.sys.ai') }}
+            <span class="text-ink-500" x-text="kiText2"></span>
+          </span>
+          <span class="tabular-nums text-ink-500 w-16 text-right"
+                x-text="gb(sys.verbraucher && sys.verbraucher.ki && sys.verbraucher.ki.groesse)"></span>
+        </div>
+      </div>
+    </div>
+
     <div class="mt-2.5 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-ink-500">
       <span>{{ t('hub.sys.disk') }}: <span class="tabular-nums text-ink-400"
             x-text="gb(sys.platte && sys.platte.frei)"></span></span>
-      <span>{{ t('hub.sys.self') }}: <span class="tabular-nums text-ink-400"
-            x-text="mb(sys.eigener_speicher)"></span></span>
     </div>
   </section>
 
@@ -539,6 +611,22 @@ function dashboard() {
       }
       return punkte.join(' ');
     },
+    get kiGeladen() {
+      const k = this.sys && this.sys.verbraucher && this.sys.verbraucher.ki;
+      return !!(k && k.geladen);
+    },
+    /* The model name, otherwise the reason — never a bare dash. */
+    get kiText2() {
+      const k = this.sys && this.sys.verbraucher && this.sys.verbraucher.ki;
+      if (!k || k.erreichbar === false) return '· ' + tr('hub.sys.unreachable');
+      if (!k.geladen) return '· ' + tr('hub.sys.notloaded');
+      const teile = [k.modell, k.quantisierung].filter(Boolean);
+      return '· ' + teile.join(' · ');
+    },
+    pct(v) {
+      if (v === null || v === undefined) return '–';
+      return v.toFixed(0) + ' %';
+    },
     gb(b) {
       if (b === null || b === undefined) return '–';
       return (b / 1073741824).toFixed(1) + ' GB';
@@ -556,9 +644,38 @@ function dashboard() {
       const name = [k.model, k.wo].filter(Boolean).join(' · ') || tr('hub.ki.none');
       return k.erreichbar === false ? name + ' — ' + tr('hub.ki.unreachable') : name;
     },
+    /* This counted LLM calls only. The same page then claimed nothing was
+       running while, two cards below, the machine card reported twenty-one
+       minutes of work — two parts measuring different things and calling both
+       of them running. The chain decides now: anything in the work register or
+       in the inbox means DocuSort is busy, whichever stage it is in. */
     get anyActivity() {
-      return (this.state.in_flight > 0)
+      return ((this.state.work || []).length > 0)
+          || (this.state.in_flight > 0)
+          || (this.sys && this.sys.eingang && this.sys.eingang.anzahl > 0)
           || (this.bulk && (this.bulk.running || this.bulk.paused));
+    },
+    stufenName(st) { return tr('hub.work.stage.' + st) || st; },
+    stufenFarbe(st) {
+      return st === 'ki'            ? 'bg-emerald-500/15 text-emerald-300'
+           : st === 'texterkennung' ? 'bg-cyan-500/15 text-cyan-300'
+           : st === 'ablage'        ? 'bg-indigo-500/15 text-indigo-300'
+           :                          'bg-ink-500/15 text-ink-300';
+    },
+    /* Which tool is on this document — the worker, not the stage. */
+    werBearbeitet(w) {
+      if (w.stage === 'ki') {
+        const k = this.sys && this.sys.verbraucher && this.sys.verbraucher.ki;
+        return (k && k.modell) || tr('hub.sys.ai');
+      }
+      if (w.stage === 'texterkennung') return 'ocrmypdf';
+      return '';
+    },
+    dauer(s) {
+      if (s === null || s === undefined) return '';
+      if (s < 60) return s + ' s';
+      const m = Math.floor(s / 60);
+      return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
     },
     // Only show the "zuletzt: …" line when the error is actually
     // recent + still relevant. The bulk worker leaves last_error

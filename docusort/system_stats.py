@@ -13,11 +13,13 @@ gluehen. Genau diese Luecke schliesst dieses Modul.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import threading
 import time
+import urllib.request
 from collections import deque
 from typing import Any
 
@@ -30,6 +32,9 @@ _letzte_cpu: tuple[int, int] | None = None   # (arbeit, gesamt)
 _faden: threading.Thread | None = None
 _inbox: str = ""
 _library: str = ""
+_ki_url: str = ""
+_ticks_vorher: dict[int, int] = {}
+_ticks_zeit: float = 0.0
 logger = logging.getLogger("docusort.system_stats")
 
 
@@ -126,6 +131,82 @@ def _eingang(pfad: str) -> dict[str, Any]:
             "aeltester_name": aeltester_name}
 
 
+# ----------------------------------------------------- wer verbraucht was
+# Die Teile des OCR-Laufs. ocrmypdf ruft sie als eigene Prozesse auf, also
+# tauchen sie im Baum auf und gehoeren der Texterkennung zugerechnet.
+_OCR_NAMEN = ("ocrmypdf", "tesseract", "gs", "pngquant", "unpaper", "qpdf",
+              "jbig2", "img2pdf")
+_UHR = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+
+
+def _eigene_prozesse() -> dict[str, dict[str, Any]]:
+    """CPU und Speicher des eigenen Baums, getrennt nach DocuSort und OCR.
+
+    🔴 Im Container zeigt /proc NUR die eigenen Prozesse — Ollama laeuft
+       woanders und ist hier unsichtbar. Das ist kein Mangel: die KI wird
+       ueber ihren eigenen Endpunkt gefragt, nicht geraten.
+    """
+    global _ticks_vorher, _ticks_zeit
+    jetzt = time.time()
+    ticks: dict[int, int] = {}
+    gruppen = {"docusort": {"cpu": 0.0, "rss": 0, "anzahl": 0},
+               "ocr":      {"cpu": 0.0, "rss": 0, "anzahl": 0}}
+    try:
+        pids = [int(n) for n in os.listdir("/proc") if n.isdigit()]
+    except OSError:
+        return gruppen
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+                roh = fh.read()
+            # comm steht in Klammern und kann Leerzeichen enthalten
+            nach = roh.rsplit(")", 1)
+            name = roh.split("(", 1)[1].rsplit(")", 1)[0]
+            felder = nach[1].split()
+            utime, stime = int(felder[11]), int(felder[12])
+            rss_seiten = int(felder[21])
+        except (OSError, ValueError, IndexError):
+            continue
+        g = "ocr" if any(n in name for n in _OCR_NAMEN) else "docusort"
+        ticks[pid] = utime + stime
+        gruppen[g]["rss"] += rss_seiten * os.sysconf("SC_PAGE_SIZE")
+        gruppen[g]["anzahl"] += 1
+        vorher = _ticks_vorher.get(pid)
+        if vorher is not None and _ticks_zeit and jetzt > _ticks_zeit:
+            d = (ticks[pid] - vorher) / _UHR
+            gruppen[g]["cpu"] += 100.0 * d / (jetzt - _ticks_zeit)
+    _ticks_vorher, _ticks_zeit = ticks, jetzt
+    for g in gruppen.values():
+        g["cpu"] = round(g["cpu"], 1)
+    return gruppen
+
+
+def _ki_lage() -> dict[str, Any]:
+    """Was die KI gerade belegt — gefragt, nicht geschaetzt.
+
+    Ollama laeuft in einem anderen Container; sein /api/ps nennt das geladene
+    Modell, seine Groesse und das Kontextfenster. Das ist die einzige ehrliche
+    Quelle fuer den Posten KI in der Verbrauchsliste.
+    """
+    if not _ki_url:
+        return {}
+    try:
+        with urllib.request.urlopen(_ki_url, timeout=3) as r:
+            d = json.load(r)
+    except Exception:  # noqa: BLE001 — eine unerreichbare KI ist kein Fehler
+        return {"erreichbar": False}
+    modelle = d.get("models") or []
+    if not modelle:
+        return {"erreichbar": True, "geladen": False}
+    m = modelle[0]
+    return {"erreichbar": True, "geladen": True,
+            "modell": m.get("name") or m.get("model"),
+            "groesse": m.get("size"),
+            "parameter": (m.get("details") or {}).get("parameter_size"),
+            "quantisierung": (m.get("details") or {}).get("quantization_level"),
+            "kontext": m.get("context_length")}
+
+
 # ------------------------------------------------------------------- Sammler
 def _einmal_messen() -> None:
     probe = {
@@ -159,10 +240,16 @@ def _schleife() -> None:
         time.sleep(TAKT_S)
 
 
-def start(inbox: str, library: str) -> None:
+def start(inbox: str, library: str, ki_base_url: str = "") -> None:
     """Einmal beim Hochfahren rufen. Mehrfachaufrufe sind folgenlos."""
-    global _faden, _inbox, _library
+    global _faden, _inbox, _library, _ki_url
     _inbox, _library = str(inbox), str(library)
+    if ki_base_url:
+        # …/v1 -> …/api/ps  (Ollama spricht beides, die Lage steht unter /api)
+        wurzel = ki_base_url.rstrip("/")
+        if wurzel.endswith("/v1"):
+            wurzel = wurzel[:-3]
+        _ki_url = wurzel.rstrip("/") + "/api/ps"
     if _faden is not None and _faden.is_alive():
         return
     _faden = threading.Thread(target=_schleife, name="system-stats", daemon=True)
@@ -191,6 +278,8 @@ def snapshot() -> dict[str, Any]:
         "eigener_speicher": _eigener_speicher(),
         "platte": _platte(_library or "/"),
         "eingang": eing,
+        # Wer verbraucht was — zugeordnet, nicht geraten.
+        "verbraucher": {**_eigene_prozesse(), "ki": _ki_lage()},
         # Verlauf als drei schlanke Reihen — die Seite zeichnet daraus Linien.
         "verlauf": {
             "t":       [p["t"] for p in verlauf],

@@ -23,6 +23,7 @@ import threading
 from pathlib import Path
 
 from . import __version__
+from . import activity as _activity
 from .classifier import Classification, Classifier
 from .config import AppSettings, get_api_key, is_configured, load_config
 from .db import Database, DocumentRecord, open_db
@@ -84,6 +85,17 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
     def _process_one(path: Path) -> None:
         if not path.exists():
             return
+        # 🔑 Who is doing what, per document. The AI counter alone answers only
+        #    whether an LLM call is in flight — on a scan the chain can spend
+        #    twenty minutes in OCR while that counter reads zero and the page
+        #    claims nothing is running. The stage register closes that gap.
+        _activity.work_begin(path.name, path.stat().st_size)
+        try:
+            _process_one_inner(path)
+        finally:
+            _activity.work_end(path.name)
+
+    def _process_one_inner(path: Path) -> None:
         log.info("Processing %s (%.1f KB)", path.name, path.stat().st_size / 1024)
         original_name = path.name
         original_size = path.stat().st_size
@@ -135,6 +147,7 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                 log.exception("Failed to record duplicate: %s", exc)
             return
 
+        _activity.work_stage(path.name, _activity.STAGE_OCR)
         ocr_res: OcrResult = extract_text(path, settings.ocr)
 
         if not ocr_res.text:
@@ -146,6 +159,7 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             )
         else:
             try:
+                _activity.work_stage(path.name, _activity.STAGE_AI)
                 cls = classifier.classify(ocr_res.text)
                 log.info(
                     "Classified %s -> %s / %s / %s (conf=%.2f, $%.4f)",
@@ -174,6 +188,7 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                     reasoning=str(exc),
                 )
 
+        _activity.work_stage(path.name, _activity.STAGE_FILE)
         target = organize(path, ocr_res.path, cls, settings)
 
         if settings.dry_run:

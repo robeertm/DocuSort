@@ -330,7 +330,8 @@ def create_app(
     #    8640 Messungen -- das kostet nichts und beantwortet die Frage, die die
     #    KI-Kachel NICHT beantwortet: arbeitet die Maschine ueberhaupt?
     from .. import system_stats as _system_stats
-    _system_stats.start(settings.paths.inbox, settings.paths.library)
+    _system_stats.start(settings.paths.inbox, settings.paths.library,
+                        getattr(settings.ai, "base_url", "") or "")
     templates_dir = Path(__file__).parent / "templates"
     static_dir = Path(__file__).parent / "static"
     static_dir.mkdir(exist_ok=True)
@@ -2003,6 +2004,13 @@ def create_app(
                 "total":     int(db._conn.execute(
                     "SELECT COUNT(*) FROM documents WHERE deleted_at IS NULL AND category != '_csv_container'"
                 ).fetchone()[0]),
+                # 🔑 Ohne 'filed' geht die Aufstellung nicht auf: 'total' enthielt
+                #    auch Duplikate, und die Startseite zeigte 681 Dokumente, von
+                #    denen 122 gar keine eigenen waren.
+                "filed":     int(db._conn.execute(
+                    "SELECT COUNT(*) FROM documents "
+                    "WHERE deleted_at IS NULL AND category != '_csv_container' AND status = 'filed'"
+                ).fetchone()[0]),
                 "review":    int(db._conn.execute(
                     "SELECT COUNT(*) FROM documents "
                     "WHERE deleted_at IS NULL AND category != '_csv_container' AND status = 'review'"
@@ -2071,6 +2079,8 @@ def create_app(
             # Was die Maschine gerade tut. Haengt bewusst an DIESER Antwort und
             # nicht an einem eigenen Endpunkt: die Startseite fragt ohnehin alle
             # 2-3 s, ein zweiter Takt waere nur mehr Verkehr fuer dieselbe Sicht.
+            # Wer macht gerade was — Stufe je Dokument, aelteste zuerst.
+            "work":          _activity.work_snapshot(),
             "system":        _system_stats.snapshot(),
             "version":       __version__,
         }
