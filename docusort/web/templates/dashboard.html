@@ -123,9 +123,17 @@
           so hoch wie eine Arbeitszeile. Beim Stapelimport wechselt das alle
           paar Sekunden, und die ganze Seite darunter huepft mit.
 
-       Beides hat dieselbe Antwort: EIN Behaelter mit fester Mindesthoehe, und
-       darin IMMER genau eine Aussage — nie keine. #}
-    <div class="min-h-[52px] flex flex-col justify-center">
+       3. IM LEERLAUF WAR DER KASTEN RIESIG. Eine Mindesthoehe allein reicht
+          nicht: sie verhindert das Schrumpfen, nicht das Wachsen. Vier
+          gleichzeitige Dokumente machten den Kasten wieder dreimal so hoch wie
+          eines, und ein grosses Symbol darin blaehte den Leerlauf auf.
+
+       Die Antwort auf alle drei: EINE FESTE HOEHE von zwei Zeilen, und darin
+       IMMER genau eine Aussage — nie keine. Liegt mehr an, wird gerollt statt
+       gewachsen. 🔑 Zwei Zeilen und nicht eine, weil die Verarbeitung bis zu
+       vier Dokumente gleichzeitig fuehrt: bei einer Zeile waere ab dem zweiten
+       immer eine Rolle da, bei zweien ist der haeufige Fall ruhig. #}
+    <div class="h-[76px] overflow-y-auto flex flex-col justify-center">
     <div x-show="(state.work || []).length > 0" x-cloak class="space-y-1.5">
       <template x-for="w in (state.work || [])" :key="w.name">
         <div class="flex items-center gap-2.5 rounded-lg border border-ink-700 px-2.5 py-2">
