@@ -361,28 +361,75 @@ def aufwecken(t: Target, *, timeout: float = 90.0) -> dict[str, Any]:
         return {"ok": False, "grund": type(exc).__name__}
 
 
-def modell_holen(t: Target, *, timeout: float = 3600.0) -> dict[str, Any]:
-    """Das fehlende Modell auf den Zielrechner holen.
+# Wie weit ist ein laufender Modell-Download? key -> dict. 🔴 Ein Balken, der
+# mehrere Gigabyte lang nichts sagt, ist von einem haengenden Programm nicht zu
+# unterscheiden — und genau dann bricht jemand ab und glaubt, es sei kaputt.
+_HOLEN: dict[str, dict[str, Any]] = {}
+_HOLEN_SCHLOSS = threading.Lock()
 
-    🔴 Das dauert Minuten bis Stunden (mehrere Gigabyte) — der Aufrufer muss
-    das in einem eigenen Faden starten und den Fortschritt im Werkregister
-    zeigen, sonst haengt eine Seite stundenlang an einem Knopfdruck.
+
+def hol_stand(key: str = "") -> dict[str, Any]:
+    """Der Stand eines laufenden Downloads (oder aller, ohne `key`)."""
+    with _HOLEN_SCHLOSS:
+        if key:
+            return dict(_HOLEN.get(key) or {})
+        return {k: dict(v) for k, v in _HOLEN.items()}
+
+
+def _hol_setze(key: str, **felder: Any) -> None:
+    with _HOLEN_SCHLOSS:
+        _HOLEN.setdefault(key, {}).update(felder)
+
+
+def modell_holen(t: Target, *, timeout: float = 7200.0) -> dict[str, Any]:
+    """Das fehlende Modell auf den Zielrechner holen — mit Fortschritt.
+
+    🔴 Das dauert Minuten bis Stunden (mehrere Gigabyte). Der Aufrufer startet
+    es in einem eigenen Faden; `hol_stand(key)` sagt waehrenddessen, wie weit
+    es ist.
+
+    🔑 `stream: true` statt `false`: Ollama schickt dann Zeile fuer Zeile
+    `{status, completed, total}`. Ohne das kommt eine einzige Antwort NACH dem
+    ganzen Download, und bis dahin weiss niemand, ob ueberhaupt etwas passiert.
     """
     if t.provider != "openai_compat":
         return {"ok": False, "grund": "nur fuer lokale Modelle"}
     import json
     from urllib import request
     wurzel = _ollama_wurzel(t.base_url)
-    daten = json.dumps({"model": t.model, "stream": False}).encode("utf-8")
+    daten = json.dumps({"model": t.model, "stream": True}).encode("utf-8")
     req = request.Request(wurzel + "/api/pull", data=daten,
                           headers={"Content-Type": "application/json"})
+    _hol_setze(t.key, laeuft=True, modell=t.model, prozent=0,
+               fertig=0, gesamt=0, text="", fehler="")
+    letzter = ""
     try:
         with request.urlopen(req, timeout=timeout) as r:
-            antwort = json.loads(r.read().decode("utf-8"))
-        return {"ok": antwort.get("status") == "success",
-                "grund": antwort.get("status") or ""}
+            for zeile in r:
+                zeile = zeile.strip()
+                if not zeile:
+                    continue
+                try:
+                    d = json.loads(zeile.decode("utf-8"))
+                except ValueError:
+                    continue
+                if d.get("error"):
+                    _hol_setze(t.key, laeuft=False, fehler=str(d["error"])[:200])
+                    return {"ok": False, "grund": str(d["error"])[:200]}
+                letzter = str(d.get("status") or letzter)
+                fertig = int(d.get("completed") or 0)
+                gesamt = int(d.get("total") or 0)
+                _hol_setze(
+                    t.key, text=letzter, fertig=fertig, gesamt=gesamt,
+                    prozent=int(fertig * 100 / gesamt) if gesamt else 0)
+        erfolg = letzter == "success"
+        _hol_setze(t.key, laeuft=False, prozent=100 if erfolg else None,
+                   text=letzter)
+        return {"ok": erfolg, "grund": letzter}
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "grund": f"{type(exc).__name__}: {str(exc)[:160]}"}
+        grund = f"{type(exc).__name__}: {str(exc)[:160]}"
+        _hol_setze(t.key, laeuft=False, fehler=grund)
+        return {"ok": False, "grund": grund}
 
 
 def aktiver_schluessel(settings: Any, vorhandene: list[Target]) -> str:

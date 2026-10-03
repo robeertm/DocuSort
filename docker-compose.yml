@@ -81,10 +81,14 @@ services:
   # es von selbst unter `http://ollama:11434`, weil das ein Dienstname AUS DIESER
   # DATEI ist, aufgelöst im Docker-Netz. Nichts einzutippen.
   #
-  # 🔴 ERST EIN MODELL HOLEN — ein Ollama ohne Modell antwortet auf der
-  #    Vorderseite 200 und auf jede Frage 404:
+  # 🔑 DAS MODELL HOLT DOCUSORT SELBST. Auf der Startseite steht dafuer ein
+  #    Knopf; er misst vorher, was diese Maschine kann, waehlt danach das
+  #    Modell und zeigt den Fortschritt. Von Hand ginge es auch:
   #
   #     docker compose exec ollama ollama pull qwen2.5:7b-instruct
+  #
+  # 🔴 Ein Ollama OHNE Modell antwortet auf der Vorderseite 200 und auf jede
+  #    Frage 404 — „erreichbar" ist deshalb nie dasselbe wie „einsatzbereit".
   #
   # 🔑 WELCHES MODELL — gemessen, nicht geraten, auf einer Synology mit AMD Ryzen
   #    V1500B (vier Kerne, keine Grafikkarte), also auf der Art Rechner, auf der
@@ -103,7 +107,25 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: docusort-ollama
-    profiles: ["ki"]
+    # 🔑 KEIN `profiles` MEHR — der Dienst laeuft von Anfang an mit.
+    #
+    # Vorher stand hier `profiles: ["ki"]`, und damit startete er nur, wenn
+    # jemand `docker compose --profile ki up` tippte. Das wusste niemand, der
+    # DocuSort zum ersten Mal installiert, und es stand auch nirgends auf dem
+    # Weg, den er geht. Ergebnis: ein fertiges lokales Modell lag einen Befehl
+    # entfernt und wurde nie benutzt.
+    #
+    # 🔴 DocuSort kann diesen Container NICHT selbst starten — es hat bewusst
+    #    keinen Zugriff auf den Docker-Socket, der waere root auf dem Wirt.
+    #    Also muss der Dienst schon laufen, damit der Knopf „lokales Modell
+    #    einrichten" auf der Startseite ueberhaupt etwas tun kann. Was er dann
+    #    tut, braucht keine Docker-Rechte: ein Modell holen.
+    #
+    # Was das kostet, wenn es ungenutzt bleibt: das Abbild belegt Plattenplatz
+    # (gemessen 5,57 GB, weil die Grafikkarten-Bibliotheken mit drin sind), im
+    # Leerlauf ohne geladenes Modell aber kaum Arbeitsspeicher und keine CPU.
+    # Wer das nicht will, loescht diesen Block oder haelt ihn an:
+    #     docker compose stop ollama
     restart: unless-stopped
     environment:
       - TZ=${TZ:-Europe/Berlin}

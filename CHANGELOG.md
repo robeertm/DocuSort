@@ -7,6 +7,56 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.85.0] - 2026-10-03
+
+### Added
+
+**Install it, open it, press one button — everything runs on your own
+machine.** You do not need to know that a local model is possible, what Ollama
+is, or what a model is called. The start page offers it, and DocuSort does the
+rest.
+
+- **The offer appears by itself** on the start page — but only when there is
+  genuinely something to offer: a reachable model service *and* enough memory.
+  A button that can only disappoint is worse than no button.
+- **It says what your machine will do before anything is downloaded.** Memory,
+  cores, GPU, the size of the one-time download, and — where it applies — that
+  this box will need minutes per document rather than seconds.
+- **One click fetches the model with a progress bar.** Several gigabytes
+  without feedback are indistinguishable from a hung program, so the download
+  streams its progress (`stream: true`), shows percent and bytes, and appears
+  in the work list. You can leave the page; it keeps going. When it finishes,
+  the model is written to the config and the running classifier switches to it
+  — no restart.
+- **The bundled `ollama` service now runs from the start.** It used to sit
+  behind `profiles: ["ki"]`, which only started with
+  `docker compose --profile ki up` — a command nobody installing DocuSort for
+  the first time knows, and which appeared nowhere on their path. A finished
+  local model was one command away and never used. 🔴 DocuSort cannot start
+  that container itself: it deliberately has no access to the Docker socket,
+  which would be root on the host. So the service has to be running for the
+  button to have anything to talk to; what the button then does needs no
+  Docker rights at all.
+
+### Changed
+
+🔴 **Memory and cores are not a verdict about speed.** The check called a
+machine "good" whenever it had enough RAM. Measured on a Synology DS1621+:
+32 GB, 8 cores — "plenty" by that rule — and 5.6 tokens/s, about 14 minutes
+per document, where a Mac with Apple Silicon takes 10 seconds. The reason is
+the CPU, not the memory: a power-sipping embedded part with no graphics unit.
+
+`docusort/hardware.py` (new, shared by the app and the setup script) now reads
+the host's DMI product name — **readable from inside a container**, which is
+how the Synology model surfaced at all — and the CPU model, and reports the
+kind of machine. A device built to sit in a cupboard around the clock is said
+to be slow *before* the download, not discovered to be slow afterwards.
+
+- The memory check now prefers a cgroup limit over `/proc/meminfo` when one is
+  set: in a container, `/proc/meminfo` describes the *host*, and a model that
+  fits the host but not our limit gets killed by the kernel.
+- No vendor list — the property is what matters, and it is measured.
+
 ## [0.84.0] - 2026-10-03
 
 ### Changed

@@ -158,6 +158,15 @@ while IFS= read -r rel; do
   [ -d "$DIR/$rel" ] || { warn "creating missing mount directory ./$rel"; mkdir -p "$DIR/$rel"; }
 done < <(sed -n 's#^[[:space:]]*-[[:space:]]*\./\([^:]*\):.*#\1#p' "$DIR/docker-compose.yml" | sort -u)
 
+# 🔑 GESAGT, BEVOR ES PASSIERT. Mit dem Abbild kommt ein lokaler KI-Dienst
+#    (ollama), damit DocuSort spaeter auf einen Klick ganz ohne Cloud arbeiten
+#    kann. Der belegt Platz — gemessen rund 5,5 GB, weil die
+#    Grafikkarten-Bibliotheken mit drin sind —, und wer Platz belegt, sagt es
+#    vorher. Das MODELL selbst (mehrere GB) wird NICHT jetzt geladen, sondern
+#    erst, wenn jemand in DocuSort darauf drueckt.
+say "Pulling images (DocuSort, plus a local AI service of about 5.5 GB so you"
+say "can work without any cloud later — the model itself is only fetched when"
+say "you ask for it in DocuSort). Not wanted? docker compose stop ollama"
 say "Pulling $IMAGE"
 # 🔴 Ein fehlgeschlagener Abruf ist nicht dasselbe wie ein fehlendes Abbild.
 #    Mit `pull && up -d` riss eine kurze Netzstoerung (oder eine Registry, die

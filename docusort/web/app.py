@@ -4000,6 +4000,158 @@ def create_app(
         from .. import ai_targets as _t
         return {"ok": True, "state": _t.zustand(ziel)}
 
+    # ------------------------------------------- Der eine Knopf: lokal rechnen
+    # „Ich will einfach, dass der Nutzer das Programm installiert. Ohne dass er
+    #  weiss, dass er ein lokales Modell auf seinem Rechner haben kann. Hier
+    #  soll er dann mit einem Klick herausfinden, dass es geht, das Modell soll
+    #  runtergeladen werden und alles muss sofort funktionieren."
+    #
+    # 🔑 DAS GEHT NUR, WEIL DER OLLAMA-DIENST SCHON DA IST. DocuSort hat
+    #    bewusst KEINEN Zugriff auf Docker — der Socket waere root auf dem
+    #    Wirt. Es kann also keinen Container starten. Was es kann: einen
+    #    laufenden Ollama finden und ihm sagen, er soll ein Modell holen. Der
+    #    Dienst steht darum in der ausgelieferten compose-Datei und laeuft von
+    #    Anfang an mit; geladen wird erst auf diesen Knopf.
+    #
+    # 🔴 Und wenn die Maschine es nicht kann, wird das GESAGT — vor dem
+    #    Download, nicht danach. Ein Modell, das nicht hineinpasst, ist nicht
+    #    langsam, es ist kaputt: das System lagert aus, ein Dokument dauert
+    #    Stunden, und von aussen sieht das aus, als sei DocuSort defekt.
+
+    @app.get("/api/local-ai/offer")
+    def api_local_ai_offer(request: Request):
+        """Kann dieser Rechner lokal rechnen — und lohnt es, das anzubieten?
+
+        Beantwortet alles, was die Karte auf der Startseite braucht, in einer
+        Anfrage: Hardware, ein erreichbarer Ollama, laeuft schon etwas.
+        """
+        from .. import hardware, local_ai, ai_targets as _t
+        # 🔑 Gemessen wird der Rechner, auf dem DOCUSORT laeuft. Genau dort
+        #    steht beim Ein-Knopf-Weg auch der Ollama-Dienst — derselbe Wirt,
+        #    also dieselben Grenzen. Laeuft das Modell spaeter woanders, sagt
+        #    `Provider.runtime()` die Wahrheit ueber jene Maschine.
+        hw = hardware.pruefe()
+        klient = getattr(getattr(request, "client", None), "host", "") or ""
+        gefunden = local_ai.discover(settings.ai.base_url or "", klient)
+        schon_lokal = (settings.ai.provider in ("openai_compat", "bridge"))
+        laeuft = _t.hol_stand()
+        return {
+            "hardware": hw,
+            "found": gefunden,
+            "already_local": schon_lokal,
+            # Anbieten lohnt, wenn ein Ollama erreichbar ist UND die Maschine
+            # es tragen kann. Sonst steht da ein Knopf, der nur enttaeuscht.
+            "can_offer": bool(gefunden) and hw.get("urteil") != "nein",
+            "pulling": {k: v for k, v in laeuft.items() if v.get("laeuft")},
+        }
+
+    @app.post("/api/local-ai/enable")
+    def api_local_ai_enable(request: Request):
+        """Ein Klick: Modell holen, eintragen, umschalten.
+
+        Der Download laeuft im Hintergrund; der Fortschritt steht unter
+        `GET /api/local-ai/enable/status`. 🔴 Eine Route, die mehrere Gigabyte
+        lang nicht antwortet, laeuft in jede Zeitgrenze, die ein Browser oder
+        ein Proxy kennt.
+        """
+        import threading
+        from .. import hardware, local_ai, settings_writer
+        from .. import ai_targets as _t, activity as _activity
+
+        hw = hardware.pruefe()
+        if hw.get("urteil") == "nein":
+            raise HTTPException(
+                409, "this machine does not have enough memory for a local "
+                     "model — use a cloud provider instead")
+        modell = str(hw.get("modell") or hardware.MODELL_GROSS)
+
+        klient = getattr(getattr(request, "client", None), "host", "") or ""
+        gefunden = local_ai.discover(settings.ai.base_url or "", klient)
+        if not gefunden:
+            raise HTTPException(
+                503, "no local model service is reachable — the bundled "
+                     "ollama service does not seem to be running")
+        wurzel = gefunden[0]["url"].rstrip("/")
+        basis = wurzel if wurzel.endswith("/v1") else wurzel + "/v1"
+
+        # Ist das Modell schon da, braucht es keinen Download — dann ist der
+        # Knopf in einer Sekunde fertig statt in einer Stunde.
+        vorhanden = gefunden[0].get("models") or []
+        da = any(m == modell or m.split(":latest")[0] == modell
+                 for m in vorhanden)
+
+        from urllib.parse import urlsplit
+        rechner = urlsplit(wurzel).hostname or "lokal"
+        ziel = _t.Target(key="lokal", label=rechner, provider="openai_compat",
+                         model=modell, base_url=basis)
+
+        def _fertigstellen() -> None:
+            """Eintragen und umschalten — erst wenn das Modell wirklich da ist."""
+            settings_writer.update_ai(
+                provider="openai_compat", model=modell, base_url=basis,
+                api_key=None, config_dir=settings.config_dir)
+            settings.ai.provider = "openai_compat"
+            settings.ai.model = modell
+            settings.ai.base_url = basis
+            try:
+                if hasattr(classifier, "wechsle"):
+                    liste = _t.ziele(settings, bridge_verbunden=False)
+                    passend = next(
+                        (z for z in liste
+                         if (z.base_url or "").rstrip("/") == basis.rstrip("/")),
+                        None)
+                    if passend is not None:
+                        classifier.wechsle(passend.key)
+                        settings_writer.update_ai_active_target(
+                            key=passend.key, config_dir=settings.config_dir)
+                        settings.ai.active_target = passend.key
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Lokales Modell eingetragen, Umschalten ging "
+                               "nicht: %s", exc)
+
+        if da:
+            _fertigstellen()
+            logger.info("Lokales Modell %s war schon da — sofort aktiv", modell)
+            return {"ok": True, "model": modell, "downloading": False,
+                    "ready": True, "hardware": hw}
+
+        marke = f"{modell} → {rechner}"
+
+        def _holen() -> None:
+            _activity.work_begin(marke)
+            _activity.work_stage(marke, _activity.STAGE_MODEL)
+            try:
+                ergebnis = _t.modell_holen(ziel)
+                if ergebnis.get("ok"):
+                    logger.info("Lokales Modell %s geholt — wird eingetragen",
+                                modell)
+                    _fertigstellen()
+                else:
+                    logger.error("Lokales Modell %s: %s", modell,
+                                 ergebnis.get("grund"))
+            finally:
+                _activity.work_end(marke)
+
+        threading.Thread(target=_holen, daemon=True, name="modell-erst").start()
+        return {"ok": True, "model": modell, "downloading": True,
+                "ready": False, "hardware": hw,
+                "bytes": hw.get("modell_bytes") or 0}
+
+    @app.get("/api/local-ai/enable/status")
+    def api_local_ai_enable_status():
+        """Wie weit ist der Download, und laeuft es schon?"""
+        from .. import ai_targets as _t
+        stand = _t.hol_stand()
+        laufend = {k: v for k, v in stand.items() if v.get("laeuft")}
+        return {
+            "pulling": laufend,
+            "last": {k: v for k, v in stand.items() if not v.get("laeuft")},
+            "provider": settings.ai.provider,
+            "model": settings.ai.model,
+            "ready": settings.ai.provider in ("openai_compat", "bridge")
+                     and not laufend,
+        }
+
     @app.post("/api/local-ai/apply")
     def api_local_ai_apply(payload: dict):
         return _local_ai_apply(payload.get("url") or "", payload.get("model") or "")
