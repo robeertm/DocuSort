@@ -3552,7 +3552,11 @@ def create_app(
         #    von aussen aus wie ein Portscan.
         if scan:
             bekannt = {e["url"].rstrip("/") for e in finds}
-            for e in local_ai.scan_netz(client_ip=client):
+            _hinweise = [settings.ai.base_url or ""] + [
+                str(r.get("base_url") or "")
+                for r in (getattr(settings.ai, "targets", None) or [])
+                if isinstance(r, dict)]
+            for e in local_ai.scan_netz(client_ip=client, hinweise=_hinweise):
                 if e["url"].rstrip("/") not in bekannt:
                     finds.append(e)
                     bekannt.add(e["url"].rstrip("/"))
@@ -3931,7 +3935,12 @@ def create_app(
             #    eigenen Wirt, angezeigt als eine Adresse, die zu keinem
             #    Geraet im Haus passt. Die Rechner im Haus
             #    findet man so nie.
-            for e in local_ai.scan_netz(client_ip=klient):
+            # 🔑 Die schon eingetragenen Rechner als Hinweis mitgeben: sie
+            #    verraten das Hausnetz, wenn der Browser ueber einen Tunnel
+            #    kommt und seine Adresse nichts darueber sagt.
+            _hinweise = [settings.ai.base_url or ""] + [
+                str(r.get("base_url") or "") for r in _ziel_konfig()]
+            for e in local_ai.scan_netz(client_ip=klient, hinweise=_hinweise):
                 if e["url"].rstrip("/") not in bekannt:
                     gefunden.append(e)
                     bekannt.add(e["url"].rstrip("/"))
