@@ -7,6 +7,33 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.86.3] - 2026-10-03
+
+### Fixed
+
+🔴 **Receipt and bank-statement extraction bypassed the distributor entirely.**
+Both were handed a provider object and called it directly, so they always used
+the manually selected machine: no distribution, and — the part that matters —
+**no fallback**. If that machine was down, the extraction failed outright while
+the classification next to it ran fine on another machine.
+
+It showed up as something that looked like a success: a classification took
+858 s on the server while the receipt extraction right after it took 11 s. It
+had landed on the laptop, not because anything decided that, but because the
+laptop was the one written down.
+
+Both now go through the same selection and the same fallback as a
+classification, and the model name is taken from the machine that was chosen
+rather than from the caller — otherwise a name could be sent to a machine that
+does not have it.
+
+### Changed
+
+**A card no longer says "chosen" while another machine is computing.** While
+DocuSort distributes by itself, the selected target is only the hint that
+breaks ties, not an instruction. In that mode every card invites a choice, and
+pressing one switches to fixed.
+
 ## [0.86.2] - 2026-10-03
 
 ### Fixed

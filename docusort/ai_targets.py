@@ -561,6 +561,31 @@ class ClassifierHandle:
         schon seit Langem richtig: das Dokument bleibt im Eingang liegen und
         wird spaeter erneut versucht, statt als „fehlgeschlagen" zu enden.
         """
+        return self._mit_rechenort(lambda k: k.classify(text), was)
+
+    # ------------------------------------------- Auswerter mit Rechenortwahl
+    def aufgaben_anbieter(self) -> Any:
+        """Ein Anbieter, der je Aufruf den Rechenort waehlt.
+
+        🔴 WARUM ES DEN BRAUCHT. Die Kassenzettel- und Kontoauszugs-Auswerter
+        bekommen einen ANBIETER in die Hand und rufen ihn direkt an. Damit
+        gingen sie am Verteiler vorbei: immer der fest gewaehlte Rechner, keine
+        Verteilung, und vor allem KEIN AUSWEICHWEG — ist der aus, scheitert die
+        Auswertung ersatzlos, waehrend die Einordnung daneben laeuft.
+
+        Gemessen am 03.10.2026: eine Einordnung lief 858 s auf dem Server, die
+        Kassenzettel-Auswertung danach 11 s — sie war auf dem Laptop gelandet,
+        weil der eingetragen war, nicht weil jemand das entschieden haette.
+
+        🔑 Dieser Anbieter ersetzt den Modellnamen durch den des GEWAEHLTEN
+        Ziels. Ein Aufrufer, der noch den alten mitgibt, kann damit keine
+        Maschine mehr nach einem Modell fragen, das sie nicht hat.
+        """
+        return _VerteilterAnbieter(self)
+
+    def _mit_rechenort(self, tue: Callable[[Any], Any], was: str = "") -> Any:
+        """Einen Rechenort waehlen, `tue(klassifizierer)` dort ausfuehren, und
+        bei einer Absage woanders weitermachen."""
         from . import ai_pool
         from .providers import ProviderError, TransientProviderError
 
@@ -603,14 +628,14 @@ class ClassifierHandle:
                 continue
             try:
                 with ai_pool.platz(key, was):
-                    return klass.classify(text)
+                    return tue(klass)
             except ProviderError as exc:
                 # 🔑 Der Rechenort hat geantwortet, dass er nicht kann — oder
                 #    gar nicht. Beides macht ihn fuer die naechste Wahl
                 #    unbrauchbar, bis der Waechter ihn wieder misst.
                 ai_pool.setze_zustand(key, ZUSTAND_TOT)
                 letzter = exc
-                logger.warning("Rechenort %s hat die Einordnung nicht "
+                logger.warning("Rechenort %s hat die Aufgabe nicht "
                                "geschafft (%s) — naechster Versuch woanders",
                                key, exc)
 
@@ -718,6 +743,49 @@ class ClassifierHandle:
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<ClassifierHandle ziel={self._ziel.key!r}>"
+
+
+class _VerteilterAnbieter:
+    """Sieht fuer einen Auswerter aus wie ein Anbieter, waehlt aber je Aufruf
+    den Rechenort — mit derselben Regel und demselben Ausweichweg wie eine
+    Einordnung.
+
+    🔴 `model` des Aufrufers wird VERWORFEN und durch das Modell des gewaehlten
+    Ziels ersetzt. Anders ginge ein Name an eine Maschine, die ihn nicht
+    kennt — genau der Fehler, den `aktive_ai()` an vier anderen Stellen
+    behoben hat.
+    """
+
+    def __init__(self, handle: "ClassifierHandle") -> None:
+        self._h = handle
+
+    @property
+    def name(self) -> str:
+        return getattr(self._h._aktiv.provider, "name", "")
+
+    def runtime(self) -> dict[str, Any]:
+        return self._h._aktiv.provider.runtime()
+
+    def classify(self, *, system_prompt: str, user_prompt: str,
+                 model: str = "", **rest: Any) -> Any:
+        def _tue(klass: Any) -> Any:
+            return klass.provider.classify(
+                system_prompt=system_prompt, user_prompt=user_prompt,
+                model=klass.settings.model, **rest)
+        return self._h._mit_rechenort(_tue, "")
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._h._aktiv.provider, name)
+
+
+def aufgaben_anbieter(classifier: Any) -> Any:
+    """Der Anbieter, den ein Auswerter benutzen soll.
+
+    Mit Halter: einer, der je Aufruf den Rechenort waehlt. Ohne Halter (ein
+    nackter Klassifizierer, ein Pruefstand): schlicht seiner.
+    """
+    hol = getattr(classifier, "aufgaben_anbieter", None)
+    return hol() if callable(hol) else getattr(classifier, "provider", None)
 
 
 def _bridge_verbunden() -> bool:

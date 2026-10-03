@@ -159,9 +159,9 @@ def _extract_statement_inline(*, doc_id: int, text: str,
     from hashlib import sha256
     from .finance import StatementExtractor
 
-    from .ai_targets import aktive_ai
+    from .ai_targets import aktive_ai, aufgaben_anbieter
     extractor = StatementExtractor(
-        classifier.provider, aktive_ai(classifier, settings.ai).model,
+        aufgaben_anbieter(classifier), aktive_ai(classifier, settings.ai).model,
         max_text_chars=max(settings.ai.max_text_chars, 32000),
         holder_names=settings.finance.holder_names,
     )

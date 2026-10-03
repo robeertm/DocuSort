@@ -420,11 +420,11 @@
                         :disabled="zielWechselt || zustandVon(z) === 'tot'"
                         class="px-2 py-0.5 text-[11px] rounded-md border transition-colors
                                disabled:opacity-60 disabled:cursor-not-allowed"
-                        :class="z.key === aiAktiv
+                        :class="gewaehlt(z)
                           ? 'border-emerald-400/60 text-emerald-200'
                           : 'border-ink-700 text-ink-400 hover:text-ink-100'"
-                        x-text="z.key === aiAktiv ? tr('hub.sys.chosen')
-                                                  : tr('hub.sys.choose')"></button>
+                        x-text="gewaehlt(z) ? tr('hub.sys.chosen')
+                                            : tr('hub.sys.choose')"></button>
                 <button type="button" x-show="kannWecken(z)" x-cloak
                         @click="zielWecken(z.key)" :disabled="zielBusy === z.key"
                         class="px-2 py-0.5 text-[11px] rounded-md border border-ink-700
@@ -1060,6 +1060,13 @@ function dashboard() {
       return live[z.key] || z.last || {};
     },
     get rechenorteZeigen() { return this.aiZiele.length > 0; },
+    /* 🔴 „gewaehlt" gilt NUR, wenn auch wirklich fest gewaehlt ist.
+       Solange DocuSort selbst verteilt, ist `active_target` kein Befehl,
+       sondern nur der Hinweis fuer den Gleichstand — eine Karte, die
+       „gewaehlt" meldet, waehrend der andere Rechner rechnet, ist wieder die
+       Doppeldeutigkeit, die es nicht geben soll. In diesem Fall laedt jede
+       Karte zum Waehlen ein: ein Druck darauf schaltet auf fest. */
+    gewaehlt(z) { return z.key === this.aiAktiv && !this.verteiltAuto; },
     get verteiltAuto() {
       const v = (this.state.ai_ziel || {}).verteilen;
       /* Keine Angabe heisst automatisch — das ist die Vorgabe, und eine
