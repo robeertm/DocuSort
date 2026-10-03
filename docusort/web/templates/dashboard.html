@@ -165,55 +165,6 @@
     </div>
   </section>
 
-  <!-- =========== DOKUMENTE NACH STATUS =========== -->
-  {# 🔴 Vorher stand hier „DOKUMENTE 681" neben „REVIEW 2" — und 681 enthielt
-     122 Duplikate, die gar keine eigenen Dokumente sind. Eine Aufstellung muss
-     aufgehen, sonst raet der Leser, was zu was gehoert. #}
-  <section>
-    <div class="flex items-baseline justify-between gap-3 mb-2 flex-wrap">
-      <h2 class="text-sm font-medium text-ink-300">{{ t('hub.status.title') }}</h2>
-      <div class="text-[11px] text-ink-500">
-        <span x-text="(state.counts && state.counts.total) || 0"></span>
-        {{ t('hub.status.total_suffix') }}
-      </div>
-    </div>
-    <section class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-      <a href="/library?status=filed" class="card p-3 hover:border-emerald-500/40">
-        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.filed') }}</div>
-        <div class="mt-1 text-2xl font-semibold tabular-nums text-emerald-300"
-             x-text="(state.counts && state.counts.filed) || 0"></div>
-      </a>
-      <a href="/library?status=review" class="card p-3 hover:border-amber-500/40"
-         :class="(state.counts && state.counts.review > 0) ? 'border-amber-500/40 bg-amber-500/5' : ''">
-        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.review') }}</div>
-        <div class="mt-1 text-2xl font-semibold tabular-nums"
-             :class="(state.counts && state.counts.review > 0) ? 'text-amber-300' : ''"
-             x-text="(state.counts && state.counts.review) || 0"></div>
-      </a>
-      <a href="/library?status=failed" class="card p-3 hover:border-rose-500/40"
-         :class="(state.counts && state.counts.failed > 0) ? 'border-rose-500/40 bg-rose-500/5' : ''">
-        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.failed') }}</div>
-        <div class="mt-1 text-2xl font-semibold tabular-nums"
-             :class="(state.counts && state.counts.failed > 0) ? 'text-rose-300' : ''"
-             x-text="(state.counts && state.counts.failed) || 0"></div>
-      </a>
-      <a href="/duplicates" class="card p-3 hover:border-ink-600">
-        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.duplicate') }}</div>
-        <div class="mt-1 text-2xl font-semibold tabular-nums text-ink-300"
-             x-text="(state.counts && state.counts.duplicate) || 0"></div>
-      </a>
-      <a href="/finance" class="card p-3 hover:border-cyan-500/40">
-        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.statements') }}</div>
-        <div class="mt-1 text-2xl font-semibold tabular-nums text-cyan-300"
-             x-text="(state.counts && state.counts.kontoauszug) || 0"></div>
-        <div class="text-[10px] text-ink-500 mt-0.5"
-             x-show="state.counts && state.counts.empty_statements > 0" x-cloak>
-          <span x-text="state.counts && state.counts.empty_statements"></span> {{ t('hub.tile.empty_suffix') }}
-        </div>
-      </a>
-    </section>
-  </section>
-
   <!-- =========== MASCHINE =========== -->
   {# Warum diese Karte: die KI-Kachel oben zaehlt nur LLM-Aufrufe. Waehrend OCR
      laeuft steht dort „KI im Leerlauf", obwohl vier Kerne gluehen — genau diese
@@ -328,6 +279,55 @@
       <span>{{ t('hub.sys.disk') }}: <span class="tabular-nums text-ink-400"
             x-text="gb(sys.platte && sys.platte.frei)"></span></span>
     </div>
+  </section>
+
+  <!-- =========== DOKUMENTE NACH STATUS =========== -->
+  {# 🔴 Vorher stand hier „DOKUMENTE 681" neben „REVIEW 2" — und 681 enthielt
+     122 Duplikate, die gar keine eigenen Dokumente sind. Eine Aufstellung muss
+     aufgehen, sonst raet der Leser, was zu was gehoert. #}
+  <section>
+    <div class="flex items-baseline justify-between gap-3 mb-2 flex-wrap">
+      <h2 class="text-sm font-medium text-ink-300">{{ t('hub.status.title') }}</h2>
+      <div class="text-[11px] text-ink-500">
+        <span x-text="(state.counts && state.counts.total) || 0"></span>
+        {{ t('hub.status.total_suffix') }}
+      </div>
+    </div>
+    <section class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+      <a href="/library?status=filed" class="card p-3 hover:border-emerald-500/40">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.filed') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums text-emerald-300"
+             x-text="(state.counts && state.counts.filed) || 0"></div>
+      </a>
+      <a href="/library?status=review" class="card p-3 hover:border-amber-500/40"
+         :class="(state.counts && state.counts.review > 0) ? 'border-amber-500/40 bg-amber-500/5' : ''">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.review') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums"
+             :class="(state.counts && state.counts.review > 0) ? 'text-amber-300' : ''"
+             x-text="(state.counts && state.counts.review) || 0"></div>
+      </a>
+      <a href="/library?status=failed" class="card p-3 hover:border-rose-500/40"
+         :class="(state.counts && state.counts.failed > 0) ? 'border-rose-500/40 bg-rose-500/5' : ''">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.failed') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums"
+             :class="(state.counts && state.counts.failed > 0) ? 'text-rose-300' : ''"
+             x-text="(state.counts && state.counts.failed) || 0"></div>
+      </a>
+      <a href="/duplicates" class="card p-3 hover:border-ink-600">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.duplicate') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums text-ink-300"
+             x-text="(state.counts && state.counts.duplicate) || 0"></div>
+      </a>
+      <a href="/finance" class="card p-3 hover:border-cyan-500/40">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.statements') }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums text-cyan-300"
+             x-text="(state.counts && state.counts.kontoauszug) || 0"></div>
+        <div class="text-[10px] text-ink-500 mt-0.5"
+             x-show="state.counts && state.counts.empty_statements > 0" x-cloak>
+          <span x-text="state.counts && state.counts.empty_statements"></span> {{ t('hub.tile.empty_suffix') }}
+        </div>
+      </a>
+    </section>
   </section>
 
   <!-- =========== FÄLLIG DEMNÄCHST =========== -->
