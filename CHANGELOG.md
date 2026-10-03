@@ -7,6 +7,16 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.77.1] - 2026-10-03
+
+### Fixed
+
+**The sampler now says it is alive.** 0.77.0 started a background thread that
+wrote nothing anywhere, so from outside there was no way to tell a running
+sampler from one that froze an hour ago — the same blind spot that once hid a
+stuck poller for twelve hours behind zero log lines. It now logs once at
+startup and once an hour with its measurement count.
+
 ## [0.77.0] - 2026-10-03
 
 ### Added

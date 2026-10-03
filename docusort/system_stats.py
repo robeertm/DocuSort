@@ -13,6 +13,7 @@ gluehen. Genau diese Luecke schliesst dieses Modul.
 """
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import threading
@@ -29,6 +30,7 @@ _letzte_cpu: tuple[int, int] | None = None   # (arbeit, gesamt)
 _faden: threading.Thread | None = None
 _inbox: str = ""
 _library: str = ""
+logger = logging.getLogger("docusort.system_stats")
 
 
 # ----------------------------------------------------------------- Messungen
@@ -138,9 +140,20 @@ def _einmal_messen() -> None:
 
 def _schleife() -> None:
     _cpu_prozent()                      # Bezugspunkt setzen
+    runden = 0
     while True:
         try:
             _einmal_messen()
+            runden += 1
+            # 🔑 Ein Hintergrund-Arbeiter, der NICHTS ins Protokoll schreibt, ist
+            #    nicht ueberpruefbar — man sieht einem stillen Faden nicht an, ob
+            #    er lebt oder vor Stunden eingefroren ist. Einmal die Stunde eine
+            #    Zeile reicht, um das von aussen zu beantworten.
+            if runden == 1 or runden % (3600 // TAKT_S) == 0:
+                with _sperre:
+                    punkte = len(_verlauf)
+                logger.info("Systemwerte: %d Messungen, %d Punkte im Verlauf",
+                            runden, punkte)
         except Exception:               # noqa: BLE001 — der Faden stirbt nie
             pass
         time.sleep(TAKT_S)
@@ -154,6 +167,8 @@ def start(inbox: str, library: str) -> None:
         return
     _faden = threading.Thread(target=_schleife, name="system-stats", daemon=True)
     _faden.start()
+    logger.info("Systemwerte: Sammler gestartet (alle %d s, %d Punkte Verlauf)",
+                TAKT_S, PUNKTE)
 
 
 # ----------------------------------------------------------------- Auskunft
