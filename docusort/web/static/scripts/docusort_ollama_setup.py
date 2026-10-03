@@ -135,7 +135,7 @@ def ollama_models(base: str, timeout: float = 2.0):
     correctly, with an empty list — and an empty list is false. So the setup
     read „no models" as „no Ollama", announced
 
-        ✋ Ollama is not reachable at http://192.168.178.38:11434
+        ✋ Ollama is not reachable at http://192.0.2.38:11434
 
     and stopped — one step before the very thing that would have fixed it, which
     is pulling a model. The owner meanwhile opened that exact address in a

@@ -7,6 +7,80 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.81.0] - 2026-10-03
+
+### Added
+
+**Pick which machine does the thinking — and switch without a restart.**
+An install can have more than one place to run inference: a workstation that
+answers in seconds, a server that is slower but always on, a cloud model for
+when neither is up. Until now the choice was a setting: you wrote it into
+`config.yaml` or the settings page, and the page told you a restart was
+required. The running classifier kept the old provider until somebody
+restarted the process — and a restart throws away any OCR in flight. For
+"just put this one document through the fast box", that was unusable.
+
+Named machines now live in `ai.targets`, and the machine card on the start
+page offers them as buttons. Choosing one takes effect on the next document;
+nothing restarts.
+
+```yaml
+ai:
+  provider: openai_compat          # still the fallback at start-up
+  model: a-model
+  base_url: http://host-a:11434/v1
+  active_target: fast
+  targets:
+    - key: fast
+      label: Workstation
+      provider: openai_compat
+      model: a-model
+      base_url: http://host-b:11434/v1
+    - key: overnight
+      label: Server
+      provider: openai_compat
+      model: a-model
+      base_url: http://host-a:11434/v1
+      note: slower
+```
+
+Any provider can be a target — a cloud model and a local one side by side is a
+perfectly good pair. The API key is looked up per target's provider, so
+switching from a local model to a cloud one picks up the right key instead of
+the one belonging to whatever is configured as the fallback.
+
+**Nothing to configure, nothing shown.** `ai.targets` is empty on a fresh
+clone, and that is the normal case: one provider means there is nothing to
+choose, so no switch is rendered. A second target is also derived — but only
+when it is *measurable*, never guessed: a bridge appears as a target only
+while a bridge client is actually connected. A target that fails the moment
+you select it is worse than no target.
+
+What a switch deliberately does *not* change: timeout, text limit and minimum
+confidence stay as configured. Those are decisions about the work, not about
+the machine.
+
+- `GET /api/ai/targets` lists them, `POST /api/ai/target` switches. Both are
+  admin-only, and that needed no work: permissions are an allowlist, so a new
+  route is admin-only until somebody opens it deliberately. `/api/dashboard`
+  carries only *which* target is running and whether there is more than one —
+  never an address, because every signed-in account sees that payload.
+- A failed switch leaves the previous target running. An install that cannot
+  classify anything is worse than one still using the old machine, and a typo
+  in an address should not cause it.
+- A malformed entry under `ai.targets` is skipped with a warning rather than
+  thrown. A crooked line in a config file must not stop the program from
+  starting.
+- A switch is remembered in `ai.active_target` alone, so it survives a restart
+  without overwriting the configured fallback. Remove the target later and the
+  install falls back to what is configured, not to an address nobody has any
+  more.
+- `pruefstaende/probe_rechenort.py` covers it, including the case that decides
+  whether this works for anyone else: a freshly cloned install with no targets
+  at all. It also asserts that no address, model name or host name appears in
+  the module's code, runs the routes for real against admin, user and deliver
+  accounts, and carries counter-tests that must go red.
+
 ## [0.80.0] - 2026-10-03
 
 ### Changed
@@ -280,7 +354,7 @@ classifying happily through a local model (`provider: openai_compat`) the page
 showed a red failure: a true statement about a component nothing talks to.
 
 The badge now reports the **configured** provider and says who is on the other
-end — model and host, e.g. `qwen2.5:7b-instruct · 10.0.0.5:11434`. It has three
+end — model and host, e.g. `qwen2.5:7b-instruct · 192.0.2.5:11434`. It has three
 states, not two:
 
 | provider | reachability |
@@ -559,7 +633,7 @@ correctly and politely — with an empty list. An empty list is false. So the se
 read "no models" as "no Ollama", announced
 
 ```
-✋ Ollama is not reachable at http://192.168.178.38:11434
+✋ Ollama is not reachable at http://192.0.2.38:11434
 ```
 
 and stopped — one step before the thing that would have fixed it, which is

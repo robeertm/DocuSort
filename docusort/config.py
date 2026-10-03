@@ -69,6 +69,19 @@ class AISettings:
     # slot for hours. Capping it keeps the worst-case wait sane.
     classify_max_tokens: int = 1500
 
+    # Benannte Rechenorte, zwischen denen die Oberflaeche umschalten kann.
+    # 🔴 LEER IST DER NORMALFALL. Wer das Repo frisch klont, hat genau einen
+    # Anbieter — dann gibt es nichts zu waehlen und die Oberflaeche zeigt
+    # keinen Umschalter. Wer zwei Rechner hat, benennt sie hier; siehe
+    # `ai_targets.py` fuer die Form. Bewusst eine rohe Liste von Abschnitten
+    # und keine Datenklasse: dieser Block wird aus der YAML gelesen, und eine
+    # krumme Zeile darf das Laden nicht werfen (`ai_targets._aus_eintrag`
+    # ueberspringt sie mit einer Warnung).
+    targets: list = field(default_factory=list)
+    # Schluessel des Ziels, das gerade rechnet. Leer = das erste. Hier steht
+    # er, damit ein Wechsel einen Neustart uebersteht.
+    active_target: str = ""
+
 
 # Backwards-compatible alias — older imports of ClaudeSettings still resolve.
 ClaudeSettings = AISettings
@@ -282,6 +295,8 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         min_confidence=float(ai_cfg.get("min_confidence", 0.65)),
         timeout_seconds=int(ai_cfg.get("timeout_seconds", 60)),
         classify_max_tokens=int(ai_cfg.get("classify_max_tokens", 1500)),
+        targets=list(ai_cfg.get("targets") or []),
+        active_target=str(ai_cfg.get("active_target", "") or ""),
     )
 
     web_cfg = cfg.get("web", {})
