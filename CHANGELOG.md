@@ -7,6 +7,33 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.85.1] - 2026-10-03
+
+### Fixed
+
+🔴 **Removing your second-to-last machine took the search buttons with it.**
+*Find machines* and *Also scan the network* sat in the same block as the
+switcher, and the switcher only appears when there is more than one machine to
+switch between. Remove one and both disappeared — leaving no way back except
+editing `config.yaml` by hand.
+
+They are two different questions. Switching is only worth offering with more
+than one machine; **searching is worth offering especially when there is only
+one, or none.** The search now has its own condition: can this account see the
+list at all.
+
+🔴 **"This machine" was showing a container ID.** The machine card read the
+hostname, and inside a container that is the container ID — twelve hex
+characters that match no device anybody owns. The card said
+`THIS MACHINE · 41d48087aee1`.
+
+It now reports the host's DMI product name where there is one (`DS1621+`),
+which is readable from inside a container because it comes from the kernel
+rather than the filesystem — and which names the box somebody actually has on
+a shelf. Failing that, the hostname, unless it looks like a container ID.
+Failing that, nothing: an empty field is more honest than a number pretending
+to be an answer.
+
 ## [0.85.0] - 2026-10-03
 
 ### Added

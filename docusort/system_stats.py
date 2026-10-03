@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -181,12 +182,37 @@ def _eigene_prozesse() -> dict[str, dict[str, Any]]:
     return gruppen
 
 
+# 🔴 In einem Container ist der Hostname die CONTAINER-ID — zwölf Zeichen
+#    Hexadezimal, die kein Mensch einem Geraet zuordnen kann. Auf der
+#    Startseite stand deshalb „DIESER RECHNER · 41d48087aee1", und die Frage
+#    des Benutzers lautete zu Recht: warum steht da das?
+_HEX12 = re.compile(r"\A[0-9a-f]{12,64}\Z")
+
+
 def _rechnername() -> str:
-    """Der Name DIESES Rechners. Eine Lastzahl ohne Rechner ist wertlos."""
+    """Der Name DIESES Rechners — so, dass ein Mensch ihn wiedererkennt.
+
+    🔑 Reihenfolge, und sie ist der ganze Punkt:
+    1. Der Produktname des WIRTS aus dem DMI (`DS1621+`). Der steht auch im
+       Container zur Verfuegung, weil er vom Kernel kommt und nicht aus dem
+       Dateisystem — und er benennt das Geraet, das jemand im Regal stehen hat.
+    2. Sonst der Hostname — aber nur, wenn er nicht wie eine Container-ID
+       aussieht.
+    3. Sonst nichts. Ein leeres Feld ist ehrlicher als eine Zahl, die eine
+       Auskunft vortaeuscht.
+    """
     try:
-        return os.uname().nodename
+        from .hardware import _produktname
+        produkt = _produktname()
+        if produkt:
+            return produkt
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        name = os.uname().nodename
     except Exception:  # noqa: BLE001
         return ""
+    return "" if _HEX12.match(name or "") else (name or "")
 
 
 def _ki_lage_unbenutzt() -> dict[str, Any]:

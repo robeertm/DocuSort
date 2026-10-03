@@ -353,6 +353,14 @@
              Admin aufrufen darf. Ein normales Konto bekommt 403, die Liste
              bleibt leer, und der Umschalter erscheint gar nicht. So steht hier
              kein Knopf, den der Betrachter nicht druecken darf. #}
+      {# 🔴 ZWEI GETRENNTE FRAGEN, UND SIE HINGEN AN EINER BEDINGUNG.
+         Der UMSCHALTER lohnt nur bei mehr als einem Rechner. Die SUCHE lohnt
+         gerade dann, wenn es nur einen gibt. Beides stand im selben Block:
+         wer seinen zweiten Rechner entfernte, verlor damit auch die Knoepfe,
+         mit denen er einen neuen finden koennte — eine Sackgasse, aus der nur
+         noch die config.yaml herausfuehrt. Gefunden hat das der Benutzer,
+         nicht ich: „jetzt habe ich das macbook geloescht und jetzt sind die
+         buttons ganz weg zum im netzwerk suchen". #}
       <div x-show="ziellisteZeigen" x-cloak>
         <div class="text-[11px] uppercase tracking-wider text-ink-500 mb-1.5">
           {{ t('hub.sys.target_switch') }}
@@ -415,6 +423,12 @@
            fasst kein fremdes Geraet an. Das Absuchen des eigenen Netzes ist
            ein zweiter, ausdruecklicher Schritt: 254 Verbindungen sehen von
            aussen aus wie ein Portscan, und das tut man nicht ungefragt. #}
+      </div>
+
+      {# Die Suche steht fuer sich — sichtbar, sobald die Liste ueberhaupt
+         geladen werden konnte, also fuer jeden, der sie auch benutzen darf.
+         Unabhaengig davon, wie viele Rechner schon eingetragen sind. #}
+      <div x-show="suchknoepfeZeigen" x-cloak>
         <div class="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" @click="rechnerSuchen(false)"
                   :disabled="sucheLaeuft"
@@ -1197,10 +1211,15 @@ function dashboard() {
         this.zielFehler = true; this.zielMeldung = tr('hub.sys.switch_failed');
       } finally { this.zielBusy = ''; }
     },
+    /* Switching is only worth offering with more than one machine. */
     get ziellisteZeigen() {
       const z = this.state.ai_ziel || {};
       return this.aiZiele.length > 1 && z.anzahl > 1 && !!z.umschaltbar;
     },
+    /* Searching is worth offering ESPECIALLY with only one — or none. The
+       only condition is whether this account may see the list at all: a
+       non-admin gets 403 and the list stays empty. */
+    get suchknoepfeZeigen() { return this.aiZiele.length > 0; },
     async zielWaehlen(key) {
       if (this.zielWechselt || key === this.aiAktiv) return;
       this.zielWechselt = true;
