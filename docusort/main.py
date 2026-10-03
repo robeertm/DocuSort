@@ -718,13 +718,31 @@ def main(argv: list[str] | None = None) -> int:
 
     classifier: Classifier | None = None
     if is_configured(settings):
-        try:
-            api_key = get_api_key(settings)
-            classifier = Classifier(
-                api_key, settings.ai, settings.categories,
+        # 🔑 Nicht mehr EIN fester Klassifizierer, sondern ein Halter um einen
+        #    austauschbaren. Von aussen ist das derselbe Gegenstand — er reicht
+        #    `classify()` und jedes Attribut durch — aber die Oberflaeche kann
+        #    den Rechenort wechseln, OHNE dass der Container neu startet.
+        #    Warum das noetig ist: ein Neustart wirft jede laufende
+        #    Texterkennung weg (gemessen: dasselbe Dokument lag nach drei
+        #    Auslieferungen 47 min im Eingang). Siehe `ai_targets.py`.
+        from . import ai_targets as _ai_targets
+
+        def _baue_classifier(ai_settings, ziel):
+            # Der Schluessel haengt am ANBIETER des Ziels, nicht am
+            # eingerichteten — sonst holte ein Wechsel auf die Wolke den
+            # Schluessel des lokalen Modells (und umgekehrt).
+            return Classifier(
+                get_api_key(settings, provider=ziel.provider),
+                ai_settings, settings.categories,
                 holder_names=settings.finance.holder_names,
                 pseudonymize=settings.finance.pseudonymize,
             )
+
+        try:
+            classifier, _ziele, _aktiv = _ai_targets.baue_handle(
+                settings, _baue_classifier)
+            log.info("KI-Ziele: %d (%s), aktiv: %s",
+                     len(_ziele), ", ".join(t.key for t in _ziele), _aktiv)
         except Exception as exc:
             log.error("Classifier init failed (provider=%s): %s",
                       settings.ai.provider, exc)

@@ -2104,6 +2104,12 @@ def create_app(
             #    SEINEN Wirt — ohne diese Auskunft stuende auf der Seite eine
             #    wahre Zahl ueber das falsche Geraet.
             "modell_laeuft_auf": _modell_laeuft_auf(),
+            # 🔴 HIER STEHT ABSICHTLICH KEINE ADRESSE. Das Blatt sieht jedes
+            #    angemeldete Konto; die Adressen der eigenen Rechner gehen nur
+            #    an einen Admin, und zwar ueber `GET /api/ai/targets`. Hier
+            #    steht nur, WELCHES Ziel rechnet und ob es mehr als eines gibt
+            #    — daran entscheidet die Seite, ob sie einen Umschalter zeigt.
+            "ai_ziel":       _ai_ziel_kurz(),
             "system":        _system_stats.snapshot(),
             "version":       __version__,
         }
@@ -3572,6 +3578,115 @@ def create_app(
         return {"ok": True, "restart_required": True, "verified": ok,
                 "answer": said, "provider": "openai_compat",
                 "base_url": base_url, "model": model}
+
+    # ------------------------------------------------- Rechenort umschalten
+    # „ich brauche schnell das dokument in docusort dann will ich den mac
+    #  waehlen koennen […] und wenn ich zeit habe und er die nacht zeit hat
+    #  soll es auf dem nas rechnen"
+    #
+    # 🔴 UND DAS MUSS BEI FREMDEN GENAUSO GEHEN. Hier steht keine Adresse und
+    #    kein Rechnername — alles kommt aus `ai.targets` der config.yaml bzw.
+    #    aus dem, was messbar vorhanden ist (siehe `ai_targets.py`). Wer nur
+    #    einen Anbieter eingerichtet hat, bekommt eine Liste mit einem Eintrag
+    #    und die Seite zeigt keinen Umschalter.
+    #
+    # 🔑 Beide Wege sind ADMIN-ONLY, und zwar ohne eine Zeile Arbeit: die
+    #    Rechteverwaltung ist eine ERLAUBNISLISTE (`auth.USER_ALLOW`), also ist
+    #    jede neue Route admin-only, bis jemand sie absichtlich oeffnet. Ein
+    #    `deliver`-Konto (die Postwache) darf ohnehin nur `POST /upload`.
+
+    def _ai_ziele_jetzt() -> tuple[list, str]:
+        """Die waehlbaren Ziele und der Schluessel des laufenden."""
+        from .. import ai_targets as _t
+        verbunden = False
+        try:
+            from ..bridge.server import get_bridge
+            verbunden = bool((get_bridge().info() or {}).get("connected"))
+        except Exception:  # noqa: BLE001
+            pass
+        liste = _t.ziele(settings, bridge_verbunden=verbunden)
+        laufend = getattr(classifier, "ziel", None)
+        key = (getattr(laufend, "key", "")
+               or _t.aktiver_schluessel(settings, liste))
+        return liste, key
+
+    def _ai_ziel_kurz() -> dict[str, Any]:
+        """Fuer die Startseite: nur Name und Anzahl, keine Adressen. Nie
+        werfen — eine Seite ohne diese Angabe ist unvollstaendig, eine Seite
+        mit Ausnahme ist kaputt."""
+        try:
+            liste, key = _ai_ziele_jetzt()
+            jetzt = next((t for t in liste if t.key == key), None)
+            return {
+                "key": key,
+                "label": getattr(jetzt, "label", "") or "",
+                "anzahl": len(liste),
+                # Ohne Halter kann nicht gewechselt werden (etwa in Tests, die
+                # einen echten Classifier einsetzen). Das ehrlich sagen, statt
+                # einen Umschalter zu zeigen, der nichts tut.
+                "umschaltbar": hasattr(classifier, "wechsle"),
+            }
+        except Exception:  # noqa: BLE001
+            return {"key": "", "label": "", "anzahl": 0, "umschaltbar": False}
+
+    @app.get("/api/ai/targets")
+    def api_ai_targets():
+        """Alle Rechenorte dieser Installation, samt dem laufenden."""
+        liste, key = _ai_ziele_jetzt()
+        return {
+            "active": key,
+            "switchable": hasattr(classifier, "wechsle"),
+            "targets": [t.as_dict() for t in liste],
+        }
+
+    @app.post("/api/ai/target")
+    def api_ai_target(payload: dict):
+        """Auf einen anderen Rechenort umstellen — OHNE Neustart.
+
+        🔴 Deshalb meldet diese Antwort kein `restart_required`, anders als
+        `/api/local-ai/apply`: dort wird die GRUNDEINSTELLUNG geschrieben, hier
+        wird nur das laufende Ziel getauscht. Ein Neustart wuerde jede laufende
+        Texterkennung wegwerfen — und genau fuer „mal schnell den anderen
+        Rechner" ist dieser Weg gedacht.
+        """
+        from .. import ai_targets as _t, settings_writer
+        key = str((payload or {}).get("key") or "").strip()
+        if not key:
+            raise HTTPException(400, "key required")
+        if not hasattr(classifier, "wechsle"):
+            # Kein Halter — etwa weil die KI nicht eingerichtet ist.
+            raise HTTPException(409, "no switchable classifier")
+        try:
+            ziel = classifier.wechsle(key)
+        except KeyError:
+            raise HTTPException(404, f"unknown target: {key}")
+        except Exception as exc:  # noqa: BLE001
+            # 🔑 Der Halter laesst bei einem Baufehler das ALTE Ziel stehen, die
+            #    Installation bleibt also arbeitsfaehig. Das gehoert in die
+            #    Antwort, damit niemand glaubt, es sei nun gar nichts aktiv.
+            logger.error("KI-Ziel %s laesst sich nicht aufbauen: %s", key, exc)
+            raise HTTPException(
+                502, f"target {key} could not be built: {exc}")
+        # Merken, damit der Wechsel einen Neustart uebersteht. Scheitert das
+        # Schreiben, ist der Wechsel trotzdem schon wirksam — das sagen wir,
+        # statt ihn zurueckzunehmen.
+        gemerkt = True
+        try:
+            settings_writer.update_ai_active_target(
+                key=ziel.key, config_dir=settings.config_dir)
+            settings.ai.active_target = ziel.key
+        except Exception as exc:  # noqa: BLE001
+            gemerkt = False
+            logger.warning("KI-Ziel %s laeuft, liess sich aber nicht merken: %s",
+                           ziel.key, exc)
+        liste, _ = _ai_ziele_jetzt()
+        return {
+            "ok": True, "active": ziel.key, "label": ziel.label,
+            "provider": ziel.provider, "model": ziel.model,
+            "persisted": gemerkt, "restart_required": False,
+            "runtime": _modell_laeuft_auf(),
+            "targets": [t.as_dict() for t in liste],
+        }
 
     @app.post("/api/local-ai/apply")
     def api_local_ai_apply(payload: dict):

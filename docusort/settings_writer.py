@@ -76,6 +76,22 @@ def update_ai(
     return out
 
 
+def update_ai_active_target(*, key: str, config_dir: Path | None = None) -> Path:
+    """Merkt, welcher benannte Rechenort gerade rechnet (`ai.active_target`).
+
+    🔑 Nur dieser EINE Schluessel wird angefasst — Anbieter, Modell und Adresse
+    des eingerichteten Rueckfalls bleiben stehen. Darum uebersteht ein Wechsel
+    einen Neustart, ohne die Grundeinstellung zu ueberschreiben: wer das Ziel
+    spaeter aus `ai.targets` entfernt, landet wieder beim eingerichteten statt
+    bei einer Adresse, die niemand mehr kennt.
+    """
+    cfg = _read_raw(config_dir)
+    ai = cfg.get("ai") or {}
+    ai["active_target"] = (key or "").strip()
+    cfg["ai"] = ai
+    return _write_raw(cfg, config_dir)
+
+
 def update_paths(
     *,
     inbox: str = "",

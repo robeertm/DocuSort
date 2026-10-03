@@ -284,6 +284,47 @@
           <span class="tabular-nums text-ink-500 w-16 text-right" x-text="modellSpeicher"></span>
         </div>
       </div>
+
+      {# WO SOLL GERECHNET WERDEN — die Wahl, nicht nur die Anzeige.
+         „ich brauche schnell das dokument in docusort dann will ich den mac
+          waehlen koennen […] und wenn ich zeit habe und er die nacht zeit hat
+          soll es auf dem nas rechnen"
+
+         🔴 Drei Bedingungen, und alle drei sind MESSUNGEN, keine Annahmen:
+         (1) `ai_ziel.anzahl > 1` — wer nur einen Anbieter eingerichtet hat,
+             sieht nichts; eine Auswahl mit einem Eintrag ist keine Auswahl.
+             Genau das ist der Fall bei jedem, der dieses Repo frisch klont.
+         (2) `ai_ziel.umschaltbar` — ohne den Halter aus `ai_targets.py` wuerde
+             ein Knopf hier nichts tun.
+         (3) `aiZiele.length` — die Liste kommt von einem Weg, den NUR ein
+             Admin aufrufen darf. Ein normales Konto bekommt 403, die Liste
+             bleibt leer, und der Umschalter erscheint gar nicht. So steht hier
+             kein Knopf, den der Betrachter nicht druecken darf. #}
+      <div x-show="ziellisteZeigen" x-cloak>
+        <div class="text-[11px] uppercase tracking-wider text-ink-500 mb-1.5">
+          {{ t('hub.sys.target_switch') }}
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          <template x-for="z in aiZiele" :key="z.key">
+            <button type="button"
+                    @click="zielWaehlen(z.key)"
+                    :disabled="zielWechselt"
+                    :title="z.base_url || z.provider"
+                    class="px-2 py-1 rounded-md text-xs border transition-colors
+                           disabled:opacity-60 disabled:cursor-wait"
+                    :class="z.key === aiAktiv
+                      ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
+                      : 'border-ink-700 bg-ink-800/60 text-ink-300 hover:border-ink-500'">
+              <span x-text="z.label || z.model || z.provider"></span>
+              <span x-show="z.note" x-cloak class="text-ink-400"
+                    x-text="' · ' + z.note"></span>
+            </button>
+          </template>
+        </div>
+        <div class="mt-1 text-[11px]" x-show="zielMeldung" x-cloak
+             :class="zielFehler ? 'text-rose-300' : 'text-ink-400'"
+             x-text="zielMeldung"></div>
+      </div>
     </div>
 
     <div class="mt-2.5 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-ink-500">
@@ -575,6 +616,15 @@ function dashboard() {
     doneDeadline: null,
     matching: false,
     matchMsg: '',
+    /* ---------- Where to compute ----------
+       The list is fetched from an admin-only route. A non-admin gets 403,
+       the list stays empty and no switch is rendered — so the page never
+       shows a button the viewer is not allowed to press. */
+    aiZiele: [],
+    aiAktiv: '',
+    zielWechselt: false,
+    zielMeldung: '',
+    zielFehler: false,
     get bulk() { return this.state.bulk_job; },
 
     /* ---------- Machine ---------- */
@@ -730,7 +780,53 @@ function dashboard() {
     },
     init() {
       this.refresh();
+      this.zieleLaden();
       this.pollHandle = setInterval(() => this.refresh(), 2500);
+    },
+    /* Fetched ONCE, not on the 2.5 s poll: the list only changes when somebody
+       changes it, and then the switch response carries the new one. */
+    async zieleLaden() {
+      try {
+        const r = await fetch('/api/ai/targets');
+        if (!r.ok) { this.aiZiele = []; return; }
+        const d = await r.json();
+        this.aiZiele = d.targets || [];
+        this.aiAktiv = d.active || '';
+      } catch (e) { this.aiZiele = []; }
+    },
+    get ziellisteZeigen() {
+      const z = this.state.ai_ziel || {};
+      return this.aiZiele.length > 1 && z.anzahl > 1 && !!z.umschaltbar;
+    },
+    async zielWaehlen(key) {
+      if (this.zielWechselt || key === this.aiAktiv) return;
+      this.zielWechselt = true;
+      this.zielFehler = false;
+      this.zielMeldung = tr('hub.sys.switching');
+      try {
+        const r = await fetch('/api/ai/target', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.zielFehler = true;
+          this.zielMeldung = tr('hub.sys.switch_failed')
+                           + (d.detail ? ' — ' + d.detail : '');
+        } else {
+          this.aiAktiv = d.active || key;
+          if (d.targets) this.aiZiele = d.targets;
+          this.zielMeldung = tr('hub.sys.switch_ok') + ' '
+                           + (d.label || d.model || d.active || '');
+          /* Pull the machine card straight away so the second block updates
+             with the new target instead of after the next poll tick. */
+          this.refresh();
+        }
+      } catch (e) {
+        this.zielFehler = true;
+        this.zielMeldung = tr('hub.sys.switch_failed');
+      } finally { this.zielWechselt = false; }
     },
     async refresh() {
       this.loading = true;
