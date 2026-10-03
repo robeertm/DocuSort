@@ -277,9 +277,15 @@
           {{ t('hub.sys.model_machine') }}
           <span class="text-ink-400 normal-case" x-text="modellOrt"></span>
         </div>
+        {# 🔴 HIER STAND EIN BERNSTEINFARBENER PUNKT FUER „alles in Ordnung".
+           Es gab nur zwei Farben — Bernstein und Grau — und Bernstein liest
+           sich als Warnung. Die Frage „warum ist da ein gelber Punkt" ist die
+           richtige Frage an so eine Anzeige. Jetzt ist es eine Ampel, und
+           jede Farbe hat eine Bedeutung, die danebensteht. #}
         <div class="flex items-center gap-2 text-xs" :class="modellDa ? '' : 'opacity-50'">
-          <span class="h-2 w-2 rounded-full shrink-0" :class="modellDa ? 'bg-amber-400' : 'bg-ink-600'"></span>
+          <span class="h-2 w-2 rounded-full shrink-0" :class="ampelFarbe"></span>
           <span class="flex-1 truncate" x-text="modellText"></span>
+          <span class="text-ink-400" x-text="ampelText"></span>
           <span class="tabular-nums text-ink-400" x-text="modellCpu"></span>
           <span class="tabular-nums text-ink-500 w-16 text-right" x-text="modellSpeicher"></span>
         </div>
@@ -306,19 +312,41 @@
         </div>
         <div class="flex flex-wrap gap-1.5">
           <template x-for="z in aiZiele" :key="z.key">
-            <button type="button"
-                    @click="zielWaehlen(z.key)"
-                    :disabled="zielWechselt"
-                    :title="z.base_url || z.provider"
-                    class="px-2 py-1 rounded-md text-xs border transition-colors
-                           disabled:opacity-60 disabled:cursor-wait"
-                    :class="z.key === aiAktiv
-                      ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
-                      : 'border-ink-700 bg-ink-800/60 text-ink-300 hover:border-ink-500'">
-              <span x-text="z.label || z.model || z.provider"></span>
-              <span x-show="z.note" x-cloak class="text-ink-400"
-                    x-text="' · ' + z.note"></span>
-            </button>
+            {# Ein Name ist kein Zustand. Jeder Knopf traegt deshalb eine
+               Ampel und sagt im Klartext, was dort los ist — und wenn
+               DocuSort etwas dagegen tun kann, steht der Knopf daneben. #}
+            <span class="inline-flex items-center rounded-md border overflow-hidden"
+                  :class="z.key === aiAktiv
+                    ? 'border-emerald-400/60 bg-emerald-400/10'
+                    : 'border-ink-700 bg-ink-800/60'">
+              <button type="button"
+                      @click="zielWaehlen(z.key)"
+                      :disabled="zielWechselt || zustandVon(z) === 'tot'"
+                      :title="z.base_url || z.provider"
+                      class="px-2 py-1 text-xs transition-colors
+                             disabled:opacity-60 disabled:cursor-not-allowed"
+                      :class="z.key === aiAktiv ? 'text-emerald-200'
+                                                : 'text-ink-300 hover:text-ink-100'">
+                <span class="inline-block h-2 w-2 rounded-full mr-1.5 align-middle"
+                      :class="ampelFuer(z)"></span>
+                <span x-text="z.label || z.model || z.provider"></span>
+                <span class="text-ink-400" x-text="' · ' + zustandText(z)"></span>
+              </button>
+              <button type="button" x-show="kannWecken(z)" x-cloak
+                      @click="zielWecken(z.key)" :disabled="zielBusy === z.key"
+                      class="px-2 py-1 text-xs border-l border-ink-700
+                             text-amber-200 hover:bg-amber-400/10
+                             disabled:opacity-60 disabled:cursor-wait"
+                      x-text="zielBusy === z.key ? tr('hub.sys.waking')
+                                                 : tr('hub.sys.wake')"></button>
+              <button type="button" x-show="kannHolen(z)" x-cloak
+                      @click="zielHolen(z.key)" :disabled="zielBusy === z.key"
+                      class="px-2 py-1 text-xs border-l border-ink-700
+                             text-cyan-200 hover:bg-cyan-400/10
+                             disabled:opacity-60 disabled:cursor-wait"
+                      x-text="zielBusy === z.key ? tr('hub.sys.pulling')
+                                                 : tr('hub.sys.pull')"></button>
+            </span>
           </template>
         </div>
         <div class="mt-1 text-[11px]" x-show="zielMeldung" x-cloak
@@ -611,6 +639,7 @@ function dashboard() {
     loading: false,
     lastUpdate: '',
     pollHandle: null,
+    zustandHandle: null,
     problemsTab: 'all',
     busyDoc: null,
     doneDeadline: null,
@@ -622,6 +651,7 @@ function dashboard() {
        shows a button the viewer is not allowed to press. */
     aiZiele: [],
     aiAktiv: '',
+    zielBusy: '',
     zielWechselt: false,
     zielMeldung: '',
     zielFehler: false,
@@ -782,6 +812,10 @@ function dashboard() {
       this.refresh();
       this.zieleLaden();
       this.pollHandle = setInterval(() => this.refresh(), 2500);
+      /* The list itself rarely changes, but the STATE does — a machine can
+         die between two page views. Measuring reaches out to other hosts, so
+         it runs on its own slower clock rather than on the 2.5 s poll. */
+      this.zustandHandle = setInterval(() => this.zieleLaden(), 30000);
     },
     /* Fetched ONCE, not on the 2.5 s poll: the list only changes when somebody
        changes it, and then the switch response carries the new one. */
@@ -793,6 +827,89 @@ function dashboard() {
         this.aiZiele = d.targets || [];
         this.aiAktiv = d.active || '';
       } catch (e) { this.aiZiele = []; }
+    },
+    /* ---------- traffic light ----------
+       There used to be exactly two colours here, amber and grey, and amber
+       meant "fine". Amber reads as a warning, so a healthy install looked
+       like a problem. Every colour now carries a meaning, and the meaning is
+       written next to it. */
+    get ampelFarbe() {
+      const z = (this.state.ai_ziel || {});
+      if (z.zustand === 'tot')         return 'bg-rose-400';
+      if (z.zustand === 'ohne_modell') return 'bg-amber-400';
+      if (z.zustand === 'offen')       return 'bg-ink-400';
+      return z.geladen === false ? 'bg-amber-400' : 'bg-emerald-400';
+    },
+    get ampelText() {
+      const z = (this.state.ai_ziel || {});
+      if (!z.zustand) return '';
+      if (z.zustand === 'bereit' && z.geladen === false) return tr('hub.sys.cold');
+      return tr('hub.sys.state.' + z.zustand);
+    },
+    zustandVon(z) { return (z.state && z.state.zustand) || 'offen'; },
+    zustandText(z) {
+      const s = this.zustandVon(z);
+      if (s === 'bereit' && z.state && z.state.geladen === false)
+        return tr('hub.sys.state.bereit') + ' · ' + tr('hub.sys.cold');
+      return tr('hub.sys.state.' + s);
+    },
+    ampelFuer(z) {
+      const s = this.zustandVon(z);
+      if (s === 'tot')         return 'bg-rose-400';
+      if (s === 'ohne_modell') return 'bg-amber-400';
+      if (s === 'offen')       return 'bg-ink-400';
+      return (z.state && z.state.geladen === false) ? 'bg-amber-400'
+                                                    : 'bg-emerald-400';
+    },
+    /* Only offer what this target can actually do right now. A button that
+       cannot work is worse than no button. */
+    kannWecken(z) {
+      return this.zustandVon(z) === 'bereit'
+          && z.state && z.state.geladen === false;
+    },
+    kannHolen(z) { return this.zustandVon(z) === 'ohne_modell'; },
+    async zielWecken(key) {
+      this.zielBusy = key; this.zielFehler = false;
+      this.zielMeldung = tr('hub.sys.waking');
+      try {
+        const r = await fetch('/api/ai/target/wake', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.zielFehler = true;
+          this.zielMeldung = (d.detail || tr('hub.sys.state.tot'));
+        } else {
+          this.zielMeldung = '';
+          await this.zieleLaden();
+          this.refresh();
+        }
+      } catch (e) {
+        this.zielFehler = true; this.zielMeldung = tr('hub.sys.state.tot');
+      } finally { this.zielBusy = ''; }
+    },
+    async zielHolen(key) {
+      this.zielBusy = key; this.zielFehler = false;
+      this.zielMeldung = tr('hub.sys.pulling');
+      try {
+        const r = await fetch('/api/ai/target/pull', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.zielFehler = true;
+          this.zielMeldung = (d.detail || tr('hub.sys.state.tot'));
+        } else {
+          /* The fetch runs in the background and shows up in the work list
+             above, so the page says what is happening instead of sitting
+             silent for several gigabytes. */
+          this.refresh();
+        }
+      } catch (e) {
+        this.zielFehler = true; this.zielMeldung = tr('hub.sys.state.tot');
+      } finally { this.zielBusy = ''; }
     },
     get ziellisteZeigen() {
       const z = this.state.ai_ziel || {};

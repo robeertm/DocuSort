@@ -84,6 +84,11 @@ STAGE_CHECK  = "pruefung"        # duplicate check, reading the file
 STAGE_OCR    = "texterkennung"
 STAGE_AI     = "ki"
 STAGE_FILE   = "ablage"
+# 🔑 Ein Modell-Download ist kein Dokument, gehoert aber in dieselbe Liste:
+#    „was gerade laeuft" muss ALLES zeigen, was die Maschine beschaeftigt,
+#    sonst steht dort „aktuell laeuft nichts", waehrend mehrere Gigabyte
+#    ueber die Leitung gehen.
+STAGE_MODEL  = "modell"
 
 
 def get_job(name: str) -> JobState:
