@@ -7,6 +7,41 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.86.4] - 2026-10-03
+
+### Fixed
+
+🔴 **`/api/status` documented a state it never returns.** The list named
+`done`; the endpoint hands back the document row's own status, and there it is
+`filed`. `duplicate` was listed but easy to miss among the others.
+
+A docstring is a contract as soon as somebody builds against it. A machine
+client written from this one waited for states that cannot occur and sat out
+its own per-document timeout on **every** file — measured on one install: 60
+minutes each, for a batch of 128 documents. The upload page had it right all
+along, because it was written against the running system rather than against
+that paragraph.
+
+The list now separates "keep polling" from "stop polling", says that `unknown`
+is briefly normal right after an upload and must not be treated as final on
+first sight, and the probe checks the listed states against the ones the upload
+page actually treats as terminal.
+
+### Changed
+
+**The activity card no longer jumps, and is never empty while work is
+running.** Two defects at one box:
+
+- **A gap nobody had thought about.** The work list appeared when there were
+  work rows, the idle text when nothing was active. In between sits a state
+  where a file is in the inbox but its row is not written yet — neither
+  condition matched, so the box was blank exactly while work was happening. It
+  now says what there always is in that moment: how much is waiting.
+- **The idle block was three times the height of a work row**, so during a
+  batch import the box — and the whole page below it — resized every few
+  seconds. One container with a fixed minimum height now holds all three
+  states, and exactly one of them is ever shown.
+
 ## [0.86.3] - 2026-10-03
 
 ### Fixed
