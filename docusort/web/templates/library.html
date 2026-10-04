@@ -198,13 +198,16 @@ function libClearDates(btn) {
 <div class="flex flex-wrap items-center gap-2 mb-4 text-sm">
   <span class="text-ink-400">{{ t('library.filter_label') }}</span>
   {% if filter.year %}
-    <a href="/library?{% if filter.category %}category={{ filter.category }}&{% endif %}{% if filter.status %}status={{ filter.status }}&{% endif %}{% if filter.q %}q={{ filter.q }}{% endif %}"
+    {# Removing one filter keeps the rest of the slice — sort and date
+       ranges included. The string comes from the route, which knows what a
+       slice is made of. #}
+    <a href="/library{{ slice_ohne.year }}"
        class="chip bg-ink-700/60 text-ink-100 hover:bg-ink-600">
       {% if filter.year == 'unknown' %}—{% else %}{{ filter.year }}{% endif %} <span class="text-ink-400 ml-1">✕</span>
     </a>
   {% endif %}
   {% if filter.category %}
-    <a href="/library?{% if filter.year %}year={{ filter.year }}&{% endif %}{% if filter.status %}status={{ filter.status }}&{% endif %}{% if filter.q %}q={{ filter.q }}{% endif %}"
+    <a href="/library{{ slice_ohne.category }}"
        class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20 hover:bg-emerald-500/20">
       {{ filter.category }} <span class="ml-1 opacity-70">✕</span>
     </a>
