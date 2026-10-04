@@ -802,6 +802,7 @@
   "hub.tile.empty_suffix": "sans opérations",
   "hub.tile.failed": "Échecs",
   "hub.tile.filed": "Classés",
+  "hub.tile.reuploaded_suffix": "réimportés",
   "hub.tile.review": "À revoir",
   "hub.tile.statements": "Relevés",
   "hub.title": "Activité",

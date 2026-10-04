@@ -7,6 +7,35 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.87.3] - 2026-10-04
+
+### Fixed
+
+**The duplicates tile counted one thing and linked to another.** Its number was
+the count of rows with `status='duplicate'` — a note from the past, *you
+uploaded this file again* — while the tile links to `/duplicates`, which lists
+something else: files that are byte-identical **now**. The two can drift apart
+without limit. On a live archive the tile said 3 and the page behind it was
+empty: a dashboard advertising work that does not exist, and a dead end for
+whoever clicks it.
+
+The three rows it was counting had no file on disk and no twin at all, so they
+were not duplicates of anything. The big number is now what `/duplicates`
+lists, from a single `WHERE` clause shared by the count and the listing, with
+the re-upload count kept as a sub-line (the library's own sidebar already calls
+those *re-uploaded*, which is what they are).
+
+**A deadlock on the dashboard, caught before it shipped.** The first version of
+that shared count took `db._lock` itself. One of its two callers already sits
+inside a `with db._lock:` block, and the lock is a `threading.Lock`, not an
+`RLock` — taking it twice blocks forever. The dashboard polls that endpoint
+every two to three seconds, so the app would have choked on stuck threads
+within minutes of a page being left open.
+
+The probe did not go red for this; it **stopped**. A check that hangs reports
+nothing, so that one call is now made with a time limit and the probe says so
+out loud when it is exceeded.
+
 ## [0.87.2] - 2026-10-04
 
 ### Fixed
