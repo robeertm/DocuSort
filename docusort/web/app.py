@@ -1063,7 +1063,13 @@ def create_app(
              "filter": filter_ctx,
              # The cards hand this straight to /document/<id> so the detail
              # page knows which slice the visitor came from.
-             "slice_qs": qs},
+             "slice_qs": qs,
+             # The breadcrumb's ✕ removes ONE filter and keeps everything
+             # else. Spelled out by hand in the template it kept only the
+             # three filters that existed when it was written, so dropping
+             # the year silently threw away the sort and both date ranges.
+             "slice_ohne": {k: _slice_qs({**filter_ctx, "trash": trash, k: None})
+                            for k in _SLICE_FILTERS}},
             headers=kopf,
         )
 

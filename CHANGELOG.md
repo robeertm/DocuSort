@@ -7,6 +7,16 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.87.1] - 2026-10-04
+
+### Fixed
+
+The ✕ on an active filter removed that filter **and** the sort and both date
+ranges with it. The breadcrumb spelled its own link out by hand and so knew only
+the three filters that existed when it was written — the last place in the
+library still carrying its own idea of what a view is made of. It reads the
+route's slice now, minus the one key it drops.
+
 ## [0.87.0] - 2026-10-04
 
 ### Fixed
