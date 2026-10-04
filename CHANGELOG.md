@@ -7,6 +7,22 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.87.2] - 2026-10-04
+
+### Fixed
+
+`db.list_documents` still defaulted to `doc_date` while `/library` passed
+`created_at`, so the data layer and the page it feeds held two different ideas
+of "default order". The point of 0.87.0's single constant was to stop exactly
+that — and the second answer caught the author within minutes: a check written
+to confirm the new ordering called `list_documents` without `order_by` and read
+the old one back, reporting a September document at the top of an archive whose
+newest arrival was from October.
+
+Both the parameter default and the `ORDER BY` fallback for an unknown sort key
+now name `LIBRARY_SORT_DEFAULT`. The three callers that take the default
+(export, empty-trash, backfill) do not depend on order at all.
+
 ## [0.87.1] - 2026-10-04
 
 ### Fixed
