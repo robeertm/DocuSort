@@ -114,6 +114,28 @@
     </div>
   </div>
 
+  {# 🔑 Direkt neben „Was zählt als Fixkosten?" — es ist dieselbe Art von
+     Entscheidung, und zwei Seiten mit je einer Hälfte wären zwei Orte, an
+     denen man suchen muss. Was hier steht, gilt ÜBERALL: Monatsausgaben,
+     Fixkosten, Gehaltsmonat, größte Empfänger. #}
+  <div class="card p-3 sm:p-4">
+    <button type="button" @click="showSonder = !showSonder" class="w-full flex items-center justify-between gap-3 text-left">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-ink-400">{{ t('spend.special_title') }}</h2>
+      <span class="text-xs text-ink-500"
+            x-text="showSonder ? tr('fixed.collapse') : (sonderCats.length ? (sonderCats.length + ' ' + tr('fixed.categories_n')) : tr('spend.special_none'))"></span>
+    </button>
+    <p class="text-xs text-ink-500 mt-1">{{ t('spend.special_help') }}</p>
+    <div x-show="showSonder" x-cloak class="mt-3 flex flex-wrap gap-2">
+      <template x-for="c in cats.filter(c => c !== 'uebertrag' && c !== 'sonstiges')" :key="'s-' + c">
+        <label class="flex items-center gap-1.5 text-xs rounded-lg border px-2.5 py-1.5 cursor-pointer"
+               :class="sonderCats.includes(c) ? 'border-amber-500/50 bg-amber-500/10 text-amber-100' : 'border-ink-700 text-ink-400'">
+          <input type="checkbox" :checked="sonderCats.includes(c)" @change="toggleSonderCat(c, $event.target.checked)" class="rounded border-ink-700 bg-ink-900">
+          <span x-text="catLabel(c)"></span>
+        </label>
+      </template>
+    </div>
+  </div>
+
   <!-- Nach Kategorie -->
   <div class="card p-3 sm:p-4" x-show="data.by_category.length" x-cloak>
     <div class="flex items-baseline justify-between gap-3 flex-wrap mb-3">
@@ -421,6 +443,8 @@ function fixkosten() {
     catFilter: '',
     cats: {{ tx_categories | tojson }},
     fixedCats: [],
+    sonderCats: [],
+    showSonder: false,
     showDef: false,
     search: '',
     data: { items: [], candidates: [], expired: [], others: [], by_category: [], total_monthly: 0, total_yearly: 0, saving_monthly: 0, saving_yearly: 0, since: '' },
@@ -506,6 +530,7 @@ function fixkosten() {
         if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
         this.data = d;
         this.fixedCats = d.fixed_categories || [];
+        this.loadSonder();
         if (Array.isArray(d.accounts) && d.accounts.length) this.accounts = d.accounts;
       } catch (e) { this.flash(false, e.message || String(e)); }
       finally { this.loading = false; }
@@ -521,6 +546,26 @@ function fixkosten() {
     toggleFixedCat(c, on) {
       const list = this.fixedCats.filter(x => x !== c); if (on) list.push(c);
       this.saveFixedCats(list);
+    },
+    async loadSonder() {
+      try {
+        const r = await fetch('/api/finance/special-categories');
+        const d = await r.json();
+        if (r.ok) this.sonderCats = d.categories || [];
+      } catch (e) { /* die Seite funktioniert auch ohne */ }
+    },
+    async toggleSonderCat(c, on) {
+      const list = this.sonderCats.filter(x => x !== c); if (on) list.push(c);
+      try {
+        const r = await fetch('/api/finance/special-categories', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categories: list }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.sonderCats = d.categories;
+        // 🔴 Neu laden: ein Sondertopf ändert JEDE Zahl auf dieser Seite.
+        await this.load();
+      } catch (e) { this.flash(false, e.message || String(e)); }
     },
     async resetFixedCats() {
       const r = await fetch('/api/finance/fixed-costs/categories'); const d = await r.json();

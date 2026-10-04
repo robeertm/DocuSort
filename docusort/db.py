@@ -294,6 +294,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     category        TEXT,                   -- miete | lebensmittel | mobilitaet | ...
     tx_hash         TEXT UNIQUE,            -- account+date+amount+purpose hash for dedup
     line_no         INTEGER,
+    -- besonders: 1 = Sonderausgabe. Geld, das wirklich geflossen ist, aber
+    -- aus einem eigenen Topf kommt (Hausbau, Erbe) und deshalb in keiner
+    -- Ausgaben-, Monats- oder Fixkostenrechnung auftauchen soll. Es wird
+    -- nicht versteckt, sondern getrennt ausgewiesen -- wie `uebertrag`.
+    besonders       INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (statement_id) REFERENCES statements(id) ON DELETE CASCADE,
     FOREIGN KEY (account_id)   REFERENCES accounts(id)   ON DELETE SET NULL
 );
@@ -302,6 +307,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_stmt     ON transactions(statement_i
 CREATE INDEX IF NOT EXISTS idx_transactions_account  ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_date     ON transactions(booking_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
+CREATE INDEX IF NOT EXISTS idx_transactions_besonders ON transactions(besonders);
 
 CREATE TRIGGER IF NOT EXISTS statements_cascade_on_doc_delete
 AFTER DELETE ON documents BEGIN
@@ -623,6 +629,15 @@ class Database:
             # booking when it is imported.
             self._conn.execute("ALTER TABLE transactions ADD COLUMN synthetic INTEGER DEFAULT 0")
             logger.info("DB migration: added transactions.synthetic")
+        if "besonders" not in tx_cols:
+            # v0.90: Sonderausgabe. Das Geld ist wirklich geflossen, kommt
+            # aber aus einem eigenen Topf (Hausbau, Erbe) und verzerrt sonst
+            # jeden Monatsschnitt. Wird getrennt ausgewiesen, nicht versteckt.
+            self._conn.execute(
+                "ALTER TABLE transactions ADD COLUMN besonders INTEGER NOT NULL DEFAULT 0")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_transactions_besonders ON transactions(besonders)")
+            logger.info("DB migration: added transactions.besonders")
 
         # v0.43: learned category rules. A manual assignment on one booking
         # teaches a rule for its counterparty (IBAN and/or normalised name);
@@ -3824,6 +3839,80 @@ class Database:
     # One booking in the window is enough only here (a yearly premium, a tax).
     _FIXED_SINGLE_OK = {"versicherung", "steuer"}
 
+    # ----------------------------------------------------------------
+    # Sonderausgaben
+    # ----------------------------------------------------------------
+    # 🔑 EINE Frage, EINE Antwort. Eine Buchung ist eine Sonderausgabe,
+    #    wenn ihr Schalter gesetzt ist ODER ihre Kategorie zum Sondertopf
+    #    gehört. Beides zusammen, damit ein ganzer Topf (Hausbau) mit einem
+    #    Griff gilt — auch für Buchungen, die erst morgen importiert
+    #    werden — und eine einzelne Ausnahme trotzdem möglich bleibt.
+    #
+    # 🔴 Sonderausgaben werden NICHT versteckt. Sie stehen in jeder Liste
+    #    und werden getrennt ausgewiesen, genau wie Umbuchungen. Eine Zahl,
+    #    die spurlos verschwindet, ist schlimmer als eine, die stört.
+
+    DEFAULT_SPECIAL_CATEGORIES: tuple[str, ...] = ()
+
+    def finance_special_categories(self) -> list[str]:
+        """Die Kategorien, die als Sondertopf gelten.
+
+        🔴 Nimmt das Schloss (über `meta_get`) — also NIE aus einem Block
+        rufen, der es schon hält. `db._lock` ist ein `Lock`, kein `RLock`.
+        """
+        import json as _json
+        try:
+            v = _json.loads(self.meta_get("finance.special_categories") or "null")
+        except ValueError:
+            v = None
+        if not isinstance(v, list):
+            v = list(self.DEFAULT_SPECIAL_CATEGORIES)
+        keys = set(self.finance_category_keys())
+        return [c for c in dict.fromkeys(v) if c in keys]
+
+    def finance_set_special_categories(self, cats: list[str]) -> list[str]:
+        import json as _json
+        keys = set(self.finance_category_keys())
+        # `uebertrag` ist ohnehin aus jeder Rechnung draußen; `sonstiges`
+        # als Sondertopf würde den Rest der Auswertung entkernen.
+        clean = [c for c in dict.fromkeys(cats)
+                 if c in keys and c not in ("uebertrag", "sonstiges")]
+        self.meta_set("finance.special_categories", _json.dumps(clean))
+        return self.finance_special_categories()
+
+    @staticmethod
+    def sonder_sql(special_cats, alias: str = "t") -> tuple[str, list[Any]]:
+        """(SQL, Parameter) für „diese Buchung ist eine Sonderausgabe".
+
+        🔴 Nimmt die Kategorienliste ENTGEGEN, statt sie zu holen: diese
+        Bedingung wird auch innerhalb von `self._lock` gebaut
+        (`transactions_aggregate`), und `finance_special_categories()`
+        würde das Schloss ein zweites Mal nehmen.
+        """
+        if special_cats:
+            ph = ",".join("?" * len(special_cats))
+            return (f"(COALESCE({alias}.besonders, 0) = 1 "
+                    f"OR COALESCE({alias}.category, '') IN ({ph}))",
+                    list(special_cats))
+        return (f"(COALESCE({alias}.besonders, 0) = 1)", [])
+
+    def transactions_set_special(self, tx_ids: list[int], besonders: bool) -> int:
+        """Einzelne Buchungen als Sonderausgabe markieren (oder nicht mehr).
+
+        🔑 Der Schalter je Buchung ist das letzte Wort — er wirkt auch auf
+        Buchungen, deren Kategorie NICHT im Sondertopf steht.
+        """
+        ids = [int(i) for i in tx_ids if str(i).strip()]
+        if not ids:
+            return 0
+        ph = ",".join("?" * len(ids))
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE transactions SET besonders = ? WHERE id IN ({ph})",
+                [1 if besonders else 0, *ids])
+            self._conn.commit()
+        return cur.rowcount or 0
+
     def finance_fixed_categories(self) -> list[str]:
         import json as _json
         try:
@@ -3890,6 +3979,11 @@ class Database:
         from datetime import date as _d, timedelta
         from .finance.buckets import merchant_key
         import json as _json
+        # 🔑 Sonderausgaben sind per Definition keine Fixkosten: ein Topf,
+        #    den man einmal aufmacht, ist kein monatlicher Posten. 🔴 Vor dem
+        #    Schloss holen.
+        sonder_cats = self.finance_special_categories()
+        s_sql, s_par = self.sonder_sql(sonder_cats)
         since = (_d.today() - timedelta(days=30 * months_back)).isoformat()
         acc_sql = ""
         acc_args: tuple[Any, ...] = ()
@@ -3903,9 +3997,10 @@ class Database:
                 "JOIN documents d ON d.id = s.doc_id LEFT JOIN accounts a ON a.id = t.account_id "
                 "WHERE d.deleted_at IS NULL AND t.amount < 0 AND COALESCE(a.is_savings, 0) = 0 "
                 "  AND COALESCE(t.category, '') NOT IN ('uebertrag', 'bargeld', 'kreditkarte') "
+                "  AND NOT " + s_sql + " "
                 "  AND t.booking_date >= ? AND t.counterparty IS NOT NULL AND TRIM(t.counterparty) != '' "
                 + acc_sql +
-                " ORDER BY t.booking_date", (since,) + acc_args,
+                " ORDER BY t.booking_date", tuple(s_par) + (since,) + acc_args,
             ).fetchall()]
         try:
             overrides = _json.loads(self.meta_get("finance.fixed_cost_overrides") or "{}")
@@ -4403,7 +4498,13 @@ class Database:
         chart with figures that aren't real cashflow ("€90,000 income"
         from closing a Tagesgeld and crediting the Girokonto). The
         full numbers including transfers stay accessible via the
-        category breakdown."""
+        category breakdown.
+
+        Sonderausgaben (Hausbau, Erbe …) fallen aus demselben Grund heraus
+        und stehen getrennt als `special_*`."""
+        # 🔴 Vor dem Schloss holen.
+        sonder_cats = self.finance_special_categories()
+        s_sql, s_par = self.sonder_sql(sonder_cats)
         with self._lock:
             tot = self._conn.execute(
                 """SELECT
@@ -4414,7 +4515,19 @@ class Database:
                    JOIN statements   s ON s.id = t.statement_id
                    JOIN documents    d ON d.id = s.doc_id
                    WHERE d.deleted_at IS NULL
-                     AND t.category != 'uebertrag'"""
+                     AND t.category != 'uebertrag'
+                     AND NOT """ + s_sql, s_par
+            ).fetchone()
+            sonder = self._conn.execute(
+                """SELECT COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS raus,
+                          COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS rein,
+                          COUNT(*) AS n
+                   FROM transactions t
+                   JOIN statements   s ON s.id = t.statement_id
+                   JOIN documents    d ON d.id = s.doc_id
+                   WHERE d.deleted_at IS NULL
+                     AND t.category != 'uebertrag'
+                     AND """ + s_sql, s_par
             ).fetchone()
             # Separate "transfers" total so the UI can show it as a
             # neutral chip ("€110,000 zwischen eigenen Konten verschoben").
@@ -4458,6 +4571,10 @@ class Database:
             "by_category":     [dict(r) for r in cats],
             "transfer_count":  int(transfers["n"]) if transfers else 0,
             "transfer_volume": float(transfers["net"]) if transfers else 0.0,
+            "special_count":   int(sonder["n"]) if sonder else 0,
+            "special_out":     float(sonder["raus"]) if sonder else 0.0,
+            "special_in":      float(sonder["rein"]) if sonder else 0.0,
+            "special_cats":    list(sonder_cats),
         }
 
     def finance_monthly(self, months: int | None = None) -> list[dict[str, Any]]:
@@ -4476,8 +4593,11 @@ class Database:
         Excludes internal transfers (category=uebertrag) for the same
         reason as `finance_summary`: a single big move between own
         accounts would dwarf every other month and make the chart
-        useless."""
-        params: list[Any] = []
+        useless. Sonderausgaben ebenfalls — ein Hausbau-Monat hätte sonst
+        einen Balken, neben dem alle anderen flach aussehen."""
+        sonder_cats = self.finance_special_categories()      # 🔴 vor dem Schloss
+        s_sql, s_par = self.sonder_sql(sonder_cats)
+        params: list[Any] = list(s_par)
         sql = (
             "SELECT substr(t.booking_date, 1, 7) AS month, "
             "       COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS income, "
@@ -4489,6 +4609,7 @@ class Database:
             "WHERE d.deleted_at IS NULL "
             "  AND t.booking_date IS NOT NULL AND t.booking_date != '' "
             "  AND t.category != 'uebertrag' "
+            "  AND NOT " + s_sql + " "
             "GROUP BY month "
             "ORDER BY month DESC "
         )
@@ -4538,6 +4659,8 @@ class Database:
         sum first); 'income' the largest inflows."""
         op = "<" if direction == "expense" else ">"
         order = "ASC" if direction == "expense" else "DESC"
+        sonder_cats = self.finance_special_categories()      # 🔴 vor dem Schloss
+        s_sql, s_par = self.sonder_sql(sonder_cats)
         with self._lock:
             rows = self._conn.execute(
                 f"""SELECT t.counterparty AS counterparty,
@@ -4550,20 +4673,26 @@ class Database:
                       AND t.amount {op} 0
                       AND t.counterparty != ''
                       AND t.category != 'uebertrag'
+                      AND NOT {s_sql}
                     GROUP BY LOWER(t.counterparty)
                     ORDER BY total {order}
                     LIMIT ?""",
-                (limit,),
+                (*s_par, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 
     def finance_recurring(self, *, min_months: int = 3, limit: int = 30) -> list[dict[str, Any]]:
         """Counterparties that show up in at least N distinct months with
         amounts within ±15% of each other — typical for subscriptions,
-        rent, insurance, gym memberships, etc."""
+        rent, insurance, gym memberships, etc.
+
+        Sonderausgaben bleiben draußen — wer jeden Monat beim Baumarkt ist,
+        soll deshalb keinen „regelmäßigen Posten" bekommen."""
+        sonder_cats = self.finance_special_categories()      # 🔴 vor dem Schloss
+        s_sql, s_par = self.sonder_sql(sonder_cats)
         with self._lock:
             rows = self._conn.execute(
-                """WITH cp_monthly AS (
+                f"""WITH cp_monthly AS (
                        SELECT LOWER(t.counterparty) AS cp_key,
                               t.counterparty AS counterparty,
                               substr(t.booking_date, 1, 7) AS month,
@@ -4575,6 +4704,7 @@ class Database:
                        WHERE d.deleted_at IS NULL
                          AND t.counterparty != ''
                          AND t.booking_date IS NOT NULL AND t.booking_date != ''
+                         AND NOT {s_sql}
                        GROUP BY cp_key, month
                    )
                    SELECT counterparty,
@@ -4589,7 +4719,7 @@ class Database:
                               ABS(AVG(avg_amount)) * 0.15
                    ORDER BY months DESC, ABS(amount) DESC
                    LIMIT ?""",
-                (min_months, limit),
+                (*s_par, min_months, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -4605,6 +4735,8 @@ class Database:
         amount_min: float | None = None,
         amount_max: float | None = None,
         exclude_uebertrag: bool = False,
+        exclude_sonder: bool = False,
+        sonder_cats: list[str] | None = None,
     ) -> tuple[list[str], list[Any]]:
         """Shared WHERE-builder for the transactions explorer.
 
@@ -4645,6 +4777,12 @@ class Database:
             params.append(float(amount_max))
         if exclude_uebertrag:
             where.append("(t.category IS NULL OR t.category != 'uebertrag')")
+        if exclude_sonder:
+            # 🔴 `sonder_cats` kommt von außen — diese Funktion wird auch
+            #    innerhalb von `self._lock` gerufen und darf es nicht holen.
+            sql, sp = self.sonder_sql(sonder_cats or [])
+            where.append("NOT " + sql)
+            params += sp
         if query:
             tokens = [t.strip() for t in str(query).split(",") if t.strip()]
             if tokens:
@@ -4711,13 +4849,22 @@ class Database:
         trend chart from a single round trip. Internal transfers are
         excluded from the totals because they'd otherwise double-count
         spend that just moved between the user's own accounts.
+
+        Sonderausgaben zählen aus demselben Grund nicht mit und werden
+        wie die Umbuchungen GETRENNT ausgewiesen (`special`).
         """
+        # 🔴 Vor dem Schloss holen — beide Abfragen nehmen es selbst.
+        sonder_cats = self.finance_special_categories()
         where, params = self._build_tx_filter(
             account_id=account_id, category=category, direction=direction,
             start=start, end=end, query=query,
             amount_min=amount_min, amount_max=amount_max,
             # Asking explicitly for transfers must not yield an empty sum.
             exclude_uebertrag=(category != "uebertrag"),
+            # … und wer ausdrücklich nach einem Sondertopf filtert, will
+            # dessen Summe sehen, nicht eine leere Kachel.
+            exclude_sonder=(category not in sonder_cats),
+            sonder_cats=sonder_cats,
         )
         join = (
             "FROM transactions t "
@@ -4802,7 +4949,29 @@ class Database:
                 + join + where_sql + " AND COALESCE(a.is_savings, 0) = 1",
                 params,
             ).fetchone()
+            # 🔑 Dieselbe Behandlung wie die Umbuchungen: nicht gezählt,
+            #    aber BENANNT. Wer 25 000 € Hausbau ausgibt, soll in der
+            #    Oberfläche sehen, dass sie bewusst draußen stehen — eine
+            #    Zahl, die spurlos verschwindet, sieht aus wie ein Fehler.
+            sw, sp = self._build_tx_filter(
+                account_id=account_id, category=category, direction=direction,
+                start=start, end=end, query=query,
+                amount_min=amount_min, amount_max=amount_max,
+                exclude_uebertrag=True, sonder_cats=sonder_cats,
+            )
+            s_sql, s_par = self.sonder_sql(sonder_cats)
+            special = self._conn.execute(
+                "SELECT COUNT(*) AS n, "
+                "  COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount END), 0) AS sum_in, "
+                "  COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount END), 0) AS sum_out "
+                + join + "WHERE " + " AND ".join(sw) + " AND " + s_sql,
+                sp + s_par,
+            ).fetchone()
         return {
+            "special_count": int(special["n"] or 0),
+            "special_in":    float(special["sum_in"] or 0.0),
+            "special_out":   float(special["sum_out"] or 0.0),
+            "special_cats":  list(sonder_cats),
             "transfer_count": int(transfers["n"] or 0),
             "transfer_in":    float(transfers["sum_in"] or 0.0),
             "transfer_out":   float(transfers["sum_out"] or 0.0),
@@ -4890,6 +5059,7 @@ class Database:
             rows = self._conn.execute(
                 """SELECT t.booking_date, t.amount, t.category, t.tx_type,
                           t.counterparty, t.purpose,
+                          COALESCE(t.besonders, 0) AS besonders,
                           COALESCE(a.is_savings, 0) AS is_savings
                    FROM transactions t
                    JOIN statements s ON s.id = t.statement_id
@@ -4900,7 +5070,9 @@ class Database:
             ).fetchall()
         txs = [dict(r) for r in rows]
         return build_periods(
-            txs, saving_cats=self.finance_saving_categories(), salary_match=salary_match, anchor_day=anchor_day,
+            txs, saving_cats=self.finance_saving_categories(),
+            sonder_cats=self.finance_special_categories(),
+            salary_match=salary_match, anchor_day=anchor_day,
             monthly_budget=monthly_budget, today=today,
         )
 
@@ -4954,6 +5126,9 @@ class Database:
         """
         from .finance.buckets import merchant_key
         saving = sorted(self.finance_saving_categories()) or ["__none__"]
+        # 🔴 Vor dem Schloss holen — `_rows()` nimmt es selbst.
+        sonder_cats = self.finance_special_categories()
+        s_sql, s_par = self.sonder_sql(sonder_cats)
         fixed = set(self.finance_fixed_categories())
         # A booking is a fixed cost when it belongs to a counted item on
         # /fixkosten (same payee, same amount class) — not when its whole
@@ -5024,8 +5199,9 @@ class Database:
 
         def _rows(key: str, *, income: bool = False) -> list[dict[str, Any]]:
             """Bookings of the period on spending accounts, no transfers, no
-            saving categories; `income=True` → the credits instead (v0.47.3:
-            the owner wants income shown and netted against the spending)."""
+            saving categories, keine Sonderausgaben; `income=True` → the
+            credits instead (v0.47.3: the owner wants income shown and
+            netted against the spending)."""
             if not key:
                 return []
             a, b = _range(key)
@@ -5049,10 +5225,11 @@ class Database:
                          AND COALESCE(a.is_savings, 0) = 0
                          AND COALESCE(t.category, '') != 'uebertrag'
                          AND COALESCE(t.category, '') NOT IN (""" + ",".join("?" * len(saving)) + """)
+                         AND NOT """ + s_sql + """
                          AND """ + ("t.amount > 0" if income else "t.amount < 0") + acc_sql + """
                          AND t.booking_date >= ? AND t.booking_date <= ?
                        ORDER BY t.booking_date DESC, t.id DESC""",
-                    (*saving, *acc_args, a, b),
+                    (*saving, *s_par, *acc_args, a, b),
                 ).fetchall()
             return [dict(r) for r in rows]
 
@@ -5141,8 +5318,33 @@ class Database:
         income_categories.sort(key=lambda x: -x["total"])
         rs, re_ = _range(month)
         prs, pre = _range(prev_month)
+        # 🔑 Was in diesem Zeitraum bewusst NICHT mitgezählt wurde. Die Zahl
+        #    gehört auf die Seite: sonst sucht jemand 9 000 €, die er
+        #    ausgegeben hat und nirgends wiederfindet.
+        acc_sql2 = ""
+        acc_args2: tuple[Any, ...] = ()
+        if account_ids:
+            acc_sql2 = " AND t.account_id IN (" + ",".join("?" * len(account_ids)) + ")"
+            acc_args2 = tuple(account_ids)
+        with self._lock:
+            srow = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(-t.amount), 0) AS summe "
+                "FROM transactions t "
+                "JOIN statements s ON s.id = t.statement_id "
+                "JOIN documents  d ON d.id = s.doc_id "
+                "LEFT JOIN accounts a ON a.id = t.account_id "
+                "WHERE d.deleted_at IS NULL AND t.amount < 0 "
+                "  AND COALESCE(a.is_savings, 0) = 0 "
+                "  AND COALESCE(t.category, '') != 'uebertrag' "
+                "  AND " + s_sql + acc_sql2 +
+                "  AND t.booking_date >= ? AND t.booking_date <= ?",
+                (*s_par, *acc_args2, rs, re_),
+            ).fetchone()
         return {
             **base,
+            "special_total": round(float(srow["summe"] or 0.0), 2),
+            "special_count": int(srow["n"] or 0),
+            "special_cats": list(sonder_cats),
             "range_start": rs, "range_end": re_,
             "prev_month": prev_month, "prev_range_start": prs, "prev_range_end": pre,
             "total": total, "fixed_total": fixed_total, "variable_total": round(total - fixed_total, 2),

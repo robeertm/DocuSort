@@ -217,6 +217,12 @@ USER_ALLOW: tuple[tuple[str, str], ...] = (
             r"|statements|transfer-check|periods|pending|ai-progress)$"),
     ("GET", r"^/api/finance/fixed-costs$"),
     ("GET", r"^/api/finance/fixed-costs/categories$"),
+    # Einen Topf als Sonderausgabe zu erklären ändert keine Buchung und
+    # löscht nichts — es ändert nur, was mitgezählt wird. Dieselbe Stufe
+    # wie Kategorisieren.
+    ("GET", r"^/api/finance/special-categories$"),
+    ("POST", r"^/api/finance/special-categories$"),
+    ("POST", r"^/api/transactions/special$"),
     ("POST", r"^/api/finance/categories$"),
     # Re-checking which booking settled which bill is strictly less than a
     # user may already do by hand: `/api/document/<id>/paid` above lets them

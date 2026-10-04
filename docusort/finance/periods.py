@@ -153,6 +153,7 @@ def build_periods(
     monthly_budget: float = 0.0,
     today: str | None = None,
     saving_cats: Iterable[str] = (),
+    sonder_cats: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     """Turn the transaction stream into salary periods, newest last.
 
@@ -178,6 +179,7 @@ def build_periods(
     """
     txs = list(txs)
     saving_set = set(saving_cats or ())
+    sonder_set = set(sonder_cats or ())
     boundaries = compute_boundaries(
         txs, salary_match=salary_match, anchor_day=anchor_day
     )
@@ -218,7 +220,7 @@ def build_periods(
             "end": end.isoformat(),
             "_start": start, "_end": end, "_next": next_start,
             "month_key": _month_label(start),
-            "income": 0.0, "expense": 0.0, "saved": 0.0,
+            "income": 0.0, "expense": 0.0, "saved": 0.0, "special": 0.0,
             "salary": 0.0, "tx_count": 0,
             "is_current": is_current,
         })
@@ -246,6 +248,13 @@ def build_periods(
             continue
         if tx.get("category") == "uebertrag":
             continue  # internal move between own accounts, not cashflow
+        # 🔑 Sonderausgabe: das Geld ist wirklich geflossen, kommt aber aus
+        #    einem eigenen Topf. Es gehört nicht in „ausgegeben", sonst sagt
+        #    der Gehaltsmonat, in dem das Dach bezahlt wurde, nichts mehr
+        #    über das Leben darin. Getrennt ausgewiesen, nicht verschluckt.
+        if int(tx.get("besonders") or 0) or tx.get("category") in sonder_set:
+            p["special"] += -amount
+            continue
         if tx.get("category") in saving_set:
             # Fund plan, endowment insurance …: the money is parked, not
             # spent — counts as saved (a payout comes back as negative).
@@ -262,6 +271,7 @@ def build_periods(
         p["income"] = round(p["income"], 2)
         p["expense"] = round(p["expense"], 2)
         p["saved"] = round(p["saved"], 2)
+        p["special"] = round(p.get("special", 0.0), 2)
         p["salary"] = round(p["salary"], 2)
         p["net"] = round(p["income"] - p["expense"], 2)
         budget = monthly_budget if monthly_budget and monthly_budget > 0 else p["income"]
