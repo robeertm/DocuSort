@@ -32,18 +32,24 @@
 
     {# Der Fortschritt. Mehrere Gigabyte ohne Rueckmeldung sind von einem
        haengenden Programm nicht zu unterscheiden. #}
+    {# 🔴 `x-show` VERSTECKT NUR — es haelt die Ausdrücke darin nicht an.
+       `lokalFortschritt` ist `null`, solange nichts laedt, und Alpine wertete
+       trotzdem `lokalFortschritt.prozent` aus: ein TypeError bei JEDEM
+       Seitenaufbau, unsichtbar hinter einem ausgeblendeten Kasten. Gefunden
+       hat ihn erst der Handy-Prüfstand, der auf Browserfehler hört.
+       Ein Fehler, den niemand sieht, verdeckt die, die man sehen müsste. #}
     <div x-show="lokalFortschritt" x-cloak class="mt-3">
       <div class="h-2 rounded-full bg-ink-800 overflow-hidden">
         <div class="h-full bg-emerald-400 transition-all"
-             :style="'width: ' + (lokalFortschritt.prozent || 0) + '%'"></div>
+             :style="'width: ' + (lokalFortschritt?.prozent || 0) + '%'"></div>
       </div>
       <p class="text-xs text-ink-400 mt-1">
-        <span x-text="(lokalFortschritt.prozent || 0) + ' %'"></span>
-        <span x-show="lokalFortschritt.gesamt" x-cloak
-              x-text="' · ' + gb(lokalFortschritt.fertig) + ' / '
-                      + gb(lokalFortschritt.gesamt)"></span>
-        <span class="text-ink-500" x-show="lokalFortschritt.text" x-cloak
-              x-text="' · ' + lokalFortschritt.text"></span>
+        <span x-text="(lokalFortschritt?.prozent || 0) + ' %'"></span>
+        <span x-show="lokalFortschritt?.gesamt" x-cloak
+              x-text="' · ' + gb(lokalFortschritt?.fertig) + ' / '
+                      + gb(lokalFortschritt?.gesamt)"></span>
+        <span class="text-ink-500" x-show="lokalFortschritt?.text" x-cloak
+              x-text="' · ' + lokalFortschritt?.text"></span>
       </p>
     </div>
     <p x-show="lokalMeldung" x-cloak class="mt-2 text-xs"
@@ -252,7 +258,7 @@
   {# Warum diese Karte: die KI-Kachel oben zaehlt nur LLM-Aufrufe. Waehrend OCR
      laeuft steht dort „KI im Leerlauf", obwohl vier Kerne gluehen — genau diese
      Frage („arbeitet das Ding ueberhaupt?") beantwortet hier der Verlauf. #}
-  <section class="card p-4 sm:p-5" x-show="sys" x-cloak>
+  <section class="card p-4 sm:p-5" x-show="sysDa" x-cloak>
     <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
       <h2 class="text-sm font-medium text-ink-300">{{ t('hub.sys.title') }}</h2>
       <div class="text-[11px] text-ink-500 flex items-center gap-2">
@@ -355,7 +361,7 @@
             <span class="h-2 w-2 rounded-full bg-cyan-400 shrink-0"></span>
             <span class="flex-1 truncate">{{ t('hub.sys.ocr') }}
               <span class="text-ink-500" x-show="sys.verbraucher && sys.verbraucher.ocr && sys.verbraucher.ocr.anzahl > 0"
-                    x-cloak x-text="'· ' + (sys.verbraucher.ocr.anzahl) + ' ' + tr('hub.sys.procs')"></span>
+                    x-cloak x-text="'· ' + (sys.verbraucher?.ocr?.anzahl ?? 0) + ' ' + tr('hub.sys.procs')"></span>
             </span>
             <span class="tabular-nums text-ink-400"
                   x-text="pct(sys.verbraucher && sys.verbraucher.ocr && sys.verbraucher.ocr.cpu)"></span>
@@ -687,45 +693,115 @@
      ohne Aussage. #}
   <section class="card p-4 sm:p-5" x-data="absenderDoppelt()" x-init="laden()"
            x-show="gruppen.length > 0" x-cloak>
-    <h2 class="font-semibold flex items-center gap-2 mb-1">
+    <h2 class="font-semibold flex items-baseline gap-2 mb-1">
       <span>✉️</span> {{ t('sender.merge_title') }}
+      <span class="text-xs font-normal text-ink-500 tabular-nums"
+            x-text="gruppen.length"></span>
     </h2>
     <p class="text-xs text-ink-500 mb-3">{{ t('sender.merge_hint') }}</p>
-    <div class="space-y-2">
+    {# 🔑 Gedeckelt und rollbar. Im echten Archiv sind es zwoelf Gruppen —
+       ungedeckelt schoebe diese Karte alles darunter (Fristen, Eingang) vom
+       Bildschirm. Dasselbe Mittel wie beim Aktivitaetskasten: feste Grenze,
+       innen rollen. #}
+    <ul class="space-y-1 max-h-[55vh] overflow-y-auto -mr-1 pr-1">
       <template x-for="g in gruppen" :key="g.vorschlag">
-        <div class="rounded-xl border border-ink-700/60 p-3">
-          <div class="flex items-start justify-between gap-3 flex-wrap">
-            <div class="min-w-0 space-y-1">
-              {# 🔑 Je Schreibweise EIN Haken, vorangekreuzt nur dort, wo sich
-                 wirklich nur die Schreibweise unterscheidet. Wo ein eigenes
-                 Wort dazukommt, steht es daneben — „ag" ist eine Rechtsform,
-                 „allgemeine lebensversicherung" sind zwei Gesellschaften. #}
-              <div class="text-sm font-medium" x-text="g.vorschlag"></div>
-              <template x-for="m in g.mitglieder.slice(1)" :key="m.name">
-                <label class="flex items-baseline gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" class="mt-0.5 accent-emerald-500"
-                         :checked="gewaehlt(g, m)" @change="umschalten(g, m)">
-                  <span class="text-ink-400" x-text="m.name"></span>
-                  <span class="text-[11px] text-ink-500 tabular-nums shrink-0"
-                        x-text="m.anzahl"></span>
-                  <span x-show="!m.nur_schreibweise" x-cloak
-                        class="text-[11px] text-amber-300/90 shrink-0"
-                        x-text="'⚠ ' + m.unterschied"></span>
-                </label>
-              </template>
-            </div>
-            <div class="flex items-center gap-2 shrink-0">
-              <button type="button" class="btn-secondary !py-1 !px-2 text-xs"
-                      :disabled="busy || !anzahlGewaehlt(g)"
-                      @click="legeZusammen(g)"
-                      x-text="tr('sender.merge_do').replace('{name}', g.vorschlag)"></button>
-              <button type="button" class="btn-ghost !py-1 !px-2 text-xs text-ink-400"
-                      :disabled="busy" @click="verwerfen(g)">{{ t('sender.merge_skip') }}</button>
-            </div>
+        <li class="rounded-xl border border-ink-800 bg-ink-900/40 p-3">
+
+          {# Der Name, auf den zusammengelegt wird — die Ueberschrift der
+             Entscheidung. Daneben, wie viele Dokumente ihn schon tragen. #}
+          <div class="flex items-baseline gap-2">
+            <span class="text-sm font-medium [overflow-wrap:anywhere] min-w-0"
+                  x-text="g.vorschlag"></span>
+            <span class="text-[11px] text-ink-500 tabular-nums shrink-0"
+                  x-text="g.mitglieder[0].anzahl"></span>
           </div>
-        </div>
+
+          {# Die anderen Schreibweisen.
+
+             🔑 EIN HAKEN NUR, WENN ES ETWAS ZU WAEHLEN GIBT. Bei genau einer
+                anderen Schreibweise IST die Karte die Entscheidung — ein
+                Kaestchen davor waere eine Frage, die schon beantwortet ist.
+                So sieht es bei zehn von zwoelf Gruppen aus.
+
+             🔴 Und kein nativer `<input type=checkbox accent-…>`: der war das
+                Lauteste auf der Karte und sah aus wie „erledigt". Das Haus
+                benutzt ein kleines Quadrat (h-5 w-5 rounded-md), siehe die
+                Fristen-Karte darunter. #}
+          <div class="mt-1.5 space-y-0.5">
+            <template x-for="m in g.mitglieder.slice(1)" :key="m.name">
+              <div>
+                {# ZWEI FORMEN DERSELBEN ZEILE.
+
+                   🔑 Gibt es nur EINE andere Schreibweise, ist die Karte die
+                      Entscheidung — dann ist die Zeile schlichter Text. Als
+                      Knopf waere sie 44 px hoch (die Daumenregel des Hauses)
+                      fuer eine Auswahl, die es gar nicht gibt: bei zehn von
+                      zwoelf Gruppen reine Leere.
+
+                   🔑 Gibt es mehrere, ist die GANZE ZEILE das Beruehrungsziel
+                      und das Quadrat nur Anzeige. Ein 18-px-Kaestchen als
+                      Knopf wuerde von derselben Regel auf 44 px gezogen und
+                      saehe aus wie eine Pille. #}
+                <template x-if="g.mitglieder.length <= 2">
+                  <div class="text-sm">
+                    <span class="text-ink-400 [overflow-wrap:anywhere]" x-text="m.name"></span>
+                    <span class="text-[11px] text-ink-500 tabular-nums ml-1.5"
+                          x-text="m.anzahl"></span>
+                    <span x-show="!m.nur_schreibweise" x-cloak
+                          class="ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px]
+                                 bg-amber-500/10 text-amber-300/90 align-middle"
+                          x-text="m.unterschied"></span>
+                  </div>
+                </template>
+
+                <template x-if="g.mitglieder.length > 2">
+                  <button type="button" @click="umschalten(g, m)"
+                          class="w-full flex items-start gap-2 text-left text-sm
+                                 rounded-lg -mx-1 px-1 hover:bg-ink-800/40 transition">
+                    {# 🔴 `h-[18px]` STAND NICHT IM GEBAUTEN BLATT. Die Klasse
+                       wirkte nicht, das Quadrat hatte keine Groesse und fiel
+                       auf seinen Inhalt zusammen — ein leeres Kaestchen war
+                       ein Punkt. `h-5 w-5` ist da (die Fristen-Karte benutzt
+                       es). Wer eine neue Klasse will, braucht einen Lauf von
+                       `scripts/build/build-css.sh`. #}
+                    <span class="shrink-0 mt-0.5 h-5 w-5 rounded-md border
+                                 flex items-center justify-center"
+                          :class="gewaehlt(g, m)
+                                  ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-300'
+                                  : 'border-ink-600'">
+                      {# 🔴 Nicht `text-transparent`: das Haekchen blieb trotzdem
+                         sichtbar und ein leeres Kaestchen sah aus wie ein
+                         gesetztes. Gar nicht zeichnen ist eindeutig. #}
+                      <span x-show="gewaehlt(g, m)" class="text-xs leading-none">✓</span>
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="text-ink-400 [overflow-wrap:anywhere]" x-text="m.name"></span>
+                      <span class="text-[11px] text-ink-500 tabular-nums ml-1.5"
+                            x-text="m.anzahl"></span>
+                      <span x-show="!m.nur_schreibweise" x-cloak
+                            class="ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px]
+                                   bg-amber-500/10 text-amber-300/90 align-middle"
+                            x-text="m.unterschied"></span>
+                    </span>
+                  </button>
+                </template>
+              </div>
+            </template>
+          </div>
+
+          {# 🔴 Zwei Knoepfe ueber die volle Breite UNTEREINANDER machten aus
+             drei Gruppen 850 px Karte. Beide sind kurz — sie passen
+             nebeneinander, auch bei 360 px. #}
+          <div class="mt-2 flex items-center gap-2">
+            <button type="button" class="btn-secondary !py-1.5 !px-3 text-xs"
+                    :disabled="busy || !anzahlGewaehlt(g)"
+                    @click="legeZusammen(g)">{{ t('sender.merge_do') }}</button>
+            <button type="button" class="btn-ghost !py-1.5 !px-2 text-xs text-ink-500"
+                    :disabled="busy" @click="verwerfen(g)">{{ t('sender.merge_skip') }}</button>
+          </div>
+        </li>
       </template>
-    </div>
+    </ul>
     <p x-show="meldung" x-cloak class="text-xs mt-2"
        :class="ok ? 'text-emerald-300' : 'text-rose-300'" x-text="meldung"></p>
   </section>
@@ -989,7 +1065,16 @@ function dashboard() {
     get bulk() { return this.state.bulk_job; },
 
     /* ---------- Machine ---------- */
-    get sys() { return this.state.system || null; },
+    // 🔴 DIESER GETTER DARF NIE `null` LIEFERN. `x-show` versteckt nur — es
+    //    haelt die Ausdruecke darin nicht an. Solange die erste Abfrage nicht
+    //    zurueck war, las Alpine `sys.host` und `sys.kerne` auf `null` und
+    //    warf bei JEDEM Seitenaufbau zwei TypeError, unsichtbar hinter einem
+    //    ausgeblendeten Kasten. Gefunden hat sie erst der Handy-Pruefstand,
+    //    der auf Browserfehler hoert.
+    // 🔑 Ein leeres Objekt statt `null`, und ein EIGENES „ist da" fuer das
+    //    Verstecken — das ist eine Stelle statt `?.` in zwoelf Bindungen.
+    get sysDa() { return !!this.state.system; },
+    get sys() { return this.state.system || {}; },
     /* Whether the chain is working is a wider question than whether an LLM
        call is in flight. While anything sits in the inbox the chain is busy —
        even when the AI badge above reports idle because OCR is the stage. */
