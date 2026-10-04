@@ -131,6 +131,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     command:
       - --cleanup
+      # 🔴 OHNE DIESE FLAGGE KOMMT EINE KAPUTTE FASSUNG NIE ZURUECK.
+      #    Watchtower sieht Container im Zustand `restarting` sonst GAR
+      #    NICHT — am Pi gemessen: laufend `scanned=1, updated=1`,
+      #    abstuerzend `scanned=0`. Startet DocuSort nach einem Update
+      #    nicht mehr, bliebe es stehen, bis jemand von Hand eingreift.
+      #    Mit der Flagge holt der naechste Lauf die heile Fassung.
+      - --include-restarting
       - --schedule
       - \${WATCHTOWER_SCHEDULE:-0 0 * * * *}
       - docusort

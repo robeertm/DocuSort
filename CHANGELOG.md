@@ -7,6 +7,52 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.90.2] - 2026-10-04
+
+### Changed
+
+🔴 **`:latest` no longer moves when someone pushes.** This is the change that
+matters. Every installation follows `:latest` through Watchtower, and the tag
+moved the moment a commit landed on main — before anything had looked at the
+image that was built. The pre-release gate checks an image built *locally*;
+what users receive had never been touched by it. On 04.10. a version that
+could not start on an existing database went out that way.
+
+The order is now:
+
+1. push to main → publishes `:<version>` and `:edge` only
+2. the gate runs **against that published image**, including an upgrade from
+   the previous release on a database that version wrote
+3. only then `promote.yml` (manual) moves `:latest`, and Watchtower
+   distributes it
+
+`promote.yml` does not rebuild: `imagetools create` attaches a second tag to
+the existing manifest, so what was tested is byte for byte what users get.
+
+### Added
+
+🔑 **The gate now upgrades from the version users are running.** The
+existing "upgrade an existing installation" scenario created its data fresh,
+so the database was written by the *new* code and no migration ever ran. The
+new scenario starts the newest release older than the image under test, lets
+it write its database, then puts the new image on top and checks the HTTP
+answer, the log, **and** that the container is not in a restart loop.
+
+Counter-tested against the broken 0.90.0 image: HTTP 000, 7 tracebacks,
+`restarts=10` — **NICHT AUSLIEFERN**. The first version of this check passed
+it, because it used the same version as predecessor and successor; the
+predecessor is now required to be strictly older, read from the image itself.
+
+🔴 **Watchtower gets `--include-restarting`.** Measured on a real machine
+with the very Watchtower the installer ships: a running container is
+`scanned=1, updated=1`, a crash-looping one is **`scanned=0`** — not even
+looked at. Without the flag a broken release stays broken on every
+installation until somebody intervenes by hand. With it, the next hourly run
+picks up the fix.
+
+The release probe now asks whether `latest` points at **exactly this**
+version, instead of whether a tag called `latest` exists somewhere.
+
 ## [0.90.1] - 2026-10-04
 
 ### Fixed
