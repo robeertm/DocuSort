@@ -2,18 +2,10 @@
 {% block title %}{{ doc.subject or doc.filename }} · DocuSort{% endblock %}
 {% block content %}
 
-{# Build the sibling-nav query string once so prev / next links keep
-   the active filter in the URL (lets the user F5 / share the link
-   and stay in the same slice). #}
-{% set _nav_parts = [] %}
-{% if nav_filters.category    %}{% set _ = _nav_parts.append('category='    ~ nav_filters.category    | urlencode) %}{% endif %}
-{% if nav_filters.subcategory %}{% set _ = _nav_parts.append('subcategory=' ~ nav_filters.subcategory | urlencode) %}{% endif %}
-{% if nav_filters.tag         %}{% set _ = _nav_parts.append('tag='         ~ nav_filters.tag         | urlencode) %}{% endif %}
-{% if nav_filters.status      %}{% set _ = _nav_parts.append('status='      ~ nav_filters.status      | urlencode) %}{% endif %}
-{% if nav_filters.year        %}{% set _ = _nav_parts.append('year='        ~ nav_filters.year        | urlencode) %}{% endif %}
-{% if nav_filters.q           %}{% set _ = _nav_parts.append('q='           ~ nav_filters.q           | urlencode) %}{% endif %}
-{% if nav_filters.trash       %}{% set _ = _nav_parts.append('trash=1') %}{% endif %}
-{% set _nav_qs = ('?' ~ _nav_parts | join('&')) if _nav_parts else '' %}
+{# The slice this page was reached through, built once in app.py. Every
+   exit appends it: the back link, the prev/next arrows, the edit form and
+   the trash buttons. #}
+{% set _nav_qs = slice_qs | default('', true) %}
 
 <div class="mb-6 flex flex-col sm:flex-row items-stretch sm:items-start gap-3"
      x-data='{
@@ -26,9 +18,13 @@
      }'
      @keydown.window.arrow-left.prevent="go(prevId)"
      @keydown.window.arrow-right.prevent="go(nextId)">
-  {%- set back_year = (doc.doc_date or doc.created_at)[:4] -%}
-  <a href="/library?year={{ back_year }}&category={{ doc.category }}{% if doc.subcategory %}&subcategory={{ doc.subcategory }}{% endif %}"
-     onclick="if (window.history.length > 1 && document.referrer) { event.preventDefault(); window.history.back(); }"
+  {# 🔴 Back goes to the SLICE, never to the browser history and never to a
+     list rebuilt from this document's own fields. After saving, history
+     holds the pre-edit copy of this very page, so history.back() used to
+     land on a document rather than on the list — and the hand-built link
+     behind it described the archive the document had just been moved INTO,
+     not the 33 under review the visitor came from. #}
+  <a href="/library{{ _nav_qs }}"
      class="btn-ghost shrink-0 self-start !px-3">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
       <path d="m15 18-6-6 6-6"/>
@@ -468,7 +464,7 @@
     {% endif %}
 
     {% if not doc.deleted_at %}
-    <form action="/document/{{ doc.id }}/edit" method="post" class="card p-5 space-y-3"
+    <form action="/document/{{ doc.id }}/edit{{ _nav_qs }}" method="post" class="card p-5 space-y-3"
           x-data='editForm({ category: {{ doc.category | tojson }}, subcategory: {{ (doc.subcategory or "") | tojson }}, subMap: {{ subcategory_map | tojson }}, subLabels: {{ subcategory_labels | tojson }} })'>
       <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.edit_heading') }}</h2>
 
@@ -793,6 +789,11 @@ function receiptEditor(docId, initial, shopTypes, itemCategories, paymentMethods
 }
 
 
+const SLICE_QS = {{ _nav_qs | tojson }};
+// Purging only happens from the trash view, but a direct link to a deleted
+// document carries no trash marker — then still return to the trash.
+const TRASH_QS = {{ (_nav_qs if 'trash=1' in _nav_qs else '?trash=1') | tojson }};
+
 function trashWidget(docId, inTrash) {
   return {
     busy: false, message: '', isError: false,
@@ -810,9 +811,11 @@ function trashWidget(docId, inTrash) {
         this.message = (e.message || String(e));
       } finally { this.busy = false; }
     },
-    del()     { return this._call('delete',  null,                 'trash.deleted',  '/library'); },
-    restore() { return this._call('restore', null,                 'trash.restored', '/document/' + docId); },
-    purge()   { return this._call('purge',   'trash.confirm_purge','trash.purged',   '/library?trash=1'); },
+    // A deleted document cannot be shown any more, so these go to the list.
+    // It has to be the SAME list the visitor came from — one entry shorter.
+    del()     { return this._call('delete',  null,                 'trash.deleted',  '/library' + SLICE_QS); },
+    restore() { return this._call('restore', null,                 'trash.restored', '/document/' + docId + SLICE_QS); },
+    purge()   { return this._call('purge',   'trash.confirm_purge','trash.purged',   '/library' + TRASH_QS); },
   };
 }
 </script>

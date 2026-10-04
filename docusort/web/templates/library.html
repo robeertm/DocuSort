@@ -77,7 +77,10 @@
   hx-get="/library?partial=1{% if trash %}&trash=1{% endif %}"
   hx-trigger="change, keyup delay:400ms from:input[name=q]"
   hx-target="#grid"
-  hx-push-url="true"
+  {# The URL to push comes back as an `HX-Push-Url` header from the route,
+     never from this attribute: `hx-push-url="true"` would push the request
+     URL, and the request URL carries `partial=1` — a browser that later
+     navigates there gets a bare card grid with no page around it. #}
   hx-include="this"
 >
   <!-- Row 1: search + status + reset -->
@@ -115,8 +118,10 @@
     <label class="block">
       <span class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('library.sort_by') }}</span>
       <select name="sort" class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
-        <option value="doc_date"   {% if filter.sort == 'doc_date' %}selected{% endif %}>{{ t('library.sort_doc_date') }}</option>
+        {# „Eingescannt" first: it is the ground order (see
+           LIBRARY_SORT_DEFAULT), and the list should open on it. #}
         <option value="created_at" {% if filter.sort == 'created_at' %}selected{% endif %}>{{ t('library.sort_created_at') }}</option>
+        <option value="doc_date"   {% if filter.sort == 'doc_date' %}selected{% endif %}>{{ t('library.sort_doc_date') }}</option>
         <option value="sender"     {% if filter.sort == 'sender' %}selected{% endif %}>{{ t('library.sort_sender') }}</option>
         <option value="subject"    {% if filter.sort == 'subject' %}selected{% endif %}>{{ t('library.sort_subject') }}</option>
         <option value="category"   {% if filter.sort == 'category' %}selected{% endif %}>{{ t('library.sort_category') }}</option>

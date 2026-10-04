@@ -77,6 +77,20 @@ def _flatten_pricing() -> dict[str, tuple[float, float]]:
 
 MODEL_PRICING: dict[str, tuple[float, float]] = _flatten_pricing()
 
+# ---------------------------------------------------------------------------
+# The library's ground order: newest SCAN first.
+#
+# The archive is fed by a scanner, so "when did this arrive" is the axis a
+# human actually navigates by — `doc_date` is missing or plain wrong on a lot
+# of old scans, which put those documents in a random place in the grid.
+#
+# 🔑 This constant exists so there is exactly ONE answer. The /library route
+# reads it for its default sort and `siblings_of` reads it for the <- / ->
+# keys; if each kept its own default, the grid and the arrow keys would walk
+# the archive in two different orders and the position counter would lie.
+LIBRARY_SORT_DEFAULT = "created_at"
+LIBRARY_DIR_DEFAULT = "desc"
+
 
 @dataclass
 class DocumentRecord:
@@ -1593,24 +1607,38 @@ class Database:
         year: str | None = None,
         query: str | None = None,
         trash: bool = False,
+        order_by: str = LIBRARY_SORT_DEFAULT,
+        sort_dir: str = LIBRARY_DIR_DEFAULT,
+        doc_from: str | None = None,
+        doc_to: str | None = None,
+        scan_from: str | None = None,
+        scan_to: str | None = None,
     ) -> dict[str, Any]:
         """Return prev / next document IDs for `doc_id` inside the same
         filtered listing — used by the document-detail keyboard nav so
         ←/→ jump to the previous / next document in the same Kategorie
         (and Jahr / Tag / etc.) ordering.
 
-        Sort order matches `list_documents` default: doc_date DESC,
-        falling back to created_at when doc_date is null. Returns
-        `position` (1-based), `total`, `prev_id`, `next_id`. Position
-        and prev/next are null when the doc isn't in the filter result
-        — happens when the user navigates directly via URL with a
-        filter the doc doesn't match."""
+        🔑 Every argument that shapes the /library grid belongs here,
+        the SORT and the date ranges included. The arrow keys promise
+        "the next one in the list you came from"; a sibling walk that
+        orders differently than the grid breaks that promise silently
+        and makes the position counter wrong. Defaults therefore match
+        the library's own ground order (LIBRARY_SORT_DEFAULT).
+
+        Returns `position` (1-based), `total`, `prev_id`, `next_id`.
+        Position and prev/next are null when the doc isn't in the
+        filter result — a direct URL visit with a filter the doc does
+        not match, or an edit that just moved it out of the slice."""
         # Reuse list_documents to share the WHERE-clause logic. Pull a
         # generous slice; finance / library accounts max out around a
         # few thousand docs in any one filter, and we only need IDs.
         rows = self.list_documents(
             category=category, subcategory=subcategory, tag=tag,
             status=status, year=year, query=query, trash=trash,
+            order_by=order_by, sort_dir=sort_dir,
+            doc_from=doc_from, doc_to=doc_to,
+            scan_from=scan_from, scan_to=scan_to,
             limit=5000,
         )
         ids = [int(r["id"]) for r in rows]
@@ -1621,8 +1649,10 @@ class Database:
                 "position": None, "total": len(ids),
                 "prev_id": None, "next_id": None,
             }
-        # Older entries are LATER in the list (DESC sort). For UX we
-        # treat ←/→ as natural reading order: ← = older, → = newer.
+        # In the default DESC order the older entries sit LATER in the
+        # list, so "one step further down the grid" is ← . The grid is
+        # what the user sees, so ← / → always mean "previous / next
+        # CARD", whichever way the chosen sort happens to run.
         prev_id = ids[idx + 1] if idx + 1 < len(ids) else None
         next_id = ids[idx - 1] if idx - 1 >= 0           else None
         return {
@@ -1733,12 +1763,21 @@ class Database:
                 cl.append(f"{prefix}tags LIKE ?"); pr.append(tag_like)
             if status:
                 cl.append(f"{prefix}status = ?"); pr.append(status)
-            else:
+            elif not trash:
                 # A `duplicate` row is not a document — it is the note
                 # "you uploaded this file again", pointing at the copy that
                 # is already filed. Re-uploading a Sammeldownload of 130
                 # statements produced 116 of them and buried the library.
                 # They stay reachable via ?status=duplicate.
+                #
+                # 🔴 ... but NOT in the trash. The trash is the one place
+                # whose whole job is "show me everything that was removed,
+                # so I can put it back". Hiding a status there made the
+                # sidebar count 161 while the grid listed 33, and the 128
+                # it swallowed were duplicate notes — exactly the rows a
+                # visitor would come to the trash to undo. A counter that
+                # promises more than the list delivers is worse than a long
+                # list: it hides the existence of the thing.
                 cl.append(f"{prefix}status != 'duplicate'")
             if year == "unknown":
                 cl.append(f"({prefix}doc_date IS NULL OR {prefix}doc_date = '')")

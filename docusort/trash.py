@@ -90,8 +90,40 @@ def restore_document(doc_id: int, settings: AppSettings, db: Database) -> dict:
         raise ValueError("document is not in trash")
 
     source = Path(doc["library_path"])
+
+    # 🔴 RESTORE HAS TO MIRROR DELETE, BRANCH FOR BRANCH (04.10.2026)
+    #
+    # delete_document has a branch for "the file was already gone": it flags
+    # the row and leaves library_path on the ORIGINAL location, moving
+    # nothing. Restore had no matching branch — it demanded a file under
+    # _Trash/ and raised otherwise. So a document that went into the trash
+    # through that branch could never come out again: the button in the UI
+    # answered with an error, every time, for good. Six of Robert's rows sat
+    # behind that one-way door.
+    #
+    # Undoing a delete means putting the row back exactly as it stood, which
+    # for those rows is: clear deleted_at, leave the path alone.
+    try:
+        im_papierkorb = source.is_relative_to(_trash_root(settings))
+    except (ValueError, OSError):
+        im_papierkorb = False
+
+    if not im_papierkorb:
+        db.mark_restored(doc_id, str(source))
+        logger.info("Restored doc %d (file was already missing when trashed): %s",
+                    doc_id, source)
+        return {"doc_id": doc_id, "library_path": str(source),
+                "file_missing": not source.exists()}
+
     if not source.exists():
-        raise ValueError(f"trash file missing: {source}")
+        # The row names a trash path, but the file is not there — somebody
+        # removed it outside the app. The row still belongs back in the
+        # library; say so instead of refusing to undo.
+        ziel = _restore_target(settings, source)
+        db.mark_restored(doc_id, str(ziel))
+        logger.warning("Restored doc %d but the file is gone from the trash: %s",
+                       doc_id, source)
+        return {"doc_id": doc_id, "library_path": str(ziel), "file_missing": True}
 
     target = _uniquify(_restore_target(settings, source))
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +131,7 @@ def restore_document(doc_id: int, settings: AppSettings, db: Database) -> dict:
 
     db.mark_restored(doc_id, str(target))
     logger.info("Restored doc %d: %s -> %s", doc_id, source, target)
-    return {"doc_id": doc_id, "library_path": str(target)}
+    return {"doc_id": doc_id, "library_path": str(target), "file_missing": False}
 
 
 def purge_document(doc_id: int, settings: AppSettings, db: Database) -> dict:

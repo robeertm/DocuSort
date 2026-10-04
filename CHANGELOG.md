@@ -7,6 +7,80 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.87.0] - 2026-10-04
+
+### Fixed
+
+🔴 **One click on one duplicate group trashed every group.** The per-group
+button sent `{"keepers": {"<hash>": <id>}}` and meant *only this group*. The
+all-groups button sent `{}` and meant *every group*. The endpoint read a
+missing hash as "no keeper picked, so keep the oldest and trash the rest" — so
+a missing key meant two opposite things and the server could not tell which.
+
+Measured in the live database: **127 documents trashed in one minute** from a
+single click. Nothing was destroyed (they were content-identical copies and the
+delete is reversible), and all 127 have been restored, but it was not what the
+visitor asked for.
+
+The keys of `keepers` are now the scope. A group that is not named is not
+touched, and a request that names nothing does nothing.
+
+🔴 **The trash counted 161 and listed 33.** A `duplicate` row is a note
+("you uploaded this file again"), and keeping those out of the library is
+deliberate. The rule also applied to the trash — where it swallowed the 128
+rows somebody would come to the trash to put back. A counter that promises more
+than the list delivers is worse than a long list: it hides that the thing
+exists at all. The rule now applies to the library only.
+
+🔴 **A document whose file was already gone could never leave the trash.**
+`delete_document` has a branch for that case: it flags the row and moves
+nothing. `restore_document` had no matching branch — it demanded a file under
+`_Trash/` and raised otherwise, so the restore button answered with an error
+every time, for good. Restore now mirrors delete branch for branch.
+
+🔴 **Leaving a document dropped you into the whole archive.** Opening one of
+the 33 under review and then saving or deleting it landed you in the full
+library instead of back in the list. The filter was handed to the document page
+on the way in and ignored by every way out: the back link rebuilt a path from
+the document's own fields, the save redirect dropped the query string, and
+delete was hardcoded to `/library`.
+
+A view is a **slice** — filter *and* order — and it is now built in one place
+(`_slice_qs`) that the cards, the back link, the edit form and the trash
+buttons all read. Saving a document that left the slice returns to the list,
+one entry shorter, because a document that is no longer in the list has no
+neighbours there.
+
+🔴 **The browser's back button landed on a bare grid of cards.** Changing a
+filter is an htmx request against `/library?partial=1&…`, which answers with
+the card grid alone — and `hx-push-url="true"` put that request URL into the
+browser history. Navigating back there got a fragment with no header, no filter
+bar and no navigation. The URL to push now comes from the route as an
+`HX-Push-Url` header and is always the address of a page.
+
+A money formatter no longer takes a page down: `cost_usd` is NULL on rows older
+than cost tracking, and both `usd` and `eur` raised on it mid-render. They
+answer `—`, like every other money field. `eur` also formats German now — it
+printed `0.93 €` next to `1.038,47 €` on the same line.
+
+### Changed
+
+- The library opens sorted by **scan date**, newest first. An archive fed by a
+  scanner is navigated by when something arrived; `doc_date` is missing or
+  plain wrong on many old scans, which scattered them through the grid. One
+  constant (`LIBRARY_SORT_DEFAULT`) answers for the grid and for the ←/→ keys,
+  so the position counter can no longer describe a different list than the one
+  on screen.
+- `siblings_of` takes the sort and the date ranges, not just the filters.
+
+### Added
+
+- `pruefstaende/probe_steuerung.py` — 49 checks over a real app run: the trash
+  lists what it counts, one click clears one group, the slice survives every
+  exit, the arrow keys walk the grid's order, the pushed URL is a page, and
+  delete/restore are inverses. Each fix was reverted in turn and the probe
+  confirmed red.
+
 ## [0.86.6] - 2026-10-04
 
 ### Fixed
