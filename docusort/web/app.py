@@ -3356,6 +3356,80 @@ def create_app(
             "extra_count": sum(len(g["docs"]) - 1 for g in groups),
         }
 
+    # ---------- Absender: Schreibweisen zusammenlegen ----------
+    # 🔑 WARUM (04.10.2026, aus dem Audit am echten Archiv): dort standen
+    #    „Ostsächsische Sparkasse Dresden" (271 Dokumente), die gleiche Bank
+    #    ohne Umlaut (10) und „Ihre Ostsächsische …" (3) nebeneinander. Wer
+    #    nach der ersten Schreibweise filtert, bekommt 13 Dokumente seiner
+    #    Hausbank nicht zu sehen — und merkt es nicht, denn eine Liste sagt
+    #    nie, was ihr fehlt.
+    #
+    # 🔴 ES WIRD NICHTS AUTOMATISCH ZUSAMMENGELEGT. Zwei Versicherungssparten
+    #    desselben Hauses liegen dicht beieinander und sind trotzdem zwei
+    #    Absender. Die Messung findet Kandidaten; entscheiden tut ein Mensch.
+    @app.get("/api/senders/groups")
+    def api_sender_groups():
+        from .. import aehnlichkeit as _ae
+        gruppen = _ae.gruppen(db.senders_with_counts())
+        return {"gruppen": gruppen,
+                "umzuziehen": sum(g["umzuziehen"] for g in gruppen)}
+
+    @app.post("/api/senders/merge")
+    def api_sender_merge(payload: dict):
+        """Mehrere Schreibweisen auf eine zusammenlegen.
+
+        Benennt auch die DATEIEN um — der Absender steht im Dateinamen, und
+        zwei Wahrheiten darueber, wie jemand heisst, waren der ganze Anlass.
+        Jedes Dokument einzeln: scheitert eines, laufen die anderen weiter
+        und das gescheiterte wird benannt."""
+        from ..organizer import target_path
+        nach = " ".join(str(payload.get("nach") or "").split())
+        von = [" ".join(str(v).split()) for v in (payload.get("von") or [])]
+        von = [v for v in von if v and v != nach]
+        if not nach or not von:
+            raise HTTPException(400, "Bitte Ziel und mindestens eine andere "
+                                     "Schreibweise angeben.")
+        if len(nach) > 120:
+            raise HTTPException(400, "Der Name ist zu lang.")
+
+        bewegt, fehler = [], []
+        for schreibweise in von:
+            for doc in db.documents_by_sender(schreibweise):
+                try:
+                    alt_pfad = Path(doc["library_path"])
+                    neu_pfad = target_path(
+                        settings.paths.library,
+                        doc.get("doc_date") or doc["created_at"][:10],
+                        doc["category"], nach, doc.get("subject") or "",
+                        settings.filename_template,
+                        settings.max_filename_length,
+                        alt_pfad.suffix,
+                        subcategory=doc.get("subcategory") or "",
+                        current_path=alt_pfad,
+                    )
+                    if neu_pfad != alt_pfad and alt_pfad.exists():
+                        neu_pfad.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(alt_pfad), str(neu_pfad))
+                    elif not alt_pfad.exists():
+                        # 🔑 Die Zeile trotzdem richtigstellen. Eine fehlende
+                        #    Datei ist ein eigenes Problem und kein Grund,
+                        #    den Absender falsch stehen zu lassen.
+                        neu_pfad = alt_pfad
+                    db.update_sender_only(doc["id"], sender=nach,
+                                          filename=neu_pfad.name,
+                                          library_path=str(neu_pfad))
+                    bewegt.append(doc["id"])
+                except Exception as exc:          # noqa: BLE001
+                    fehler.append({"doc_id": doc["id"], "error": str(exc)})
+                    logger.warning("Absender %r -> %r fuer Dokument %s "
+                                   "fehlgeschlagen: %s",
+                                   schreibweise, nach, doc["id"], exc)
+        logger.info("Absender zusammengelegt: %s -> %r (%d Dokument(e), "
+                    "%d Fehler)", ", ".join(repr(v) for v in von), nach,
+                    len(bewegt), len(fehler))
+        return {"ok": True, "nach": nach, "bewegt": len(bewegt),
+                "ids": bewegt, "fehler": fehler}
+
     # ---------- Kategorien anlegen, bestaetigen, entfernen ----------
     @app.get("/api/categories")
     def api_categories():
@@ -3596,10 +3670,26 @@ def create_app(
         from .. import activity
         snap = activity.snapshot()
         with db._lock:
+            # 🔴 HIER STAND `status IN ('pending_review','processing')` — und
+            #    `processing` wird in diese Spalte NIE geschrieben. Es gibt
+            #    das Wort nur als Antwort von `/api/status/<name>` fuer eine
+            #    Datei, die noch im Eingang liegt und ueberhaupt keine Zeile
+            #    in der Datenbank hat. Die Bedingung konnte also nie greifen.
+            #
+            #    Dieselbe Familie wie der Vertrag, der `done` beschrieb und
+            #    `filed` lieferte: ein Name, den man fuer einen Zustand haelt,
+            #    weil er anderswo einer ist. Ein Zaehler, der einen Wert
+            #    abfragt, den niemand setzt, ist still falsch — er ist nicht
+            #    leer, er ist UNVOLLSTAENDIG, und das sieht man ihm nicht an.
+            #
+            #    Was uebrig bleibt, ist ein echter Zustand: ein Auszug, der
+            #    auf die Freigabe wartet, bevor er an einen Wolken-Anbieter
+            #    geht (`finance.review_before_send`). Die Dokumente, die
+            #    gerade WIRKLICH gerechnet werden, stehen seit 0.88.1 je
+            #    Rechenort darunter — gemessen, nicht aus der Spalte geraten.
             queue = db._conn.execute(
                 """SELECT COUNT(*) FROM documents
-                   WHERE deleted_at IS NULL
-                     AND status IN ('pending_review','processing')"""
+                   WHERE deleted_at IS NULL AND status = 'pending_review'"""
             ).fetchone()[0]
         snap["pending_or_processing"] = int(queue or 0)
 

@@ -31,10 +31,10 @@ benutzen. Damit kann die KI Kategorien beitragen, nur ohne den Haufen.
 """
 from __future__ import annotations
 
-import difflib
 import re
-import unicodedata
 from typing import Any, Iterable
+
+from .aehnlichkeit import AEHNLICH_AB, gleich as namen_gleich, schlicht as _schlicht, zu_aehnlich
 
 # Mehr als das passt in keine Auswahlliste und in keinen Dateinamen mehr.
 MAX_NAME = 40
@@ -44,41 +44,13 @@ MAX_BESCHREIBUNG = 400
 #    aus ihm heraus zeigen kann, darf gar nicht erst entstehen.
 _VERBOTEN = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
 
-# Ab hier gilt ein Vorschlag als blosse Schreibvariante von etwas, das es
-# schon gibt. 0,86 trennt in der Messung Versicherungen/Versicherung (0,96)
-# sauber von Versicherung/Vertraege (0,35).
-AEHNLICH_AB = 0.86
+# 🔑 Wann zwei Namen dasselbe sind, beantwortet `aehnlichkeit.py` — fuer
+#    Kategorien UND fuer Absender. Zwei Antworten auf dieselbe Frage waeren
+#    zwei Schwellen, die irgendwann auseinanderlaufen.
 
 
 class NameFehler(ValueError):
     """Der Name taugt nicht — die Meldung ist fuer Menschen gedacht."""
-
-
-def _schlicht(name: str) -> str:
-    """Zum Vergleichen: ohne Gross-/Kleinschreibung, ohne Akzente, ohne
-    doppelte Leerzeichen. NICHT zum Speichern — gespeichert wird, was der
-    Mensch geschrieben hat."""
-    ohne = unicodedata.normalize("NFKD", name)
-    ohne = "".join(c for c in ohne if not unicodedata.combining(c))
-    return " ".join(ohne.casefold().split())
-
-
-def namen_gleich(a: str, b: str) -> bool:
-    return _schlicht(a) == _schlicht(b)
-
-
-def zu_aehnlich(name: str, vorhandene: Iterable[str]) -> str:
-    """Der vorhandene Name, der dem neuen zu nahe kommt — sonst ''.
-
-    🔑 Gemessen statt geraten: `difflib` gibt eine Zahl, und die Schwelle
-    steht oben mit den Werten, an denen sie gewaehlt wurde."""
-    ziel = _schlicht(name)
-    bester, beste = "", 0.0
-    for v in vorhandene:
-        wert = difflib.SequenceMatcher(None, ziel, _schlicht(v)).ratio()
-        if wert > beste:
-            bester, beste = v, wert
-    return bester if beste >= AEHNLICH_AB else ""
 
 
 def pruefe_namen(name: str, vorhandene: Iterable[str]) -> str:

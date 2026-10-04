@@ -7,6 +7,38 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.89.0] - 2026-10-04
+
+### Added
+
+**The same organisation, filed under two names.** Measured on a real archive
+of 853 documents: *Ostsächsische Sparkasse Dresden* (271 documents), the same
+bank written without the umlaut (10), and the same bank with a word in front
+(3) stood side by side. Filtering by the common spelling hides thirteen
+documents of your own bank — and nothing tells you, because a list never says
+what is missing from it. Five such groups in total, nineteen documents.
+
+The dashboard now shows those groups when there are any, and merging them onto
+one spelling takes a click. It renames the **files** too: the sender is part of
+the filename, and two truths about what somebody is called were the whole
+point.
+
+🔴 **Nothing is merged on its own.** Two insurance branches of the same company
+sit close together and are still two senders — on the real data,
+*Sparkassen-Versicherung Sachsen Lebensversicherung* and *… Allgemeine* score
+0.80, and a company and its parent (*DekaBank* / *DekaBank Deutsche
+Girozentrale*) score 0.42. The measurement finds candidates; a person decides.
+Merging is admin-only: it rewrites many documents at once.
+
+🔑 The merge uses a **narrower write path** than editing a document by hand.
+`update_metadata` sets the status to *filed*, because a human has just looked
+at the document — but nobody looked at anything when a spelling was aligned, so
+a document waiting for review has to stay waiting.
+
+The question *are these two names the same thing written differently* now has
+exactly one answer (`aehnlichkeit.py`), used both for senders and for category
+names. Two thresholds for one question drift apart eventually.
+
 ## [0.88.1] - 2026-10-04
 
 ### Changed
