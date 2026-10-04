@@ -940,6 +940,7 @@
   "nav.close": "Fermer",
   "nav.dashboard": "Tableau de bord",
   "nav.finance": "Finances",
+  "nav.finance_overview": "Vue d'ensemble",
   "nav.fixed": "Charges fixes",
   "nav.home": "Accueil",
   "nav.invoices": "Factures",
