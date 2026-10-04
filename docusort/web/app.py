@@ -3602,6 +3602,42 @@ def create_app(
                      AND status IN ('pending_review','processing')"""
             ).fetchone()[0]
         snap["pending_or_processing"] = int(queue or 0)
+
+        # WO gerechnet wird — nicht nur OB.
+        #
+        # 🔴 Das Abzeichen in der Kopfleiste sagte im Leerlauf dreimal
+        #    dasselbe: Leerlauf, 0 aktive Aufrufe, 0 wartend. Drei Zeilen fuer
+        #    „es passiert nichts". Seit es mehrere Rechenorte gibt, ist die
+        #    nuetzliche Frage eine andere — welcher Rechner arbeitet, wie
+        #    schnell ist er, wie viele warten dort. Auf der Startseite steht
+        #    das auf den Maschinenkarten; dieses Abzeichen haengt aber in
+        #    JEDER Seite, und genau deshalb lohnt es sich dort.
+        #
+        # 🔑 Nur `ai_pool.stand()`, NICHT `_ai_ziel_kurz()`. Letzteres misst
+        #    die Rechenorte ueber das Netz; diese Antwort wird von jeder
+        #    offenen Seite alle drei Sekunden geholt, und das waere dann
+        #    Messverkehr ohne Anlass. `stand()` liest nur, was ohnehin im
+        #    Speicher steht: gemessene Dauern, belegte Tore, laufende Arbeit.
+        try:
+            from .. import ai_pool as _p
+            liste, key = _ai_ziele_jetzt()
+            roh = _p.stand(liste)
+            snap["orte"] = [
+                {"key": t.key,
+                 "label": t.label or t.model or t.provider,
+                 "aktiv": t.key == key,
+                 "s_pro_dokument": (roh.get(t.key) or {}).get("s_pro_dokument"),
+                 "wartend": (roh.get(t.key) or {}).get("wartend") or 0,
+                 "rechnet_seit_s": (roh.get(t.key) or {}).get("rechnet_seit_s"),
+                 "rechnet_an": (roh.get(t.key) or {}).get("rechnet_an") or "",
+                 "zustand": (roh.get(t.key) or {}).get("zustand") or ""}
+                for t in liste
+            ]
+            snap["verteilen"] = getattr(settings.ai, "verteilen", "auto")
+        except Exception:
+            # 🔴 Nie werfen. Dieses Abzeichen haengt in jeder Seite — ein
+            #    Fehler hier duerfte nie eine Seite kosten.
+            snap["orte"] = []
         return snap
 
     # ---------- Bulk operations ----------

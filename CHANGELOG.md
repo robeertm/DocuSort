@@ -7,6 +7,33 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.88.1] - 2026-10-04
+
+### Changed
+
+**The AI badge in the header said the same thing three times when idle.**
+*AI idle*, *calls in flight: 0*, *waiting: 0* — three lines for "nothing is
+happening". A counter that only means something while work is running now
+appears only while work is running.
+
+What stands there instead is the question that has mattered since documents
+started being distributed across machines: **which machine is computing, and
+how fast is it**. The dashboard shows that on its machine cards, but this badge
+hangs in *every* page, and there it was the one place the answer was missing.
+Each compute location gets a line with a status dot, its name, and either how
+long it has been working on the current document or its measured seconds per
+document.
+
+The pulsing dot now also reacts to a compute location being busy, not only to
+calls started by this process — with several machines in play, work happening
+elsewhere is still work.
+
+The endpoint behind the badge does **not** measure over the network for this.
+It is fetched by every open page every three seconds; the figures come from
+`ai_pool.stand()`, which reads only what is already in memory — measured
+durations, occupied gates, work in flight. Probing the machines from here would
+have been traffic with no occasion.
+
 ## [0.88.0] - 2026-10-04
 
 ### Added
