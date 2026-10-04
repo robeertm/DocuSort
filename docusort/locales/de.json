@@ -802,6 +802,7 @@
   "hub.tile.empty_suffix": "ohne Buchungen",
   "hub.tile.failed": "Fehler",
   "hub.tile.filed": "Abgelegt",
+  "hub.tile.reuploaded_suffix": "erneut hochgeladen",
   "hub.tile.review": "Review",
   "hub.tile.statements": "Auszüge",
   "hub.title": "Aktivität",

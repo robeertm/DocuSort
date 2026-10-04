@@ -618,10 +618,21 @@
              :class="(state.counts && state.counts.failed > 0) ? 'text-rose-300' : ''"
              x-text="(state.counts && state.counts.failed) || 0"></div>
       </a>
+      {# 🔴 Die grosse Zahl ist, was /duplicates auflistet — dorthin fuehrt
+         die Kachel. Vorher stand hier `counts.duplicate`: Zeilen mit
+         status='duplicate', also „schon mal hochgeladen". Das ist eine
+         andere Frage, und sie sagte 3, waehrend die Seite dahinter leer
+         war. Der Startwert kommt vom Server, damit der erste Anstrich
+         stimmt und nicht erst die naechste Abfrage ihn berichtigt. #}
       <a href="/duplicates" class="card p-3 hover:border-ink-600">
         <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.duplicate') }}</div>
         <div class="mt-1 text-2xl font-semibold tabular-nums text-ink-300"
-             x-text="(state.counts && state.counts.duplicate) || 0"></div>
+             x-text="(state.counts && state.counts.duplicate_groups !== undefined)
+                      ? state.counts.duplicate_groups : {{ duplicate_groups }}"></div>
+        <div class="text-[10px] text-ink-500 mt-0.5"
+             x-show="state.counts && state.counts.duplicate > 0" x-cloak>
+          <span x-text="state.counts && state.counts.duplicate"></span> {{ t('hub.tile.reuploaded_suffix') }}
+        </div>
       </a>
       <a href="/finance" class="card p-3 hover:border-cyan-500/40">
         <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('hub.tile.statements') }}</div>

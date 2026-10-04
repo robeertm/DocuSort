@@ -802,6 +802,7 @@
   "hub.tile.empty_suffix": "without bookings",
   "hub.tile.failed": "Failed",
   "hub.tile.filed": "Filed",
+  "hub.tile.reuploaded_suffix": "re-uploaded",
   "hub.tile.review": "Review",
   "hub.tile.statements": "Statements",
   "hub.title": "Activity",

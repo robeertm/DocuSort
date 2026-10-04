@@ -802,6 +802,7 @@
   "hub.tile.empty_suffix": "sin movimientos",
   "hub.tile.failed": "Fallidos",
   "hub.tile.filed": "Archivados",
+  "hub.tile.reuploaded_suffix": "resubidos",
   "hub.tile.review": "Revisión",
   "hub.tile.statements": "Extractos",
   "hub.title": "Actividad",

@@ -898,19 +898,10 @@ def create_app(
         stats = db.stats()
         recent = db.list_documents(limit=8, order_by="created_at")
         review_count = db.count_documents(status="review")
-        # Cheap library-wide duplicate count (groups, not docs) for the
-        # dashboard hint. Same query the /duplicates page uses, just
-        # the COUNT.
+        # Die Zahl fuer die Kachel — damit der erste Anstrich schon stimmt
+        # und nicht erst die naechste Abfrage sie richtigstellt.
         with db._lock:
-            dup_row = db._conn.execute(
-                """SELECT COUNT(*) AS n FROM (
-                     SELECT 1 FROM documents
-                     WHERE deleted_at IS NULL
-                       AND content_hash IS NOT NULL AND content_hash != ''
-                     GROUP BY content_hash HAVING COUNT(*) > 1
-                   )"""
-            ).fetchone()
-            duplicate_groups = int(dup_row["n"]) if dup_row else 0
+            duplicate_groups = _duplicate_group_count_ohne_schloss()
         return templates.TemplateResponse(
             request, "dashboard.html",
             {**base_ctx(request), "stats": stats, "recent": recent,
@@ -2246,6 +2237,11 @@ def create_app(
                     "SELECT COUNT(*) FROM documents "
                     "WHERE deleted_at IS NULL AND category != '_csv_container' AND status = 'duplicate'"
                 ).fetchone()[0]),
+                # Was /duplicates wirklich auflistet. `duplicate` daneben ist
+                # eine andere Frage — „wie oft wurde etwas erneut
+                # hochgeladen" — und bleibt als Nebenzeile sichtbar.
+                # 🔴 Ohne Schloss: dieser Block laeuft bereits unter db._lock.
+                "duplicate_groups": _duplicate_group_count_ohne_schloss(),
                 "kontoauszug": int(db._conn.execute(
                     "SELECT COUNT(*) FROM documents "
                     "WHERE deleted_at IS NULL AND category = 'Kontoauszug'"
@@ -3241,17 +3237,55 @@ def create_app(
             },
         )
 
+    # 🔑 Die Zahl auf der Kachel und die Liste auf /duplicates MUESSEN
+    # dieselbe Frage beantworten. Die Kachel zaehlte Zeilen mit
+    # status='duplicate' — das ist die Notiz „du hast diese Datei nochmal
+    # hochgeladen", eine Spur aus der Vergangenheit — und verlinkte auf
+    # /duplicates, das etwas anderes auflistet: Dateien, die sich JETZT
+    # Byte fuer Byte gleichen. Beide Zahlen koennen beliebig auseinander
+    # laufen; am 04.10.2026 sagte die Kachel 3, und die Seite dahinter war
+    # leer. Eine Kachel, die Arbeit anzeigt, die es nicht gibt, schickt
+    # einen in eine Sackgasse.
+    #
+    # Darum hier EINE Stelle fuer die Bedingung, von der Zaehlung und der
+    # Liste gelesen. Nicht `_duplicate_groups()` fuer die Zaehlung nehmen:
+    # die Startseite fragt alle 2-3 s, und die Liste holt alle Spalten
+    # jeder Kopie.
+    _DUP_GRUPPEN_WHERE = ("deleted_at IS NULL "
+                          "AND content_hash IS NOT NULL AND content_hash != ''")
+
+    def _duplicate_group_count_ohne_schloss() -> int:
+        """Wie viele Hash-Gruppen /duplicates gerade auflisten wuerde.
+
+        🔴 DER AUFRUFER MUSS `db._lock` HALTEN — daher der Name.
+
+        Die erste Fassung nahm das Schloss selbst. Einer der beiden Aufrufer
+        sitzt aber mitten in einem `with db._lock:`-Block (die Zaehler in
+        /api/dashboard), und `db._lock` ist ein `threading.Lock`, kein
+        `RLock`: dieselbe Sperre ein zweites Mal zu nehmen blockiert fuer
+        immer. Die Startseite fragt diese Antwort alle 2-3 s ab, also waere
+        die Anwendung binnen Minuten an haengenden Threads erstickt.
+
+        Gefunden, weil der Pruefstand nicht rot wurde, sondern STEHEN BLIEB —
+        darum misst er diesen Aufruf jetzt mit einer Zeitgrenze."""
+        row = db._conn.execute(
+            f"""SELECT COUNT(*) AS n FROM (
+                  SELECT 1 FROM documents WHERE {_DUP_GRUPPEN_WHERE}
+                  GROUP BY content_hash HAVING COUNT(*) > 1
+                )"""
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
     def _duplicate_groups() -> list[dict]:
         """Return all hash collisions across non-deleted documents.
         Each group is sorted oldest → newest so the UI can default to
         'keep first, trash rest' without further work."""
         with db._lock:
             hash_rows = db._conn.execute(
-                """SELECT content_hash, COUNT(*) AS n FROM documents
-                   WHERE deleted_at IS NULL
-                     AND content_hash IS NOT NULL AND content_hash != ''
-                   GROUP BY content_hash HAVING n > 1
-                   ORDER BY n DESC, content_hash"""
+                f"""SELECT content_hash, COUNT(*) AS n FROM documents
+                    WHERE {_DUP_GRUPPEN_WHERE}
+                    GROUP BY content_hash HAVING n > 1
+                    ORDER BY n DESC, content_hash"""
             ).fetchall()
             groups: list[dict] = []
             for hr in hash_rows:
