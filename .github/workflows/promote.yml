@@ -1,0 +1,66 @@
+# Setzt `:latest` auf eine Fassung, die bereits VEROEFFENTLICHT und GEPRUEFT
+# ist. Getrennt vom Bauen, und ausdruecklich von Hand ausgeloest.
+#
+# 🔴 WARUM ES DIESEN SCHRITT GIBT (04.10.2026)
+#
+# `docker-publish.yml` setzte `:latest` bei jedem Push nach main. Jede
+# Kundeninstallation folgt diesem Etikett ueber Watchtower. Eine Fassung, die
+# auf bestehenden Datenbanken nicht startete, war damit binnen Minuten
+# ueberall — geprueft worden war nur ein lokal gebautes Abbild.
+#
+# Die Reihenfolge ist jetzt:
+#   1. Push nach main  ->  `:<version>` und `:edge` werden veroeffentlicht
+#   2. `vor_auslieferung.py` faehrt GEGEN DIESES ABBILD, auch den Aufstieg
+#      von der vorigen Fassung auf einer BESTEHENDEN Datenbank
+#   3. erst dann dieser Schritt  ->  `:latest` wandert, Watchtower verteilt
+#
+# Es wird NICHT neu gebaut: `imagetools create` haengt das vorhandene
+# Manifest an ein zweites Etikett. Was geprueft wurde, ist Byte fuer Byte
+# das, was Kunden bekommen.
+name: Promote to latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Die geprüfte Version, z. B. 0.90.2"
+        required: true
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Repository name in lower case
+        id: repo
+        run: echo "slug=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Die Fassung muss es wirklich geben
+        run: |
+          set -euo pipefail
+          IMG="ghcr.io/${{ steps.repo.outputs.slug }}:${{ inputs.version }}"
+          echo "prüfe $IMG"
+          docker buildx imagetools inspect "$IMG" > /dev/null
+          echo "vorhanden."
+
+      - name: :latest auf diese Fassung setzen
+        run: |
+          set -euo pipefail
+          SLUG="ghcr.io/${{ steps.repo.outputs.slug }}"
+          docker buildx imagetools create -t "$SLUG:latest" "$SLUG:${{ inputs.version }}"
+          echo "::notice::latest zeigt jetzt auf ${{ inputs.version }}"
+
+      - name: Nachlesen, worauf :latest zeigt
+        run: |
+          docker buildx imagetools inspect "ghcr.io/${{ steps.repo.outputs.slug }}:latest" \
+            | head -20

@@ -56,9 +56,25 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          # 🔴 HIER STEHT KEIN `:latest` MEHR (04.10.2026).
+          #
+          # Es stand hier, und damit wanderte das Etikett, dem jede
+          # Kundeninstallation folgt, in dem Moment, in dem jemand nach main
+          # pusht — also BEVOR irgendetwas das gebaute Abbild geprüft hat.
+          # Das Auslieferungstor prüft ein LOKAL gebautes Abbild; was Kunden
+          # bekommen, hat es nie angefasst.
+          #
+          # Am 04.10. ging so eine Fassung hinaus, die auf bestehenden
+          # Datenbanken nicht startete. Watchtower verteilte sie um 20:36;
+          # die Installationen standen still — und wären NICHT von selbst
+          # zurückgekommen (Watchtower sieht abstürzende Container nicht).
+          #
+          # Jetzt veröffentlicht ein Push nur die Versionsmarke und `edge`.
+          # `:latest` setzt `promote.yml` — von Hand, nach grünem Tor gegen
+          # GENAU DIESES veröffentlichte Abbild.
           tags: |
-            ghcr.io/${{ steps.repo.outputs.slug }}:latest
             ghcr.io/${{ steps.repo.outputs.slug }}:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ steps.repo.outputs.slug }}:edge
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
