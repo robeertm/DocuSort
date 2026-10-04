@@ -13,7 +13,10 @@
       {% else %}{{ t('library.subtitle_default') }}{% endif %}
     </p>
   </div>
-  <div class="flex items-center gap-2">
+  {# 🔴 Ohne `flex-wrap` schob diese Reihe auf dem Handy ueber den Rand:
+     „Alle neu einordnen" und „Als ZIP exportieren" nebeneinander sind
+     breiter als 390 px. #}
+  <div class="flex items-center gap-2 flex-wrap">
     {% if not trash and filter.status == 'review' %}
       <button type="button" x-data="{ running: false, done: 0, total: 0 }"
               x-init="
@@ -27,18 +30,20 @@
               "
               @click="
                 if (running) return;
-                if (!confirm('Re-classify every document currently in review?')) return;
+                if (!confirm(tr('library.retry_all_confirm'))) return;
                 fetch('/api/library/retry-all-review', { method: 'POST' })
                   .then(r => r.json())
-                  .then(d => { if (d.started === false && d.reason !== 'queue empty') alert('Already running.'); });
+                  .then(d => { if (d.started === false && d.reason !== 'queue empty') alert(tr('library.retry_all_busy')); });
               "
               :disabled="running"
               class="btn-ghost text-amber-300 hover:bg-amber-500/10 disabled:opacity-60 disabled:cursor-not-allowed">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
           <path d="M3 12a9 9 0 1 0 3-6.708"/><path d="M3 4v5h5"/>
         </svg>
-        <span x-show="!running">Re-queue all review</span>
-        <span x-show="running" x-cloak x-text="`Re-classifying… ${done}/${total}`"></span>
+        <span x-show="!running">{{ t('library.retry_all') }}</span>
+        <span x-show="running" x-cloak
+              x-text="tr('library.retry_all_running')
+                        .replace('{done}', done).replace('{total}', total)"></span>
       </button>
     {% endif %}
     {% if trash %}

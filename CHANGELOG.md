@@ -7,6 +7,63 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.89.2] - 2026-10-04
+
+### Fixed
+
+🔴 **The new sender card did not fit on a phone — and then it was still ugly.**
+The merge button carried the full sender name, which ran to 548 px inside a
+390 px screen with the button beside it off the edge entirely. Reported with a
+screenshot rather than by a check, although the same thing had been measured
+once before with a throwaway script that is long gone.
+
+Fixing the overflow was not enough, and the second screenshot said so. The card
+has been rebuilt against the house's own pattern:
+
+- The button no longer repeats the name that is on the line above it in bold.
+- The native checkbox was the loudest thing on the card and read as *done*
+  rather than *chosen*. It is a small square now, the same one the deadlines
+  card uses.
+- **A chooser only appears when there is something to choose.** With exactly
+  one other spelling the card *is* the decision, and a box in front of it is a
+  question already answered — which is how ten of twelve groups look.
+- 🔴 The whole row is the touch target, not the square. The house sets a 44 px
+  minimum on buttons for thumbs; an 18 px box declared as a button gets
+  stretched to 44 px and looks like a pill. (The deadlines card has exactly
+  that flaw.)
+- 🔴 `h-[18px]` was **not in the built stylesheet**, so the class did nothing,
+  the square had no size and collapsed onto its content: an empty box rendered
+  as a dot. `h-5 w-5` is there. Every class on the card was then checked
+  against the built sheet.
+- An empty box draws no tick at all rather than a transparent one, the two
+  actions sit side by side instead of stacking full width, and the list is
+  capped with its own scroll so twelve groups do not push the rest of the
+  dashboard off the screen.
+
+🔴 **Two TypeErrors on every single page load, behind a hidden box.** `x-show`
+hides an element; it does **not** stop the expressions inside it from being
+evaluated. The dashboard read `sys.host` and `sys.kerne` while `sys` was still
+`null` — and a third, `lokalFortschritt.prozent`, did the same. None of them
+broke anything visible, which is exactly the problem: errors nobody sees bury
+the ones you need to see. The getter now returns an empty object and the
+*is it there* question is asked separately, which is one place instead of
+optional chaining in a dozen bindings.
+
+🔴 **Four English strings on a German page.** The *re-classify everything in
+review* button, its confirmation, its progress label and its busy warning were
+hardcoded. They are translated in all five languages now, and the button row
+wraps instead of running off the screen.
+
+### Added
+
+`pruefstaende/probe_handy.py` — fifteen pages at 390 px and 360 px, with data
+shaped like a real archive (the longest sender names are copied from one, and a
+subject with no spaces at all, because scanners produce those). It asserts one
+property: nothing visible reaches past the edge of the screen and the page
+cannot be pushed sideways, except where scrolling was chosen on purpose. It
+also listens for browser errors, which is how all three TypeErrors above turned
+up.
+
 ## [0.89.1] - 2026-10-04
 
 ### Fixed
