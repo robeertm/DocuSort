@@ -169,6 +169,24 @@
 
   /* 2. Tippflächen. 44 px ist der Richtwert, unter dem man daneben tippt. */
   .btn, .btn-primary, .btn-secondary, .btn-ghost { min-height: 44px; min-width: 44px; }
+
+  /* 🔴 EIN GESPERRTER KNOPF MUSS GESPERRT AUSSEHEN.
+     Keine der vier Knopfklassen hatte eine Darstellung für `disabled` — in
+     36 Fällen über die ganze Oberfläche sah ein gesperrter Knopf aus wie
+     ein normaler. Gemeldet wurde es so: „Hier kann ich auf Zusammenlegen
+     klicken, aber es passiert nichts."
+
+     🔑 Das ist die schlechteste Art von Rückmeldung: keine. Wer klickt und
+     nichts sieht, hält das Programm für kaputt — zu Recht, denn ein Knopf,
+     der nichts tut, ist kaputt oder schlecht beschriftet.
+
+     Kein `pointer-events: none`: sonst verschwindet auch der Hinweistext
+     (`title`), und gerade der soll ja sagen, warum es nicht geht. */
+  .btn:disabled, .btn-primary:disabled,
+  .btn-secondary:disabled, .btn-ghost:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
   :is(select, textarea, input):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
     min-height: 44px;
     /* 16 px verhindert, dass iOS beim Antippen hineinzoomt. */

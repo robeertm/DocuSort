@@ -1861,9 +1861,26 @@ function absenderDoppelt() {
       const k = g.vorschlag + '\u0000' + m.name;
       this.wahl[k] = !this.wahl[k];
     },
-    anzahlGewaehlt(g) {
-      return g.mitglieder.slice(1).filter((m) => this.gewaehlt(g, m)).length;
+
+    // 🔴 EINE STELLE SAGT, WAS ZUSAMMENGELEGT WIRD — und genau diese fehlte.
+    //
+    //    Bei GENAU EINER anderen Schreibweise zeigt die Karte kein
+    //    Auswahlfeld: sie IST die Entscheidung. Vorangekreuzt wird aber nur,
+    //    was sich NUR in der Schreibweise unterscheidet. Für eine Gruppe aus
+    //    zwei Namen, die mehr trennt („notar", „allgemeine
+    //    lebensversicherung"), war damit nichts gewählt UND es gab keinen
+    //    Weg, etwas zu wählen: der Knopf blieb für immer gesperrt.
+    //
+    // 🔑 Ausgerechnet die Gruppen, bei denen ein Mensch entscheiden SOLL,
+    //    konnte man nicht entscheiden. Gemeldet wurde es als Knopf, den man
+    //    druecken kann, ohne dass etwas geschieht.
+    zuLegen(g) {
+      const andere = g.mitglieder.slice(1);
+      // Eine einzige Alternative: der Knopf IST die Wahl.
+      if (andere.length === 1) return andere;
+      return andere.filter((m) => this.gewaehlt(g, m));
     },
+    anzahlGewaehlt(g) { return this.zuLegen(g).length; },
     // „Sind verschieden" blendet die Gruppe nur aus. Es wird NICHTS
     // gespeichert: beim naechsten Laden steht sie wieder da. Eine Liste von
     // Ausnahmen zu fuehren waere ein zweiter Ort fuer dieselbe Entscheidung —
@@ -1872,8 +1889,7 @@ function absenderDoppelt() {
       this.gruppen = this.gruppen.filter((x) => x.vorschlag !== g.vorschlag);
     },
     async legeZusammen(g) {
-      const andere = g.mitglieder.slice(1)
-        .filter((m) => this.gewaehlt(g, m)).map((m) => m.name);
+      const andere = this.zuLegen(g).map((m) => m.name);
       if (!andere.length) return;
       this.busy = true; this.meldung = '';
       try {

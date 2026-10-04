@@ -7,6 +7,37 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.89.4] - 2026-10-04
+
+### Fixed
+
+🔴 **The merge button did nothing, on exactly the groups a person is supposed
+to decide.** A group of two names shows no chooser — the card *is* the
+decision. But only what differs purely in spelling is ticked in advance. So for
+a pair separated by an actual word (*notar*, *allgemeine lebensversicherung*)
+nothing was selected **and there was no way to select anything**: the button
+stayed disabled forever: a button that can be pressed without anything
+happening.
+
+There is one place now that answers what would be merged, and with a single
+alternative it is that alternative, always.
+
+🔴 **And a disabled button looked exactly like an enabled one.** None of the
+four button classes had any `disabled` styling — in **36 places** across the
+interface. That is the worst kind of feedback: none at all. Somebody who
+clicks and sees nothing concludes the program is broken, and they are right —
+a button that does nothing is either broken or badly labelled. They are faded
+and carry a not-allowed cursor now; no `pointer-events: none`, so the tooltip
+that explains why still works.
+
+### Changed
+
+The mobile probe **clicks** instead of reading source. Every source-level check
+was green through all of this, because they compare strings and nobody pressed
+anything. It now opens the dashboard, finds every merge button and asserts that
+none of them is disabled with no way to change that — and the fixture contains
+exactly the shape that failed: two names separated by a word.
+
 ## [0.89.3] - 2026-10-04
 
 ### Fixed
