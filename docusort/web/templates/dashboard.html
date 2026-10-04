@@ -681,6 +681,46 @@
        :class="ok ? 'text-emerald-300' : 'text-rose-300'" x-text="meldung"></p>
   </section>
 
+  <!-- =========== ABSENDER, DIE DOPPELT GESCHRIEBEN SIND =========== -->
+  {# Nur sichtbar, wenn es wirklich welche gibt — wie die Vorschlagskarte
+     darueber. Eine Karte, die dauerhaft „nichts gefunden" sagt, ist Platz
+     ohne Aussage. #}
+  <section class="card p-4 sm:p-5" x-data="absenderDoppelt()" x-init="laden()"
+           x-show="gruppen.length > 0" x-cloak>
+    <h2 class="font-semibold flex items-center gap-2 mb-1">
+      <span>✉️</span> {{ t('sender.merge_title') }}
+    </h2>
+    <p class="text-xs text-ink-500 mb-3">{{ t('sender.merge_hint') }}</p>
+    <div class="space-y-2">
+      <template x-for="g in gruppen" :key="g.vorschlag">
+        <div class="rounded-xl border border-ink-700/60 p-3">
+          <div class="flex items-start justify-between gap-3 flex-wrap">
+            <div class="min-w-0 space-y-0.5">
+              <template x-for="m in g.mitglieder" :key="m.name">
+                <div class="text-sm flex items-baseline gap-2">
+                  <span :class="m.name === g.vorschlag ? 'font-medium' : 'text-ink-400'"
+                        x-text="m.name"></span>
+                  <span class="text-[11px] text-ink-500 tabular-nums shrink-0"
+                        x-text="m.anzahl"></span>
+                </div>
+              </template>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button type="button" class="btn-secondary !py-1 !px-2 text-xs"
+                      :disabled="busy"
+                      @click="legeZusammen(g)"
+                      x-text="tr('sender.merge_do').replace('{name}', g.vorschlag)"></button>
+              <button type="button" class="btn-ghost !py-1 !px-2 text-xs text-ink-400"
+                      :disabled="busy" @click="verwerfen(g)">{{ t('sender.merge_skip') }}</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+    <p x-show="meldung" x-cloak class="text-xs mt-2"
+       :class="ok ? 'text-emerald-300' : 'text-rose-300'" x-text="meldung"></p>
+  </section>
+
   <!-- =========== FÄLLIG DEMNÄCHST =========== -->
   <section class="card p-4 sm:p-5" x-show="(state.deadlines || []).length > 0" x-cloak>
     <div class="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
@@ -1683,6 +1723,50 @@ function katVorschlaege() {
         this.meldung = annehmen
           ? (tr('cat.approved') || '').replace('{name}', v.name)
           : tr('cat.rejected');
+      } catch (e) {
+        this.ok = false; this.meldung = e.message || String(e);
+      } finally { this.busy = false; }
+    },
+  };
+}
+
+// Absender, die dieselbe Stelle unter zwei Namen fuehren. Eigene kleine
+// Komponente wie die Kategorie-Vorschlaege: aendert sich selten, also nicht
+// an den Zustand haengen, den die Startseite alle 2-3 s holt.
+function absenderDoppelt() {
+  return {
+    gruppen: [], busy: false, meldung: '', ok: false,
+    async laden() {
+      try {
+        const r = await fetch('/api/senders/groups');
+        if (!r.ok) return;                      // z. B. ohne Recht: still
+        this.gruppen = (await r.json()).gruppen || [];
+      } catch (e) { /* die Startseite muss ohne auskommen */ }
+    },
+    // „Sind verschieden" blendet die Gruppe nur aus. Es wird NICHTS
+    // gespeichert: beim naechsten Laden steht sie wieder da. Eine Liste von
+    // Ausnahmen zu fuehren waere ein zweiter Ort fuer dieselbe Entscheidung —
+    // und die eigentliche Entscheidung ist ohnehin, die Namen anzugleichen.
+    verwerfen(g) {
+      this.gruppen = this.gruppen.filter((x) => x.vorschlag !== g.vorschlag);
+    },
+    async legeZusammen(g) {
+      const andere = g.mitglieder
+        .filter((m) => m.name !== g.vorschlag).map((m) => m.name);
+      if (!andere.length) return;
+      this.busy = true; this.meldung = '';
+      try {
+        const r = await fetch('/api/senders/merge', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nach: g.vorschlag, von: andere }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.gruppen = this.gruppen.filter((x) => x.vorschlag !== g.vorschlag);
+        this.ok = (d.fehler || []).length === 0;
+        this.meldung = tr('sender.merge_done')
+          .replace('{n}', d.bewegt).replace('{name}', d.nach)
+          + ((d.fehler || []).length ? ' — ' + d.fehler.length + ' ⚠' : '');
       } catch (e) {
         this.ok = false; this.meldung = e.message || String(e);
       } finally { this.busy = false; }

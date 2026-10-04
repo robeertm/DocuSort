@@ -2727,6 +2727,48 @@ class Database:
         return {"total": round(sum(float(r["paid"]) for r in by), 2), "by_category": by,
                 "first": min((r["a"] for r in by if r["a"]), default=""), "last": max((r["b"] for r in by if r["b"]), default="")}
 
+    # ------------------------------------------------------------ Absender
+    def senders_with_counts(self) -> list[tuple[str, int]]:
+        """Jeder Absender und wie viele aktive Dokumente ihn tragen.
+
+        `Unbekannt` bleibt draussen: das ist kein Name, sondern das
+        Eingestaendnis, dass keiner gefunden wurde — es mit einem echten
+        zusammenzulegen waere eine Behauptung."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT sender, COUNT(*) AS n FROM documents "
+                "WHERE deleted_at IS NULL AND category != '_csv_container' "
+                "  AND sender IS NOT NULL AND TRIM(sender) != '' "
+                "  AND sender != 'Unbekannt' "
+                "GROUP BY sender ORDER BY n DESC, sender COLLATE NOCASE"
+            ).fetchall()
+        return [(r["sender"], int(r["n"])) for r in rows]
+
+    def documents_by_sender(self, sender: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM documents WHERE deleted_at IS NULL "
+                "AND category != '_csv_container' AND sender = ? ORDER BY id",
+                (sender,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_sender_only(self, doc_id: int, *, sender: str,
+                           filename: str, library_path: str) -> None:
+        """Nur den Absender und den daraus folgenden Dateinamen aendern.
+
+        🔴 NICHT `update_metadata` nehmen: das setzt den Status auf `filed`,
+        weil dort ein Mensch gerade nachgesehen hat. Beim Zusammenlegen von
+        Schreibweisen hat niemand nachgesehen — ein Dokument, das zur
+        Durchsicht liegt, muss dort liegen bleiben."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE documents SET sender = ?, filename = ?, "
+                "library_path = ? WHERE id = ?",
+                (sender, filename, library_path, doc_id),
+            )
+            self._conn.commit()
+
     # ---------------------------------------------------- Dokumentkategorien
     # 🔑 Diese Schicht SPEICHERT nur. Ob ein Name taugt, entscheidet
     #    `docusort/kategorien.py` — dort steht die Regel, und dort allein,
