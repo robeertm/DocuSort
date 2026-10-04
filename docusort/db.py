@@ -1706,8 +1706,9 @@ class Database:
     def _order_clause(self, order_by: str, sort_dir: str, *, fts: bool) -> str:
         expr_tmpl = self._SORT_EXPR.get(order_by)
         if expr_tmpl is None or (order_by == "relevance" and not fts):
-            # Default: newest document date first.
-            expr_tmpl = self._SORT_EXPR["doc_date"]
+            # An unknown key falls back to the library's ground order, not to
+            # a third opinion about what "default" means.
+            expr_tmpl = self._SORT_EXPR[LIBRARY_SORT_DEFAULT]
         prefix = "d." if fts and order_by != "relevance" else ""
         expr = expr_tmpl.format(p=prefix)
         direction = "ASC" if str(sort_dir).lower() == "asc" else "DESC"
@@ -1728,8 +1729,16 @@ class Database:
         year: str | None = None,
         query: str | None = None,
         trash: bool = False,
-        order_by: str = "doc_date",
-        sort_dir: str = "desc",
+        # 🔴 The default is the LIBRARY's order, from the one constant above.
+        # It used to be "doc_date" here while /library passed created_at, and
+        # that second answer caught me within minutes of writing the first: a
+        # check meant to confirm the new ordering called this without
+        # `order_by` and read back the old one. The three callers that take
+        # the default (export, empty-trash, backfill) do not care about order
+        # at all; the ones that do should pass it, and now agree when they
+        # forget.
+        order_by: str = LIBRARY_SORT_DEFAULT,
+        sort_dir: str = LIBRARY_DIR_DEFAULT,
         doc_from: str | None = None,   # ISO date, filter doc_date >=
         doc_to: str | None = None,     # ISO date, filter doc_date <=
         scan_from: str | None = None,  # ISO date, filter created_at day >=
