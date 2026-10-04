@@ -306,7 +306,8 @@ def spend_setup_ticket(token: str) -> None:
 
 
 # ------------------------------------------------------- Suche im eigenen Netz
-# „es wird ermittelt was gibt es für Hardware in der Umgebung"
+# Gefordert war, dass das Programm selbst ermittelt, welche Hardware in der
+# Umgebung zur Verfuegung steht.
 #
 # 🔴 EIN NETZSCAN IST NICHTS, WAS MAN NEBENBEI TUT. 254 Verbindungen in ein
 #    fremdes Netz sehen von außen aus wie ein Portscan, und in einem Firmennetz

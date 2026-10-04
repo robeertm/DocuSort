@@ -110,8 +110,8 @@
        Minuten in der Texterkennung steckt, erschien damit als Leerlauf.
 
        🔴 ZWEI FEHLER AUF EINMAL, BEIDE AM SELBEN KASTEN, BEIDE VOM BENUTZER
-          GEMELDET: „dieses fenster jiggelt hin und her wird groesser und
-          kleiner, soll immer gleich sein und den status zeigen".
+          GEMELDET: der Kasten wechselte staendig seine Groesse, statt immer
+          gleich zu bleiben und den Zustand zu zeigen.
 
        1. EINE LUECKE. Die Arbeitsliste erschien nur bei `work.length > 0`, der
           Leerlauftext nur bei `!anyActivity`. Dazwischen liegt ein Zustand, den
@@ -269,8 +269,8 @@
 
     {# 🔴 DIESE DREI KAESTEN GEHOEREN DEM RECHNER, AUF DEM DOCUSORT LAEUFT —
        und bis hier eine Ueberschrift stand, musste man das raten. Die Frage
-       kam prompt: „hier sehen wir ja cpu, ram und eingang an dokumenten, aber
-       das ist bestimmt das vom ollama nas container oder?"
+       kam prompt: gehoeren CPU, Arbeitsspeicher und Eingang vielleicht dem
+       Rechner, auf dem das Modell laeuft?
 
        Sie ist berechtigt und die Antwort ist: ja, von diesem Rechner, und das
        ist auch richtig so — Texterkennung, Eingang und Ablage passieren hier,
@@ -367,17 +367,15 @@
 
       {# WO GERECHNET WIRD — und zwar je Rechner, mit seinem eigenen Verlauf.
 
-         Der Einwand, der diesen Block ausgeloest hat:
-
-             „eigentlich muesste immer der verlauf gezeigt werden der gerade
-              aktiv ist, in dem fall der mac mit gpu denn dort laeuft ja das
-              model"
+         Der Einwand, der diesen Block ausgeloest hat: gezeigt gehoert der
+         Verlauf des Rechners, der gerade AKTIV rechnet — nicht der eines
+         anderen, auf dem dasselbe Modell nur ebenfalls bereitsteht.
 
          🔴 DIE EHRLICHE EINSCHRAENKUNG ZUERST: CPU und Arbeitsspeicher EINER
             FREMDEN MASCHINE kann DocuSort nicht messen. Dort laeuft nichts von
             uns, und dort soll auch nichts installiert werden muessen — das ist
-            eine ausdrueckliche Zusage („niemand soll was installieren
-            muessen"), keine Bequemlichkeit. Eine erfundene Prozentzahl waere
+            eine ausdrueckliche Zusage — niemand soll dort etwas installieren
+            muessen —, keine Bequemlichkeit. Eine erfundene Prozentzahl waere
             schlimmer als keine.
 
          🔑 WAS WIR STATTDESSEN WIRKLICH WISSEN, und es ist das Nuetzlichere:
@@ -516,9 +514,9 @@
 
       {# 🔴 HIER STAND EIN ZWEITER STREIFEN MIT DENSELBEN RECHNERN — Name,
          Ampel, dieselben Knoepfe, nur kleiner. Zwei Stellen fuer dieselbe
-         Sache sind genau das, was nicht sein soll („keine doppelten sachen
-         oder ich kann hier was einstellen und da auch, welches ist das
-         richtige"). Die Karten oben koennen alles, was dieser Streifen
+         Sache sind genau das, was nicht sein soll: nichts doppelt
+         einstellbar, und nie die Frage, welche der beiden Stellen gilt.
+         Die Karten oben koennen alles, was dieser Streifen
          konnte, und sagen zusaetzlich, was der Rechner leistet. #}
 
       {# EINEN KNOPF DRUECKEN UND DOCUSORT FINDET, WAS DA IST.
@@ -644,6 +642,43 @@
         </div>
       </a>
     </section>
+  </section>
+
+  <!-- =========== VOM MODELL VORGESCHLAGENE KATEGORIEN =========== -->
+  {# Nur sichtbar, wenn es wirklich etwas zu entscheiden gibt. Eine Karte,
+     die dauerhaft „nichts vorgeschlagen" sagt, ist Platz ohne Aussage —
+     dieselbe Lehre wie bei der Duplikate-Kachel. #}
+  <section class="card p-4 sm:p-5" x-data="katVorschlaege()" x-init="laden()"
+           x-show="liste.length > 0" x-cloak>
+    <h2 class="font-semibold flex items-center gap-2 mb-1">
+      <span>🗂</span> {{ t('cat.proposed_title') }}
+    </h2>
+    <p class="text-xs text-ink-500 mb-3">{{ t('cat.proposed_hint') }}</p>
+    <div class="space-y-2">
+      <template x-for="v in liste" :key="v.parent + '/' + v.name">
+        <div class="flex items-start justify-between gap-3 rounded-xl border border-ink-700/60 p-3">
+          <div class="min-w-0">
+            <div class="font-medium text-sm">
+              <span x-text="v.name"></span>
+              <span x-show="v.parent" x-cloak class="text-ink-500 text-xs"
+                    x-text="'· ' + v.parent"></span>
+            </div>
+            <div class="text-xs text-ink-400 mt-0.5" x-text="v.grund || v.description"></div>
+            <a x-show="v.doc_id" x-cloak :href="'/document/' + v.doc_id"
+               class="text-[11px] text-emerald-300 hover:underline"
+               x-text="'#' + v.doc_id"></a>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button type="button" class="btn-secondary !py-1 !px-2 text-xs"
+                    :disabled="busy" @click="antworten(v, true)">{{ t('cat.approve') }}</button>
+            <button type="button" class="btn-ghost !py-1 !px-2 text-xs text-ink-400"
+                    :disabled="busy" @click="antworten(v, false)">{{ t('cat.reject') }}</button>
+          </div>
+        </div>
+      </template>
+    </div>
+    <p x-show="meldung" x-cloak class="text-xs mt-2"
+       :class="ok ? 'text-emerald-300' : 'text-rose-300'" x-text="meldung"></p>
   </section>
 
   <!-- =========== FÄLLIG DEMNÄCHST =========== -->
@@ -1614,6 +1649,43 @@ function dashboard() {
       } catch (e) {
         alert((T['common.error'] || 'Error') + ': ' + (e.message || String(e)));
       } finally { this.busyDoc = null; }
+    },
+  };
+}
+
+// 🔑 Eigene kleine Komponente statt eines Felds im grossen Zustand: die
+//    Vorschlaege aendern sich selten, und die Startseite fragt ihren Zustand
+//    alle 2-3 s ab — das waere jedes Mal eine Abfrage mehr fuer nichts.
+function katVorschlaege() {
+  return {
+    liste: [], busy: false, meldung: '', ok: false,
+    async laden() {
+      try {
+        const r = await fetch('/api/categories');
+        if (!r.ok) return;                       // z. B. ohne Recht: still
+        const d = await r.json();
+        this.liste = d.vorschlaege || [];
+      } catch (e) { /* die Startseite muss ohne auskommen */ }
+    },
+    async antworten(v, annehmen) {
+      this.busy = true; this.meldung = '';
+      try {
+        const r = await fetch(annehmen ? '/api/categories/approve' : '/api/categories', {
+          method: annehmen ? 'POST' : 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: v.name, parent: v.parent || '' }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.liste = this.liste.filter(
+          (x) => !(x.name === v.name && (x.parent || '') === (v.parent || '')));
+        this.ok = true;
+        this.meldung = annehmen
+          ? (tr('cat.approved') || '').replace('{name}', v.name)
+          : tr('cat.rejected');
+      } catch (e) {
+        this.ok = false; this.meldung = e.message || String(e);
+      } finally { this.busy = false; }
     },
   };
 }

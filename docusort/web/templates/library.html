@@ -366,12 +366,15 @@ function libClearDates(btn) {
     </button>
 
     {% if not trash %}
-    <select @change="$store.libBulk.recategorize($event.target.value); $event.target.value=''"
+    {# „Ueberall" heisst auch hier: wer 30 Dokumente auf einmal umsortiert,
+       merkt genauso, dass die passende Schublade fehlt. #}
+    <select @change="$store.libBulk.waehle($event.target.value); $event.target.value=''"
             class="rounded-xl bg-ink-800 border border-ink-700 px-3 py-2 text-sm">
       <option value="">{{ t('library.bulk_recategorize') }}</option>
       {% for c in categories %}
         <option value="{{ c }}">{{ cat(c) }}</option>
       {% endfor %}
+      <option value="__neu__">{{ t('cat.add_new') }}</option>
     </select>
 
     {% if me and me.is_admin %}
@@ -439,6 +442,23 @@ document.addEventListener('alpine:init', () => {
     async purge() {
       if (!confirm(tr('trash.confirm_purge'))) return;
       return this._bulkPost('/api/bulk/purge');
+    },
+    // Der Weg vom Auswahlfeld: entweder eine vorhandene Kategorie, oder
+    // erst eine anlegen und dann dorthin umsortieren.
+    async waehle(wert) {
+      if (!wert) return;
+      if (wert !== '__neu__') return this.recategorize(wert);
+      const name = window.prompt(tr('cat.prompt'));
+      if (!name || !name.trim()) return;
+      try {
+        const r = await fetch('/api/categories', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim() }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        return this.recategorize(d.name);
+      } catch (e) { alert(e.message || String(e)); }
     },
     async recategorize(category) {
       if (!category) return;

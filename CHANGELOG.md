@@ -7,6 +7,79 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.88.0] - 2026-10-04
+
+### Added
+
+**Categories can be created by hand — in every place that offers them.**
+Until now they lived only in `categories.yaml`: needing a new one meant editing
+a file inside the container and restarting. Now there is a *+ New category …*
+entry in the document editor (for categories **and** subcategories) and in the
+library's bulk re-file menu, and what you type is available immediately —
+including to the model.
+
+That last part is the whole difficulty. A category is read by five things, and
+all of them have to learn about it at once:
+
+1. the dropdowns,
+2. the check when saving — otherwise the server rejects what it just offered,
+3. the folder path on disk,
+4. **the classifier**, which keeps the allowed names, the allowed
+   subcategories and its system prompt as snapshots taken in its constructor.
+   A category it does not know, it discards as unknown — so the interface
+   would be offering a drawer that nothing is ever filed into,
+5. and **every** compute location, not just the active one. The others sit
+   built and ready to take over the moment the active one is slow or gone; with
+   a stale list the same document would land somewhere else over there.
+
+The built-in list from the file and the hand-made list from the database are
+merged in exactly one function, which all five read.
+
+**The model may propose new categories.** When nothing fits, it can name one —
+and a human confirms it once. After that it is an ordinary category the model
+uses on its own. It is deliberately not allowed to create them outright: a
+category here is not a label but a **folder name on disk**, and a model free to
+open its own drawers produces "Insurance", "Insurances" and "Policy" inside a
+week. A proposal is held to exactly the same standard as typed input, so a
+near-duplicate is turned down the same way.
+
+Names are checked before anything exists: no path separators or characters that
+break a filename, nothing that is a device name on Windows, nothing longer than
+will fit a folder, and nothing within a measured similarity of a name already
+there. Proposals appear on the dashboard only when there are any.
+
+Removing a category is the admin's business and never touches documents — the
+answer says how many still carry it. Taking a drawer out of the list and
+re-filing what was in it are two different decisions.
+
+### Privacy
+
+🔴 **Twenty-five verbatim remarks by the owner were sitting in published
+source.** The repository is public, and the rule against quoting a person in it
+has been guarded for a year — but the guard only recognised a quote that
+carried a label in front of it (`Word: "…"`). A quote standing bare on an
+indented line matched nothing, so six modules kept them, reported green the
+whole time. All of them are now reported speech: the reason a thing was built
+survives, the voice does not.
+
+The check was then widened to bare quotes — and the first counter-test for the
+new rule **stayed green**, which is how a guard that guards nothing announces
+itself. The word list it used to tell a sentence from a quoted term had been
+written for formal prose: it knew *und*, *nicht*, *werden*, but not *ich*,
+*will*, *mal*, *man*. A request is phrased in exactly those. A probe that does
+not speak the language of its subject measures nothing.
+
+Fixing that revealed the matching trap in the other direction: several of those
+informal words are also ordinary English (*was*, *will*, *man*, *hat*), and
+adding them made the English changelog read as German prose. There are two
+questions here, so there are now two lists — *is this file German* answers only
+with words English does not share, while *is this quotation a sentence* may use
+all of them.
+
+The scan also asks **git** which files are published rather than walking the
+tree: `pruefstaende/` is excluded from the repository and never shipped, and a
+probe that flags findings nobody can see teaches people to ignore it.
+
 ## [0.87.3] - 2026-10-04
 
 ### Fixed

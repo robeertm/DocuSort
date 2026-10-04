@@ -190,6 +190,19 @@ USER_ALLOW: tuple[tuple[str, str], ...] = (
     ("POST", r"^/api/document/[^/]+/receipt/extract$"),
     ("PATCH", r"^/api/document/[^/]+/receipt$"),
     ("POST", r"^/api/bulk/recategorize$"),
+    # --- Dokumentkategorien ------------------------------------------
+    # Die Liste zu LESEN ist weniger, als jede Seite ohnehin zeigt: die
+    # Auswahlfelder stehen fertig im HTML. Eine Kategorie ANZULEGEN ist
+    # dasselbe Recht wie `POST /api/finance/categories` darueber — wer
+    # einsortieren darf, darf auch eine Schublade dafuer aufmachen; einen
+    # Vorschlag des Modells anzunehmen ist derselbe Vorgang.
+    #
+    # 🔴 ENTFERNEN steht bewusst NICHT hier. Das aendert die Auswahl fuer
+    #    alle und kann Dokumente mit einer Kategorie zuruecklassen, die es
+    #    nicht mehr gibt — das ist, wie der Papierkorb, Sache des Verwalters.
+    ("GET", r"^/api/categories$"),
+    ("POST", r"^/api/categories$"),
+    ("POST", r"^/api/categories/approve$"),
     ("GET", r"^/api/receipts/(stats|items)$"),
     # --- shared read-only surface -----------------------------------
     ("GET", r"^/api/(stats|dashboard|activity|pricing)$"),

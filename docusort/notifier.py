@@ -158,8 +158,9 @@ def telegram_find_chats(bot_token: str) -> dict:
     """Frage Telegram selbst nach der Chat-ID, statt ein Rezept zu drucken.
 
     🔴 WARUM ES DAS GIBT
-    Der Hilfetext sagte: „oeffne api.telegram.org/bot<TOKEN>/getUpdates und
-    lies deine Chat-ID aus der Antwort." Das ist der EINZIGE Schritt der
+    Der Hilfetext verlangte, selbst api.telegram.org/bot<TOKEN>/getUpdates
+    aufzurufen und die Chat-ID aus der Antwort herauszulesen. Das ist der
+    EINZIGE Schritt der
     ganzen Einrichtung, der jemanden bittet, die Antwort einer Maschine zu
     entziffern — also ist es genau der Schritt, den das Programm selbst tut.
     Dieselbe Lehre wie beim Ollama-Einrichter: wer ein Rezept druckt, hilft

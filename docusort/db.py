@@ -706,6 +706,35 @@ class Database:
         if "is_saving" not in cc_cols:
             self._conn.execute("ALTER TABLE custom_categories ADD COLUMN is_saving INTEGER NOT NULL DEFAULT 0")
 
+        # v0.88: Kategorien fuer DOKUMENTE, die nicht in categories.yaml
+        # stehen — von Hand angelegt oder vom Modell vorgeschlagen.
+        #
+        # 🔑 `parent` leer = eine eigene Kategorie, sonst der Name der
+        #    Kategorie, unter der die Unterkategorie haengt. Eine Tabelle
+        #    fuer beides, weil eine Unterkategorie hier nichts anderes ist
+        #    als ein Name unter einem Dach.
+        #
+        # 🔴 `status='vorschlag'` ist NICHT benutzbar. Das Modell darf
+        #    vorschlagen; erst eine Bestaetigung macht daraus eine Kategorie.
+        #    Der Grund steht in `docusort/kategorien.py`: eine Kategorie ist
+        #    ein ORDNERNAME auf der Platte.
+        #
+        # COLLATE NOCASE im Schluessel, damit „Fahrzeug" und „fahrzeug" nicht
+        # zwei Ordner werden, wenn zwei Anfragen gleichzeitig ankommen.
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS doc_categories (
+                   name        TEXT NOT NULL COLLATE NOCASE,
+                   parent      TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+                   description TEXT NOT NULL DEFAULT '',
+                   status      TEXT NOT NULL DEFAULT 'aktiv',
+                   herkunft    TEXT NOT NULL DEFAULT 'hand',
+                   grund       TEXT NOT NULL DEFAULT '',
+                   doc_id      INTEGER,
+                   created_at  TEXT NOT NULL,
+                   PRIMARY KEY (parent, name)
+               )"""
+        )
+
         # Generic key-value meta table. First customer is
         # last_reanalyzed_version so the auto-reanalyse-on-upgrade hook
         # can tell what version it last ran for, but anything else that
@@ -2697,6 +2726,84 @@ class Database:
         by = [dict(r) for r in rows]
         return {"total": round(sum(float(r["paid"]) for r in by), 2), "by_category": by,
                 "first": min((r["a"] for r in by if r["a"]), default=""), "last": max((r["b"] for r in by if r["b"]), default="")}
+
+    # ---------------------------------------------------- Dokumentkategorien
+    # 🔑 Diese Schicht SPEICHERT nur. Ob ein Name taugt, entscheidet
+    #    `docusort/kategorien.py` — dort steht die Regel, und dort allein,
+    #    denn sie braucht die zusammengefuehrte Liste aus Datei UND Tabelle,
+    #    und die Datei kennt die Datenbank nicht.
+    def doc_categories_custom(self, *, status: str = "aktiv") -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, parent, description, status, herkunft, grund, "
+                "       doc_id, created_at "
+                "FROM doc_categories WHERE status = ? "
+                "ORDER BY parent COLLATE NOCASE, name COLLATE NOCASE",
+                (status,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def doc_category_add(self, name: str, *, parent: str = "",
+                         description: str = "", status: str = "aktiv",
+                         herkunft: str = "hand", grund: str = "",
+                         doc_id: int | None = None) -> dict[str, Any]:
+        """Legt die Zeile an. Der Name muss VORHER geprueft sein."""
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            da = self._conn.execute(
+                "SELECT name, status FROM doc_categories "
+                "WHERE parent = ? AND name = ?", (parent, name),
+            ).fetchone()
+            if da:
+                # Ein zweiter Vorschlag fuer dasselbe ist kein Fehler — er
+                # ist derselbe Vorschlag. Melden, nicht werfen.
+                return {"name": da["name"], "parent": parent,
+                        "status": da["status"], "neu": False}
+            self._conn.execute(
+                "INSERT INTO doc_categories "
+                "(name, parent, description, status, herkunft, grund, doc_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, parent, description, status, herkunft, grund, doc_id, now),
+            )
+            self._conn.commit()
+        return {"name": name, "parent": parent, "description": description,
+                "status": status, "herkunft": herkunft, "grund": grund,
+                "doc_id": doc_id, "created_at": now, "neu": True}
+
+    def doc_category_set_status(self, name: str, parent: str, status: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE doc_categories SET status = ? WHERE parent = ? AND name = ?",
+                (status, parent, name),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def doc_category_delete(self, name: str, parent: str = "") -> dict[str, Any]:
+        """Entfernt die Kategorie aus der Liste — und sagt, wie viele
+        Dokumente sie noch benutzen.
+
+        🔴 Die Dokumente werden NICHT angefasst. Eine Kategorie aus der
+        Auswahl zu nehmen ist etwas anderes, als die Dokumente darin
+        umzusortieren; das Zweite ist eine eigene Entscheidung und gehoert
+        nicht als Nebenwirkung in ein Loeschen."""
+        with self._lock:
+            if parent:
+                n = self._conn.execute(
+                    "SELECT COUNT(*) FROM documents WHERE deleted_at IS NULL "
+                    "AND category = ? AND subcategory = ?", (parent, name),
+                ).fetchone()[0]
+            else:
+                n = self._conn.execute(
+                    "SELECT COUNT(*) FROM documents WHERE deleted_at IS NULL "
+                    "AND category = ?", (name,),
+                ).fetchone()[0]
+            cur = self._conn.execute(
+                "DELETE FROM doc_categories WHERE parent = ? AND name = ?",
+                (parent, name),
+            )
+            self._conn.commit()
+        return {"deleted": cur.rowcount > 0, "documents": int(n)}
 
     def finance_category_add(self, label: str, *, is_fixed: bool = False, is_saving: bool = False) -> dict[str, Any]:
         from .finance.categories import TX_CATEGORIES
