@@ -34,16 +34,28 @@ from typing import Iterable
 AEHNLICH_AB = 0.86
 
 
-def schlicht(name: str) -> str:
-    """Zum VERGLEICHEN: ohne Gross-/Kleinschreibung, ohne Akzente, ohne
-    doppelte Leerzeichen.
+# 🔴 ERST UMSCHREIBEN, DANN ENTAKZENTUIEREN. Wer nur die Akzente abzieht,
+#    macht aus „ä" ein „a" — und „Ostsächsische" trifft dann NICHT auf
+#    „Ostsaechsische", obwohl genau das die haeufigste deutsche
+#    Schreibvariante ist. Im echten Archiv waren das 10 Dokumente, die
+#    deshalb als „verschieden" gemeldet wurden.
+#    `organizer._slug()` schreibt seit jeher so um; hier muss es genauso sein.
+_UMSCHRIFT = {"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}
 
-    🔴 Nicht zum Speichern. Gespeichert wird, was dasteht — `ä` zu `a` zu
-    machen ist eine Vereinfachung fuers Messen, keine Verbesserung des Namens.
+
+def schlicht(name: str) -> str:
+    """Zum VERGLEICHEN: ohne Gross-/Kleinschreibung, mit deutscher Umschrift,
+    ohne uebrige Akzente, ohne doppelte Leerzeichen.
+
+    🔴 Nicht zum Speichern. Gespeichert wird, was dasteht — das hier ist eine
+    Vereinfachung fuers Messen, keine Verbesserung des Namens.
     """
-    ohne = unicodedata.normalize("NFKD", name or "")
+    klein = (name or "").casefold()
+    for von, nach in _UMSCHRIFT.items():
+        klein = klein.replace(von, nach)
+    ohne = unicodedata.normalize("NFKD", klein)
     ohne = "".join(c for c in ohne if not unicodedata.combining(c))
-    return " ".join(ohne.casefold().split())
+    return " ".join(ohne.split())
 
 
 def gleich(a: str, b: str) -> bool:
@@ -64,6 +76,47 @@ def zu_aehnlich(name: str, vorhandene: Iterable[str],
         if wert > beste:
             bester, beste = v, wert
     return bester if beste >= ab else ""
+
+
+# 🔴 DIE SCHWELLE ALLEIN GENUEGT NICHT, und das wurde an echten Daten
+#    gelernt. Zwei Paare, beide bei 0,92:
+#
+#        Verti Versicherung AG            / Verti Versicherung
+#            → dieselbe Firma, nur die Rechtsform fehlt
+#        Sparkassen-Vers. Sachsen Leben…  / … Allgemeine Versicherung…
+#            → ZWEI Gesellschaften desselben Hauses
+#
+#    Keine Zahl trennt die beiden Faelle, denn der Unterschied liegt nicht im
+#    Abstand, sondern darin, WAS sich unterscheidet. Eine Rechtsform ist kein
+#    anderer Absender; ein anderer Geschaeftszweig schon.
+#
+# 🔑 Also wird genau das gemessen: bleibt nach Abzug von Gross/Klein, Akzenten,
+#    Zeichensetzung und Rechtsform nichts uebrig, ist es dieselbe Stelle, nur
+#    anders geschrieben. Bleibt ein Wort uebrig, muss ein Mensch hinsehen.
+_RECHTSFORMEN = {
+    "ag", "gmbh", "mbh", "kg", "ohg", "gbr", "eg", "se", "kgaa", "ug",
+    "ev", "e v", "aoer", "koer", "ag & co kg", "gmbh & co kg",
+    "inc", "ltd", "llc", "plc", "sa", "nv", "bv", "co", "und", "&",
+}
+
+
+def _kern(name: str) -> str:
+    """Der Name ohne Rechtsform und Zeichensetzung — das, was uebrig bleibt,
+    wenn man nur die Schreibweise abzieht."""
+    roh = schlicht(name)
+    roh = "".join(c if (c.isalnum() or c.isspace()) else " " for c in roh)
+    woerter = [w for w in roh.split() if w not in _RECHTSFORMEN]
+    return " ".join(woerter)
+
+
+def nur_schreibweise(a: str, b: str) -> bool:
+    """Unterscheiden sich die beiden NUR in der Schreibweise?
+
+    Gross/klein, Akzente, Zeichensetzung, Abstaende und die Rechtsform
+    zaehlen nicht. Alles andere schon — ein zusaetzliches Wort ist eine
+    Aussage.
+    """
+    return _kern(a) == _kern(b)
 
 
 def gruppen(namen_mit_anzahl: list[tuple[str, int]],
@@ -120,11 +173,34 @@ def gruppen(namen_mit_anzahl: list[tuple[str, int]],
              "naehe": round(naehe(kopf, namen[i][0]), 2)}
             for i in teile
         ]
+        # 🔑 „sicher" heisst: ALLE Mitglieder unterscheiden sich vom Kopf nur
+        #    in der Schreibweise. Sobald eines ein eigenes Wort mitbringt,
+        #    gilt die ganze Gruppe als anzusehen — lieber einmal zu oft
+        #    gefragt als einmal zwei Firmen verschmolzen.
+        sicher = all(nur_schreibweise(kopf, m["name"]) for m in mitglieder[1:])
+        for m in mitglieder[1:]:
+            m["nur_schreibweise"] = nur_schreibweise(kopf, m["name"])
+            m["unterschied"] = _unterschied(kopf, m["name"])
+        mitglieder[0]["nur_schreibweise"] = True
+        mitglieder[0]["unterschied"] = ""
         raus.append({
             "vorschlag": kopf,
             "mitglieder": mitglieder,
+            "sicher": sicher,
             "umzuziehen": sum(m["anzahl"] for m in mitglieder[1:]),
         })
-    # Die groesste Wirkung zuerst.
-    raus.sort(key=lambda g: (-g["umzuziehen"], g["vorschlag"]))
+    # Die eindeutigen zuerst, dann nach Wirkung — wer die Liste von oben
+    # abarbeitet, trifft die leichten Entscheidungen zuerst.
+    raus.sort(key=lambda g: (not g["sicher"], -g["umzuziehen"], g["vorschlag"]))
     return raus
+
+
+def _unterschied(a: str, b: str) -> str:
+    """Die Woerter, die nur in EINEM der beiden stehen — klein geschrieben.
+
+    Das ist, was ein Mensch sehen muss, um zu entscheiden: steht dort „ag",
+    ist es dieselbe Firma; steht dort „allgemeine versicherung", sind es
+    zwei."""
+    wa, wb = set(_kern(a).split()), set(_kern(b).split())
+    nur = sorted((wa - wb) | (wb - wa))
+    return " ".join(nur)

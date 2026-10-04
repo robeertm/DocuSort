@@ -695,19 +695,28 @@
       <template x-for="g in gruppen" :key="g.vorschlag">
         <div class="rounded-xl border border-ink-700/60 p-3">
           <div class="flex items-start justify-between gap-3 flex-wrap">
-            <div class="min-w-0 space-y-0.5">
-              <template x-for="m in g.mitglieder" :key="m.name">
-                <div class="text-sm flex items-baseline gap-2">
-                  <span :class="m.name === g.vorschlag ? 'font-medium' : 'text-ink-400'"
-                        x-text="m.name"></span>
+            <div class="min-w-0 space-y-1">
+              {# 🔑 Je Schreibweise EIN Haken, vorangekreuzt nur dort, wo sich
+                 wirklich nur die Schreibweise unterscheidet. Wo ein eigenes
+                 Wort dazukommt, steht es daneben — „ag" ist eine Rechtsform,
+                 „allgemeine lebensversicherung" sind zwei Gesellschaften. #}
+              <div class="text-sm font-medium" x-text="g.vorschlag"></div>
+              <template x-for="m in g.mitglieder.slice(1)" :key="m.name">
+                <label class="flex items-baseline gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" class="mt-0.5 accent-emerald-500"
+                         :checked="gewaehlt(g, m)" @change="umschalten(g, m)">
+                  <span class="text-ink-400" x-text="m.name"></span>
                   <span class="text-[11px] text-ink-500 tabular-nums shrink-0"
                         x-text="m.anzahl"></span>
-                </div>
+                  <span x-show="!m.nur_schreibweise" x-cloak
+                        class="text-[11px] text-amber-300/90 shrink-0"
+                        x-text="'⚠ ' + m.unterschied"></span>
+                </label>
               </template>
             </div>
             <div class="flex items-center gap-2 shrink-0">
               <button type="button" class="btn-secondary !py-1 !px-2 text-xs"
-                      :disabled="busy"
+                      :disabled="busy || !anzahlGewaehlt(g)"
                       @click="legeZusammen(g)"
                       x-text="tr('sender.merge_do').replace('{name}', g.vorschlag)"></button>
               <button type="button" class="btn-ghost !py-1 !px-2 text-xs text-ink-400"
@@ -1735,13 +1744,28 @@ function katVorschlaege() {
 // an den Zustand haengen, den die Startseite alle 2-3 s holt.
 function absenderDoppelt() {
   return {
-    gruppen: [], busy: false, meldung: '', ok: false,
+    gruppen: [], wahl: {}, busy: false, meldung: '', ok: false,
     async laden() {
       try {
         const r = await fetch('/api/senders/groups');
         if (!r.ok) return;                      // z. B. ohne Recht: still
         this.gruppen = (await r.json()).gruppen || [];
+        // Vorgekreuzt wird nur, was sich NUR in der Schreibweise
+        // unterscheidet. Alles andere muss jemand bewusst ankreuzen.
+        for (const g of this.gruppen) {
+          for (const m of g.mitglieder.slice(1)) {
+            this.wahl[g.vorschlag + '\u0000' + m.name] = !!m.nur_schreibweise;
+          }
+        }
       } catch (e) { /* die Startseite muss ohne auskommen */ }
+    },
+    gewaehlt(g, m) { return !!this.wahl[g.vorschlag + '\u0000' + m.name]; },
+    umschalten(g, m) {
+      const k = g.vorschlag + '\u0000' + m.name;
+      this.wahl[k] = !this.wahl[k];
+    },
+    anzahlGewaehlt(g) {
+      return g.mitglieder.slice(1).filter((m) => this.gewaehlt(g, m)).length;
     },
     // „Sind verschieden" blendet die Gruppe nur aus. Es wird NICHTS
     // gespeichert: beim naechsten Laden steht sie wieder da. Eine Liste von
@@ -1751,8 +1775,8 @@ function absenderDoppelt() {
       this.gruppen = this.gruppen.filter((x) => x.vorschlag !== g.vorschlag);
     },
     async legeZusammen(g) {
-      const andere = g.mitglieder
-        .filter((m) => m.name !== g.vorschlag).map((m) => m.name);
+      const andere = g.mitglieder.slice(1)
+        .filter((m) => this.gewaehlt(g, m)).map((m) => m.name);
       if (!andere.length) return;
       this.busy = true; this.meldung = '';
       try {
