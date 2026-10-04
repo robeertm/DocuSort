@@ -7,6 +7,39 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.89.1] - 2026-10-04
+
+### Fixed
+
+🔴 **0.89.0 claimed two insurance branches would stay apart. They did not.**
+The probe asserting it used names typed out of a truncated console listing
+rather than taken from the data. The real names are longer, and the real
+distance is 0.92, not 0.80 — so *Sparkassen-Versicherung Sachsen
+Lebensversicherung AG* and *… Allgemeine Versicherung AG*, two separate
+companies, landed in one group. The check was green for the wrong reason: a
+probe that rebuilds its subject instead of taking it measures something else.
+
+**Raising the threshold does not help.** On the same archive, *Verti
+Versicherung AG* / *Verti Versicherung* also scores 0.92 and *ERGO
+Lebensversicherung* / *… AG* scores 0.94 — and those **are** the same company.
+No number separates the two cases, because the difference is not in the
+distance but in **what** differs: a legal form is not another sender, a
+different line of business is.
+
+So that is what gets measured now. With case, accents, punctuation, German
+transliteration and the legal form taken out, anything left over is a word
+somebody chose — and each group says which word it is: *ihre*, *detlev*,
+*notar*, *allgemeine lebensversicherung*. Groups that differ only in spelling
+are marked safe and sort to the top; the rest ask to be looked at. In the
+dashboard card every spelling now has its own checkbox, ticked in advance only
+where nothing but the spelling differs.
+
+**And the comparison learned German.** Stripping accents turns *ä* into *a*,
+which does not match *ae* — the most common German spelling variant there is.
+Thirteen documents of the owner's own bank were being reported as a different
+sender for exactly that reason. The filename slug has always transliterated;
+the comparison now does too.
+
 ## [0.89.0] - 2026-10-04
 
 ### Added
