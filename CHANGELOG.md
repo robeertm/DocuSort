@@ -7,6 +7,32 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.90.1] - 2026-10-04
+
+### Fixed
+
+🔴 **0.90.0 would not start on an existing database.** The index for the new
+`transactions.besonders` column was part of the schema script, which runs
+*before* the migration. On a fresh database the same script creates the table
+with the column, so every probe was green. On an existing one
+`CREATE TABLE IF NOT EXISTS` does nothing, the column is not there yet, and
+startup died in a loop:
+
+```
+sqlite3.OperationalError: no such column: besonders
+    db.py  self._conn.executescript(SCHEMA)
+```
+
+The index is created in the migration now, after the column exists. No data
+was touched — the crash happened before any migration ran.
+
+🔑 **A migration can only be tested against an old database.** The probe
+builds one by creating today's schema and then dropping the new column, which
+is exactly yesterday's shape and stays correct when the table changes again.
+Counter-tested: against the previous code it fails with the very error seen in
+production. The pre-release gate installs onto a fresh database, so it could
+not see this.
+
 ## [0.90.0] - 2026-10-04
 
 ### Added
