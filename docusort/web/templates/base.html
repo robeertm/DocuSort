@@ -130,12 +130,34 @@
            class="absolute right-0 mt-2 w-72 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30 p-3 text-xs">
         <div class="font-medium text-sm mb-1"
              x-text="active ? (T['nav.ai_active'] || 'AI is processing') : (T['nav.ai_idle'] || 'AI idle')"></div>
+        {# 🔴 HIER STANDEN DREI ZEILEN, DIE IM LEERLAUF DASSELBE SAGTEN:
+           „KI im Leerlauf", „Aktive Calls: 0", „Wartend: 0". Zaehler, die
+           nur im Betrieb etwas aussagen, erscheinen jetzt auch nur dann.
+           Was stattdessen immer dasteht, ist die Frage, die seit dem
+           Verteiler zaehlt: WO gerechnet wird und wie schnell der Rechner
+           ist. Auf der Startseite steht das auf den Maschinenkarten — dieses
+           Abzeichen haengt in jeder Seite, und dort gab es das bisher nicht. #}
         <div class="text-ink-400 space-y-1">
-          <div>
+          <template x-for="o in (snap.orte || [])" :key="o.key">
+            <div class="flex items-center justify-between gap-2">
+              <span class="flex items-center gap-1.5 min-w-0">
+                <span class="h-1.5 w-1.5 rounded-full shrink-0"
+                      :class="o.rechnet_seit_s !== null ? 'bg-emerald-400'
+                              : (o.zustand === 'tot' ? 'bg-rose-400' : 'bg-ink-600')"></span>
+                <span class="truncate" :class="o.aktiv ? 'text-ink-200' : ''"
+                      x-text="o.label"></span>
+              </span>
+              <span class="tabular-nums text-ink-500 shrink-0"
+                    x-text="o.rechnet_seit_s !== null
+                            ? Math.round(o.rechnet_seit_s) + ' s'
+                            : (o.s_pro_dokument ? '~' + o.s_pro_dokument + ' s' : '—')"></span>
+            </div>
+          </template>
+          <div x-show="(snap.in_flight || 0) > 0" x-cloak>
             <span class="text-ink-500">{{ t('nav.ai_in_flight') }}:</span>
             <span x-text="snap.in_flight || 0" class="tabular-nums"></span>
           </div>
-          <div>
+          <div x-show="(snap.pending_or_processing || 0) > 0" x-cloak>
             <span class="text-ink-500">{{ t('nav.ai_pending') }}:</span>
             <span x-text="snap.pending_or_processing || 0" class="tabular-nums"></span>
           </div>
@@ -387,7 +409,7 @@ async function switchLang(code) {
 function aiActivity() {
   return {
     open: false,
-    snap: { in_flight: 0, last_call_at: 0, pending_or_processing: 0, jobs: {} },
+    snap: { in_flight: 0, last_call_at: 0, pending_or_processing: 0, jobs: {}, orte: [] },
     handle: null,
     start() {
       this.tick();
@@ -404,7 +426,10 @@ function aiActivity() {
     },
     get active() {
       return (this.snap.in_flight || 0) > 0
-          || (this.approveJob && this.approveJob.running);
+          || (this.approveJob && this.approveJob.running)
+          // Ein Rechenort, der gerade an einem Dokument sitzt, ist Arbeit —
+          // auch wenn der Aufruf von einem anderen Faden kam.
+          || (this.snap.orte || []).some((o) => o.rechnet_seit_s !== null);
     },
     get total() {
       const inflight = this.snap.in_flight || 0;

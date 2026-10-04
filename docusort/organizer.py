@@ -71,6 +71,42 @@ def build_filename(cls: Classification, template: str, max_len: int, suffix: str
     )
 
 
+# Was einen Pfad zerlegen oder aus ihm heraus zeigen kann. Dieselbe Liste
+# wie in `kategorien.py`, wo ein Name schon beim Anlegen abgelehnt wird —
+# hier steht sie fuer den Fall, dass ein Name auf einem anderen Weg
+# hereinkommt (eine handgeschriebene `categories.yaml`, ein spaeterer
+# Aufrufer, eine Migration).
+_ORDNER_VERBOTEN = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
+
+
+# 🔴 Ein Ordnername hat eine HARTE Grenze: die meisten Dateisysteme nehmen
+#    255 BYTE je Teil, und ein Umlaut zaehlt doppelt. Der Dateiname war seit
+#    jeher begrenzt (`max_filename_length`), der Ordnername nie — ein langer
+#    Kategoriename liess `mkdir` mit „File name too long" abstuerzen, und das
+#    Dokument waere am Ablegen gescheitert, nicht am Einordnen.
+#    60 Zeichen, weil ein Ordnername darueber ohnehin niemandem mehr hilft;
+#    gemessen in Bytes, nicht in Zeichen.
+MAX_ORDNER_BYTES = 60
+
+
+def _ordnerteil(name: str, rueckfall: str = "") -> str:
+    """Ein einzelner, sicherer Ordnername — nie ein Pfad, nie ein Aufstieg,
+    nie zu lang fuer das Dateisystem.
+
+    Gibt den Rueckfall zurueck, wenn nichts Brauchbares uebrig bleibt. Ein
+    Name ganz ohne Buchstaben oder Ziffern ist keiner: `../..` wuerde sonst
+    zu einem Ordner namens `-`."""
+    sauber = _ORDNER_VERBOTEN.sub("-", (name or "").strip())
+    sauber = " ".join(sauber.split()).strip(". ")
+    roh = sauber.encode("utf-8")
+    if len(roh) > MAX_ORDNER_BYTES:
+        # An einer Zeichengrenze abschneiden, nicht mitten in einem Umlaut.
+        sauber = roh[:MAX_ORDNER_BYTES].decode("utf-8", "ignore").strip(". ")
+    if not any(c.isalnum() for c in sauber):
+        return rueckfall
+    return sauber
+
+
 def target_path(
     library_root: Path, date: str, category: str, sender: str, subject: str,
     template: str, max_len: int, suffix: str,
@@ -84,10 +120,30 @@ def target_path(
     `foo.pdf` to `foo-2.pdf` for no reason.
     """
     year = _parse_iso_date(date).strftime("%Y")
-    if subcategory:
-        target_dir = library_root / year / category / subcategory
-    else:
-        target_dir = library_root / year / category
+    # 🔴 KATEGORIE UND UNTERKATEGORIE WERDEN ORDNERNAMEN — und wurden hier
+    #    ungeprueft angehaengt. Gemessen am 04.10.2026:
+    #        category="../../../etc"  ->  library/2026/../../../etc/…pdf
+    #        category="a/b"           ->  library/2026/a/b/…pdf
+    #        category="/absolut"      ->  /absolut/…pdf          🔴
+    #    Das erste legt die Datei AUSSERHALB der Bibliothek ab, das zweite
+    #    zieht einen Ordner ein, den niemand erwartet — und das dritte ist
+    #    das schaerfste: `Path(...) / "/absolut"` VERWIRFT alles links davon.
+    #    Die Gegenprobe scheiterte prompt mit „Read-only file system:
+    #    '/absolut'" — DocuSort haette im Wurzelverzeichnis angelegt.
+    #
+    #    Erreichbar war es nicht: jede Aufrufstelle prueft die Kategorie
+    #    vorher gegen die erlaubte Liste. Aber die Stelle, die den Pfad
+    #    BAUT, darf sich darauf nicht verlassen — sonst haengt die
+    #    Unversehrtheit des Archivs daran, dass jede kuenftige Aufrufstelle
+    #    an dieselbe Pruefung denkt. Absender und Betreff werden seit jeher
+    #    geputzt; fuer die beiden Ordnernamen galt das nie.
+    target_dir = library_root / year / _ordnerteil(category, "Sonstiges")
+    # Eine unbrauchbare Unterkategorie wird WEGGELASSEN, nicht ersetzt: das
+    # Dokument gehoert dann eben direkt in die Kategorie. Ein erfundener
+    # Unterordner waere eine Aussage, die niemand getroffen hat.
+    unter = _ordnerteil(subcategory) if subcategory else ""
+    if unter:
+        target_dir = target_dir / unter
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = build_filename_from_parts(
         date, category, sender, subject, template, max_len, suffix,
