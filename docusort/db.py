@@ -307,7 +307,13 @@ CREATE INDEX IF NOT EXISTS idx_transactions_stmt     ON transactions(statement_i
 CREATE INDEX IF NOT EXISTS idx_transactions_account  ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_date     ON transactions(booking_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
-CREATE INDEX IF NOT EXISTS idx_transactions_besonders ON transactions(besonders);
+-- 🔴 KEIN Index auf `besonders` hier. Auf einer BESTEHENDEN Datenbank tut
+--    `CREATE TABLE IF NOT EXISTS` nichts — die Tabelle hat die Spalte dann
+--    noch nicht, und dieses Skript läuft VOR der Migration. Genau das hat
+--    0.90.0 live in eine Startschleife geschickt:
+--        sqlite3.OperationalError: no such column: besonders
+--    Der Index wird in `_migrate()` angelegt, nachdem die Spalte da ist.
+--    Dieselbe Regel gilt für jede künftige Spalte.
 
 CREATE TRIGGER IF NOT EXISTS statements_cascade_on_doc_delete
 AFTER DELETE ON documents BEGIN
