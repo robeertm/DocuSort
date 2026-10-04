@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 from .. import auth as _auth
 from ..classifier import Classifier
 from ..config import AppSettings, get_api_key, is_configured, load_secrets
-from ..db import Database, MODEL_PRICING
+from ..db import Database, MODEL_PRICING, LIBRARY_SORT_DEFAULT, LIBRARY_DIR_DEFAULT
 from ..i18n import (
     LANGUAGE_NAMES, SUPPORTED, all_translations_for_js, category_label,
     detect_language, subcategory_label, translate,
@@ -95,11 +95,23 @@ def _human_size(n: int | None) -> str:
     return f"{n:.1f} TB"
 
 
-def _eur(usd: float) -> str:
+def _eur(usd: float | None) -> str:
     """Convert a USD AI cost into euros. 🔴 NOT a euro formatter — passing
     an amount that is already in euros through this silently shows 93 % of
-    it. Use the `money` filter for real euro amounts."""
-    return f"{usd * 0.93:.2f} €"
+    it. Use the `money` filter for real euro amounts.
+
+    A missing cost reads as "—", like every other money field: `cost_usd` is
+    NULL on rows older than cost tracking, and a formatter that raises takes
+    down the page it was only supposed to decorate."""
+    if usd is None:
+        return "—"
+    try:
+        # 🔑 Durch _money, nicht per eigenem f-string: auf einer deutschen
+        # Seite stand "0.93 €" mit Punkt neben "1.038,47 €" mit Komma —
+        # zwei Schreibweisen fuer Geld in derselben Zeile.
+        return _money(round(float(usd) * 0.93, 2))
+    except (TypeError, ValueError):
+        return "—"
 
 
 def _money(value: float | None) -> str:
@@ -110,7 +122,18 @@ def _money(value: float | None) -> str:
     return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".") + " €"
 
 
-def _usd(usd: float) -> str:
+def _usd(usd: float | None) -> str:
+    """🔴 A display helper must never take a page down. `cost_usd` is NULL on
+    rows that predate cost tracking, and comparing None to a float raised a
+    TypeError in the middle of rendering the whole library grid — one old row
+    would have blanked the page. The money column above already answers "—"
+    for a missing value; this one does too."""
+    if usd is None:
+        return "—"
+    try:
+        usd = float(usd)
+    except (TypeError, ValueError):
+        return "—"
     if usd < 0.01:
         return f"${usd:.4f}"
     return f"${usd:.2f}"
@@ -897,11 +920,70 @@ def create_app(
 
     # ---------- Library ----------
     # Public sort keys the /library UI may request. Anything else falls
-    # back to doc_date in db.list_documents (whitelist enforced there).
+    # back to the library's ground order in db.list_documents (whitelist
+    # enforced there as well — never interpolate a sort key into SQL).
     _LIBRARY_SORTS = {
         "doc_date", "created_at", "sender", "subject",
         "category", "file_size", "confidence", "page_count", "relevance",
     }
+
+    # ---------- The slice ----------
+    # A library view is a SLICE of the archive: what is filtered out, and in
+    # which order what is left appears. The user steps into a document from a
+    # slice and expects every way back out — the back button, saving an edit,
+    # deleting — to land in that same slice again.
+    #
+    # 🔴 That only holds while exactly ONE place knows what a slice is made
+    # of. It used to be spelled out by hand in two templates and ignored
+    # altogether by three exits, so opening a document from the 33 under
+    # review and then saving or deleting it dropped the visitor into the whole
+    # archive. Both templates and both redirects now read the string built
+    # here, so a new filter can never again be carried in on the way in and
+    # forgotten on the way out.
+    _SLICE_FILTERS = ("category", "subcategory", "tag", "status", "year", "q",
+                      "doc_from", "doc_to", "scan_from", "scan_to")
+
+    def _slice_qs(werte: dict) -> str:
+        """The slice as a query string — '' when it is the plain library.
+
+        Sort and direction are left out while they are the default, so the
+        everyday URL stays short and a later change to the ground order
+        cannot be contradicted by a stale link."""
+        teile = [f"{k}={quote(str(werte[k]))}"
+                 for k in _SLICE_FILTERS if werte.get(k)]
+        if werte.get("sort") and werte["sort"] != LIBRARY_SORT_DEFAULT:
+            teile.append(f"sort={quote(str(werte['sort']))}")
+        if werte.get("dir") and werte["dir"] != LIBRARY_DIR_DEFAULT:
+            teile.append(f"dir={quote(str(werte['dir']))}")
+        if werte.get("trash"):
+            teile.append("trash=1")
+        return ("?" + "&".join(teile)) if teile else ""
+
+    def _nav_slice(doc: dict, **roh) -> tuple[dict, bool]:
+        """The slice a document page was reached through.
+
+        Returns the slice plus whether it actually came from the URL. That
+        second answer matters on save: a slice the visitor chose is a place
+        to go back to, while a slice this function invented for a bookmarked
+        link is not — bouncing someone into a filter they never picked would
+        be a third kind of surprise."""
+        slice_ = {k: (roh.get(k) or None) for k in _SLICE_FILTERS}
+        aus_url = any(slice_.values())
+        # A direct visit (notification, bookmark) still gets sibling nav —
+        # inside the document's own category and year, which is the smallest
+        # honest guess at "documents like this one".
+        if not aus_url:
+            slice_["category"] = doc.get("category") or None
+            d_date = doc.get("doc_date") or ""
+            if len(d_date) >= 4 and d_date[:4].isdigit():
+                slice_["year"] = d_date[:4]
+        sort_key = roh.get("sort") if roh.get("sort") in _LIBRARY_SORTS else LIBRARY_SORT_DEFAULT
+        if sort_key == "relevance" and not (slice_.get("q") or "").strip():
+            sort_key = LIBRARY_SORT_DEFAULT
+        slice_["sort"] = sort_key
+        slice_["dir"] = "asc" if (roh.get("dir") or "").lower() == "asc" else "desc"
+        slice_["trash"] = "1" if roh.get("trash") else None
+        return slice_, aus_url
 
     @app.get("/library", response_class=HTMLResponse)
     def library(
@@ -929,11 +1011,12 @@ def create_app(
             raise HTTPException(status_code=403, detail="admin only")
 
         # Sanitise sort + direction here so the template can echo the
-        # exact effective values back into its controls.
-        sort_key = sort if sort in _LIBRARY_SORTS else "doc_date"
+        # exact effective values back into its controls. The ground order
+        # is "Eingescannt" (newest arrival first) — see LIBRARY_SORT_DEFAULT.
+        sort_key = sort if sort in _LIBRARY_SORTS else LIBRARY_SORT_DEFAULT
         # Relevance only makes sense with an active query.
         if sort_key == "relevance" and not (q or "").strip():
-            sort_key = "doc_date"
+            sort_key = LIBRARY_SORT_DEFAULT
         sort_dir = "asc" if (dir or "").lower() == "asc" else "desc"
 
         docs = db.list_documents(
@@ -951,15 +1034,37 @@ def create_app(
         tree = db.tree()
         tags = db.all_tags(trash=trash)
         tpl = "_card_grid.html" if partial else "library.html"
+        filter_ctx = {"category": category, "subcategory": subcategory,
+                      "tag": tag, "status": status, "year": year, "q": q,
+                      "sort": sort_key, "dir": sort_dir,
+                      "doc_from": doc_from, "doc_to": doc_to,
+                      "scan_from": scan_from, "scan_to": scan_to}
+        qs = _slice_qs({**filter_ctx, "trash": trash})
+        # 🔴 WHAT GOES IN THE ADDRESS BAR (04.10.2026)
+        #
+        # Changing a filter is an htmx GET against `/library?partial=1&…`,
+        # which answers with the card grid alone. `hx-push-url="true"` put
+        # THAT request URL into the browser history — `partial=1` and all.
+        # So the browser's own back button (and reload, and restoring the
+        # tab) fetched a URL that answers with a bare fragment: no header,
+        # no filter bar, no navigation. That is the "back button does odd
+        # things".
+        #
+        # The address bar must always hold the address of a PAGE. This
+        # header overrides what htmx would have pushed, and it is the same
+        # slice string the cards carry, so the URL you can bookmark, the
+        # list the arrow keys walk and the place the back link returns to
+        # are one and the same thing.
+        kopf = {"HX-Push-Url": f"/library{qs}"} if partial else None
         return templates.TemplateResponse(
             request, tpl,
             {**base_ctx(request), "docs": docs, "years": years, "tree": tree,
              "tags": tags, "trash": trash,
-             "filter": {"category": category, "subcategory": subcategory,
-                        "tag": tag, "status": status, "year": year, "q": q,
-                        "sort": sort_key, "dir": sort_dir,
-                        "doc_from": doc_from, "doc_to": doc_to,
-                        "scan_from": scan_from, "scan_to": scan_to}},
+             "filter": filter_ctx,
+             # The cards hand this straight to /document/<id> so the detail
+             # page knows which slice the visitor came from.
+             "slice_qs": qs},
+            headers=kopf,
         )
 
     def _decode_tags(doc: dict) -> dict:
@@ -987,6 +1092,14 @@ def create_app(
         status: str | None = Query(None),
         year: str | None = Query(None),
         q: str | None = Query(None),
+        # Sort and date ranges belong to the slice too: the arrow keys walk
+        # the same order the grid showed, not a second one of their own.
+        sort: str | None = Query(None),
+        dir: str | None = Query(None),
+        doc_from: str | None = Query(None),
+        doc_to: str | None = Query(None),
+        scan_from: str | None = Query(None),
+        scan_to: str | None = Query(None),
         trash: bool = Query(False),
     ):
         doc = db.get(doc_id)
@@ -1002,24 +1115,12 @@ def create_app(
             target = f"/transactions?account_id={acc['account_id']}" if acc and acc["account_id"] else "/transactions"
             return RedirectResponse(target, status_code=302)
         _decode_tags(doc)
-        nav_filters = {
-            "category": category or None,
-            "subcategory": subcategory or None,
-            "tag": tag or None,
-            "status": status or None,
-            "year": year or None,
-            "q": q or None,
-            "trash": "1" if trash else None,
-        }
-        # Default the filter to the doc's own category + year when
-        # no explicit filter came in via the URL — direct visits
-        # (notification, bookmarked URL) still get sibling nav inside
-        # something sensible.
-        if not any(v for v in nav_filters.values()):
-            nav_filters["category"] = doc.get("category") or None
-            d_date = doc.get("doc_date") or ""
-            if len(d_date) >= 4 and d_date[:4].isdigit():
-                nav_filters["year"] = d_date[:4]
+        nav_filters, aus_url = _nav_slice(
+            doc, category=category, subcategory=subcategory, tag=tag,
+            status=status, year=year, q=q, sort=sort, dir=dir,
+            doc_from=doc_from, doc_to=doc_to,
+            scan_from=scan_from, scan_to=scan_to, trash=trash,
+        )
         siblings = db.siblings_of(
             doc_id,
             category=nav_filters["category"],
@@ -1029,6 +1130,9 @@ def create_app(
             year=nav_filters["year"],
             query=nav_filters["q"],
             trash=trash,
+            order_by=nav_filters["sort"], sort_dir=nav_filters["dir"],
+            doc_from=nav_filters["doc_from"], doc_to=nav_filters["doc_to"],
+            scan_from=nav_filters["scan_from"], scan_to=nav_filters["scan_to"],
         )
         receipt = db.get_receipt(doc_id) if doc.get("category") == "Kassenzettel" else None
         # Statement card surfaces for Kontoauszug AND any legacy Bank
@@ -1056,7 +1160,9 @@ def create_app(
              "tx_categories": _cat_keys(request),
              "tx_types":      list(TX_TYPES),
              "siblings":      siblings,
-             "nav_filters":   nav_filters},
+             "nav_filters":   nav_filters,
+             # Every exit from this page — back, save, delete — appends this.
+             "slice_qs":      _slice_qs(nav_filters)},
         )
 
     def path_is_file(p: str) -> bool:
@@ -1110,6 +1216,21 @@ def create_app(
     @app.post("/document/{doc_id}/edit")
     def edit_document(
         doc_id: int,
+        # The slice rides along in the form's action URL, so saving returns
+        # the visitor to the list they were working through.
+        f_category: str | None = Query(None, alias="category"),
+        f_subcategory: str | None = Query(None, alias="subcategory"),
+        f_tag: str | None = Query(None, alias="tag"),
+        f_status: str | None = Query(None, alias="status"),
+        f_year: str | None = Query(None, alias="year"),
+        f_q: str | None = Query(None, alias="q"),
+        f_sort: str | None = Query(None, alias="sort"),
+        f_dir: str | None = Query(None, alias="dir"),
+        f_doc_from: str | None = Query(None, alias="doc_from"),
+        f_doc_to: str | None = Query(None, alias="doc_to"),
+        f_scan_from: str | None = Query(None, alias="scan_from"),
+        f_scan_to: str | None = Query(None, alias="scan_to"),
+        f_trash: bool = Query(False, alias="trash"),
         category: str = Form(...),
         subcategory: str = Form(""),
         tags: str = Form(""),
@@ -1186,7 +1307,37 @@ def create_app(
         )
         logger.info("Edited doc %d -> %s (sub=%s tags=%s)",
                     doc_id, new_path.name, sub, tag_list)
-        return RedirectResponse(f"/document/{doc_id}", status_code=303)
+
+        # Where to land. The edit just set the status to 'filed' and may have
+        # moved the document to another category, so it can have left the very
+        # slice the visitor is working through — which is the normal case when
+        # clearing the review list. Staying on a document that is no longer in
+        # the list would leave the arrow keys dead and the counter blank, so
+        # hand the visitor back to the list instead; it is now one shorter.
+        # A slice this app invented for a bookmarked link is not a place to
+        # send anybody, hence `aus_url`.
+        slice_, aus_url = _nav_slice(
+            db.get(doc_id) or {},
+            category=f_category, subcategory=f_subcategory, tag=f_tag,
+            status=f_status, year=f_year, q=f_q, sort=f_sort, dir=f_dir,
+            doc_from=f_doc_from, doc_to=f_doc_to,
+            scan_from=f_scan_from, scan_to=f_scan_to, trash=f_trash,
+        )
+        if not aus_url:
+            return RedirectResponse(f"/document/{doc_id}", status_code=303)
+        qs = _slice_qs(slice_)
+        drin = db.siblings_of(
+            doc_id,
+            category=slice_["category"], subcategory=slice_["subcategory"],
+            tag=slice_["tag"], status=slice_["status"], year=slice_["year"],
+            query=slice_["q"], trash=f_trash,
+            order_by=slice_["sort"], sort_dir=slice_["dir"],
+            doc_from=slice_["doc_from"], doc_to=slice_["doc_to"],
+            scan_from=slice_["scan_from"], scan_to=slice_["scan_to"],
+        )
+        if drin.get("position") is None:
+            return RedirectResponse(f"/library{qs}", status_code=303)
+        return RedirectResponse(f"/document/{doc_id}{qs}", status_code=303)
 
     # ---------- Upload ----------
     @app.get("/upload", response_class=HTMLResponse)
@@ -3126,22 +3277,38 @@ def create_app(
 
     @app.post("/api/library/duplicates/clean")
     def api_library_duplicates_clean(payload: dict):
-        """Trash every duplicate except one keeper per group. The
-        keeper id can be picked client-side; if none is given we keep
-        the oldest (first inserted) doc.
-        Body shape: ``{"keepers": {"<hash>": <doc_id>, ...}}`` or
-        ``{}`` for the keep-oldest default applied to every group.
+        """Trash every duplicate except one keeper per group.
+
+        Body shape: ``{"keepers": {"<hash>": <doc_id>, ...}}``. The keys
+        of `keepers` ARE the scope — only those groups are touched.
+
+        🔴 WHY THE SCOPE IS EXPLICIT (04.10.2026)
+
+        This used to read a missing hash as "no keeper picked, so keep the
+        oldest and trash the rest". That made a missing key mean two
+        opposite things: the all-groups button sent `{}` and meant "every
+        group", while the per-group button sent one hash and meant "only
+        this one" — and the endpoint could not tell them apart. Clicking
+        the button on ONE group therefore trashed the extras of EVERY
+        group: 127 documents in one minute, measured in the live database.
+        Nothing was destroyed (they were content-identical copies and the
+        delete is reversible), but it was not what the visitor asked for.
+
+        So: a group that is not named is not touched. The all-groups button
+        names every group — it always did; the `{}` shortcut was the only
+        caller that relied on the guess, and a request that names nothing
+        now correctly does nothing.
         """
         from ..trash import delete_document
         keepers: dict[str, int] = {
             str(k): int(v) for k, v in (payload.get("keepers") or {}).items()
         }
-        groups = _duplicate_groups()
+        groups = [g for g in _duplicate_groups() if g["content_hash"] in keepers]
         trashed: list[int] = []
         failed: list[dict]  = []
         for g in groups:
             doc_ids = [d["id"] for d in g["docs"]]
-            keeper  = keepers.get(g["content_hash"], doc_ids[0])
+            keeper  = keepers[g["content_hash"]]
             if keeper not in doc_ids:
                 # Caller picked an id that isn't part of this group —
                 # safer to skip the whole group than to wipe a row by
