@@ -7,6 +7,33 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.89.5] - 2026-10-04
+
+### Changed
+
+**The category list is alphabetical now — in every dropdown.** It used to come
+in the order of `categories.yaml`, with anything added by hand appended at the
+end. With seventeen entries that means scanning the whole list, and a category
+you created yourself sat wherever it happened to land rather than where you
+would look for it.
+
+🔑 **Sorted by the label, not by the stored name.** Those are not the same
+string: the file knows `Behoerde` and `Auto`, the dropdown shows *Behörde* and
+*Verträge* — and in English *Authorities* and *Vehicle*. Sorting the names
+would have produced a correct-looking German list by accident and an English
+one beginning Vehicle, Banking, Authorities, which is no order at all. So the
+list is sorted by what is actually on screen, per language, and umlauts count
+as their transliteration (*Behörde* between *Bank* and *Bildung*, not after Z).
+
+The order is decided in one place (`kategorien.sortiert`, applied by
+`kategorien.zusammen`), so the dropdown, the subcategory list, the model's
+system prompt and the check on save all agree. `/api/categories` answers in
+the same order as the page that calls it — otherwise the list would jump once
+the moment you added a category.
+
+Subcategories are sorted the same way. The finance categories are a separate,
+deliberately grouped list and are unchanged.
+
 ## [0.89.4] - 2026-10-04
 
 ### Fixed
