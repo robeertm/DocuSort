@@ -844,8 +844,14 @@ def create_app(
     #    Jetzt fragt jeder Aufruf nach; die Abfrage ist ein kleines SELECT.
     from .. import kategorien as _kat
 
-    def _kategorien() -> list[dict[str, Any]]:
-        """Die eingebauten aus der Datei plus die eigenen aus der Datenbank."""
+    def _kategorien(lang: str | None = None) -> list[dict[str, Any]]:
+        """Die eingebauten aus der Datei plus die eigenen aus der Datenbank.
+
+        Alphabetisch — und mit `lang` nach dem, was in dieser Sprache
+        DASTEHT. Ohne `lang` nach dem gespeicherten Namen; das ist die
+        richtige Antwort ueberall dort, wo niemand hinsieht (Pruefung beim
+        Speichern, Systemtext des Modells).
+        """
         try:
             eigene = db.doc_categories_custom()
         except Exception:
@@ -853,13 +859,22 @@ def create_app(
             #    Migration laeuft), gilt die Datei allein — eine Oberflaeche
             #    ohne Kategorien waere schlimmer als eine ohne die eigenen.
             eigene = []
-        return _kat.zusammen(settings.categories, eigene)
+        kats = _kat.zusammen(settings.categories, eigene)
+        if lang:
+            # 🔴 Der gespeicherte Name ist nicht der gezeigte: `Behoerde`
+            #    steht als „Behörde" da und auf Englisch als „Authorities".
+            #    Die Reihenfolge gehoert an das, was der Mensch liest.
+            kats = _kat.sortiert(
+                kats,
+                beschriftung=lambda n: category_label(n, lang),
+                unterbeschriftung=lambda d, s: subcategory_label(d, s, lang))
+        return kats
 
-    def _category_names() -> list[str]:
-        return _kat.namen(_kategorien())
+    def _category_names(lang: str | None = None) -> list[str]:
+        return _kat.namen(_kategorien(lang))
 
-    def _subcategory_map() -> dict[str, list[str]]:
-        return _kat.unterkategorien(_kategorien())
+    def _subcategory_map(lang: str | None = None) -> dict[str, list[str]]:
+        return _kat.unterkategorien(_kategorien(lang))
 
     def _kategorien_geaendert() -> int:
         """Nach jeder Aenderung: allen Klassifizierern die neue Liste geben.
@@ -905,7 +920,7 @@ def create_app(
         # dropdown — Alpine looks up sub_labels[category][canonical] = label.
         sub_labels = {
             cat: {sub: subcategory_label(cat, sub, lang) for sub in subs}
-            for cat, subs in _subcategory_map().items()
+            for cat, subs in _subcategory_map(lang).items()
         }
         return {
             "request": request,
@@ -914,13 +929,13 @@ def create_app(
             # hide admin-only controls on this; the server still enforces
             # every rule independently in `auth_gate`.
             "me": getattr(request.state, "user", None),
-            "categories": _category_names(),
-            "subcategory_map": _subcategory_map(),
+            "categories": _category_names(lang),
+            "subcategory_map": _subcategory_map(lang),
             # Beschriftungen fuer die Auswahlfelder, die Alpine aufbaut.
             # `category_label` faellt bei selbst angelegten auf den Namen
             # zurueck — genau richtig, da gibt es nichts zu uebersetzen.
             "category_labels": {n: category_label(n, lang)
-                                for n in _category_names()},
+                                for n in _category_names(lang)},
             "subcategory_labels": sub_labels,
             "lang": lang,
             "supported_langs": [(code, LANGUAGE_NAMES[code]) for code in SUPPORTED],
@@ -3432,9 +3447,14 @@ def create_app(
 
     # ---------- Kategorien anlegen, bestaetigen, entfernen ----------
     @app.get("/api/categories")
-    def api_categories():
-        """Alles, was eine Auswahlliste braucht — und was noch wartet."""
-        kats = _kategorien()
+    def api_categories(request: Request):
+        """Alles, was eine Auswahlliste braucht — und was noch wartet.
+
+        🔑 In der Reihenfolge der Oberflaeche, nicht in der der Datei: wer
+        diese Antwort in eine Auswahlliste schuettet, bekommt dieselbe
+        Sortierung wie auf der Seite, von der er kommt.
+        """
+        kats = _kategorien(_lang(request))
         eigene = {(c["parent"], c["name"]) for c in db.doc_categories_custom()}
         return {
             "categories": [
@@ -3475,12 +3495,16 @@ def create_app(
         n = _kategorien_geaendert()
         logger.info("Kategorie angelegt: %r (unter %r), an %d Klassifizierer",
                     name, parent or "-", n)
+        # 🔴 In der Sprache des Anfragenden sortiert. Die Oberflaeche setzt
+        #    diese Liste an die Stelle der alten — kaeme sie anders sortiert
+        #    zurueck, spraenge die Auswahl beim Anlegen einmal um.
+        lang = _lang(request)
         return {"ok": True, "name": name, "parent": parent,
-                "categories": _category_names(),
-                "subcategory_map": _subcategory_map()}
+                "categories": _category_names(lang),
+                "subcategory_map": _subcategory_map(lang)}
 
     @app.post("/api/categories/approve")
-    def api_category_approve(payload: dict):
+    def api_category_approve(payload: dict, request: Request):
         """Einen Vorschlag des Modells annehmen — danach ist er eine ganz
         normale Kategorie, die das Modell von sich aus benutzen darf."""
         name = " ".join(str(payload.get("name") or "").split())
@@ -3503,12 +3527,13 @@ def create_app(
         n = _kategorien_geaendert()
         logger.info("Vorschlag angenommen: %r (unter %r), an %d Klassifizierer",
                     name, parent or "-", n)
+        lang = _lang(request)
         return {"ok": True, "name": name, "parent": parent,
-                "categories": _category_names(),
-                "subcategory_map": _subcategory_map()}
+                "categories": _category_names(lang),
+                "subcategory_map": _subcategory_map(lang)}
 
     @app.delete("/api/categories")
-    def api_category_delete(payload: dict = Body(default={})):
+    def api_category_delete(request: Request, payload: dict = Body(default={})):
         """Eine selbst angelegte Kategorie (oder einen Vorschlag) entfernen.
 
         🔴 Dokumente werden NICHT angefasst — die Antwort sagt nur, wie viele
@@ -3525,9 +3550,10 @@ def create_app(
         logger.info("Kategorie entfernt: %r (unter %r), %d Dokument(e) tragen "
                     "sie weiter, an %d Klassifizierer",
                     name, parent or "-", res["documents"], n)
+        lang = _lang(request)
         return {"ok": True, **res,
-                "categories": _category_names(),
-                "subcategory_map": _subcategory_map()}
+                "categories": _category_names(lang),
+                "subcategory_map": _subcategory_map(lang)}
 
     @app.post("/api/library/duplicates/clean")
     def api_library_duplicates_clean(payload: dict):

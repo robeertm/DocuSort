@@ -110,8 +110,8 @@ def zusammen(basis: list[dict[str, Any]],
     zusammenkommen. Wer eine zweite baut, bekommt eine Oberflaeche, die eine
     Kategorie anbietet, die der Klassifizierer nicht kennt — oder umgekehrt.
 
-    Die Reihenfolge der Basis bleibt; Eigenes kommt hinten dran, damit die
-    gewohnte Liste nicht jedes Mal umspringt.
+    Die Liste kommt alphabetisch zurueck (`sortiert`) — eine neu angelegte
+    Kategorie steht damit dort, wo man sie sucht, und nicht hinten dran.
     """
     aus = [
         {**c, "subcategories": list(c.get("subcategories") or [])}
@@ -147,7 +147,11 @@ def zusammen(basis: list[dict[str, Any]],
         name = (zeile.get("name") or "").strip()
         if name and not any(namen_gleich(name, s) for s in ziel["subcategories"]):
             ziel["subcategories"].append(name)
-    return aus
+    # 🔑 Die Reihenfolge wird hier festgelegt, nicht beim Anzeigen: so steht
+    #    sie in der Oberflaeche, im Systemtext des Modells und in der
+    #    Pruefung gleich. Wer eine Sprache hat, sortiert danach noch einmal
+    #    nach der Beschriftung — siehe `sortiert`.
+    return sortiert(aus)
 
 
 def namen(kategorien: list[dict[str, Any]]) -> list[str]:
@@ -156,3 +160,45 @@ def namen(kategorien: list[dict[str, Any]]) -> list[str]:
 
 def unterkategorien(kategorien: list[dict[str, Any]]) -> dict[str, list[str]]:
     return {c["name"]: list(c.get("subcategories") or []) for c in kategorien}
+
+
+def sortiert(kategorien: list[dict[str, Any]],
+             beschriftung=None,
+             unterbeschriftung=None) -> list[dict[str, Any]]:
+    """Alphabetisch — nach dem, was in der Auswahlliste STEHT.
+
+    🔴 Der gespeicherte Name und der gezeigte sind nicht dasselbe. In
+    `categories.yaml` heisst die Kategorie `Behoerde`, die Auswahl zeigt
+    „Behörde"; auf Englisch zeigt sie „Authorities", und `Auto` steht dort
+    als „Vehicle". Wer die NAMEN sortiert, bekommt auf Deutsch zufaellig das
+    Richtige und auf Englisch eine Liste, die mit Vehicle, Banking,
+    Authorities beginnt — also gar keine Sortierung.
+
+    Darum nimmt diese Funktion die Beschriftung entgegen: `beschriftung(name)`
+    und `unterbeschriftung(dach, name)`. Ohne sie wird nach dem Namen
+    sortiert — das ist die richtige Antwort ueberall dort, wo es keine
+    Sprache gibt (Systemtext des Modells, Pruefung beim Speichern).
+
+    Umlaute zaehlen wie ihre Umschrift (`aehnlichkeit.schlicht`): „Behörde"
+    liegt zwischen „Bank" und „Bildung", nicht hinter „Z".
+    """
+    def _kopf(c: dict[str, Any]) -> tuple[str, str]:
+        name = c.get("name") or ""
+        gezeigt = beschriftung(name) if beschriftung else name
+        return (_schlicht(gezeigt), _schlicht(name))
+
+    def _unter(dach: str, s: str) -> tuple[str, str]:
+        gezeigt = unterbeschriftung(dach, s) if unterbeschriftung else s
+        return (_schlicht(gezeigt), _schlicht(s))
+
+    aus = []
+    for c in sorted(kategorien, key=_kopf):
+        # Eine Kopie — die Eingabe gehoert dem Aufrufer.
+        neu = dict(c)
+        if "subcategories" in c:
+            dach = c.get("name") or ""
+            neu["subcategories"] = sorted(
+                list(c.get("subcategories") or []),
+                key=lambda s, d=dach: _unter(d, s))
+        aus.append(neu)
+    return aus
