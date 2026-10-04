@@ -835,7 +835,16 @@
             :class="d.paid_at ? 'border-emerald-500/30 bg-emerald-500/5'
                               : (doneDeadline === d.id ? 'border-ink-800 bg-ink-900/40 opacity-40'
                                                        : 'border-ink-800 bg-ink-900/40')">
-          <div class="flex items-start gap-2">
+          {# 🔴 `data-tiny` HEBT DIE 44-px-REGEL AUF (`input.css`: `button
+             { min-height: 44px }` fuer den Daumen). Ohne sie wurde der
+             20-px-Haken daneben auf 44 px GEZOGEN und war eine Pille statt
+             eines Quadrats — sichtbar in jeder Zeile, und ungleich zum
+             bezahlten Zustand daneben, der ein `<span>` ist und darum
+             quadratisch blieb.
+             🔑 Der Daumen bekommt sein Ziel trotzdem: der Knopf traegt
+             Polster nach aussen (`-m-2 p-2`), der Rahmen sitzt auf dem
+             `<span>` darin. 36 px Flaeche, 20 px Bild. #}
+          <div class="flex items-start gap-2" data-tiny>
             {# A settled bill keeps its row but stops asking to be ticked —
                the tick is for "I dealt with this", and the booking already
                says so. #}
@@ -852,10 +861,13 @@
                       :disabled="doneDeadline === d.id"
                       :title="tr('dashboard.deadlines.done_hint')"
                       :aria-label="tr('dashboard.deadlines.done_hint')"
-                      class="shrink-0 mt-0.5 h-5 w-5 rounded-md border border-ink-600 text-emerald-300
-                             hover:border-emerald-400 hover:bg-emerald-500/10 flex items-center justify-center
+                      class="group shrink-0 -m-2 p-2 flex items-start
                              disabled:opacity-50 transition">
-                <span class="text-xs leading-none">✓</span>
+                <span class="mt-0.5 h-5 w-5 rounded-md border border-ink-600 text-emerald-300
+                             group-hover:border-emerald-400 group-hover:bg-emerald-500/10
+                             flex items-center justify-center transition">
+                  <span class="text-xs leading-none">✓</span>
+                </span>
               </button>
             </template>
             {# Chip and title share ONE line and wrap together. They used to be
