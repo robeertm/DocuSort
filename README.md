@@ -1,3 +1,37 @@
+> # 🔴 If your DocuSort stopped on the evening of 4 October 2026 — read this first
+>
+> **Version 0.90.0 could not start on an existing database.** It was published
+> on the evening of 4 October 2026 and Watchtower distributed it within the
+> hour. Affected containers crash-loop with
+> `sqlite3.OperationalError: no such column: besonders`.
+>
+> **It does not repair itself.** Watchtower skips containers that are
+> restarting (`scanned=0`), so the fix is not picked up on the next run. One
+> command on the host fixes it:
+>
+> ```
+> docker compose pull docusort && docker compose up -d docusort
+> ```
+>
+> (Not using compose? `docker pull ghcr.io/robeertm/docusort:latest` and
+> recreate the container.) Then check `docker logs docusort` and open the page.
+>
+> **No data was lost.** The crash happened before any migration ran — nothing
+> had been written. **0.90.1** fixes it, **0.90.2** is current, and `:latest`
+> points at a tested image.
+>
+> **I am sorry.** This should never have reached anyone. `:latest` moved the
+> moment a commit landed on `main` — before anything had looked at the image
+> that users actually pull. That is fixed, not patched: the build now publishes
+> only `:<version>` and `:edge`, a separate manual step
+> ([`promote.yml`](.github/workflows/promote.yml)) moves `:latest`, and it only
+> does so after the **published** image has been started on a database written
+> by the previous release. Watchtower now also gets `--include-restarting`, so
+> a broken release can heal itself on the next run. Details in the
+> [changelog](CHANGELOG.md#0902---2026-10-04).
+
+---
+
 # DocuSort
 
 [![Licence: source-available](https://img.shields.io/badge/licence-source--available-blue.svg)](LICENSE)

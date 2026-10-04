@@ -6,6 +6,10 @@ name: Publish container image
 on:
   push:
     branches: [main]
+    # 🔴 Eine Aenderung an Text baut kein neues Abbild (04.10.2026). Sonst
+    # wuerde ein README-Satz die Versionsmarke neu belegen — und damit genau
+    # das Abbild ersetzen, das das Tor angefahren hat.
+    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
 # 🔴 Deliberately NOT on tags. A push to main already publishes both
@@ -50,6 +54,61 @@ jobs:
         id: ver
         run: echo "version=$(python3 -c "import re;print(re.search(r'__version__ = \"([^\"]+)\"', open('docusort/__init__.py').read()).group(1))")" >> "$GITHUB_OUTPUT"
 
+      # 🔴 EINE VEROEFFENTLICHTE VERSIONSMARKE BEWEGT SICH NIE (04.10.2026).
+      #
+      # `promote.yml` haengt `:latest` an das Manifest, das das Tor angefahren
+      # hat. Wuerde ein spaeterer Push dieselbe Versionsnummer neu belegen,
+      # zeigte `:latest` ploetzlich auf ein Abbild, das niemand geprueft hat —
+      # dasselbe Loch, nur eine Ebene tiefer.
+      #
+      # Also: ist die Nummer schon draussen, wird nur `:edge` erneuert. Kein
+      # Fehlschlag, damit mehrere Commits vor einer Freigabe normal
+      # weiterlaufen — aber eine Warnung, die sagt, was zu tun ist.
+      - name: Eine veroeffentlichte Versionsmarke wird nie ueberschrieben
+        id: marken
+        run: |
+          set -euo pipefail
+          SLUG="ghcr.io/${{ steps.repo.outputs.slug }}"
+          V="${{ steps.ver.outputs.version }}"
+
+          # 🔴 DREI FAELLE, NICHT ZWEI (04.10.2026, am eigenen Wurf gemessen).
+          #
+          # Der erste Entwurf fragte `if imagetools inspect …; then`. Auf einer
+          # Maschine ohne Docker-Dienst schlug der Aufruf fehl — und der
+          # Waechter las das als „die Marke gibt es nicht" und haette sie
+          # ueberschrieben. Ein Waechter, der „konnte nicht fragen" mit „ist
+          # frei" verwechselt, ist schlechter als keiner.
+          #
+          #   rc=0                  -> die Marke ist draussen
+          #   rc!=0 + „not found"   -> die Marke ist frei
+          #   rc!=0 sonst           -> wir wissen es nicht: ABBRUCH
+          antwort="$(docker buildx imagetools inspect "$SLUG:$V" 2>&1)" && rc=0 || rc=$?
+          if [ "$rc" = "0" ]; then
+            vorhanden=ja
+          elif printf '%s' "$antwort" | grep -qi 'not found\|manifest unknown\|MANIFEST_UNKNOWN\|denied\|was not found'; then
+            vorhanden=nein
+          else
+            echo "::error::Konnte die Registry nicht nach $SLUG:$V fragen. Es wird NICHTS veroeffentlicht, damit keine gepruefte Marke ueberschrieben wird."
+            printf '%s\n' "$antwort"
+            exit 1
+          fi
+
+          if [ "$vorhanden" = "ja" ]; then
+            MARKEN="$SLUG:edge"
+            echo "::warning::$SLUG:$V ist bereits veroeffentlicht und wird NICHT ersetzt — es wird nur :edge erneuert. Version in docusort/__init__.py erhoehen, wenn das eine neue Fassung werden soll."
+          else
+            # printf, kein eingebetteter Umbruch: eine Zeile auf Spalte 0 beendet
+            # den YAML-Block hier mitten im Skript.
+            MARKEN="$(printf '%s\n%s' "$SLUG:$V" "$SLUG:edge")"
+          fi
+          echo "Marken, die dieser Bau setzt:"
+          echo "$MARKEN" | sed 's/^/  /'
+          {
+            echo "tags<<ENDE_DER_MARKEN"
+            echo "$MARKEN"
+            echo "ENDE_DER_MARKEN"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -72,9 +131,7 @@ jobs:
           # Jetzt veröffentlicht ein Push nur die Versionsmarke und `edge`.
           # `:latest` setzt `promote.yml` — von Hand, nach grünem Tor gegen
           # GENAU DIESES veröffentlichte Abbild.
-          tags: |
-            ghcr.io/${{ steps.repo.outputs.slug }}:${{ steps.ver.outputs.version }}
-            ghcr.io/${{ steps.repo.outputs.slug }}:edge
+          tags: ${{ steps.marken.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
