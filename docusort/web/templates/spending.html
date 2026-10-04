@@ -132,6 +132,14 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
           <span x-text="(delta > 0 ? '▲ ' : delta < 0 ? '▼ ' : '± ') + fmt0(Math.abs(delta)) + ' €'"></span>
           <span class="text-ink-500" x-text="T.vs_prev.replace('{month}', d.prev_month_label)"></span>
         </div>
+        {# 🔑 Was bewusst draußen steht, gehört auf die Seite. Sonst sucht
+           jemand 9 000 €, die er ausgegeben hat, und findet sie nirgends. #}
+        <div class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs
+                    bg-amber-500/10 text-amber-200" x-show="d.special_total > 0" x-cloak
+             :title="(d.special_cats || []).map(k => label(k)).join(', ')">
+          <span x-text="'◆ ' + fmt0(d.special_total) + ' €'"></span>
+          <span class="text-amber-400/80">{{ t('spend.special_sum') }}</span>
+        </div>
       </div>
 
       <div class="card p-5 lg:col-span-2">

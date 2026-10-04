@@ -148,7 +148,7 @@
   </div>
 
   <!-- ============================ KPIS ============================ -->
-  <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 xl:grid-cols-6">
+  <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4 xl:grid-cols-7">
     <div class="card p-3 sm:p-4">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.counted') }}</div>
       <div class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums leading-tight" x-text="agg.count.toLocaleString(DS_LOCALE)"></div>
@@ -160,6 +160,16 @@
       <div class="mt-1 text-2xl font-semibold tabular-nums text-sky-300" x-text="(agg.transfer_count || 0).toLocaleString(DS_LOCALE)"></div>
       <div class="text-[11px] text-ink-500 mt-0.5"
            x-text="agg.transfer_count ? (fmtEur(agg.transfer_in || 0) + ' ' + tr('tx.in_out_short').replace('{out}', fmtEur(agg.transfer_out || 0))) : tr('tx.none_in_filter')"></div>
+    </div>
+    {# 🔑 Wie die Umbuchungs-Kachel daneben: nicht gezählt, aber BENANNT.
+       Eine Zahl, die spurlos verschwindet, sieht aus wie ein Fehler. #}
+    <div class="card p-4" :class="agg.special_count > 0 ? '' : 'opacity-60'"
+         title="{{ t('tx.special_hint') }}">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.special') }}</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums text-amber-300"
+           x-text="fmtEur(-(agg.special_out || 0))"></div>
+      <div class="text-[11px] text-ink-500 mt-0.5"
+           x-text="agg.special_count ? (agg.special_count + ' ' + tr('tx.bookings_word')) : tr('tx.none_in_filter')"></div>
     </div>
     <div class="card p-3 sm:p-4">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.income_col') }}</div>
@@ -455,6 +465,19 @@
                 class="text-xs rounded px-2 py-1 bg-emerald-500/30 text-emerald-100 hover:bg-emerald-500/50 disabled:opacity-50">
           Anwenden
         </button>
+        {# Ein Trenner ist kein Text — als Strich gezeichnet, nicht als
+           blasses Zeichen. Siehe probe_kontrast: die schwaechste Tonstufe
+           darf Linien faerben, keine Schrift. #}
+        <span class="w-px self-stretch bg-ink-700" aria-hidden="true"></span>
+        <button type="button" @click="bulkSpecial(true)" :disabled="busy"
+                title="{{ t('tx.special_hint') }}"
+                class="text-xs rounded px-2 py-1 bg-amber-500/25 text-amber-100 hover:bg-amber-500/40 disabled:opacity-50">
+          {{ t('tx.special_mark') }}
+        </button>
+        <button type="button" @click="bulkSpecial(false)" :disabled="busy"
+                class="text-xs rounded px-2 py-1 text-ink-300 hover:text-ink-100">
+          {{ t('tx.special_unmark') }}
+        </button>
         <button type="button" @click="selected = new Set(); $event.stopPropagation()"
                 class="text-xs text-ink-400 hover:text-ink-200">
           {{ t('tx.clear_selection') }}
@@ -471,7 +494,7 @@
     <div class="sm:hidden px-4 m-list">
       <template x-for="tx in rows.slice(0, mShown)" :key="'m-' + tx.id">
         <div class="py-3 -mx-2 px-2 rounded-lg"
-             :class="(selected.has(tx.id) ? 'bg-emerald-500/5 ' : '') + (tx.category === 'uebertrag' ? 'opacity-70' : '')">
+             :class="(selected.has(tx.id) ? 'bg-emerald-500/5 ' : '') + (tx.category === 'uebertrag' || istSonder(tx) ? 'opacity-70' : '')">
           <div class="flex items-start gap-2.5">
             <input type="checkbox" :checked="selected.has(tx.id)" @change="toggleRow(tx.id)"
                    class="mt-1 shrink-0 rounded border-ink-700 bg-ink-900 accent-emerald-500"
@@ -542,7 +565,7 @@
         <tbody>
           <template x-for="tx in rows" :key="tx.id">
             <tr class="border-t border-ink-800/50 hover:bg-ink-800/30"
-                :class="(selected.has(tx.id) ? 'bg-emerald-500/5 ' : '') + (tx.category === 'uebertrag' ? 'opacity-60' : '')">
+                :class="(selected.has(tx.id) ? 'bg-emerald-500/5 ' : '') + (tx.category === 'uebertrag' || istSonder(tx) ? 'opacity-60' : '')">
               <td class="px-2 sm:px-3 py-2 align-middle">
                 <input type="checkbox" :checked="selected.has(tx.id)"
                        @change="toggleRow(tx.id)"
@@ -594,6 +617,7 @@
                   :class="tx.category === 'uebertrag' ? 'text-sky-300' : (tx.amount < 0 ? 'text-rose-300' : 'text-emerald-300')">
                 <span x-text="(tx.amount > 0 ? '+' : '') + fmtEur(tx.amount)"></span>
                 <span x-show="tx.category === 'uebertrag'" x-cloak class="text-[10px] text-sky-400/80 block" x-text="tx.synthetic ? tr('tx.synthetic_added') : tr('tx.not_counted_short')"></span>
+                <span x-show="istSonder(tx)" x-cloak class="text-[10px] text-amber-300/90 block" x-text="tr('tx.special_short')"></span>
               </td>
               <td class="px-2 py-2 text-center whitespace-nowrap hidden xl:table-cell">
                 <template x-if="tx.doc_id && tx.has_doc">
@@ -664,7 +688,7 @@ function txExplorer() {
       start: '', end: '', amount_min: '', amount_max: '',
     },
     rows: [],
-    agg: { count: 0, sum_in: 0, sum_out: 0, sum_net: 0,
+    agg: { count: 0, sum_in: 0, sum_out: 0, sum_net: 0, special_count: 0, special_out: 0, special_cats: [],
            top_expense: [], top_income: [], monthly: [], by_category: [],
            first_date: '', last_date: '' },
     selected: new Set(),
@@ -1162,6 +1186,40 @@ function txExplorer() {
         }
         if (this.unresolvedLoaded) this.loadUnresolved();
       } catch (e) { this.flash(false, e.message || String(e)); }
+    },
+
+    // 🔑 Eine Buchung ist besonders, wenn ihr Schalter gesetzt ist ODER
+    //    ihre Kategorie zum Sondertopf gehört — dieselbe Regel wie im
+    //    Server (`Database.sonder_sql`). Zwei Antworten auf eine Frage
+    //    wären zwei Wahrheiten.
+    istSonder(tx) {
+      if (!tx) return false;
+      if (tx.besonders) return true;
+      return (this.agg.special_cats || []).includes(tx.category);
+    },
+
+    async bulkSpecial(an) {
+      if (this.selected.size === 0) return;
+      const ids = Array.from(this.selected);
+      this.busy = true;
+      try {
+        const r = await fetch('/api/transactions/special', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids, besonders: an }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        for (const row of this.rows) {
+          if (this.selected.has(row.id)) row.besonders = an ? 1 : 0;
+        }
+        this.selected = new Set();
+        this.flash(true, tr(an ? 'tx.special_done' : 'tx.special_undone')
+          .replace('{n}', d.changed));
+        this.reloadAggOnly();
+      } catch (e) {
+        this.flash(false, e.message || String(e));
+      } finally { this.busy = false; }
     },
 
     async bulkApply() {

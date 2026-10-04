@@ -7,6 +7,46 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.90.0] - 2026-10-04
+
+### Added
+
+**Special expenses — money that really left the account and still should not
+count.** A house build, an inheritance, a one-off: 25,632 € across fifteen
+bookings next to an everyday life of a few hundred euros wrecks every average.
+There are now two ways to declare it, because they are two different
+questions:
+
+* **A whole pot.** On */fixkosten*, next to "What counts as a fixed cost?",
+  a second field: *What comes out of a special pot?* Tick **Hausbau** and
+  everything in that category drops out everywhere — including bookings
+  imported tomorrow.
+* **A single booking.** On */transactions*, select rows → **Mark as special**.
+  This works on categories that are not in a pot at all.
+
+**It drops out of every calculation**, and that is measured rather than
+claimed: the explorer, the headline totals, the monthly series, the salary
+month, the largest payees, */ausgaben* and the **fixed-cost calculator** all
+stop counting it.
+
+🔴 **But nothing disappears without trace.** The booking stays in every list
+(dimmed, marked "special pot — not counted"), there is a separate *Special
+expenses (not counted)* tile, and */ausgaben* shows "◆ 9,000 € from special
+pots, not counted". A figure that vanishes silently looks like a bug. Filter
+explicitly on the category and you get its full sum.
+
+The rule lives in **one** place (`Database.sonder_sql`) and every reader asks
+it — the eleven places that add up money had already drifted apart three
+times this week.
+
+The probe asks the property rather than auditing eleven call sites: mark a
+booking, and every counted total must drop by exactly its amount while the
+separately reported figure rises by exactly the same amount. A number that
+stays unchanged is as much a failure as one that moves wrongly. 33 checks,
+including a browser pass over all three pages with real bookings — the mobile
+probe visits those pages without data, where "no errors" only means "nothing
+ran".
+
 ## [0.89.6] - 2026-10-04
 
 ### Fixed

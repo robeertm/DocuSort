@@ -3088,6 +3088,41 @@ def create_app(
             raise HTTPException(400, "categories must be a list")
         return {"ok": True, "categories": db.finance_set_fixed_categories([str(c) for c in cats])}
 
+    # ---------- Sonderausgaben ----------
+    # 🔑 Zwei Wege zum selben Ziel, weil es zwei Fragen sind:
+    #    „dieser ganze Topf zählt nicht" (Kategorien) und
+    #    „ausgerechnet diese Buchung nicht" (Schalter je Zeile).
+
+    @app.get("/api/finance/special-categories")
+    def api_finance_special_categories(request: Request):
+        return {"categories": db.finance_special_categories(),
+                "all": _cat_keys(request),
+                "default": list(db.DEFAULT_SPECIAL_CATEGORIES)}
+
+    @app.post("/api/finance/special-categories")
+    def api_finance_special_categories_set(payload: dict):
+        cats = payload.get("categories")
+        if not isinstance(cats, list):
+            raise HTTPException(400, "categories must be a list")
+        return {"ok": True,
+                "categories": db.finance_set_special_categories([str(c) for c in cats])}
+
+    @app.post("/api/transactions/special")
+    def api_transactions_special(payload: dict):
+        """Einzelne Buchungen als Sonderausgabe markieren — oder zurücknehmen.
+
+        🔴 Es wird nichts gelöscht und nichts verschoben: die Buchung bleibt
+        in jeder Liste stehen und wird nur aus den Summen genommen.
+        """
+        ids = payload.get("ids")
+        if not isinstance(ids, list) or not ids:
+            raise HTTPException(400, "ids must be a non-empty list")
+        an = bool(payload.get("besonders", True))
+        n = db.transactions_set_special([int(i) for i in ids], an)
+        logger.info("Sonderausgabe %s: %d Buchung(en)",
+                    "gesetzt" if an else "zurückgenommen", n)
+        return {"ok": True, "changed": n, "besonders": an}
+
     @app.get("/api/finance/pending")
     def api_finance_pending(account_id: int | None = None):
         """Bookings the bank still lists as „vorgemerkt" — shown on
