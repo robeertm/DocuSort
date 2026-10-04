@@ -49,11 +49,37 @@
 <header class="sticky top-0 z-20 backdrop-blur bg-ink-900/70 border-b border-ink-800">
   {# One list feeds both menus so the order is the same on every device.
      Desktop shows the links from lg upwards; below that the scroll strip
-     under the header carries the same items in the same order. #}
-  {% set nav_items = [
+     under the header carries the same items in the same order.
+
+     🔴 WARUM DIE FINANZZIELE EIN MENUE SIND (04.10.2026)
+
+     Acht Beschriftungen passen nicht neben Logo und Bedienknoepfe. Gemessen
+     bei 1536 px — die Leiste ist dort gedeckelt, mehr Bildschirm bringt also
+     nichts (Links brauchen / haben / Reserve):
+
+         de  879 / 888  →   +9 px     fr  938 / 892  →  −46 px, ZWEI Zeilen
+         en  791 / 922  →  +131 px    es  803 / 941  →  +138 px
+                                        it  792 / 902  →  +110 px
+
+     Deutsch passte um NEUN Pixel — in Roberts Browser nicht mehr, dort rutschte
+     „Fixkosten" allein in eine zweite Zeile. Franzoesisch brach schon im
+     Pruefstand um, seit dem 02.10., und niemand hat es gemeldet: die Probe
+     bewachte den Upload-Knopf, aber nicht die Links.
+
+     🔑 Neun Pixel sind keine Loesung, auch wenn sie gruen messen. Fuenf der
+     acht Ziele sind Finanzen — die liegen jetzt unter einem Menue, und die
+     Leiste hat in jeder Sprache ueber 350 px Luft. Im Streifen (md–2xl) und
+     auf dem Handy bleiben alle acht flach nebeneinander: dort ist Platz. #}
+  {% set nav_haupt = [
     ('/library', t('nav.library')), ('/library?status=review', t('nav.review')), ('/analytics', t('nav.analytics')),
-    ('/finance', t('nav.finance')), ('/rechnungen', t('nav.invoices')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')),
   ] %}
+  {% set nav_finanzen = [
+    ('/finance', t('nav.finance_overview')), ('/rechnungen', t('nav.invoices')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')),
+  ] %}
+  {# Die flache Liste — fuer den Streifen und alles, was keinen Platz fuer ein
+     Menue hat. Sie wird aus denselben beiden Gruppen gebaut, damit die
+     Reihenfolge nirgends auseinanderlaeuft. #}
+  {% set nav_items = nav_haupt + [('/finance', t('nav.finance'))] + nav_finanzen[1:] %}
   <nav class="mx-auto max-w-screen-2xl px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-1.5 sm:gap-x-2.5 2xl:gap-x-4">
     <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg shrink-0 min-h-[44px]">
       <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
@@ -81,9 +107,29 @@
        von Einträgen. #}
     <div class="hidden 2xl:flex flex-1 min-w-0 flex-wrap items-center justify-end
                 gap-x-4 gap-y-1">
-    {% for href, label in nav_items %}
+    {% for href, label in nav_haupt %}
       <a href="{{ href }}" class="btn-ghost">{{ label }}</a>
     {% endfor %}
+      {# Dasselbe Muster wie Sprachwahl und Kontomenue nebenan: klicken,
+         nicht schweben — ein Menue, das beim Vorbeifahren aufgeht, erwischt
+         man auf dem Weg zum Upload-Knopf. #}
+      <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+        <button type="button" @click="open = !open" class="btn-ghost"
+                :aria-expanded="open" aria-haspopup="menu">
+          {{ t('nav.finance') }}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               class="h-4 w-4 opacity-60" :class="open ? 'rotate-180' : ''">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        <div x-show="open" x-cloak x-transition.opacity role="menu"
+             class="absolute right-0 mt-2 w-52 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30">
+          {% for href, label in nav_finanzen %}
+            <a href="{{ href }}" role="menuitem"
+               class="block px-3 py-2 text-sm hover:bg-ink-700/60">{{ label }}</a>
+          {% endfor %}
+        </div>
+      </div>
     </div>
     {# Unterhalb von xl ist der Linkkasten ausgeblendet — dann schiebt dieser
        Abstandhalter die rechte Gruppe nach rechts. #}

@@ -7,6 +7,42 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.89.6] - 2026-10-04
+
+### Fixed
+
+🔴 **The navigation bar wrapped: "Fixkosten" sat alone on a second line.**
+Eight destinations do not fit next to the logo and the controls. Measured at
+1536px — where the bar is capped, so a wider screen does not help — as what
+the links need against what they have:
+
+```
+de  879 / 888  →   +9 px      fr  938 / 892  →  −46 px, TWO lines
+en  791 / 922  →  +131 px     es  803 / 941  →  +138 px
+                              it  792 / 902  →  +110 px
+```
+
+German fitted by **nine pixels**, which is the difference between two font
+stacks, not between right and wrong — in a real browser it wrapped. French had
+been wrapping since 02.10, in the probe itself, and no check ever went red:
+the header probe guards the Upload button and never counted the links.
+
+Five of the eight destinations are finance pages. They are one menu now —
+Finanzen ▾ with Übersicht, Rechnungen, Ausgaben, Buchungen, Fixkosten — using
+the same click-to-open pattern as the language and account menus beside it.
+The bar now has 380–538px of headroom in every language. The strip between md
+and 2xl and the mobile sheet still list all eight side by side; there is room
+there.
+
+🔑 The header probe now measures the property that was missing: every
+top-level destination on **one** line, in all five languages, **with a
+reserve** — a layout that fits by nine pixels is not a layout that fits. It
+also clicks the menu open and checks that all five pages are reachable.
+Counter-tested against the previous markup: four checks go red.
+
+🔴 `rotate-180` (the chevron) was not in the built stylesheet. Rebuilt
+and compared class by class: exactly one added, none lost.
+
 ## [0.89.5] - 2026-10-04
 
 ### Changed
