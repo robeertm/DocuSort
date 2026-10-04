@@ -7,6 +7,29 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.89.3] - 2026-10-04
+
+### Fixed
+
+**The tick on the deadlines card was a pill, not a square** — in every row, and
+different in height from the paid state right beside it, which is a `<span>`
+and therefore kept its shape. The cause is the one found in 0.89.2: the house
+sets a 44 px minimum on buttons for thumbs, and a 20 px box declared as a
+button gets stretched to meet it. This was predicted while fixing the sender
+card, then confirmed by rendering the deadlines card and looking at it.
+
+The row now carries `data-tiny`, the house's own exemption from that rule, and
+the button wears its padding on the outside (`-m-2 p-2`) with the border on a
+span inside: a 36 px target, a 20 px square. The card is 33 px shorter.
+
+🔴 **And the stylesheet needed rebuilding, which the check caught first.**
+Three of the classes used for it — including the negative margin — were not in
+the built sheet, so they would have done nothing at all and the square would
+have been wrong in a different way. Every class on the card was checked against
+the built sheet before looking at the result; after the rebuild, the two sheets
+were diffed to prove nothing in use had been dropped (two classes disappeared,
+both genuinely unused).
+
 ## [0.89.2] - 2026-10-04
 
 ### Fixed
