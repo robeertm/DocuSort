@@ -45,6 +45,13 @@ class Classification:
     cache_read_tokens: int = 0         # tokens served from cache (cheap)
     cost_usd: float = 0.0
     model: str = ""
+    # 🔑 Ein VORSCHLAG, keine Entscheidung. Wenn nichts passt, darf das
+    #    Modell eine neue Kategorie nennen — `category` oben bleibt trotzdem
+    #    auf der besten vorhandenen, damit das Dokument sofort irgendwo
+    #    liegt. Erst wenn ein Mensch bestaetigt, wird daraus eine Kategorie.
+    #    Warum nicht sofort: siehe `docusort/kategorien.py`.
+    vorschlag_name: str = ""
+    vorschlag_grund: str = ""
 
     @property
     def is_confident(self) -> bool:
@@ -409,6 +416,21 @@ def _build_system_prompt(categories: list[dict[str, Any]]) -> str:
             lines.append(f"- {c['name']}: {' | '.join(subs)}")
         else:
             lines.append(f"- {c['name']}: (no subcategories — leave subcategory empty)")
+    # 🔑 Vorschlagen ja, waehlen nein. `category` MUSS aus der Liste oben
+    #    kommen — sonst liegt das Dokument nach dem Lauf nirgends. Der
+    #    Vorschlag ist ein zweites, getrenntes Feld, damit beides nebeneinander
+    #    stehen kann: wo es jetzt liegt, und wohin es gehoert haette.
+    lines.append(
+        "\n# If nothing fits\n"
+        "Pick the closest category from the list above anyway — that field must "
+        "always hold one of those exact spellings. If, and only if, none of them "
+        "really describes this document, ALSO add:\n"
+        '  "new_category": {"name": "<short noun, 1-2 words>", '
+        '"reason": "<one sentence: what kind of documents belong in it>"}\n'
+        "Use it sparingly: a human has to confirm it, and it becomes a folder "
+        "name. Never propose a name that only differs from an existing one by "
+        "plural, case or spelling."
+    )
     return SYSTEM_PROMPT_BASE + "\n".join(lines)
 
 
@@ -572,6 +594,22 @@ class Classifier:
         self.holder_names = list(holder_names or [])
         self.pseudonymize = pseudonymize
 
+    def setze_kategorien(self, categories: list[dict[str, Any]]) -> None:
+        """Eine neue Kategorienliste uebernehmen — ohne Neustart.
+
+        🔴 Die drei abgeleiteten Dinge sind MOMENTAUFNAHMEN aus dem
+        Konstruktor: die erlaubten Namen, die erlaubten Unterkategorien und
+        der Systemtext. Wer nur `self.categories` austauscht, hat eine
+        Kategorie, die die Oberflaeche anbietet, das Modell aber nie zu sehen
+        bekommt — und die es, kaeme sie doch zurueck, selbst verwerfen
+        wuerde. Alle drei gehoeren zusammen neu gebaut."""
+        self.categories = categories
+        self._allowed_names = {c["name"] for c in categories}
+        self._allowed_subs = {
+            c["name"]: set(c.get("subcategories") or []) for c in categories
+        }
+        self._system_prompt = _build_system_prompt(categories)
+
     def classify(self, text: str, *, was: str = "") -> Classification:
         """`was` ist der Dateiname und dient nur der Anzeige. Er steht hier,
         damit der Halter (`ai_targets.ClassifierHandle`) und der nackte
@@ -687,6 +725,25 @@ class Classifier:
             logger.warning("Model returned unknown category %r – falling back", category)
             category = "Sonstiges"
 
+        # Ein Vorschlag fuer eine neue Kategorie. Hier wird NICHTS angelegt —
+        # nur gelesen, geputzt und weitergereicht. Die Entscheidung faellt
+        # ein Mensch; was dabei geprueft wird, steht in `kategorien.py`.
+        vorschlag_name = vorschlag_grund = ""
+        roh = data.get("new_category")
+        if isinstance(roh, str):
+            # Manche Modelle antworten mit dem blossen Namen statt mit einem
+            # Objekt. Das ist dieselbe Aussage — also annehmen.
+            roh = {"name": roh}
+        if isinstance(roh, dict):
+            vorschlag_name = " ".join(str(roh.get("name") or "").split())[:40]
+            vorschlag_grund = " ".join(str(roh.get("reason")
+                                           or roh.get("description") or "").split())[:400]
+            if vorschlag_name and vorschlag_name in self._allowed_names:
+                # Das Modell hat etwas vorgeschlagen, das es schon gibt —
+                # dann ist es keine neue Kategorie, sondern seine Wahl.
+                logger.info("Modell schlug %r vor, das gibt es schon", vorschlag_name)
+                vorschlag_name = vorschlag_grund = ""
+
         subcategory = str(data.get("subcategory", "") or "").strip()
         allowed_subs = self._allowed_subs.get(category, set())
         if subcategory and subcategory not in allowed_subs:
@@ -727,6 +784,8 @@ class Classifier:
             sender=str(data.get("sender", "")).strip() or "Unbekannt",
             subject=str(data.get("subject", "")).strip() or "Dokument",
             confidence=_zuversicht(data.get("confidence")),
+            vorschlag_name=vorschlag_name,
+            vorschlag_grund=vorschlag_grund,
             reasoning=str(data.get("reasoning", "")).strip(),
             input_tokens=resp.input_tokens,
             output_tokens=resp.output_tokens,

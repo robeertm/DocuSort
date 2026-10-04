@@ -836,10 +836,46 @@ def create_app(
             },
         )
 
-    category_names = [c["name"] for c in settings.categories]
-    subcategory_map: dict[str, list[str]] = {
-        c["name"]: list(c.get("subcategories") or []) for c in settings.categories
-    }
+    # ---------- Kategorien ----------
+    # 🔴 Das waren zwei KONSTANTEN, einmal beim Start aus `categories.yaml`
+    #    gelesen. Seit man Kategorien von Hand anlegen kann, ist die Liste
+    #    nicht mehr fest — und eine Konstante haette bedeutet: angelegt,
+    #    gespeichert, und bis zum naechsten Neustart nirgends zu sehen.
+    #    Jetzt fragt jeder Aufruf nach; die Abfrage ist ein kleines SELECT.
+    from .. import kategorien as _kat
+
+    def _kategorien() -> list[dict[str, Any]]:
+        """Die eingebauten aus der Datei plus die eigenen aus der Datenbank."""
+        try:
+            eigene = db.doc_categories_custom()
+        except Exception:
+            # 🔴 Nie werfen. Ist die Tabelle noch nicht da (alte Datenbank,
+            #    Migration laeuft), gilt die Datei allein — eine Oberflaeche
+            #    ohne Kategorien waere schlimmer als eine ohne die eigenen.
+            eigene = []
+        return _kat.zusammen(settings.categories, eigene)
+
+    def _category_names() -> list[str]:
+        return _kat.namen(_kategorien())
+
+    def _subcategory_map() -> dict[str, list[str]]:
+        return _kat.unterkategorien(_kategorien())
+
+    def _kategorien_geaendert() -> int:
+        """Nach jeder Aenderung: allen Klassifizierern die neue Liste geben.
+
+        🔴 Ohne das bietet die Oberflaeche sofort eine Kategorie an, die das
+        Modell erst nach einem Neustart kennt — und bis dahin als unbekannt
+        verwirft. Siehe `Classifier.setze_kategorien`."""
+        setzen = getattr(classifier, "setze_kategorien", None)
+        if not callable(setzen):
+            return 0
+        try:
+            return int(setzen(_kategorien()) or 0)
+        except Exception as exc:
+            logger.warning("Kategorienliste nicht an den Klassifizierer "
+                           "durchgereicht: %s", exc)
+            return 0
 
     def _lang(request: Request) -> str:
         return detect_language(
@@ -869,7 +905,7 @@ def create_app(
         # dropdown — Alpine looks up sub_labels[category][canonical] = label.
         sub_labels = {
             cat: {sub: subcategory_label(cat, sub, lang) for sub in subs}
-            for cat, subs in subcategory_map.items()
+            for cat, subs in _subcategory_map().items()
         }
         return {
             "request": request,
@@ -878,8 +914,13 @@ def create_app(
             # hide admin-only controls on this; the server still enforces
             # every rule independently in `auth_gate`.
             "me": getattr(request.state, "user", None),
-            "categories": category_names,
-            "subcategory_map": subcategory_map,
+            "categories": _category_names(),
+            "subcategory_map": _subcategory_map(),
+            # Beschriftungen fuer die Auswahlfelder, die Alpine aufbaut.
+            # `category_label` faellt bei selbst angelegten auf den Namen
+            # zurueck — genau richtig, da gibt es nichts zu uebersetzen.
+            "category_labels": {n: category_label(n, lang)
+                                for n in _category_names()},
             "subcategory_labels": sub_labels,
             "lang": lang,
             "supported_langs": [(code, LANGUAGE_NAMES[code]) for code in SUPPORTED],
@@ -1240,9 +1281,9 @@ def create_app(
         from ..organizer import target_path
         from ..finance.dates import normalise_date
 
-        if category not in category_names:
+        if category not in _category_names():
             raise HTTPException(400, f"Unknown category: {category}")
-        allowed_subs = subcategory_map.get(category, [])
+        allowed_subs = _subcategory_map().get(category, [])
         sub = subcategory.strip()
         if sub and sub not in allowed_subs:
             raise HTTPException(400, f"Unknown subcategory {sub!r} under {category}")
@@ -2237,9 +2278,9 @@ def create_app(
                     "SELECT COUNT(*) FROM documents "
                     "WHERE deleted_at IS NULL AND category != '_csv_container' AND status = 'duplicate'"
                 ).fetchone()[0]),
-                # Was /duplicates wirklich auflistet. `duplicate` daneben ist
-                # eine andere Frage — „wie oft wurde etwas erneut
-                # hochgeladen" — und bleibt als Nebenzeile sichtbar.
+                # Was /duplicates wirklich auflistet. `duplicate` daneben
+                # beantwortet eine andere Frage — wie oft etwas erneut
+                # hochgeladen wurde — und bleibt als Nebenzeile sichtbar.
                 # 🔴 Ohne Schloss: dieser Block laeuft bereits unter db._lock.
                 "duplicate_groups": _duplicate_group_count_ohne_schloss(),
                 "kontoauszug": int(db._conn.execute(
@@ -3090,8 +3131,8 @@ def create_app(
         def liste(w: str) -> tuple[str, ...]:
             return tuple(x.strip() for x in (w or "").split(",") if x.strip())
 
-        # 🔑 „alle" ist die Abkuerzung fuer „auch die Betraege, die keine
-        #    Forderung sind". Welche Arten es gibt, weiss der Server — eine
+        # 🔑 `alle` ist die Abkuerzung fuer: auch die Betraege, die keine
+        #    Forderung sind. Welche Arten es gibt, weiss der Server — eine
         #    Aufzaehlung in der Adresse waere eine Liste, die in dem Moment
         #    veraltet, in dem eine Art dazukommt.
         arten = ("forderung", "gutschrift", "hinweis", "unbekannt") \
@@ -3315,6 +3356,105 @@ def create_app(
             "extra_count": sum(len(g["docs"]) - 1 for g in groups),
         }
 
+    # ---------- Kategorien anlegen, bestaetigen, entfernen ----------
+    @app.get("/api/categories")
+    def api_categories():
+        """Alles, was eine Auswahlliste braucht — und was noch wartet."""
+        kats = _kategorien()
+        eigene = {(c["parent"], c["name"]) for c in db.doc_categories_custom()}
+        return {
+            "categories": [
+                {"name": c["name"],
+                 "subcategories": list(c.get("subcategories") or []),
+                 # Woran die Oberflaeche erkennt, was sie entfernen darf:
+                 # die eingebauten aus `categories.yaml` gehoeren ihr nicht.
+                 "eigen": ("", c["name"]) in eigene,
+                 "eigene_unter": [s for s in (c.get("subcategories") or [])
+                                  if (c["name"], s) in eigene]}
+                for c in kats
+            ],
+            "vorschlaege": db.doc_categories_custom(status="vorschlag"),
+        }
+
+    @app.post("/api/categories")
+    def api_category_add(payload: dict, request: Request):
+        """Eine Kategorie oder Unterkategorie von Hand anlegen."""
+        parent = " ".join(str(payload.get("parent") or "").split())
+        kats = _kategorien()
+        if parent:
+            unter = _kat.unterkategorien(kats)
+            if parent not in unter:
+                raise HTTPException(400, "Diese Kategorie gibt es nicht: %s" % parent)
+            # 🔑 Eine Unterkategorie muss sich nur von ihren GESCHWISTERN
+            #    unterscheiden. „Sonstiges" unter zwei Daechern ist richtig.
+            gegen = unter[parent]
+        else:
+            gegen = _kat.namen(kats)
+        try:
+            name = _kat.pruefe_namen(str(payload.get("name") or ""), gegen)
+        except _kat.NameFehler as exc:
+            raise HTTPException(400, str(exc))
+        db.doc_category_add(
+            name, parent=parent,
+            description=_kat.pruefe_beschreibung(payload.get("description") or ""),
+        )
+        n = _kategorien_geaendert()
+        logger.info("Kategorie angelegt: %r (unter %r), an %d Klassifizierer",
+                    name, parent or "-", n)
+        return {"ok": True, "name": name, "parent": parent,
+                "categories": _category_names(),
+                "subcategory_map": _subcategory_map()}
+
+    @app.post("/api/categories/approve")
+    def api_category_approve(payload: dict):
+        """Einen Vorschlag des Modells annehmen — danach ist er eine ganz
+        normale Kategorie, die das Modell von sich aus benutzen darf."""
+        name = " ".join(str(payload.get("name") or "").split())
+        parent = " ".join(str(payload.get("parent") or "").split())
+        offen = [v for v in db.doc_categories_custom(status="vorschlag")
+                 if v["name"] == name and (v["parent"] or "") == parent]
+        if not offen:
+            raise HTTPException(404, "Diesen Vorschlag gibt es nicht (mehr).")
+        # 🔴 Noch einmal pruefen. Zwischen Vorschlag und Bestaetigung koennen
+        #    Tage liegen, und in der Zeit kann jemand genau diese Kategorie
+        #    von Hand angelegt haben.
+        gegen = (_kat.unterkategorien(_kategorien()).get(parent, []) if parent
+                 else _kat.namen(_kategorien()))
+        try:
+            _kat.pruefe_namen(name, gegen)
+        except _kat.NameFehler as exc:
+            db.doc_category_delete(name, parent)
+            raise HTTPException(400, "%s Der Vorschlag wurde verworfen." % exc)
+        db.doc_category_set_status(name, parent, "aktiv")
+        n = _kategorien_geaendert()
+        logger.info("Vorschlag angenommen: %r (unter %r), an %d Klassifizierer",
+                    name, parent or "-", n)
+        return {"ok": True, "name": name, "parent": parent,
+                "categories": _category_names(),
+                "subcategory_map": _subcategory_map()}
+
+    @app.delete("/api/categories")
+    def api_category_delete(payload: dict = Body(default={})):
+        """Eine selbst angelegte Kategorie (oder einen Vorschlag) entfernen.
+
+        🔴 Dokumente werden NICHT angefasst — die Antwort sagt nur, wie viele
+        es betrifft. Eine Kategorie aus der Auswahl zu nehmen und Dokumente
+        umzusortieren sind zwei Entscheidungen."""
+        name = " ".join(str(payload.get("name") or "").split())
+        parent = " ".join(str(payload.get("parent") or "").split())
+        res = db.doc_category_delete(name, parent)
+        if not res["deleted"]:
+            raise HTTPException(404, "Diese Kategorie steht nicht in der "
+                                     "eigenen Liste — eingebaute lassen sich "
+                                     "nicht entfernen.")
+        n = _kategorien_geaendert()
+        logger.info("Kategorie entfernt: %r (unter %r), %d Dokument(e) tragen "
+                    "sie weiter, an %d Klassifizierer",
+                    name, parent or "-", res["documents"], n)
+        return {"ok": True, **res,
+                "categories": _category_names(),
+                "subcategory_map": _subcategory_map()}
+
     @app.post("/api/library/duplicates/clean")
     def api_library_duplicates_clean(payload: dict):
         """Trash every duplicate except one keeper per group.
@@ -3508,7 +3648,7 @@ def create_app(
     def bulk_recategorize(payload: dict):
         ids = payload.get("ids") or []
         category = payload.get("category", "")
-        if category not in category_names:
+        if category not in _category_names():
             raise HTTPException(400, f"Unknown category: {category}")
         ok, errors = [], []
         for doc_id in ids:
@@ -3848,8 +3988,8 @@ def create_app(
         #    damit gab es ZWEI Welten, die dasselbe beschrieben: die
         #    Grundeinstellung hier und die Rechenorte auf der Startseite. Wer
         #    hier einen Rechner waehlte, sah ihn dort nicht, und umgekehrt.
-        #    „ich kann hier was einstellen und da auch, welches ist das
-        #    richtige" — genau das.
+        #    Zwei Stellen fuer dieselbe Einstellung, und keine Antwort
+        #    darauf, welche gilt — genau das.
         #
         # 🔑 Es ist EIN Zustand mit zwei Ansichten: der hier gewaehlte Rechner
         #    wird auch als Rechenort eingetragen (falls er noch nicht
@@ -3950,9 +4090,9 @@ def create_app(
                 "active": neu_aktiv, "added_target": eingetragen}
 
     # ------------------------------------------------- Rechenort umschalten
-    # „ich brauche schnell das dokument in docusort dann will ich den mac
-    #  waehlen koennen […] und wenn ich zeit habe und er die nacht zeit hat
-    #  soll es auf dem nas rechnen"
+    # Gefordert: eilt ein Dokument, soll der schnelle Rechner es nehmen; hat
+    # man Zeit und der andere nachts ohnehin nichts zu tun, soll er dort
+    # laufen.
     #
     # 🔴 UND DAS MUSS BEI FREMDEN GENAUSO GEHEN. Hier steht keine Adresse und
     #    kein Rechnername — alles kommt aus `ai.targets` der config.yaml bzw.
@@ -4209,14 +4349,14 @@ def create_app(
     def api_ai_verteilen(payload: dict):
         """Selbst verteilen oder bei einem Rechner bleiben.
 
-            „docusort sollte auch umschalten koennen, wenn der mac nicht da ist
-             wird auf dem nas gerechnet ist der mac da wieder dort oder auf
-             beiden jenachdem wie die last an dokumenten ist"
+        Gefordert war, dass DocuSort selbst umschaltet: faellt ein Rechenort
+        aus, rechnet der andere; ist er wieder da, wieder er — und bei viel
+        Last beide.
 
         🔑 Das ist die Vorgabe und braucht keine Bedienung — der Schalter ist
         fuer den anderen Fall da: wer aus einem Grund, den nur er kennt, genau
-        einen Rechner will („der NAS soll nachts rechnen, auch wenn der Mac
-        waere schneller"), stellt auf `fest`. Auch dann bleibt der Ausweichweg:
+        einen Rechner will — etwa, weil nachts ohnehin der langsamere laufen
+        soll —, stellt auf `fest`. Auch dann bleibt der Ausweichweg:
         faellt der gewaehlte Rechner aus, rechnet ein anderer, statt das
         Dokument liegen zu lassen.
         """
@@ -4240,13 +4380,12 @@ def create_app(
         return {"ok": True, "verteilen": modus, "persisted": gemerkt}
 
     # ------------------------------- Rechner finden, anlegen, wieder loswerden
-    # Der Weg, den der Auftrag beschreibt: „er drueckt nur einen Knopf, es wird
-    # ermittelt was gibt es fuer Hardware in der Umgebung, das Modell wird
-    # heruntergeladen und in Zukunft immer benutzt — oder er hat mehrere
-    # Hardware-Geraete die er nutzen kann und kann sie auswaehlen".
+    # Der Weg, den der Auftrag beschreibt: ein Knopfdruck ermittelt, welche
+    # Hardware in der Umgebung ueberhaupt da ist, laedt das Modell und benutzt
+    # es kuenftig — oder laesst zwischen mehreren Geraeten waehlen.
     #
-    # 🔴 UND WIEDER WEG: „der Nutzer muss auch die Modelle von der Hardware
-    #    wieder loeschen koennen, ohne groessere Umstaende." Mehrere Gigabyte,
+    # 🔴 UND WIEDER WEG: die Modelle muessen sich ohne groessere Umstaende
+    #    von der Hardware loeschen lassen. Mehrere Gigabyte,
     #    die niemand mehr braucht, auf einem Rechner, zu dem man sich sonst
     #    erst per SSH verbinden muesste.
 
@@ -4404,10 +4543,10 @@ def create_app(
         return {"ok": True, "state": _t.zustand(ziel)}
 
     # ------------------------------------------- Der eine Knopf: lokal rechnen
-    # „Ich will einfach, dass der Nutzer das Programm installiert. Ohne dass er
-    #  weiss, dass er ein lokales Modell auf seinem Rechner haben kann. Hier
-    #  soll er dann mit einem Klick herausfinden, dass es geht, das Modell soll
-    #  runtergeladen werden und alles muss sofort funktionieren."
+    # Die Vorgabe: jemand installiert das Programm, ohne zu wissen, dass auf
+    # seinem Rechner ueberhaupt ein lokales Modell laufen koennte. Ein Klick
+    # soll ihm zeigen, dass es geht, das Modell holen — und danach muss alles
+    # sofort funktionieren.
     #
     # 🔑 DAS GEHT NUR, WEIL DER OLLAMA-DIENST SCHON DA IST. DocuSort hat
     #    bewusst KEINEN Zugriff auf Docker — der Socket waere root auf dem

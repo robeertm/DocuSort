@@ -1,16 +1,12 @@
 """Benannte Rechenorte fuer die Einordnung — und ein Wechsel OHNE Neustart.
 
-Der Auftrag, woertlich:
+Der Auftrag war, zwischen den Rechnern umschalten zu koennen: eilt ein
+Dokument, soll der schnelle Rechner es nehmen; hat man Zeit und der andere
+nachts ohnehin nichts zu tun, soll er dort laufen.
 
-    „gib auch eine umschaltmoeglichkeit zwischen den rechnern zu wechseln, zum
-    beispiel ich brauche schnell das dokument in docusort dann will ich den mac
-    waehlen koennen, ollama ist ja drauf und aktiv und wenn ich zeit habe und er
-    die nacht zeit hat soll es auf dem nas rechnen"
-
-Und der zweite, genauso wichtige:
-
-    „denke immer dran es muss auch fuer fremde klappen die das repo ueber git
-    holen und dort eine ganz andere konstelation fahren!!"
+Und die zweite, genauso wichtige Vorgabe: es muss ebenso fuer Fremde
+funktionieren, die dieses Repo klonen und eine voellig andere Konstellation
+betreiben.
 
 🔴 DESHALB STEHT HIER KEINE ADRESSE, KEIN MODELLNAME UND KEIN RECHNERNAME.
 Wer dieses Repo klont, hat keinen Mac im Netz und keine Synology. Die Ziele
@@ -49,7 +45,7 @@ Einstellungsseite den Anbieter in die Datei und meldete `restart_required`.
 Der laufende Klassifizierer behielt seinen alten Anbieter, bis jemand den
 Container neu startet — und ein Neustart wirft jede laufende Texterkennung weg
 (gemessen: drei Auslieferungen hielten dasselbe Dokument 47 min im Eingang).
-Zum Umschalten „mal schnell auf den anderen Rechner" ist das untauglich.
+Fuer ein schnelles Umschalten auf den anderen Rechner ist das untauglich.
 
 `ClassifierHandle` sieht fuer jeden Aufrufer aus wie ein `Classifier` — es
 reicht `classify()` und jedes andere Attribut durch. Innen haelt es den
@@ -204,8 +200,8 @@ def ziele(settings: Any, *, bridge_verbunden: bool | None = None) -> list[Target
 
 
 # --------------------------------------------------------------- Zustand
-# „bekomme ich rueckmeldung wenn eine von beiden oder beide ollamas nicht
-#  laufen? mehr status informationen bitte"
+# Gewuenscht war eine Rueckmeldung, wenn einer der Rechenorte oder beide nicht
+# laufen — und ueberhaupt mehr Angaben zum Zustand.
 #
 # 🔴 EIN NAME IST KEIN ZUSTAND. Die Knoepfe nannten bisher nur, wie ein Ziel
 #    heisst — ob dort ueberhaupt etwas antwortet, erfuhr man erst, wenn ein
@@ -545,9 +541,9 @@ class ClassifierHandle:
         """Ein Dokument einordnen — auf dem Rechenort, der am fruehesten fertig
         ist.
 
-            „docusort sollte auch umschalten koennen, wenn der mac nicht da ist
-             wird auf dem nas gerechnet ist der mac da wieder dort oder auf
-             beiden jenachdem wie die last an dokumenten ist"
+        Gefordert war, dass DocuSort selbst umschaltet: faellt ein Rechenort
+        aus, rechnet der andere; ist er wieder da, wieder er — und bei viel
+        Last beide.
 
         Die Wahl trifft `ai_pool.waehle()`; hier steht nur, was daraus folgt.
 
@@ -555,8 +551,8 @@ class ClassifierHandle:
         wird EINMAL geholt und damit zu Ende gearbeitet.
 
         🔴 SCHEITERT EIN RECHENORT, WIRD DAS DOKUMENT NICHT WEGGEWORFEN. Es
-        geht an den naechstbesten — genau der Fall „wenn der mac nicht da ist
-        wird auf dem nas gerechnet". Erst wenn KEINER mehr kann, fliegt ein
+        geht an den naechstbesten — genau der geforderte Fall: faellt einer
+        aus, rechnet der andere. Erst wenn KEINER mehr kann, fliegt ein
         `TransientProviderError`, und den behandelt die Verarbeitungskette
         schon seit Langem richtig: das Dokument bleibt im Eingang liegen und
         wird spaeter erneut versucht, statt als „fehlgeschlagen" zu enden.
@@ -596,9 +592,9 @@ class ClassifierHandle:
 
         while kandidaten:
             # 🔴 ZWEI VERSCHIEDENE FRAGEN, und sie duerfen nicht verwechselt
-            #    werden. Automatisch heisst „wer ist am fruehesten fertig".
-            #    Fest heisst „der gewaehlte, und nur wenn der nicht kann, der
-            #    naechste" — da waere die Bestenwahl ein Betrug an der
+            #    werden. Automatisch bedeutet: wer ist am fruehesten fertig.
+            #    Fest bedeutet: der gewaehlte, und nur wenn der nicht kann,
+            #    der naechste — da waere die Bestenwahl ein Betrug an der
             #    getroffenen Entscheidung.
             if automatisch:
                 # Der gewaehlte Rechner entscheidet den Gleichstand — siehe
@@ -680,6 +676,26 @@ class ClassifierHandle:
         return [eigen] + [k for k in alle if k != eigen]
 
     # -------------------------------------------------------------- Wechseln
+    def setze_kategorien(self, categories: list) -> int:
+        """Die Kategorienliste an JEDEN gebauten Klassifizierer geben.
+
+        🔴 Nicht nur an den aktiven. Die anderen Rechenorte liegen gebaut
+        herum und springen ein, sobald der aktive langsam oder weg ist —
+        mit einer veralteten Liste wuerde dasselbe Dokument dort anders
+        einsortiert. Was dabei alles neu gebaut werden muss, steht in
+        `Classifier.setze_kategorien`."""
+        gezaehlt = 0
+
+        def _an(k):
+            nonlocal gezaehlt
+            setzen = getattr(k, "setze_kategorien", None)
+            if callable(setzen):
+                setzen(categories)
+                gezaehlt += 1
+
+        self._verteiler.fuer_alle(_an)
+        return gezaehlt
+
     def vergiss(self, key: str) -> None:
         """Den zwischengespeicherten Klassifizierer eines Ziels wegwerfen.
 
@@ -718,8 +734,8 @@ class ClassifierHandle:
             #    am selben Lenkrad: man drueckt „MacBook Pro", und das naechste
             #    Dokument landet trotzdem woanders, weil die Verteilung es fuer
             #    besser hielt. Genau diese Sorte Doppeldeutigkeit soll es nicht
-            #    geben („keine doppelten sachen oder ich kann hier was
-            #    einstellen und da auch, welches ist das richtige").
+            #    geben: nichts doppelt einstellbar, und nie die Frage, welche
+            #    der beiden Stellen nun gilt.
             #
             #    Zurueck zur Verteilung fuehrt der Schalter daneben — ein Weg
             #    hin, ein Weg zurueck, und beide sagen, was sie tun.
@@ -834,8 +850,8 @@ def baue_handle(settings: Any, baue_classifier: Callable[[Any, Target], Any]):
 
 
 # ------------------------------------------------------------- Der Waechter
-# „bekomme ich rueckmeldung wenn eine von beiden oder beide ollamas nicht
-#  laufen?"
+# Gewuenscht war eine Rueckmeldung, wenn einer der Rechenorte oder beide nicht
+# laufen.
 #
 # 🔴 EIN AUSFALL FAELLT SONST ERST AUF, WENN EIN DOKUMENT DARAUF SCHEITERT —
 #    und das kann Stunden spaeter sein, oder nie, wenn gerade nichts anliegt.

@@ -1,12 +1,9 @@
 """Wer rechnet dieses Dokument — und wer das naechste.
 
-Der Auftrag, woertlich:
+Der Auftrag war, dass DocuSort selbst umschaltet: ist der eine Rechner nicht
+da, rechnet der andere; ist er wieder da, wieder er — und bei viel Last beide.
 
-    „docusort sollte auch umschalten koennen, wenn der mac nicht da ist wird
-     auf dem nas gerechnet ist der mac da wieder dort oder auf beiden
-     jenachdem wie die last an dokumenten ist"
-
-Drei Forderungen in einem Satz, und sie haben EINE gemeinsame Antwort.
+Drei Forderungen, und sie haben EINE gemeinsame Antwort.
 
 🔑 DIE REGEL: jedes Dokument geht dorthin, wo es am FRUEHESTEN FERTIG ist.
 Nicht zum schnellsten Rechner — zum fruehesten Ende. Der Unterschied ist der
@@ -279,6 +276,19 @@ class Verteiler:
         neu = self._baue(t)
         with self._schloss:
             return self._gebaut.setdefault(t.key, neu)
+
+    def fuer_alle(self, tue: Callable[[Any], None]) -> None:
+        """`tue` auf jedem schon gebauten Klassifizierer ausfuehren.
+
+        🔑 Dafuer gibt es genau einen Anlass: etwas hat sich geaendert, das
+        JEDER von ihnen wissen muss — bisher nur die Kategorienliste. Einen
+        davon zu uebersehen hiesse, dass ein Dokument je nach Rechenort in
+        einer anderen Schublade landet."""
+        with self._schloss:
+            welche = list(self._gebaut.values())
+        # Ausserhalb des Schlosses: `tue` ist fremder Code.
+        for k in welche:
+            tue(k)
 
     def vergiss(self, key: str) -> None:
         """Nach einem Zielwechsel in der Konfiguration: der alte Klassifizierer

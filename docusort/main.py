@@ -280,6 +280,21 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             log.exception("DB insert failed for %s: %s", target.name, exc)
             return
 
+        # Hat das Modell eine neue Kategorie vorgeschlagen? Dann merken —
+        # mehr nicht. Es wird KEINE Kategorie angelegt und das Dokument
+        # NICHT dorthin gelegt: es liegt schon in der besten vorhandenen,
+        # und der Vorschlag wartet auf eine Bestaetigung.
+        #
+        # 🔴 Darf die Pipeline nie aufhalten. Ein Vorschlag ist ein Extra;
+        #    ein Fehler daran waere kein Grund, ein eingeordnetes Dokument
+        #    zu verlieren.
+        if getattr(cls, "vorschlag_name", ""):
+            try:
+                _merke_kategorievorschlag(db, settings, cls, doc_id)
+            except Exception as exc:
+                log.warning("Kategorievorschlag %r nicht gemerkt: %s",
+                            cls.vorschlag_name, exc)
+
         # Fire a notification (if any channel is configured + the
         # corresponding event is enabled). Failures here can never
         # break the pipeline — the dispatcher catches and logs.
@@ -624,6 +639,36 @@ def _deadline_watchdog_forever(settings: AppSettings, db: Database,
         _time.sleep(interval_s)
 
 
+def _merke_kategorievorschlag(db, settings, cls, doc_id: int) -> None:
+    """Einen Kategorievorschlag des Modells festhalten.
+
+    🔑 Hier wird derselbe Massstab angelegt wie bei einer Eingabe von Hand
+    (`kategorien.pruefe_namen`), und das ist der Punkt: ein Modell, das
+    „Versicherungen" neben „Versicherung" vorschlaegt, bekommt dieselbe
+    Antwort wie ein Mensch — nein. Nur dass hier niemand sie liest, also
+    wird der Vorschlag still verworfen statt zurueckgemeldet.
+    """
+    from . import kategorien as _k
+    zusammen = _k.zusammen(settings.categories, db.doc_categories_custom())
+    # Auch die schon offenen Vorschlaege zaehlen mit — sonst entstehen aus
+    # zehn aehnlichen Dokumenten zehn fast gleiche Vorschlaege.
+    offene = [v["name"] for v in db.doc_categories_custom(status="vorschlag")
+              if not v["parent"]]
+    try:
+        name = _k.pruefe_namen(cls.vorschlag_name, _k.namen(zusammen) + offene)
+    except _k.NameFehler as exc:
+        log.info("Vorschlag %r verworfen: %s", cls.vorschlag_name, exc)
+        return
+    db.doc_category_add(
+        name,
+        description=_k.pruefe_beschreibung(cls.vorschlag_grund),
+        status="vorschlag", herkunft="ki",
+        grund=_k.pruefe_beschreibung(cls.vorschlag_grund),
+        doc_id=doc_id,
+    )
+    log.info("Neue Kategorie vorgeschlagen: %r (aus Dokument %d)", name, doc_id)
+
+
 def _ensure_dirs(settings: AppSettings) -> None:
     for p in (
         settings.paths.inbox,
@@ -789,14 +834,22 @@ def main(argv: list[str] | None = None) -> int:
         #    Texterkennung weg (gemessen: dasselbe Dokument lag nach drei
         #    Auslieferungen 47 min im Eingang). Siehe `ai_targets.py`.
         from . import ai_targets as _ai_targets
+        from . import kategorien as _kategorien
 
         def _baue_classifier(ai_settings, ziel):
             # Der Schluessel haengt am ANBIETER des Ziels, nicht am
             # eingerichteten — sonst holte ein Wechsel auf die Wolke den
             # Schluessel des lokalen Modells (und umgekehrt).
+            # 🔑 Nicht `settings.categories` allein: das waere nur die Datei.
+            #    Von Hand angelegte und bestaetigte Kategorien stehen in der
+            #    Datenbank, und ein Klassifizierer, der sie nicht kennt,
+            #    verwirft sie als unbekannt — die Oberflaeche boete also eine
+            #    Schublade an, in die das Modell nie etwas legt.
             return Classifier(
                 get_api_key(settings, provider=ziel.provider),
-                ai_settings, settings.categories,
+                ai_settings,
+                _kategorien.zusammen(settings.categories,
+                                     db.doc_categories_custom()),
                 holder_names=settings.finance.holder_names,
                 pseudonymize=settings.finance.pseudonymize,
             )

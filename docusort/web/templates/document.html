@@ -465,29 +465,41 @@
 
     {% if not doc.deleted_at %}
     <form action="/document/{{ doc.id }}/edit{{ _nav_qs }}" method="post" class="card p-5 space-y-3"
-          x-data='editForm({ category: {{ doc.category | tojson }}, subcategory: {{ (doc.subcategory or "") | tojson }}, subMap: {{ subcategory_map | tojson }}, subLabels: {{ subcategory_labels | tojson }} })'>
+          x-data='editForm({ category: {{ doc.category | tojson }}, subcategory: {{ (doc.subcategory or "") | tojson }}, cats: {{ categories | tojson }}, subMap: {{ subcategory_map | tojson }}, catLabels: {{ category_labels | tojson }}, subLabels: {{ subcategory_labels | tojson }} })'>
       <h2 class="font-semibold text-sm uppercase tracking-wide text-ink-400">{{ t('document.edit_heading') }}</h2>
 
+      {# Beide Felder baut Alpine, nicht Jinja: eine frisch angelegte
+         Kategorie muss SOFORT in der Liste stehen und ausgewaehlt sein.
+         Ein serverseitig gerendertes <select> haette dafuer einen
+         Seitenneuaufbau gebraucht — und der haette das halb ausgefuellte
+         Formular mitgenommen. #}
       <label class="block">
         <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_category') }}</span>
         <select name="category" x-model="category" @change="onCategoryChange()"
                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
-          {% for c in categories %}
-            <option value="{{ c }}"{% if c == doc.category %} selected{% endif %}>{{ cat(c) }}</option>
-          {% endfor %}
+          <template x-for="c in cats" :key="c">
+            <option :value="c" x-text="catLabels[c] || c"></option>
+          </template>
+          <option value="__neu__">{{ t('cat.add_new') }}</option>
         </select>
       </label>
 
-      <label class="block" x-show="subs.length > 0" x-cloak>
+      {# 🔴 Stand frueher auf `x-show="subs.length > 0"`. Unter einer
+         Kategorie ohne Unterkategorien gab es damit keinen Weg, die erste
+         anzulegen — „ueberall" heisst auch dort. #}
+      <label class="block">
         <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_subcategory') }}</span>
-        <select name="subcategory" x-model="subcategory"
+        <select name="subcategory" x-model="subcategory" @change="onSubChange()"
                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
           <option value="">{{ t('document.subcategory_none') }}</option>
           <template x-for="s in subs" :key="s">
             <option :value="s" x-text="(subLabels[category] && subLabels[category][s]) || s"></option>
           </template>
+          <option value="__neu__">{{ t('cat.add_new_sub') }}</option>
         </select>
       </label>
+      <p x-show="catMsg" x-cloak class="text-xs -mt-1"
+         :class="catOk ? 'text-emerald-300' : 'text-rose-300'" x-text="catMsg"></p>
 
       <label class="block">
         <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_date') }}</span>
@@ -658,13 +670,59 @@ function diagnosticsPanel(docId) {
   };
 }
 
-function editForm({ category, subcategory, subMap, subLabels }) {
+function editForm({ category, subcategory, cats, subMap, catLabels, subLabels }) {
   return {
-    category, subcategory, subMap, subLabels,
+    category, subcategory, cats, subMap, catLabels, subLabels,
+    // Was zuletzt gewaehlt war — damit ein abgebrochener Dialog nicht
+    // „+ Neue Kategorie …" als Wert stehen laesst.
+    vorher: category, vorherSub: subcategory,
+    catMsg: '', catOk: false,
     get subs() { return this.subMap[this.category] || []; },
+
     onCategoryChange() {
+      if (this.category === '__neu__') { this.anlegen(''); return; }
+      this.vorher = this.category;
       // Reset subcategory if it doesn't fit the new category.
       if (!this.subs.includes(this.subcategory)) this.subcategory = '';
+      this.vorherSub = this.subcategory;
+    },
+    onSubChange() {
+      if (this.subcategory === '__neu__') { this.anlegen(this.category); return; }
+      this.vorherSub = this.subcategory;
+    },
+
+    // `parent` leer = eine Kategorie, sonst eine Unterkategorie darunter.
+    async anlegen(parent) {
+      const frage = parent
+        ? tr('cat.prompt_sub').replace('{parent}', this.catLabels[parent] || parent)
+        : tr('cat.prompt');
+      const name = window.prompt(frage);
+      // Erst den Wert zuruecksetzen, dann erst reden: sonst steht bei einem
+      // Abbruch „+ Neue Kategorie …" im Feld und wuerde mit abgeschickt.
+      if (parent) this.subcategory = this.vorherSub; else this.category = this.vorher;
+      if (!name || !name.trim()) return;
+      this.catMsg = ''; this.catOk = false;
+      try {
+        const r = await fetch('/api/categories', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim(), parent: parent || '' }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.cats = d.categories;
+        this.subMap = d.subcategory_map;
+        if (parent) { this.subcategory = d.name; this.vorherSub = d.name; }
+        else {
+          this.catLabels[d.name] = d.name;   // selbst angelegt = eigener Name
+          this.category = d.name; this.vorher = d.name;
+          this.subcategory = ''; this.vorherSub = '';
+        }
+        this.catOk = true;
+        this.catMsg = tr('cat.created').replace('{name}', d.name);
+      } catch (e) {
+        this.catOk = false;
+        this.catMsg = e.message || String(e);
+      }
     },
   };
 }
