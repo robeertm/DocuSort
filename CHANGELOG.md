@@ -7,6 +7,17 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.97.1] - 2026-10-05
+
+### Fixed
+A comment in the new planner's source read like a quoted person. The rule is
+that no verbatim speech belongs in a public repository; it was rewritten.
+Nothing about the planner itself changed.
+
+Worth recording why it was not caught before the first build: the check reads
+the files **git knows about**, and a brand-new file is untracked until it is
+committed. The first gate therefore could not see it at all.
+
 ## [0.97.0] - 2026-10-05
 
 ### Added
