@@ -202,6 +202,8 @@
   "document.field_subject": "Betreff",
   "document.field_tags": "Tags",
   "document.fullscreen": "Vollbild",
+  "document.hit_of": "Fundstelle {n} von {total} · Seite {page}",
+  "document.hit_off": "ausblenden",
   "document.input_tokens": "Input Token",
   "document.meta": "Metadaten",
   "document.model": "Modell",

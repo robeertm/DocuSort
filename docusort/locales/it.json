@@ -202,6 +202,8 @@
   "document.field_subject": "Oggetto",
   "document.field_tags": "Tag",
   "document.fullscreen": "Schermo intero",
+  "document.hit_of": "Risultato {n} di {total} · pagina {page}",
+  "document.hit_off": "nascondi",
   "document.input_tokens": "Token in ingresso",
   "document.meta": "Metadati",
   "document.model": "Modello",

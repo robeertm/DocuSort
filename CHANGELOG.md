@@ -7,6 +7,32 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.92.0] - 2026-10-05
+
+### Added
+
+🔦 **A search hit is now shown where it sits in the document.** Finding a
+document by its content is only half the job — the other half was scrolling
+through twenty pages of a council notice looking for the word. Open a document
+from a search and the page it was found on is shown with the word **highlighted
+in yellow**, plus a line saying "match 1 of 4 · page 3" and arrows to step
+through the rest. Hide it and the normal preview comes back.
+
+🔑 The coordinates come from `pdftotext -bbox-layout` — the same `poppler-utils`
+that already renders the page images, so nothing new is installed. The stored
+text knows *that* a word occurs; only the PDF itself knows *where*.
+
+🔴 Boxes are stored as a fraction of the page, never in points. The page image
+is rendered at a different width than the PDF measures, and the column scales
+it again — a box in points would land anywhere but on the word. The probe
+checks the drawn box against the reported coordinates, and that a word at the
+foot of the page really lands at the foot: PDF counts its y from the bottom,
+CSS from the top, and a flipped origin looks perfectly plausible in both.
+
+The highlight uses the same matching as the search — start of a word first,
+then anywhere inside one — so the list and the page can never disagree about
+what was found.
+
 ## [0.91.0] - 2026-10-05
 
 ### Added
