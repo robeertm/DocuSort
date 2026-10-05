@@ -662,6 +662,13 @@ def create_app(
         return resp
 
     # ----- login / logout -----
+    def _hat_kanal() -> bool:
+        from .. import notzugang
+        try:
+            return notzugang.einmalpasswort_moeglich(db)
+        except Exception:      # noqa: BLE001
+            return False
+
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request, next: str = "/"):
         if db.admin_count() == 0:
@@ -670,7 +677,8 @@ def create_app(
         if token and db.session_user(_auth.session_token_hash(token)):
             return RedirectResponse("/", status_code=303)
         return templates.TemplateResponse(
-            request, "login.html", {**base_ctx(request), "next": next},
+            request, "login.html",
+            {**base_ctx(request), "next": next, "hat_kanal": _hat_kanal()},
         )
 
     @app.post("/login")
@@ -686,12 +694,29 @@ def create_app(
             return templates.TemplateResponse(
                 request, "login.html",
                 {**base_ctx(request), "next": next,
-                 "error": translate("auth.err.too_many", lang), "username": username},
+                 "error": translate("auth.err.too_many", lang), "username": username,
+                 "hat_kanal": _hat_kanal()},
                 status_code=429,
             )
         row = db.user_by_name(username or "")
         ok = bool(row) and row["is_active"] and _auth.verify_password(
             password, row["password_hash"] or "")
+        if not ok:
+            # 🔑 Zweiter Schluessel: ein gueltiges Einmalpasswort. Es wird
+            #    ERST hier geprueft — das regulaere Passwort hat immer
+            #    Vorrang, und ein abgelaufener oder falscher Code sieht fuer
+            #    den Angreifer aus wie jede andere Fehleingabe.
+            from .. import notzugang
+            try:
+                row = notzugang.einmalpasswort_einloesen(
+                    db, username or "", password, settings.config_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Einmalpasswort einloesen: %s", exc)
+                row = None
+            ok = bool(row)
+            if ok:
+                logger.warning("auth: Anmeldung mit Einmalpasswort fuer '%s'",
+                               username)
         if not ok:
             _login_failed(key)
             logger.warning("auth: failed login for '%s' from %s",
@@ -700,7 +725,7 @@ def create_app(
                 request, "login.html",
                 {**base_ctx(request), "next": next,
                  "error": translate("auth.err.bad_credentials", lang),
-                 "username": username},
+                 "username": username, "hat_kanal": _hat_kanal()},
                 status_code=401,
             )
         _login_fails.pop(key, None)
@@ -714,6 +739,42 @@ def create_app(
         resp = RedirectResponse(target, status_code=303)
         _set_session_cookie(resp, token, request)
         return resp
+
+    @app.post("/login/reset")
+    def login_reset(request: Request):
+        """Ein Einmalpasswort anfordern — ohne angemeldet zu sein.
+
+        🔴 ES WIRD DABEI NICHTS GEAENDERT. Wer das hier drueckt, sperrt
+           niemanden aus: das bisherige Passwort gilt weiter, bis jemand den
+           Code wirklich benutzt. Deshalb ist der Knopf offen erreichbar.
+        🔴 Und er ist begrenzt (eine Anfrage alle zwei Minuten), sonst waere
+           er ein Weg, jemandem beliebig viele Nachrichten zu schicken.
+        """
+        from .. import notzugang
+        lang = _lang(request)
+        if db.admin_count() == 0:
+            raise HTTPException(409, translate("auth.reset.no_account", lang))
+        try:
+            erg = notzugang.einmalpasswort_anfordern(db, settings.config_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Einmalpasswort: %s", exc)
+            raise HTTPException(500, str(exc)[:200])
+        if not erg.get("ok"):
+            grund = erg.get("grund")
+            if grund == "zu_frueh":
+                raise HTTPException(429, translate("auth.reset.too_soon", lang)
+                                    .replace("{s}", str(erg.get("warten_s", 0))))
+            if grund == "kein_konto":
+                raise HTTPException(409, translate("auth.reset.no_account", lang))
+            raise HTTPException(502, erg.get("fehler")
+                                or translate("auth.reset.failed", lang))
+        # 🔑 Nie das Passwort selbst zurueckgeben — nur, WO es angekommen ist.
+        logger.info("Einmalpasswort angefordert, Weg: %s", erg.get("weg"))
+        return {"ok": True, "weg": erg.get("weg"),
+                "kanaele": erg.get("kanaele") or [],
+                "dateiname": erg.get("dateiname") or "",
+                "benutzer": erg.get("benutzer"),
+                "gueltig_min": erg.get("gueltig_min")}
 
     @app.get("/logout")
     @app.post("/logout")

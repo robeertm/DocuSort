@@ -146,7 +146,12 @@ class User:
 # a release landed — putting it behind the login would break the
 # deploy's own success check.
 PUBLIC_PATHS = (
-    "/login", "/logout", "/setup/admin",
+    # 🔴 `/login/reset` MUSS offen sein — wer es braucht, ist ja gerade
+    #    nicht angemeldet. Es aendert von sich aus nichts: es legt dem
+    #    Besitzer ein Einmalpasswort an einen Ort, an den nur er kommt
+    #    (sein Benachrichtigungskanal oder sein eigener Ordner). Das
+    #    bisherige Passwort gilt weiter, bis jemand den Code benutzt.
+    "/login", "/login/reset", "/logout", "/setup/admin",
     "/static/", "/upload-sw.js", "/favicon.ico",
     "/api/version",
     # The one-click Ollama setup runs on the user's own machine and has no

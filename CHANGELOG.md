@@ -7,6 +7,71 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.95.0] - 2026-10-05
+
+### Fixed
+
+🔑 **You could lock yourself out of your own archive, permanently.** A user's
+password stopped being accepted and there was no way back in — no command, no
+page, nothing. The documents sat untouched on the disk and were unreachable.
+Signing in was the only door and it had no second lock.
+
+There are now three ways back, and you need only one of them.
+
+**On the login page itself**, under "Forgotten your password?", a button asks
+DocuSort for a one-time password. It goes out through whatever notification
+channel you already set up — Telegram, email. If you have none, DocuSort
+writes it into a file in its own config folder instead, which you can open
+from your NAS file manager or a network share without ever touching a
+console. A console is a thing many owners do not have; a reset that assumes
+one is not a reset.
+
+Pressing that button changes **nothing**. Your current password keeps working
+until somebody actually uses the one-time one, so a stranger who presses it
+cannot lock you out — they can only send you a message. The code is valid for
+fifteen minutes, works exactly once, dies after five wrong attempts, and can
+be requested at most once every two minutes. Logging in with it immediately
+asks you for a password of your own.
+
+**On the machine**, for whoever has a shell:
+
+    docker exec -it docusort python -m docusort --reset-password
+
+It picks the first admin, sets a new random password, prints it once and
+stores it nowhere. `--list-users` shows the accounts, `--reset-password NAME`
+takes one by name, and `--add-admin` creates an *additional* administrator
+without touching any existing account. The password is rolled fresh every
+time: a built-in emergency password would be the same on every installation
+and would be sitting in public source.
+
+🔴 This is not a weakening. Everything above requires standing at the machine
+DocuSort runs on, or holding a channel that is already yours — and anyone who
+can `docker exec` on that host can read the database and every filed document
+anyway. A lock that only keeps the rightful owner out protects nobody.
+
+📮 **The Postwache account can be reset the same way**, with its own command:
+
+    docker exec -it docusort python -m docusort --reset-postwache
+
+It needs one, because that password does not live in the database: it comes
+from a pairing secret in the config folder, and DocuSort re-asserts it on
+every start. Changing only the database hash would hold until the next
+restart and then quietly revert. This rolls the secret itself — enter the same
+word in Postwache afterwards. Resetting a machine account by name no longer
+promotes it to administrator either; it keeps the narrow role it is supposed
+to have.
+
+A probe holds the whole property, and it presses the button rather than
+reading the template: after a reset you can really sign in, the old password
+really stops working, the one-time code really works exactly once, and the
+Postwache word really survives a restart.
+
+🔘 **And the first version of that button did nothing at all.** It was written
+with Alpine directives, and the login page does not load Alpine — it is
+deliberately free of frameworks. The button could be pressed, and nothing
+happened: no message, no file, no error. The probe was green because it only
+checked that the template *mentioned* the command. It clicks now.
+
 ## [0.94.0] - 2026-10-05
 
 ### Fixed
