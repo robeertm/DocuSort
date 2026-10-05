@@ -810,8 +810,16 @@ def create_app(
         current = str(payload.get("current") or "")
         new = str(payload.get("new") or "")
         row = db.user_get(me.id)
-        if not row or not _auth.verify_password(current, row["password_hash"] or ""):
-            raise HTTPException(status_code=403, detail="current password is wrong")
+        # 🔴 Wer hier hingezwungen wurde, darf nicht am alten Passwort
+        #    scheitern. `must_change_password` heisst: DocuSort selbst hat
+        #    verlangt, dass jetzt ein neues vergeben wird — meist nach einem
+        #    Notzugang, bei dem das alte gerade niemand mehr weiss. Dann ist
+        #    die bestehende Anmeldung der Nachweis, nicht das alte Wort.
+        #    Sonst ist der Rettungsweg eine Tuer in einen Raum ohne Ausgang.
+        muss = bool(row and row["must_change_password"])
+        if not row or (not muss and not _auth.verify_password(current, row["password_hash"] or "")):
+            raise HTTPException(status_code=403,
+                                detail=translate("auth.err.current_wrong", _lang(request)))
         problem = _auth.password_problem(new)
         if problem:
             raise HTTPException(status_code=400,
@@ -2279,6 +2287,7 @@ def create_app(
         categories as the explorer, so every re-categorisation shows up
         here at once. `mode` = 'salary' (default, Gehalt bis Gehalt) or
         'calendar'. See db.finance_spend_by_category."""
+        from ..finance.classify import SOURCE_LABELS
         data = _spending_data(request, month, mode, accounts or None,
                               **_span_args(months, year, start, end, sonder))
         summary = db.finance_summary()
@@ -2312,7 +2321,7 @@ def create_app(
         return templates.TemplateResponse(
             request, "spending.html",
             {**base_ctx(request), "data": data, "has_data": has_data, "mode": data["mode"],
-             "budget_period": budget_period},
+             "budget_period": budget_period, "source_labels": SOURCE_LABELS},
         )
 
     @app.get("/ausgaben.pdf")

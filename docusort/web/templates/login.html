@@ -106,6 +106,12 @@
               : T.sent.replace('{channel}', (j.kanaele || []).join(', '));
             zeige(txt.replace('{user}', '<b>' + j.benutzer + '</b>')
                      .replace('{min}', j.gueltig_min), true);
+            // 🔑 Wer sein Passwort vergessen hat, kennt oft auch den
+            //    Benutzernamen nicht mehr. Er steht in der Nachricht und in
+            //    der Datei — hier wird er gleich eingetragen, damit niemand
+            //    ihn abtippen muss.
+            var feld = document.getElementById('username');
+            if (feld && j.benutzer) { feld.value = j.benutzer; feld.form && feld.form.password && feld.form.password.focus(); }
           })
           .catch(function (e) { zeige(e.message || T.failed, false); })
           .then(function () { knopf.disabled = false; knopf.textContent = urtext; });

@@ -26,7 +26,7 @@
 
 <script>window.__spendingData = {{ data | tojson }};
 window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
-<div class="viz" x-data="spendingPage(window.__spendingData)" x-init="init()">
+<div class="viz" x-data="spendingPage(window.__spendingData)">
   <div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
     <div>
       <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('spending.title') }}</h1>
@@ -646,12 +646,36 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
                         <td class="px-3 py-1.5 text-ink-500 text-xs break-words max-w-[260px] hidden md:table-cell" x-text="r.purpose.slice(0, 90)"></td>
                         <td class="px-3 py-1.5 text-ink-500 text-xs whitespace-nowrap hidden lg:table-cell" x-text="r.bank_name + (r.iban_last4 ? ' · …' + r.iban_last4 : '')"></td>
                         <td class="px-3 py-1.5">
-                          <select x-effect="const v = r.category; $nextTick(() => { $el.value = v; })" :disabled="busy"
-                                  @change="recat(r, $event)"
-                                  class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs max-w-[11rem]">
-                            <template x-for="k in d.cats" :key="k"><option :value="k" x-text="label(k)"></option></template>
-                            <option value="__new__">{{ t('spending.new_category') }}</option>
-                          </select>
+                          {# 🔴 DER SCHALTER GEHOERT AN DIE ZEILE, NICHT AN DIE SEITE.
+                             Gemeldet wurde: eine einzelne Kategorie geaendert,
+                             und alle Buchungen desselben Zahlers wanderten mit. Ein
+                             Haken unter der Tabelle entschied ueber jede Zeile darin,
+                             im Einnahmen-Block fehlte er ganz, und er war VORGEKREUZT. Wer EINE Buchung
+                             richtigstellt, meint diese eine. Lernen ist jetzt eine
+                             Entscheidung pro Buchung, und sie ist standardmaessig NEIN. #}
+                          <div class="flex items-center gap-1.5 flex-wrap">
+                            <select x-effect="const v = r.category; $nextTick(() => { $el.value = v; })" :disabled="busy"
+                                    @change="recat(r, $event)"
+                                    class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs max-w-[11rem]">
+                              <template x-for="k in d.cats" :key="k"><option :value="k" x-text="label(k)"></option></template>
+                              <option value="__new__">{{ t('spending.new_category') }}</option>
+                            </select>
+                            <label class="inline-flex items-center gap-1 text-[10px] text-ink-500 select-none whitespace-nowrap"
+                                   :title="T.learn_hint">
+                              <input type="checkbox" :checked="lernt(r.id)" :disabled="busy"
+                                     @change="lernSchalter(r.id, $event.target.checked)"
+                                     class="accent-emerald-500">
+                              <span x-text="T.learn_short"></span>
+                            </label>
+                            {# Woher diese Kategorie kommt — dieselben Abzeichen wie im
+                               Buchungs-Explorer. Eine Regel, die 670 Buchungen faerbt,
+                               soll man DORT sehen, wo einem die Zahl auffaellt. #}
+                            <span x-show="r.category_source" x-cloak
+                                  class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border whitespace-nowrap"
+                                  :class="quelleKlasse(r.category_source)"
+                                  :title="r.category_reason || ''"
+                                  x-text="quelleLabel(r.category_source)"></span>
+                          </div>
                         </td>
                         <td class="px-3 py-1.5 text-right tabular-nums text-rose-300 whitespace-nowrap" x-text="fmt(r.amount)"></td>
                       </tr>
@@ -659,10 +683,6 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
                   </tbody>
                 </table>
               </div>
-              <label class="mt-2 inline-flex items-center gap-1.5 text-[11px] text-ink-400 select-none">
-                <input type="checkbox" x-model="learn" @change="saveLearn()" class="accent-emerald-500">
-                {{ t('spending.learn') }}
-              </label>
             </div>
           </div>
         </template>
@@ -707,12 +727,36 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
                         </td>
                         <td class="px-3 py-1.5 text-ink-500 text-xs break-words max-w-[260px] hidden md:table-cell" x-text="r.purpose.slice(0, 90)"></td>
                         <td class="px-3 py-1.5">
-                          <select x-effect="const v = r.category; $nextTick(() => { $el.value = v; })" :disabled="busy"
-                                  @change="recat(r, $event)"
-                                  class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs max-w-[11rem]">
-                            <template x-for="k in d.cats" :key="k"><option :value="k" x-text="label(k)"></option></template>
-                            <option value="__new__">{{ t('spending.new_category') }}</option>
-                          </select>
+                          {# 🔴 DER SCHALTER GEHOERT AN DIE ZEILE, NICHT AN DIE SEITE.
+                             Gemeldet wurde: eine einzelne Kategorie geaendert,
+                             und alle Buchungen desselben Zahlers wanderten mit. Ein
+                             Haken unter der Tabelle entschied ueber jede Zeile darin,
+                             im Einnahmen-Block fehlte er ganz, und er war VORGEKREUZT. Wer EINE Buchung
+                             richtigstellt, meint diese eine. Lernen ist jetzt eine
+                             Entscheidung pro Buchung, und sie ist standardmaessig NEIN. #}
+                          <div class="flex items-center gap-1.5 flex-wrap">
+                            <select x-effect="const v = r.category; $nextTick(() => { $el.value = v; })" :disabled="busy"
+                                    @change="recat(r, $event)"
+                                    class="rounded bg-ink-900/60 border border-ink-800 px-1.5 py-1 text-xs max-w-[11rem]">
+                              <template x-for="k in d.cats" :key="k"><option :value="k" x-text="label(k)"></option></template>
+                              <option value="__new__">{{ t('spending.new_category') }}</option>
+                            </select>
+                            <label class="inline-flex items-center gap-1 text-[10px] text-ink-500 select-none whitespace-nowrap"
+                                   :title="T.learn_hint">
+                              <input type="checkbox" :checked="lernt(r.id)" :disabled="busy"
+                                     @change="lernSchalter(r.id, $event.target.checked)"
+                                     class="accent-emerald-500">
+                              <span x-text="T.learn_short"></span>
+                            </label>
+                            {# Woher diese Kategorie kommt — dieselben Abzeichen wie im
+                               Buchungs-Explorer. Eine Regel, die 670 Buchungen faerbt,
+                               soll man DORT sehen, wo einem die Zahl auffaellt. #}
+                            <span x-show="r.category_source" x-cloak
+                                  class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border whitespace-nowrap"
+                                  :class="quelleKlasse(r.category_source)"
+                                  :title="r.category_reason || ''"
+                                  x-text="quelleLabel(r.category_source)"></span>
+                          </div>
                         </td>
                         <td class="px-3 py-1.5 text-right tabular-nums text-emerald-300 whitespace-nowrap" x-text="'+' + fmt(r.amount)"></td>
                       </tr>
@@ -738,7 +782,9 @@ function spendingPage(initial) {
     d: initial,
     T: {{ {
       'no_month_hint': t('spending.no_month_hint'), 'vs_prev': t('spending.vs_prev'), 'vs_avg': t('spending.vs_avg'),
-      'avg_label': t('spending.avg_label'), 'open_hint': t('spending.open_hint'), 'reassigned': t('spending.reassigned'),
+      'avg_label': t('spending.avg_label'), 'open_hint': t('spending.open_hint'),
+      'recat_one': t('spending.recat_one'), 'recat_learned': t('spending.recat_learned'),
+      'learn_short': t('spending.learn_short'), 'learn_hint': t('spending.learn_hint'),
       'new_prompt': t('spending.new_prompt'), 'new_fixed': t('spending.new_fixed'), 'new_saving': t('spending.new_saving'),
       'new_done': t('spending.new_done'), 'trend_clipped': t('spending.trend_clipped'), 'trend_clipped_one': t('spending.trend_clipped_one'),
       'game_benchmark': t('game.benchmark'), 'game_of_max': t('game.of_max'), 'game_of_days': t('game.of_days'),
@@ -762,9 +808,30 @@ function spendingPage(initial) {
       'special_counted': t('spend.special_counted'),
       'special_not_counted': t('spend.special_sum'),
     } | tojson }},
-    open: '', busy: false, learn: true, message: '', messageOk: true,
-    init() { try { this.learn = localStorage.getItem('docusort-learn') !== '0'; } catch {} },
-    saveLearn() { try { localStorage.setItem('docusort-learn', this.learn ? '1' : '0'); } catch {} },
+    open: '', busy: false, message: '', messageOk: true,
+    /* 🔑 Gemerkt wird je BUCHUNG, nicht je Seite — und nie vorgekreuzt.
+       Der Haken lebt nur, solange die Seite offen ist: er ist eine
+       Entscheidung fuer diesen einen Griff, keine Einstellung. */
+    lernen: new Set(),
+    lernt(id) { return this.lernen.has(id); },
+    lernSchalter(id, an) {
+      const s = new Set(this.lernen);
+      if (an) s.add(id); else s.delete(id);
+      this.lernen = s;          // neue Menge: sonst merkt Alpine nichts
+    },
+    sourceLabels: {{ source_labels | tojson }},
+    quelleLabel(q) { return this.sourceLabels[q || 'none'] || (q || ''); },
+    quelleKlasse(q) {
+      return ({
+        manual:   'border-emerald-500/50 text-emerald-200 bg-emerald-500/10',
+        transfer: 'border-sky-500/50 text-sky-200 bg-sky-500/10',
+        rule:     'border-emerald-500/40 text-emerald-300 bg-emerald-500/5',
+        ai:       'border-violet-500/50 text-violet-200 bg-violet-500/10',
+        keyword:  'border-ink-600 text-ink-300 bg-ink-800/40',
+        bank:     'border-ink-600 text-ink-400 bg-ink-800/40',
+        import:   'border-amber-500/40 text-amber-200 bg-amber-500/10',
+      })[q || 'none'] || 'border-rose-500/40 text-rose-200 bg-rose-500/10';
+    },
     fmt(v) { return DS.geld(v); },        // eine Fassung fuer alle (base.html)
     fmt0(v) { return DS.zahl(v); },
     pct(v) { return this.d.total ? Math.round(v / this.d.total * 100) : 0; },
@@ -1005,12 +1072,25 @@ function spendingPage(initial) {
         return;
       }
       if (!cat || cat === row.category) return;
+      // 🔴 Was gelernt wird, entscheidet der Haken NEBEN DIESER ZEILE.
+      //    Ohne ihn geht genau eine Buchung an den Server.
+      const merken = this.lernt(row.id);
       this.busy = true;
       try {
         const r = await fetch('/api/transactions/categorize', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: [row.id], category: cat, learn: this.learn, scope: 'auto' }) });
+          body: JSON.stringify({ ids: [row.id], category: cat, learn: merken, scope: 'auto' }) });
         const j = await r.json(); if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
-        this.flash(true, this.T.reassigned.replace("{n}", (j.updated || 0) + (j.applied || 0)).replace('{cat}', this.label(cat)));
+        // Und die Rueckmeldung sagt, WIEVIELE es getroffen hat — nicht nur,
+        // dass etwas passiert ist.
+        if (merken && ((j.rules || 0) || (j.applied || 0))) {
+          const wer = (j.merchants || [row.counterparty])[0] || '—';
+          this.flash(true, this.T.recat_learned.replace('{who}', wer)
+                               .replace('{cat}', this.label(cat))
+                               .replace('{n}', j.applied || 0));
+        } else {
+          this.flash(true, this.T.recat_one.replace('{cat}', this.label(cat)));
+        }
+        this.lernSchalter(row.id, false);
         await this.reload();
       } catch (e) { this.flash(false, e.message || String(e)); ev.target.value = row.category; }
       finally { this.busy = false; }
