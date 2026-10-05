@@ -541,7 +541,7 @@
         <input type="checkbox" x-model="reviewBeforeSend" class="mt-0.5 accent-emerald-500">
         <div class="min-w-0">
           <div class="font-medium">{{ t('settings.finance.review_label') }}</div>
-          <div class="text-xs text-ink-400 mt-0.5">{{ t('settings.finance.review_hint') }}</div>
+          <div class="text-xs text-ink-400 mt-0.5">{{ t('settings.finance.review_hint', statement=kat_text('kontoauszug', 'Kontoauszug')) }}</div>
         </div>
       </label>
     </div>

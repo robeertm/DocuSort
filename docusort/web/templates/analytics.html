@@ -31,7 +31,7 @@
           {{ t('analytics.salvage_heading') }}
           <span class="ml-1 text-amber-300/70">— <span x-text="salvage.count"></span></span>
         </h2>
-        <p class="text-xs text-ink-400 mt-1">{{ t('analytics.salvage_hint') }}</p>
+        <p class="text-xs text-ink-400 mt-1">{{ t('analytics.salvage_hint', receipts=kat_text('kassenzettel', 'Kassenzettel'), invoices=kat_text('rechnung', 'Rechnungen'), other=cat('Sonstiges')) }}</p>
       </div>
       <button type="button" @click="salvage.visible = false"
               class="text-ink-500 hover:text-ink-200 p-1" :title="T['analytics.salvage_dismiss']">
@@ -86,7 +86,7 @@
       <button type="button" @click="salvagePromote()"
               :disabled="salvage.selected.length === 0 || salvage.busy"
               class="rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 px-3 py-1.5 text-xs text-ink-950 font-medium">
-        <span x-show="!salvage.busy">{{ t('analytics.salvage_promote') }}</span>
+        <span x-show="!salvage.busy">{{ t('analytics.salvage_promote', receipts=kat_text('kassenzettel', 'Kassenzettel')) }}</span>
         <span x-show="salvage.busy" x-cloak>{{ t('analytics.salvage_promoting') }}</span>
       </button>
     </div>
@@ -584,8 +584,9 @@ function analyticsPage() {
     },
     async salvagePromote() {
       if (this.salvage.selected.length === 0) return;
-      const confirmMsg = (T['analytics.salvage_confirm'] || 'Move the selected documents to Receipts?')
-        .replace('{n}', this.salvage.selected.length);
+      const confirmMsg = (T['analytics.salvage_confirm'] || 'Move the selected documents to {receipts}?')
+        .replace('{n}', this.salvage.selected.length)
+        .replace('{receipts}', {{ kat_text('kassenzettel', 'Kassenzettel') | tojson }});
       if (!confirm(confirmMsg)) return;
       this.salvage.busy = true;
       this.salvage.message = '';

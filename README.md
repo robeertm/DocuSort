@@ -17,8 +17,8 @@
 > recreate the container.) Then check `docker logs docusort` and open the page.
 >
 > **No data was lost.** The crash happened before any migration ran — nothing
-> had been written. **0.90.1** fixes it, **0.90.2** is current, and `:latest`
-> points at a tested image.
+> had been written. **0.90.1** fixes it, and every release since has gone
+> out through the gate below — `:latest` always points at a tested image.
 >
 > **I am sorry.** This should never have reached anyone. `:latest` moved the
 > moment a commit landed on `main` — before anything had looked at the image
