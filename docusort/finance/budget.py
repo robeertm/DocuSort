@@ -103,10 +103,10 @@ def _ist_vertrag(posten: dict[str, Any]) -> bool:
 
 ARTEN = ("gebunden", "steuerbar", "projekt", "sparen")
 
-# 🔴 Diese Vertraege gehoeren NICHT in die Vorschlagsliste. „Kuendige deine
-#    Miete" ist keine Sparmassnahme, sondern ein Umzug — und genau den
+# 🔴 Diese Vertraege gehoeren NICHT in die Vorschlagsliste. Die eigene
+#    Miete zu kuendigen ist keine Sparmassnahme, sondern ein Umzug — und den
 #    bildet das Ziel selbst ab (`wohnen_heute` → `wohnen_kuenftig`). Ein
-#    Planer, dessen bester Vorschlag „zieh aus" lautet, wird nicht gelesen.
+#    Planer, dessen bester Vorschlag ein Auszug ist, wird nicht gelesen.
 #    Sichtbar bleiben sie trotzdem: in der Vertragsliste ihres Topfes.
 GRUNDBEDARF_WORTE = WOHNEN_WORTE + ("kredit", "darlehen", "loan", "mortgage",
                                     "hypothek", "prestito", "prestamo", "pret",
@@ -320,7 +320,7 @@ def ziel_lesen(roh: dict[str, Any] | None, lg: dict[str, Any]) -> dict[str, Any]
     🔑 Ein Budgetplaner darf nicht EIN Vorhaben kennen. Drei Bausteine
        decken alles ab, was Leute wirklich vorhaben, und sie addieren sich:
 
-       · `mehr_monatlich` — „ich will schlicht X EUR im Monat uebrig haben"
+       · `mehr_monatlich` — ein fester Betrag, der monatlich uebrig bleiben soll
        · `wohnen_heute` → `wohnen_kuenftig` — eine wiederkehrende Ausgabe
          steigt bekanntermassen (Umzug, Hauskredit statt Miete, Pflegeheim)
        · `kapital_ziel` bis `monate_bis` — eine Summe muss bis zu einem
