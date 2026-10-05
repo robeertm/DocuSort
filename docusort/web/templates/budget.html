@@ -1,0 +1,473 @@
+{% extends "base.html" %}
+{% block title %}{{ t('budget.title') }} · DocuSort{% endblock %}
+{% block content %}
+{# ===========================================================================
+   DER BUDGETPLANER
+
+   🔑 Die Seite beantwortet eine Frage, die keine andere beantwortet: WAS
+      WAERE, WENN. /ausgaben schaut zurueck, /fixkosten listet Vertraege —
+      hier wird geschoben.
+
+   🔴 Keine Zahl auf dieser Seite wird im Browser erfunden. Die Regler
+      schicken ihre Stellung an den Server, und der rechnet (budget.rechnen).
+      Was hier gerechnet wird, ist nur die Vorschau zwischen zwei Antworten —
+      und sie benutzt dieselbe Formel.
+   =========================================================================== #}
+{# 🔴 Die Serverdaten gehen durch eine GLOBALE, nicht durch das
+   x-data-Attribut. In einem Attribut steht JSON zwischen
+   Anfuehrungszeichen, und das erste `"` im JSON beendet es — die
+   Komponente wird dann nie gebaut, und JEDER Ausdruck der Seite
+   meldet „d is not defined". Dieselbe Loesung wie auf /ausgaben. #}
+<script>window.__budgetDaten = {{ daten | tojson }};</script>
+<div id="ds-budget" x-data="budgetSeite(window.__budgetDaten)" class="space-y-5">
+
+  <div class="flex items-start justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ t('budget.title') }}</h1>
+      <p class="text-ink-400 mt-1 text-sm max-w-3xl">{{ t('budget.intro') }}</p>
+    </div>
+    <div class="flex items-center gap-2 text-xs">
+      <label class="text-ink-500">{{ t('budget.window') }}</label>
+      {# 🔴 Die Optionen stehen fest im Blatt, nicht in einem x-for: Alpine
+         setzt den Wert von `x-model`, BEVOR eine Schleife die Optionen
+         gebaut hat — die Auswahl zeigte „6 Monate", waehrend die Seite 12
+         rechnete. Zwei Wahrheiten an derselben Stelle. #}
+      <select x-model.number="monate" @change="neuLaden()"
+              class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+        <option value="6">{{ t('budget.n_months') | replace('{n}', 6) }}</option>
+        <option value="12">{{ t('budget.n_months') | replace('{n}', 12) }}</option>
+        <option value="24">{{ t('budget.n_months') | replace('{n}', 24) }}</option>
+      </select>
+    </div>
+  </div>
+
+  {# ------------------------------------------------- Keine Daten, kein Planer #}
+  <div class="card p-6" x-show="!d.lage.toepfe.length" x-cloak>
+    <p class="text-ink-300">{{ t('budget.no_data') }}</p>
+    <a href="/transactions" class="btn-secondary mt-3 inline-flex">{{ t('budget.no_data_action') }}</a>
+  </div>
+
+  <template x-if="d.lage.toepfe.length">
+  <div class="space-y-5">
+
+  {# ============================ 1. DIE LAGE ============================ #}
+  <div class="card p-5">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap">
+      <h2 class="text-sm uppercase tracking-wider text-ink-500">{{ t('budget.situation') }}</h2>
+      <span class="text-[11px] text-ink-500"
+            x-text="tr('budget.median_hint').replace('{n}', d.lage.anzahl_monate)"></span>
+    </div>
+
+    <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('budget.income') }}</div>
+        <div class="text-xl font-semibold tabular-nums text-emerald-300" x-text="geld(d.lage.einnahmen.median)"></div>
+        <div class="text-[11px] text-ink-500"
+             x-text="geld(d.lage.einnahmen.min) + ' – ' + geld(d.lage.einnahmen.max)"></div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('budget.bound') }}</div>
+        <div class="text-xl font-semibold tabular-nums text-sky-300" x-text="geld(d.lage.summen.gebunden)"></div>
+        <div class="text-[11px] text-ink-500">{{ t('budget.bound_hint') }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('budget.free') }}</div>
+        <div class="text-xl font-semibold tabular-nums text-amber-300" x-text="geld(d.lage.summen.steuerbar)"></div>
+        <div class="text-[11px] text-ink-500">{{ t('budget.free_hint') }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('budget.left') }}</div>
+        <div class="text-xl font-semibold tabular-nums"
+             :class="r.ueberschuss_neu >= 0 ? 'text-emerald-300' : 'text-rose-300'"
+             x-text="geld(r.ueberschuss_neu)"></div>
+        <div class="text-[11px] text-ink-500"
+             x-text="tr('budget.left_before').replace('{v}', geld(r.ueberschuss_heute))"></div>
+      </div>
+    </div>
+
+    {# Ein Band, das die vier Groessen ins Verhaeltnis setzt. #}
+    <div class="mt-4 h-3 rounded-full overflow-hidden flex bg-ink-900/60">
+      <div class="h-full bg-sky-500/70" :style="'width: ' + anteil(r.zeilen.filter(z => z.art === 'gebunden').reduce((a, z) => a + z.ziel, 0)) + '%'"></div>
+      <div class="h-full bg-amber-500/70" :style="'width: ' + anteil(r.zeilen.filter(z => z.art === 'steuerbar').reduce((a, z) => a + z.ziel, 0)) + '%'"></div>
+      <div class="h-full bg-violet-500/70" :style="'width: ' + anteil(r.sparen_neu) + '%'"></div>
+      <div class="h-full bg-emerald-500/70" :style="'width: ' + anteil(Math.max(0, r.ueberschuss_neu)) + '%'"></div>
+    </div>
+
+    {# 🔴 Einmalige Eingaenge werden AUSGEWIESEN, aber nie verplant. Wer 90 000
+       Euro Erbe durch zwoelf teilt, verspricht ein Einkommen, das es nicht gibt. #}
+    <div class="mt-4" x-show="d.lage.einnahmen.einmalig.length" x-cloak>
+      <button type="button" @click="zeigeEinmalig = !zeigeEinmalig"
+              class="text-[11px] text-ink-400 underline hover:text-emerald-300"
+              x-text="tr('budget.one_off').replace('{v}', geld(d.lage.einnahmen.einmalig_summe))"></button>
+      <div x-show="zeigeEinmalig" x-cloak class="mt-2 flex flex-wrap gap-1.5">
+        <template x-for="e in d.lage.einnahmen.einmalig.slice(0, 10)" :key="e.kategorie">
+          <span class="text-[11px] rounded-full border border-ink-700 px-2 py-0.5 text-ink-400">
+            <span x-text="label(e.kategorie)"></span> · <span class="tabular-nums" x-text="geld(e.summe)"></span>
+          </span>
+        </template>
+      </div>
+      <p class="mt-1 text-[11px] text-ink-500">{{ t('budget.one_off_hint') }}</p>
+    </div>
+  </div>
+
+  {# ============================ 2. DAS ZIEL ============================ #}
+  <div class="card p-5">
+    <h2 class="text-sm uppercase tracking-wider text-ink-500">{{ t('budget.goal') }}</h2>
+    <p class="mt-1 text-xs text-ink-500 max-w-3xl">{{ t('budget.goal_hint') }}</p>
+
+    <input type="text" x-model="d.ziel.titel" @change="rechnen()" maxlength="120"
+           placeholder="{{ t('budget.goal_name_ph') }}"
+           class="mt-3 w-full sm:max-w-md rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm">
+
+    <div class="mt-4 grid gap-4 md:grid-cols-3">
+      <div class="rounded-xl border border-ink-800 p-3">
+        <div class="text-xs font-medium text-ink-200">{{ t('budget.goal_more') }}</div>
+        <p class="text-[11px] text-ink-500 mt-0.5">{{ t('budget.goal_more_hint') }}</p>
+        <label class="block mt-2 text-[11px] text-ink-400">{{ t('budget.per_month') }}</label>
+        <input type="number" min="0" step="10" x-model.number="d.ziel.mehr_monatlich" @change="rechnen()"
+               class="w-full rounded-lg bg-ink-950/60 border border-ink-700 px-2.5 py-1.5 text-sm tabular-nums">
+      </div>
+
+      <div class="rounded-xl border border-ink-800 p-3">
+        <div class="text-xs font-medium text-ink-200">{{ t('budget.goal_housing') }}</div>
+        <p class="text-[11px] text-ink-500 mt-0.5">{{ t('budget.goal_housing_hint') }}</p>
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] text-ink-400">{{ t('budget.today') }}</label>
+            <input type="number" min="0" step="10" x-model.number="d.ziel.wohnen_heute" @change="rechnen()"
+                   class="w-full rounded-lg bg-ink-950/60 border border-ink-700 px-2.5 py-1.5 text-sm tabular-nums">
+          </div>
+          <div>
+            <label class="block text-[11px] text-ink-400">{{ t('budget.later') }}</label>
+            <input type="number" min="0" step="10" x-model.number="d.ziel.wohnen_kuenftig" @change="rechnen()"
+                   class="w-full rounded-lg bg-ink-950/60 border border-ink-700 px-2.5 py-1.5 text-sm tabular-nums">
+          </div>
+        </div>
+        <p class="mt-1 text-[11px] text-ink-500" x-show="r.mehr_wohnen > 0" x-cloak
+           x-text="'+ ' + geld(r.mehr_wohnen) + ' / ' + tr('budget.month')"></p>
+      </div>
+
+      <div class="rounded-xl border border-ink-800 p-3">
+        <div class="text-xs font-medium text-ink-200">{{ t('budget.goal_capital') }}</div>
+        <p class="text-[11px] text-ink-500 mt-0.5">{{ t('budget.goal_capital_hint') }}</p>
+        <div class="mt-2 grid grid-cols-3 gap-2">
+          <div>
+            <label class="block text-[11px] text-ink-400">{{ t('budget.target') }}</label>
+            <input type="number" min="0" step="1000" x-model.number="d.ziel.kapital_ziel" @change="rechnen()"
+                   class="w-full rounded-lg bg-ink-950/60 border border-ink-700 px-2 py-1.5 text-sm tabular-nums">
+          </div>
+          <div>
+            <label class="block text-[11px] text-ink-400">{{ t('budget.have') }}</label>
+            <input type="number" min="0" step="1000" x-model.number="d.ziel.kapital_da" @change="rechnen()"
+                   class="w-full rounded-lg bg-ink-950/60 border border-ink-700 px-2 py-1.5 text-sm tabular-nums">
+          </div>
+          <div>
+            <label class="block text-[11px] text-ink-400">{{ t('budget.in_months') }}</label>
+            <input type="number" min="0" step="1" x-model.number="d.ziel.monate_bis" @change="rechnen()"
+                   class="w-full rounded-lg bg-ink-950/60 border border-ink-700 px-2 py-1.5 text-sm tabular-nums">
+          </div>
+        </div>
+        <p class="mt-1 text-[11px] text-ink-500" x-show="r.kapital_rate > 0" x-cloak
+           x-text="'+ ' + geld(r.kapital_rate) + ' / ' + tr('budget.month')"></p>
+      </div>
+    </div>
+  </div>
+
+  {# ====================== 3. DIE LUECKE (bleibt stehen) ====================== #}
+  <div class="sticky top-2 z-20">
+    <div class="card p-4 border"
+         :class="r.bedarf <= 0 ? 'border-ink-700' : (r.geschafft ? 'border-emerald-500/50' : 'border-amber-500/50')">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div class="text-[11px] uppercase tracking-wider text-ink-500" x-text="tr('budget.need')"></div>
+          <div class="text-2xl font-semibold tabular-nums"
+               :class="r.bedarf <= 0 ? 'text-ink-300' : (r.geschafft ? 'text-emerald-300' : 'text-amber-300')"
+               x-text="r.bedarf <= 0 ? tr('budget.no_goal')
+                       : r.geschafft ? tr('budget.done').replace('{v}', geld(-r.luecke))
+                                     : tr('budget.missing').replace('{v}', geld(r.luecke))"></div>
+          <div class="text-[11px] text-ink-500" x-show="r.bedarf > 0" x-cloak
+               x-text="tr('budget.need_detail').replace('{need}', geld(r.bedarf)).replace('{have}', geld(r.ueberschuss_neu))"></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" @click="zuruecksetzen()" class="btn-ghost text-xs">{{ t('budget.reset') }}</button>
+          <button type="button" @click="sichern()" :disabled="busy" class="btn-primary text-sm">
+            <span x-show="!busy">{{ t('budget.save') }}</span>
+            <span x-show="busy" x-cloak>{{ t('budget.saving') }}</span>
+          </button>
+        </div>
+      </div>
+      <div class="mt-3 h-2 rounded-full bg-ink-900/60 overflow-hidden">
+        <div class="h-full rounded-full transition-all"
+             :class="r.bedarf <= 0 ? 'bg-ink-700' : (r.geschafft ? 'bg-emerald-500' : 'bg-amber-500')"
+             :style="'width: ' + fortschritt() + '%'"></div>
+      </div>
+      <p class="mt-1 text-[11px]" :class="meldungOk ? 'text-emerald-300' : 'text-rose-300'"
+         x-show="meldung" x-cloak x-text="meldung"></p>
+    </div>
+  </div>
+
+  {# ============================ 4. DIE REGLER ============================ #}
+  <div class="card p-0 overflow-hidden">
+    <div class="px-5 py-3 border-b border-ink-800/60 flex items-baseline justify-between gap-3 flex-wrap">
+      <span class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('budget.sliders') }}</span>
+      <span class="text-[11px] text-ink-500">{{ t('budget.sliders_hint') }}</span>
+    </div>
+    <div>
+      <template x-for="z in r.zeilen" :key="z.kategorie">
+        <div class="px-5 py-3 border-b border-ink-800/40 last:border-b-0">
+          <div class="flex items-baseline justify-between gap-3 flex-wrap">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="font-medium text-sm" x-text="label(z.kategorie)"></span>
+              <span class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border whitespace-nowrap"
+                    :class="z.art === 'gebunden' ? 'border-sky-500/40 text-sky-300 bg-sky-500/5'
+                          : z.art === 'sparen'   ? 'border-violet-500/40 text-violet-300 bg-violet-500/5'
+                                                 : 'border-amber-500/40 text-amber-300 bg-amber-500/5'"
+                    x-text="artLabel(z.art)"></span>
+            </div>
+            <div class="text-sm tabular-nums whitespace-nowrap">
+              <span x-text="geld(z.ziel)"></span>
+              <span class="text-[11px] text-ink-500" x-text="' / ' + geld(z.heute)"></span>
+              <span class="text-[11px] ml-1" :class="z.spart > 0 ? 'text-emerald-300' : 'text-ink-500'"
+                    x-show="z.spart > 0" x-cloak x-text="'−' + geld(z.spart)"></span>
+            </div>
+          </div>
+
+          <div class="mt-2 flex items-center gap-3">
+            <input type="range" :min="0" :max="Math.round(z.heute * 1.5) || 10" step="5"
+                   :value="z.ziel" @input="schieben(z.kategorie, $event.target.value)"
+                   class="flex-1 accent-emerald-500">
+            <button type="button" @click="schieben(z.kategorie, z.heute)"
+                    class="text-[11px] text-ink-500 hover:text-emerald-300 underline whitespace-nowrap">
+              {{ t('budget.back') }}</button>
+          </div>
+
+          {# Der Boden: unter seine laufenden Vertraege kommt ein Topf nur,
+             wenn einer davon gekuendigt wird. Das steht hier, und die
+             Vertraege lassen sich einzeln aufgeben. #}
+          <div class="mt-1 flex items-center justify-between gap-2 flex-wrap text-[11px]">
+            <span class="text-ink-500" x-show="z.boden > 0" x-cloak
+                  x-text="tr('budget.floor').replace('{v}', geld(z.boden))"></span>
+            <button type="button" x-show="vertraege(z.kategorie).length" x-cloak
+                    @click="offen = (offen === z.kategorie ? '' : z.kategorie)"
+                    class="text-ink-500 hover:text-emerald-300 underline"
+                    x-text="tr('budget.contracts_n').replace('{n}', vertraege(z.kategorie).length)"></button>
+          </div>
+
+          <div x-show="offen === z.kategorie" x-cloak class="mt-2 rounded-lg border border-ink-800/60 divide-y divide-ink-800/40">
+            <template x-for="p in vertraege(z.kategorie)" :key="p.uid">
+              <label class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer">
+                <input type="checkbox" :checked="gekuendigt.includes(p.uid)"
+                       @change="kuendigen(p.uid, $event.target.checked)" class="accent-emerald-500">
+                <span class="flex-1 min-w-0 truncate" x-text="p.name || tr('budget.unnamed')"></span>
+                <span class="text-ink-500 whitespace-nowrap" x-text="p.rhythmus"></span>
+                <span class="tabular-nums whitespace-nowrap" x-text="geld(p.monatlich)"></span>
+              </label>
+            </template>
+            <p class="px-3 py-1.5 text-[11px] text-ink-500">{{ t('budget.contracts_hint') }}</p>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  {# ============================ 5. VORSCHLAEGE ============================ #}
+  <div class="card p-0 overflow-hidden">
+    <div class="px-5 py-3 border-b border-ink-800/60 flex items-center justify-between gap-3 flex-wrap">
+      <span class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('budget.ideas') }}</span>
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] text-ink-500" x-show="kiStand" x-cloak x-text="kiStand"></span>
+        <button type="button" @click="kiHolen()" :disabled="kiLaeuft || !d.ki_verfuegbar"
+                class="btn-secondary text-xs disabled:opacity-50"
+                :title="d.ki_verfuegbar ? '' : tr('budget.ai_missing')">
+          <span x-show="!kiLaeuft">{{ t('budget.ai_ask') }}</span>
+          <span x-show="kiLaeuft" x-cloak>{{ t('budget.ai_running') }}</span>
+        </button>
+      </div>
+    </div>
+
+    <p class="px-5 py-2 text-[11px] text-ink-500 border-b border-ink-800/40">{{ t('budget.ideas_hint') }}</p>
+
+    <div class="divide-y divide-ink-800/40">
+      <template x-for="v in alleVorschlaege()" :key="v.quelle + ':' + v.kategorie + ':' + (v.posten || v.art)">
+        <div class="px-5 py-3 flex items-start gap-3">
+          <span class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border whitespace-nowrap mt-0.5"
+                :class="v.quelle === 'ki' ? 'border-violet-500/40 text-violet-300 bg-violet-500/5'
+                                          : 'border-ink-600 text-ink-300 bg-ink-800/40'"
+                x-text="v.quelle === 'ki' ? tr('budget.src_ai') : tr('budget.src_measured')"></span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm">
+              <span class="font-medium" x-text="label(v.kategorie)"></span>
+              <span class="text-ink-500 text-xs" x-show="v.name" x-cloak x-text="' · ' + v.name"></span>
+            </div>
+            <p class="text-[11px] text-ink-400 mt-0.5" x-text="erklaerung(v)"></p>
+          </div>
+          <div class="text-right whitespace-nowrap">
+            <div class="text-sm font-semibold tabular-nums text-emerald-300" x-text="'−' + geld(v.spart)"></div>
+            <button type="button" @click="uebernehmen(v)"
+                    class="text-[11px] underline text-ink-400 hover:text-emerald-300">{{ t('budget.apply') }}</button>
+          </div>
+        </div>
+      </template>
+      <p class="px-5 py-4 text-sm text-ink-500" x-show="!alleVorschlaege().length" x-cloak>{{ t('budget.no_ideas') }}</p>
+    </div>
+  </div>
+
+  </div>
+  </template>
+</div>
+
+<script>
+function budgetSeite(initial) {
+  return {
+    d: initial,
+    r: initial.rechnung,
+    regler: Object.assign({}, initial.regler || {}),
+    gekuendigt: (initial.gekuendigt || []).slice(),
+    monate: 12, _bremse: null,
+    offen: '', busy: false, zeigeEinmalig: false,
+    meldung: '', meldungOk: true,
+    kiLaeuft: false, kiStand: '',
+
+    geld(v) { return DS.geld(v); },
+    label(k) { return catLabel(k); },
+    /* 🔴 Ausgeschriebene Schluessel, kein 'budget.kind_' + art: einen
+       zusammengesetzten Schluessel kann die Sprachprobe nicht nachschlagen,
+       und ein fehlender faellt dann erst dem Nutzer auf. */
+    artLabel(art) {
+      return ({ gebunden: tr('budget.kind_gebunden'),
+                steuerbar: tr('budget.kind_steuerbar'),
+                sparen: tr('budget.kind_sparen') })[art] || art;
+    },
+
+    /* Anteil einer Zahl an den Einnahmen — fuer das Band. 🔴 Maschinenlesbar
+       formatiert: ein deutsches Komma in einer CSS-Breite verwirft die
+       ganze Regel, und jeder Abschnitt waere voll breit. */
+    anteil(v) {
+      const ein = this.d.lage.einnahmen.median || 1;
+      return Math.max(0, Math.min(100, (100 * v / ein))).toFixed(1);
+    },
+    fortschritt() {
+      const b = this.r.bedarf || 0;
+      if (b <= 0) return 100;
+      const da = Math.max(0, this.r.ueberschuss_neu || 0);
+      return Math.max(0, Math.min(100, 100 * da / b)).toFixed(1);
+    },
+    vertraege(kat) {
+      const t = (this.d.lage.toepfe || []).find(x => x.kategorie === kat);
+      return ((t && t.posten) || []).filter(p => p.vertrag);
+    },
+
+    schieben(kat, wert) {
+      this.regler[kat] = Number(wert);
+      this.rechnen();
+    },
+    kuendigen(uid, an) {
+      const s = new Set(this.gekuendigt);
+      if (an) s.add(uid); else s.delete(uid);
+      this.gekuendigt = Array.from(s);
+      this.rechnen();
+    },
+    zuruecksetzen() {
+      this.regler = {}; this.gekuendigt = [];
+      this.rechnen();
+    },
+    uebernehmen(v) {
+      if (v.art === 'vertrag' && v.posten) { this.kuendigen(v.posten, true); return; }
+      const z = this.r.zeilen.find(x => x.kategorie === v.kategorie);
+      if (!z) return;
+      this.schieben(v.kategorie, Math.max(z.boden, z.heute - v.spart));
+    },
+    erklaerung(v) {
+      if (v.quelle === 'ki') return v.wie || '';
+      if (v.art === 'schwankung') {
+        const b = v.beleg_zahlen || {};
+        return tr('budget.why_swing')
+          .replace('{low}', this.geld(b.guenstigster_monat))
+          .replace('{usual}', this.geld(b.gewoehnlich));
+      }
+      const b = v.beleg_zahlen || {};
+      return tr('budget.why_contract').replace('{rhythm}', b.rhythmus || '');
+    },
+    alleVorschlaege() {
+      const ki = ((this.d.ki && this.d.ki.ideen) || []);
+      return ki.concat(this.d.vorschlaege || []);
+    },
+
+    /* 🔴 Der Server rechnet. Die Seite schickt nur die Reglerstellung und
+       bekommt die fertigen Summen zurueck — so kann sie nie eine Zahl
+       zeigen, die DocuSort nicht selbst gebildet hat.
+       🔴 Und sie fragt ENTPRELLT: ein Ziehen am Regler loest Dutzende
+       Ereignisse aus; ohne die Bremse waeren das Dutzende Anfragen. */
+    rechnen() {
+      clearTimeout(this._bremse);
+      this._bremse = setTimeout(() => this.jetztRechnen(), 200);
+    },
+    async jetztRechnen() {
+      try {
+        const r = await fetch('/api/budget/preview?monate=' + this.monate, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ziel: this.d.ziel, regler: this.regler,
+                                 gekuendigt: this.gekuendigt }),
+        });
+        const j = await r.json();
+        if (r.ok && j.rechnung) { this.r = j.rechnung; }
+      } catch (e) { /* die Seite bleibt stehen, der naechste Griff versucht es wieder */ }
+    },
+    /* Sichern ist eine Entscheidung — nur HIER wird geschrieben. */
+    async sichern() {
+      this.busy = true;
+      try {
+        const r = await fetch('/api/budget/plan?monate=' + this.monate, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ziel: this.d.ziel, regler: this.regler,
+                                 gekuendigt: this.gekuendigt, notizen: this.d.notizen }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+        if (j.rechnung) this.r = j.rechnung;
+        this.flash(true, tr('budget.saved'));
+      } catch (e) { this.flash(false, e.message || String(e)); }
+      finally { this.busy = false; }
+    },
+    async neuLaden() {
+      const r = await fetch('/api/budget/data?monate=' + this.monate);
+      const j = await r.json();
+      if (r.ok) { this.d = j; this.r = j.rechnung;
+                  this.regler = Object.assign({}, j.regler || {});
+                  this.gekuendigt = (j.gekuendigt || []).slice(); }
+    },
+
+    async kiHolen() {
+      if (!this.d.ki_verfuegbar) { this.flash(false, tr('budget.ai_missing')); return; }
+      this.kiLaeuft = true; this.kiStand = tr('budget.ai_running');
+      try {
+        const r = await fetch('/api/budget/ai?monate=' + this.monate, { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+        this.kiWarten();
+      } catch (e) { this.kiLaeuft = false; this.kiStand = ''; this.flash(false, e.message || String(e)); }
+    },
+    kiWarten() {
+      const tick = async () => {
+        try {
+          const r = await fetch('/api/budget/ai-progress');
+          const j = await r.json();
+          if (j.running) { setTimeout(tick, 2500); return; }
+          this.kiLaeuft = false;
+          const erg = j.ergebnis || {};
+          this.d.ki = erg;
+          if (erg.fehler) { this.kiStand = ''; this.flash(false, erg.fehler); }
+          else { this.kiStand = tr('budget.ai_done').replace('{n}', (erg.ideen || []).length); }
+        } catch (e) { this.kiLaeuft = false; this.kiStand = ''; }
+      };
+      setTimeout(tick, 2000);
+    },
+
+    flash(ok, msg) {
+      this.meldung = msg; this.meldungOk = ok;
+      setTimeout(() => { this.meldung = ''; }, 4000);
+    },
+  };
+}
+</script>
+{% endblock %}

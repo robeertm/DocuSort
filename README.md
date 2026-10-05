@@ -128,6 +128,46 @@ choose to send to an AI model — and you can point that at a local model too.
 
 ![Fixed costs with the account picker open](docs/screenshots/19-fixed-costs-accounts.png)
 
+### The budget planner
+A tab that asks the question none of the other pages do: **what would happen
+if.** Everything else looks backwards at money already spent; this one looks
+forward.
+
+It starts from what is measured, not from what you guess:
+
+- **Income is the median of your regular earnings** over the last 6, 12 or 24
+  full months — and only the regular ones. An inheritance, a tax refund, a
+  closed savings account are real money, but nothing a monthly commitment may
+  stand on. They are listed, with their total, and deliberately left out of
+  every figure. The current month is never counted either: on its third day it
+  would make you look frugal.
+- **Median, not average.** One kitchen paid for in cash would otherwise set
+  the level for every month of the year.
+- **A contract is not a habit.** Both repeat, and the fixed-costs detector
+  sees both. But rent is the same amount on the same day — the weekly
+  supermarket is not. Only the amount that truly repeats becomes the **floor**
+  of a pot: the slider cannot go below it, because that part needs a
+  cancellation, not a decision. Tick the contract and the floor drops.
+- **A yearly premium still counts monthly.** An insurance paid once a year
+  shows nothing in eleven months; its monthly share is budgeted all the same.
+
+Then you set a goal — three blocks that add up, and you use only the ones you
+need: simply *more left over each month*, a *housing cost that is known to
+change* (moving, a mortgage instead of rent), or *a sum by a date* (a deposit,
+a car), which becomes a monthly rate. A bar that stays in view says how much
+is still missing.
+
+And then you move the sliders. What you take from one pot lands in what is
+left over, live. Beside them a list of where something can be found: proposals
+measured straight out of your own bookings, each naming the figures it rests
+on — "in the cheapest month it was 186 €, usually 540 €". If a local model is
+configured you can ask it for ideas too; it suggests *where* and *how*, in one
+concrete sentence, and **every amount it names is capped at the measured room
+of that pot**. DocuSort does the arithmetic, never the model. Without a model
+the planner is complete — the measured half is the half that cannot be wrong.
+
+![The budget planner with a goal set](docs/screenshots/26-budget-planner.png)
+
 ### The day view
 The spending page draws **every day of the salary month** from its first
 day: a bar per day with its amount on top, days without spending as what

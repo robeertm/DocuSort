@@ -3521,6 +3521,148 @@ def create_app(
              "accounts": db.account_picks(None)},
         )
 
+    # ── Budgetplaner: was ist frei, und wo kommt mehr her ─────────────────
+    # 🔑 WARUM EINE EIGENE SEITE UND NICHT EIN KASTEN AUF /ausgaben
+    # /ausgaben beantwortet „wohin ist es geflossen" — rueckwaerts, fertig,
+    # nicht verhandelbar. Hier ist die Frage nach VORNE gerichtet: was waere,
+    # wenn. Dafuer braucht es Regler, ein Ziel und eine Luecke, und das ist
+    # eine andere Seite, kein weiterer Kasten.
+    _BUDGET_KI_SCHLUESSEL = "finance.budgetplan_ki"
+
+    def _regler_lesen(roh: Any) -> dict[str, float]:
+        """Reglerstellungen aus einer Anfrage — alles, was keine Zahl ist,
+        faellt still weg und der Topf bleibt auf seinem heutigen Wert."""
+        raus: dict[str, float] = {}
+        if isinstance(roh, dict):
+            for k, v in roh.items():
+                try:
+                    raus[str(k)] = float(v)
+                except (TypeError, ValueError):
+                    continue
+        return raus
+
+    def _budget_bauen(request: Request, monate: int, account_ids: list[int] | None):
+        from ..finance import budget as _b
+        lg = _b.lage(db, monate=monate, account_ids=account_ids)
+        gespeichert = _b.plan_lesen(db)
+        ziel = _b.ziel_lesen(gespeichert.get("ziel"), lg)
+        regler = gespeichert.get("regler") or {}
+        gekuendigt = gespeichert.get("gekuendigt") or []
+        rechnung = _b.rechnen(lg, ziel, regler, gekuendigt)
+        try:
+            ki = json.loads(db.meta_get(_BUDGET_KI_SCHLUESSEL) or "{}")
+        except ValueError:
+            ki = {}
+        return {
+            "lage": lg, "ziel": ziel, "regler": regler, "gekuendigt": gekuendigt,
+            "notizen": gespeichert.get("notizen") or "",
+            "rechnung": rechnung,
+            "vorschlaege": _b.vorschlaege(lg),
+            "ki": ki if isinstance(ki, dict) else {},
+            "labels": _cat_labels(_lang(request)),
+            "ki_verfuegbar": classifier is not None,
+        }
+
+    @app.get("/api/budget/data")
+    def api_budget_data(request: Request, monate: int = Query(12),
+                        accounts: list[int] = Query(default=[])):
+        return _budget_bauen(request, max(3, min(36, monate)), accounts or None)
+
+    @app.post("/api/budget/plan")
+    def api_budget_plan(request: Request, payload: dict = Body(default={}),
+                        monate: int = Query(12), accounts: list[int] = Query(default=[])):
+        """Ziel, Reglerstellungen und Kuendigungen sichern — und gleich
+        zurueckrechnen, damit die Seite nie eine Summe zeigt, die der Server
+        nicht selbst gebildet hat."""
+        from ..finance import budget as _b
+        lg = _b.lage(db, monate=max(3, min(36, monate)), account_ids=accounts or None)
+        ziel = _b.ziel_lesen((payload or {}).get("ziel"), lg)
+        regler = _regler_lesen((payload or {}).get("regler"))
+        gekuendigt = [str(x) for x in ((payload or {}).get("gekuendigt") or [])][:200]
+        gespeichert = _b.plan_schreiben(db, ziel, regler,
+                                        (payload or {}).get("notizen") or "",
+                                        gekuendigt)
+        return {"ok": True, "plan": gespeichert,
+                "rechnung": _b.rechnen(lg, ziel, regler, gekuendigt)}
+
+    @app.post("/api/budget/preview")
+    def api_budget_preview(request: Request, payload: dict = Body(default={}),
+                           monate: int = Query(12), accounts: list[int] = Query(default=[])):
+        """Nur rechnen, nichts sichern.
+
+        🔴 Warum das vom Sichern getrennt ist: die Regler fragen bei JEDER
+           Bewegung nach der neuen Summe. Ginge das ueber dieselbe Route wie
+           das Sichern, schriebe ein einziges Ziehen Dutzende Male in die
+           Datenbank — und der Plan waere gespeichert, ohne dass jemand auf
+           „sichern" gedrueckt hat. Rechnen ist eine Frage, Sichern eine
+           Entscheidung.
+        """
+        from ..finance import budget as _b
+        lg = _b.lage(db, monate=max(3, min(36, monate)), account_ids=accounts or None)
+        ziel = _b.ziel_lesen((payload or {}).get("ziel"), lg)
+        regler = _regler_lesen((payload or {}).get("regler"))
+        gekuendigt = [str(x) for x in ((payload or {}).get("gekuendigt") or [])][:200]
+        return {"ok": True, "rechnung": _b.rechnen(lg, ziel, regler, gekuendigt), "ziel": ziel}
+
+    @app.post("/api/budget/ai")
+    def api_budget_ai(request: Request, monate: int = Query(12),
+                      accounts: list[int] = Query(default=[])):
+        """Den lokalen Verstand nach Sparideen fragen. Hintergrundauftrag —
+        auf einer NAS dauert ein einziger Aufruf Minuten."""
+        if classifier is None:
+            raise HTTPException(503, translate("budget.ai_missing", _lang(request)))
+        from .. import activity
+        laeuft = activity.get_job("budget-ki")
+        if laeuft.running:
+            return {"started": False, "reason": "already running", **laeuft.as_dict()}
+        daten = _budget_bauen(request, max(3, min(36, monate)), accounts or None)
+        labels = daten["labels"]
+        ziel_text = daten["ziel"].get("titel") or ""
+        activity.start_job("budget-ki", total=1)
+        from ..finance import budget_ai as _ki
+
+        def worker():
+            ergebnis: dict[str, Any] = {"stand": "", "ideen": [], "fehler": ""}
+            try:
+                ideen = _ki.vorschlagen(
+                    classifier.provider, classifier.settings.model,
+                    daten["lage"], daten["rechnung"], labels=labels, ziel_text=ziel_text)
+                ergebnis = {"stand": datetime.now().isoformat(timespec="seconds"),
+                            "ideen": ideen, "fehler": ""}
+            except Exception as exc:  # noqa: BLE001
+                ergebnis = {"stand": datetime.now().isoformat(timespec="seconds"),
+                            "ideen": [], "fehler": str(exc)[:300]}
+                activity.update_job("budget-ki", last_error=str(exc))
+            finally:
+                try:
+                    db.meta_set(_BUDGET_KI_SCHLUESSEL, json.dumps(ergebnis, ensure_ascii=False))
+                except Exception:  # noqa: BLE001
+                    pass
+                activity.update_job("budget-ki", done=1)
+                activity.finish_job("budget-ki", current="")
+
+        threading.Thread(target=worker, name="budget-ki", daemon=True).start()
+        return {"started": True, **activity.get_job("budget-ki").as_dict()}
+
+    @app.get("/api/budget/ai-progress")
+    def api_budget_ai_progress():
+        from .. import activity
+        job = activity.get_job("budget-ki").as_dict()
+        job["available"] = classifier is not None
+        try:
+            job["ergebnis"] = json.loads(db.meta_get(_BUDGET_KI_SCHLUESSEL) or "{}")
+        except ValueError:
+            job["ergebnis"] = {}
+        return job
+
+    @app.get("/budget", response_class=HTMLResponse)
+    def budget_page(request: Request, monate: int = Query(12),
+                    accounts: list[int] = Query(default=[])):
+        daten = _budget_bauen(request, max(3, min(36, monate)), accounts or None)
+        return templates.TemplateResponse(
+            request, "budget.html", {**base_ctx(request), "daten": daten},
+        )
+
     # ── Rechnungen: was gefordert wurde, was offen ist, was belegt ist ─────
     # 🔑 WARUM EINE EIGENE SEITE UND NICHT EIN FILTER AUF /library
     # Die Bibliothek beantwortet „wo liegt dieses Papier". Hier ist die Frage
