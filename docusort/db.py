@@ -5442,7 +5442,7 @@ class Database:
             with self._lock:
                 rows = self._conn.execute(
                     """SELECT t.id, t.booking_date, t.amount, COALESCE(t.category, '') AS category,
-                              t.category_source, t.counterparty, t.purpose, t.tx_type,
+                              t.category_source, t.category_reason, t.counterparty, t.purpose, t.tx_type,
                               a.bank_name, a.iban_last4
                        FROM transactions t
                        JOIN statements s ON s.id = t.statement_id
@@ -5492,7 +5492,8 @@ class Database:
             e["rows"].append({
                 "id": r["id"], "booking_date": r["booking_date"], "amount": float(r["amount"]),
                 "counterparty": name, "purpose": (r["purpose"] or "")[:140], "category": c,
-                "category_source": r["category_source"] or "", "bank_name": r["bank_name"] or "",
+                "category_source": r["category_source"] or "",
+                "category_reason": r["category_reason"] or "", "bank_name": r["bank_name"] or "",
                 "iban_last4": r["iban_last4"] or "", "is_fixed": fixed_row,
             })
             day = str(r["booking_date"] or "")[:10]
@@ -5529,7 +5530,8 @@ class Database:
             e["rows"].append({
                 "id": r["id"], "booking_date": r["booking_date"], "amount": amt,
                 "counterparty": name, "purpose": (r["purpose"] or "")[:140], "category": c,
-                "category_source": r["category_source"] or "", "bank_name": r["bank_name"] or "",
+                "category_source": r["category_source"] or "",
+                "category_reason": r["category_reason"] or "", "bank_name": r["bank_name"] or "",
                 "iban_last4": r["iban_last4"] or "", "is_fixed": False,
             })
         income_categories = []

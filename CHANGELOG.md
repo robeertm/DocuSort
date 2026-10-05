@@ -7,6 +7,63 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.96.0] - 2026-10-05
+
+### Fixed
+
+🔑 **Changing one booking's category changed every booking of that payer.**
+Reported with a screenshot of five income bookings from the same person: one
+was dragged to a different category, and all five followed.
+
+The cause was not arithmetic, it was a default. A tick box labelled "remember
+this assignment for this payee" sat *below* the spending table, pre-ticked,
+and decided for every row in it. In the income block it was missing
+altogether, so there was no way to say "only this one" at all. Every manual
+assignment therefore wrote a rule for the whole payee and recoloured that
+payee's entire history — silently, going back years.
+
+In one real archive that had produced 305 learned rules covering 2738
+bookings: a rule on a payment service held 670 of them, a rule on a public
+pay office held 129 including a complete salary series, and a rule on the
+owner's own name held 675.
+
+**The decision now belongs to the row.** Behind every category dropdown — in
+the spending block and in the income block — there is a small *remember* box.
+It is never pre-ticked. Without it, an assignment moves exactly one booking
+and writes no rule. With it, learning works as before and the message says
+who was learned and how many further bookings were adjusted.
+
+The same tick box in the booking explorer is no longer pre-ticked either.
+Nothing that was already learned is touched: existing rules keep working, and
+the "Rules" list in the booking explorer remains the place to remove one.
+
+🔑 **The one-time password led into a room with no exit.** Signing in with it
+worked, DocuSort then demanded a password of your own — and that form asked
+for the *current* one. The current one was still the old, forgotten
+password: the one-time code was never the account's password, it lived
+elsewhere. Signed in and unable to do anything.
+
+Whoever DocuSort itself forces to set a new password no longer has to know
+the old one — the existing session is the proof, and the field is marked as
+optional while that is the case. A rescue path that assumes you remember what
+you have forgotten is not a rescue path. Everyone else still has to type
+their current password, and the one-time code still works exactly once: an
+earlier attempt at this fix turned the code into the account's password,
+which quietly gave it an unlimited lifetime.
+
+### Added
+
+**Every row now says where its category came from.** The same badges as the
+booking explorer — by hand, learned, recognised, transfer, bank — sit next to
+each dropdown in the spending and income drill-down, with the full reason as a
+tooltip. A rule that colours hundreds of bookings should be visible where the
+wrong number catches your eye, not only in a separate list.
+
+**The login page fills in your username.** Whoever has forgotten their
+password often no longer knows the user name either. It was already written
+in the one-time-password message and in the fallback file; now it is also
+entered into the form, so there is nothing to type.
+
 ## [0.95.0] - 2026-10-05
 
 ### Fixed

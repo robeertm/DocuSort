@@ -762,7 +762,9 @@ function txExplorer() {
     periods: [],
     salaryPeriod: '',
     anchorDay: 23,
-    learn: true,
+    // 🔴 NICHT vorgekreuzt. Lernen faerbt die ganze Geschichte eines
+    //    Zahlers um; das darf nie die Vorgabe eines Griffs sein.
+    learn: false,
     unresolved: [],
     unresolvedCat: 'sonstiges',
     unresolvedInRange: false,
@@ -922,7 +924,7 @@ function txExplorer() {
         const v = u.searchParams.get(k);
         if (v !== null) this.filter[k] = v;
       }
-      try { this.learn = localStorage.getItem('docusort-learn') !== '0'; } catch {}
+      try { this.learn = localStorage.getItem('docusort-learn') === '1'; } catch {}
       this.reload();
       this.loadPeriods();
       this.loadRules();

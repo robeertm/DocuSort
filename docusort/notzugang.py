@@ -309,6 +309,15 @@ def einmalpasswort_einloesen(db, benutzername: str, passwort: str,
         return None
     # Erst JETZT wird etwas geaendert: der Zugang wird einsatzfaehig gemacht
     # und ein neues Passwort verlangt.
+    #
+    # 🔴 DAS PASSWORT DES KONTOS WIRD HIER NICHT ANGEFASST — und das ist
+    #    Absicht. Ein erster Entwurf setzte das Einmalpasswort als Kontowort
+    #    ein; damit galt es nicht mehr GENAU EINMAL, sondern bis zur naechsten
+    #    Aenderung, und wer die Nachricht mitlas, konnte sich jederzeit wieder
+    #    anmelden. Der Prueftand hat das im selben Lauf gemeldet.
+    #    Die Sackgasse (angemeldet, zum Aendern gezwungen, altes Wort
+    #    vergessen) loest die andere Seite: `POST /api/me/password` verlangt
+    #    das alte Wort nicht, wenn `must_change_password` gesetzt ist.
     db.user_update(int(reihe["id"]), is_active=1, must_change_password=1)
     return db.user_by_name(stand["benutzer"])
 

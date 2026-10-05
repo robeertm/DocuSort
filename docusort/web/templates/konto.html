@@ -32,9 +32,17 @@
     <p class="mt-1 text-sm text-ink-400">{{ t('auth.change_password_hint') }}</p>
 
     <form class="mt-4 space-y-4" @submit.prevent="save()">
+      {# 🔴 Wer hier hingezwungen wurde, weiss das alte Wort meist nicht mehr —
+         genau deshalb steht er hier. Dann ist das Feld freiwillig, und die
+         bestehende Anmeldung ist der Nachweis. Sonst waere der Notzugang eine
+         Tuer in einen Raum ohne Ausgang. #}
       <div>
-        <label for="cur" class="block text-sm text-ink-300 mb-1">{{ t('auth.current_password') }}</label>
-        <input id="cur" type="password" x-model="current" required autocomplete="current-password"
+        <label for="cur" class="block text-sm text-ink-300 mb-1">
+          {{ t('auth.current_password') }}{% if me.must_change_password %}
+          <span class="text-ink-500 text-xs">— {{ t('auth.current_optional') }}</span>{% endif %}
+        </label>
+        <input id="cur" type="password" x-model="current"
+               {% if not me.must_change_password %}required{% endif %} autocomplete="current-password"
                class="w-full rounded-xl bg-ink-950/60 border border-ink-700 px-3 py-2 text-sm
                       focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
       </div>
