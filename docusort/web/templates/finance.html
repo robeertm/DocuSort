@@ -87,7 +87,7 @@
       {# progress bar: spent vs budget #}
       <div class="h-3 rounded-full bg-ink-800 overflow-hidden">
         <div class="h-full rounded-full {% if over %}bg-rose-500{% elif spent_pct > 80 %}bg-amber-400{% else %}bg-emerald-500{% endif %}"
-             style="width: {{ spent_pct | zahl(1) }}%"></div>
+             style="width: {{ spent_pct | css_pct }}%"></div>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center">
         <div>
@@ -184,19 +184,25 @@
           {# dual bar: income above, expense below #}
           <div class="flex-1 min-w-[6rem] space-y-0.5">
             <div class="h-2 rounded-full overflow-hidden">
-              <div class="h-full bg-emerald-500 rounded-full" style="width: {{ (100 * p.income / pmax) | zahl(1) }}%"></div>
+              <div class="h-full bg-emerald-500 rounded-full" style="width: {{ (100 * p.income / pmax) | css_pct }}%"></div>
             </div>
             <div class="h-2 rounded-full overflow-hidden">
-              <div class="h-full bg-rose-500 rounded-full" style="width: {{ (100 * p.expense / pmax) | zahl(1) }}%"></div>
+              <div class="h-full bg-rose-500 rounded-full" style="width: {{ (100 * p.expense / pmax) | css_pct }}%"></div>
             </div>
           </div>
-          <div class="flex gap-3 w-full sm:w-auto justify-end sm:justify-start">
-          <div class="w-20 shrink-0 text-right tabular-nums text-emerald-300">+{{ p.income | zahl }}</div>
-          <div class="w-20 shrink-0 text-right tabular-nums text-rose-300">−{{ p.expense | zahl }}</div>
-          <div class="w-20 shrink-0 text-right tabular-nums font-semibold {% if p.net >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
+          {# 🔴 Die Zahlenspalten waren fest 3×80 + 64 px breit. Mit den
+             Abstaenden sind das 340 px — auf einem 360-px-Telefon bleiben
+             nach dem Seitenrand rund 328 px, und weil die Reihe rechts
+             ausgerichtet ist, lief sie nach LINKS aus dem Bild: die
+             Einnahmen-Spalte begann bei −17 px und war nicht mehr zu
+             lesen. Auf dem Handy also schmaler; ab sm wie bisher. #}
+          <div class="flex gap-2 sm:gap-3 w-full sm:w-auto justify-end sm:justify-start">
+          <div class="w-16 sm:w-20 shrink-0 text-right tabular-nums text-emerald-300">+{{ p.income | zahl }}</div>
+          <div class="w-16 sm:w-20 shrink-0 text-right tabular-nums text-rose-300">−{{ p.expense | zahl }}</div>
+          <div class="w-16 sm:w-20 shrink-0 text-right tabular-nums font-semibold {% if p.net >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
             {% if p.net >= 0 %}+{% endif %}{{ p.net | zahl }}
           </div>
-          <div class="w-16 shrink-0 text-right tabular-nums text-ink-500" title="{{ t('finance.periods.saved') }}">
+          <div class="w-12 sm:w-16 shrink-0 text-right tabular-nums text-ink-500" title="{{ t('finance.periods.saved') }}">
             {% if p.saved > 0 %}⇢{{ p.saved | zahl }}{% else %}—{% endif %}
           </div>
           </div>
@@ -333,7 +339,7 @@
               <span class="inline-flex items-center gap-1.5">
                 {{ t('finance.start_balance') }}:
                 <input type="text" inputmode="decimal"
-                       value="{{ a.start_balance or 0 | zahl(2) }}"
+                       value="{{ (a.start_balance or 0) | zahl(2) }}"
                        @change="setStart({{ a.id }}, $event.target.value)"
                        class="w-24 bg-ink-900 border border-ink-700 rounded px-1.5 py-0.5 tabular-nums text-right text-ink-200"/>
                 €

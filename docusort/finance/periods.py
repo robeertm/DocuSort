@@ -298,3 +298,92 @@ def build_periods(
             p.pop(k, None)
 
     return periods
+
+
+# ---------------------------------------------------------------------------
+# Freie Zeitraeume (0.94.0)
+#
+# 🔑 WARUM NEBEN DEM GEHALTSMONAT NOCH ETWAS STEHT
+# Der Gehaltsmonat beantwortet die Frage, ob das Geld bis zum naechsten
+# Gehalt reicht. Er beantwortet NICHT, was ein ganzes Jahr gekostet hat
+# oder wie zwoelf Monate rueckwaerts aussehen — dafuer ist er zu kurz.
+# Beides sind
+# Schnitte durch denselben Buchungsstrom, also bekommen sie dieselbe Form:
+# eine Liste von Fenstern, neuestes zuerst, genau wie `salary_periods`.
+# Damit funktioniert alles dahinter unveraendert weiter — die Vorperiode
+# ist das naechste Fenster in der Liste, der Durchschnitt die danach.
+#
+# 🔴 UND DARUM IST DIE VORPERIODE GLEICH LANG.
+# Ein Jahr gegen das Vorjahr ist eine Aussage. Ein Jahr gegen die letzten
+# dreissig Tage waere keine. Jedes Fenster dieser Liste hat dieselbe Laenge wie das
+# gewaehlte — bei Jahren echte Kalenderjahre, bei Monatsfenstern echte
+# Kalendermonate, bei einem frei gewaehlten Von–Bis dieselbe Zahl Tage.
+
+def _month_start(d: date) -> date:
+    return date(d.year, d.month, 1)
+
+
+def _add_months(d: date, n: int) -> date:
+    """Denselben Tag n Monate weiter — auf den letzten gueltigen gekuerzt."""
+    y, m = divmod((d.year * 12 + (d.month - 1)) + n, 12)
+    return _clamp_day(y, m + 1, d.day)
+
+
+def _month_end(d: date) -> date:
+    nxt = _add_months(_month_start(d), 1)
+    return nxt - timedelta(days=1)
+
+
+def window_series(kind: str, *, start: str = "", end: str = "",
+                  months: int = 12, year: int = 0,
+                  today: str = "", count: int = 7) -> list[dict[str, Any]]:
+    """Ein gewaehlter Zeitraum und die gleich langen davor — neuestes zuerst.
+
+    `kind`:
+      "months" — die letzten `months` KALENDERmonate, bis einschliesslich
+                 des laufenden. Vorperiode: die `months` davor.
+      "year"   — das Kalenderjahr `year`. Vorperiode: das Jahr davor.
+      "range"  — frei gewaehltes `start`..`end`. Vorperiode: genauso viele
+                 Tage unmittelbar davor.
+
+    Jedes Fenster traegt `key` (sein Startdatum, wie beim Gehaltsmonat),
+    `start`, `end` und `is_current` (enthaelt den heutigen Tag).
+    """
+    heute = _parse(today) or date.today()
+    fenster: list[tuple[date, date]] = []
+
+    if kind == "year":
+        j = int(year or heute.year)
+        for i in range(count):
+            fenster.append((date(j - i, 1, 1), date(j - i, 12, 31)))
+    elif kind == "months":
+        n = max(1, int(months or 12))
+        # Das jüngste Fenster endet mit dem laufenden Monat.
+        letzter = _month_start(heute)
+        for i in range(count):
+            ende_m = _add_months(letzter, -i * n)
+            start_m = _add_months(ende_m, -(n - 1))
+            fenster.append((start_m, _month_end(ende_m)))
+    else:  # "range"
+        a = _parse(start)
+        b = _parse(end)
+        if not a or not b:
+            return []
+        if b < a:
+            a, b = b, a
+        laenge = (b - a).days + 1
+        for i in range(count):
+            vb = b - timedelta(days=laenge * i)
+            va = vb - timedelta(days=laenge - 1)
+            fenster.append((va, vb))
+
+    raus: list[dict[str, Any]] = []
+    for a, b in fenster:
+        raus.append({
+            "key": a.isoformat(),
+            "start": a.isoformat(),
+            "end": b.isoformat(),
+            "is_current": a <= heute <= b,
+            "due_date": "",
+        })
+    return raus

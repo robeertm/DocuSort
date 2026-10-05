@@ -44,9 +44,56 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
     {% endif %}
     {% if has_data and data.month_options %}
       <form method="get" action="/ausgaben" class="w-full sm:w-auto shrink-0 flex items-end gap-2 flex-wrap">
-        <input type="hidden" name="mode" value="{{ mode }}">
+        {# 🔑 Der Sondertopf-Schalter steht in der Adresse, nicht in den
+           Einstellungen — er gilt fuer diese Ansicht. Jedes Formular auf
+           dieser Seite nimmt ihn mit, sonst faellt er beim naechsten Klick
+           still heraus. #}
+        <input type="hidden" name="sonder" value="{{ 'mit' if data.special_included else '' }}">
+        {# Zeitraum-ART. Der Gehaltsmonat ist die Vorgabe und behaelt seine
+           Auswahlliste; die uebrigen Arten beantworten laengere Fragen. #}
         <label class="block">
-          <span class="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">{% if mode == 'salary' %}{{ t('spending.mode_salary') }}{% else %}{{ t('spending.month') }}{% endif %}</span>
+          <span class="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">{{ t('spending.span') }}</span>
+          <select name="mode" onchange="this.form.submit()" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm max-w-full">
+            <option value="salary"   {% if mode == 'salary'   %}selected{% endif %}>{{ t('spending.mode_salary') }}</option>
+            <option value="calendar" {% if mode == 'calendar' %}selected{% endif %}>{{ t('spending.mode_calendar') }}</option>
+            <option value="months"   {% if mode == 'range' and data.span.kind == 'months' %}selected{% endif %}>{{ t('spending.span_months') }}</option>
+            <option value="year"     {% if mode == 'range' and data.span.kind == 'year'   %}selected{% endif %}>{{ t('spending.span_year') }}</option>
+            <option value="range"    {% if mode == 'range' and data.span.kind == 'range'  %}selected{% endif %}>{{ t('spending.span_range') }}</option>
+          </select>
+        </label>
+        {% if mode == 'range' and data.span.kind == 'months' %}
+          <label class="block">
+            <span class="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">{{ t('spending.span_how_many') }}</span>
+            <select name="months" onchange="this.form.submit()" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm max-w-full">
+              {% for n in [3, 6, 12, 24] %}
+                <option value="{{ n }}" {% if data.span.months == n %}selected{% endif %}>{{ t('spending.span_n_months') | replace('{n}', n) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        {% elif mode == 'range' and data.span.kind == 'year' %}
+          <label class="block">
+            <span class="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">{{ t('spending.span_year') }}</span>
+            <select name="year" onchange="this.form.submit()" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm max-w-full">
+              {% for y in data.years %}
+                <option value="{{ y }}" {% if data.span.year|string == y %}selected{% endif %}>{{ y }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        {% elif mode == 'range' and data.span.kind == 'range' %}
+          <label class="block">
+            <span class="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">{{ t('spending.span_from') }}</span>
+            <input type="date" name="start" value="{{ data.span.start }}"
+                   class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm max-w-full">
+          </label>
+          <label class="block">
+            <span class="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">{{ t('spending.span_to') }}</span>
+            <input type="date" name="end" value="{{ data.span.end }}"
+                   class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm max-w-full">
+          </label>
+          <button type="submit" class="btn-primary text-xs !py-2">{{ t('spending.span_apply') }}</button>
+        {% endif %}
+        <label class="block">
+          <span class="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">{% if mode == 'salary' %}{{ t('spending.mode_salary') }}{% elif mode == 'range' %}{{ t('spending.range') }}{% else %}{{ t('spending.month') }}{% endif %}</span>
           <select name="month" onchange="this.form.submit()" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm max-w-full">
             {% for opt in data.month_options %}
               <option value="{{ opt.key }}" {% if opt.key == data.month %}selected{% endif %}>{{ opt.label }}</option>
@@ -74,7 +121,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
               {% endif %}
             </button>
             <div x-show="open" x-cloak
-                 class="absolute right-0 z-30 mt-1 w-64 rounded-xl border border-ink-700 bg-ink-900 p-3 shadow-xl">
+                 class="absolute left-0 sm:left-auto sm:right-0 z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-xl border border-ink-700 bg-ink-900 p-3 shadow-xl">
               <div class="text-[10px] uppercase tracking-wider text-ink-500 mb-2">{{ t('spending.accounts_title') }}</div>
               <div class="space-y-1.5 max-h-60 overflow-y-auto">
                 {% for a in data.accounts %}
@@ -95,10 +142,16 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
             </div>
           </div>
         {% endif %}
-        <a href="/ausgaben?mode={% if mode == 'salary' %}calendar{% else %}salary{% endif %}"
-           class="text-xs rounded-lg px-2.5 py-2 border border-ink-700 text-ink-300 hover:text-emerald-300 hover:border-emerald-500/50"
-           title="{{ t('spending.mode_hint') }}">
-          ⇄ {% if mode == 'salary' %}{{ t('spending.mode_calendar') }}{% else %}{{ t('spending.mode_salary') }}{% endif %}
+        {# Der Zeitraum, wie er gerade auf dem Schirm steht — als ein Blatt.
+           Der Knopf traegt dieselbe Adresse wie die Seite, damit das PDF
+           zeigt, was man sieht, und nicht etwas Benachbartes. #}
+        <a :href="pdfHref()" href="/ausgaben.pdf" target="_blank" rel="noopener"
+           class="text-xs rounded-lg px-2.5 py-2 border border-ink-700 text-ink-300 hover:text-emerald-300 hover:border-emerald-500/50 inline-flex items-center gap-1.5"
+           title="{{ t('spending.pdf_hint') }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
+            <path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+          </svg>
+          {{ t('spending.pdf') }}
         </a>
       </form>
     {% endif %}
@@ -144,12 +197,22 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
         </div>
         {# 🔑 Was bewusst draußen steht, gehört auf die Seite. Sonst sucht
            jemand 9 000 €, die er ausgegeben hat, und findet sie nirgends. #}
-        <div class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs
-                    bg-amber-500/10 text-amber-200" x-show="d.special_total > 0" x-cloak
-             :title="(d.special_cats || []).map(k => label(k)).join(', ')">
+        {# 🔑 Die Zahl IST der Schalter. Wer liest „1 654 € nicht mitgezaehlt",
+           will als naechstes wissen, wie es MIT aussieht — der Weg dahin
+           gehoert an die Zahl, nicht in ein Menue. Ein Klick aendert nur die
+           Ansicht; welche Kategorien Sondertoepfe SIND, bleibt unberuehrt. #}
+        <a :href="sonderHref()" x-show="d.special_total > 0" x-cloak
+           :title="T.special_switch + ' · ' + (d.special_cats || []).map(k => label(k)).join(', ')"
+           class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs min-h-[32px]
+                  border transition-colors"
+           :class="d.special_included
+                   ? 'bg-amber-500/20 text-amber-100 border-amber-500/50'
+                   : 'bg-amber-500/10 text-amber-200 border-transparent hover:border-amber-500/50'">
           <span x-text="'◆ ' + fmt0(d.special_total) + ' €'"></span>
-          <span class="text-amber-400/80">{{ t('spend.special_sum') }}</span>
-        </div>
+          <span class="text-amber-400/80"
+                x-text="d.special_included ? T.special_counted : T.special_not_counted"></span>
+          <span class="text-amber-400/60" x-text="d.special_included ? '✓' : '+'"></span>
+        </a>
       </div>
 
       <div class="card p-5 lg:col-span-2">
@@ -461,7 +524,7 @@ window.__spendingBudget = {{ (budget_period or None) | tojson }};</script>
 
       <div class="space-y-1.5">
         <template x-for="r in (boardOpen ? ranking : boardTop)" :key="r.key">
-          <a :href="'/ausgaben?mode=' + d.mode + '&month=' + encodeURIComponent(r.key) + accountQuery()"
+          <a :href="periodHref(r.key)"
              class="block rounded-xl border px-3 py-2 transition"
              :class="r.key === d.month ? 'border-emerald-500/40 bg-emerald-500/10'
                                        : 'border-ink-700/60 bg-ink-900/30 hover:bg-ink-800/50'">
@@ -695,6 +758,9 @@ function spendingPage(initial) {
       'game_badge_zero': t('game.badge_zero'), 'game_badge_zero_hint': t('game.badge_zero_hint'),
       'game_badge_three': t('game.badge_three'), 'game_badge_week': t('game.badge_week'),
       'game_badge_half': t('game.badge_half'), 'game_badge_missing': t('game.badge_missing'),
+      'special_switch': t('spend.special_switch'),
+      'special_counted': t('spend.special_counted'),
+      'special_not_counted': t('spend.special_sum'),
     } | tojson }},
     open: '', busy: false, learn: true, message: '', messageOk: true,
     init() { try { this.learn = localStorage.getItem('docusort-learn') !== '0'; } catch {} },
@@ -876,10 +942,42 @@ function spendingPage(initial) {
       });
       return `<svg viewBox="0 0 160 160" style="width:100%;height:100%;transform:rotate(-90deg);"><circle cx="80" cy="80" r="60" fill="none" style="stroke:var(--viz-track)" stroke-width="20"/>${segs}</svg>`;
     },
+    // 🔴 Hier stand eine Adresse aus DREI Angaben (month, mode, Konten).
+    //    Jede weitere — Jahr, Von–Bis, Zahl der Monate, Sondertoepfe —
+    //    waere beim ersten Nachladen still herausgefallen, und die Seite
+    //    waere nach einer Umsortierung auf den Gehaltsmonat zurueckgesprungen.
+    //    Ein Ausschnitt ist ALLES, was ihn ausmacht: die Adresse der Seite
+    //    wird uebernommen, nicht nachgebaut.
+    spanQuery() {
+      const u = new URLSearchParams(location.search);
+      const q = new URLSearchParams();
+      for (const k of ['mode', 'month', 'months', 'year', 'start', 'end', 'sonder']) {
+        const v = u.get(k);
+        if (v !== null && v !== '') q.set(k, v);
+      }
+      if (!q.get('month') && this.d.month) q.set('month', this.d.month);
+      return q;
+    },
+    // Derselbe Ausschnitt, nur mit umgelegtem Sondertopf-Schalter.
+    sonderHref() {
+      const q = this.spanQuery();
+      if (this.d.special_included) q.delete('sonder'); else q.set('sonder', 'mit');
+      // 🔴 `month` zeigt beim freien Zeitraum auf ein Fenster, das nach dem
+      //    Umschalten dasselbe bleiben soll — es wird mitgenommen.
+      return '/ausgaben?' + q.toString();
+    },
+    // Ein Sprung auf einen anderen Zeitraum behaelt alles uebrige.
+    periodHref(key) {
+      const q = this.spanQuery();
+      q.set('month', key);
+      return '/ausgaben?' + q.toString() + this.accountQuery();
+    },
+    pdfHref() {
+      return '/ausgaben.pdf?' + this.spanQuery().toString() + this.accountQuery();
+    },
     async reload() {
-      const u = new URL(location.href);
-      const r = await fetch('/api/ausgaben/data?month=' + encodeURIComponent(u.searchParams.get('month') || this.d.month)
-                            + '&mode=' + encodeURIComponent(this.d.mode) + this.accountQuery());
+      const r = await fetch('/api/ausgaben/data?' + this.spanQuery().toString()
+                            + this.accountQuery());
       const j = await r.json(); if (r.ok) this.d = j;
     },
     // ---- eigene Kategorie anlegen (wie im Explorer: Name, Fixkosten?, Sparen?) ----

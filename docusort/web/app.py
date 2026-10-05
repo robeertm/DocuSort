@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -132,6 +132,33 @@ def _zahl(value: float | None, stellen: int = 0) -> str:
     except (TypeError, ValueError):
         return "—"
     return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
+def _css_pct(value: float | None, stellen: int = 1) -> str:
+    """Ein Prozentwert fuer eine CSS-Breite — maschinenlesbar, nie deutsch.
+
+    🔴 WARUM ES DAS BRAUCHT (05.10.2026)
+    In `finance.html` stand `style="width: {{ x | zahl(1) }}%"`. `_zahl`
+    schreibt das Komma deutsch, also stand dort `width: 6,1%` — fuer CSS
+    ist das ungueltig, der Browser verwirft die Regel ersatzlos, und das
+    Balkenstueck fiel auf die volle Breite seines Kastens zurueck. Ergebnis:
+    JEDER Balken des Diagramms „Einnahmen & Ausgaben pro Gehaltsmonat" war
+    gleich lang — die Grafik zeigte nichts mehr, sah aber heil aus.
+
+    🔑 Die Lehre: ein Anzeigefilter gehoert nur dorthin, wo ein MENSCH liest.
+    Wo eine MASCHINE liest (CSS, SVG-Koordinaten, Formularwerte), braucht es
+    einen eigenen Filter — sonst legt die naechste Umstellung den
+    Anzeigefilter wieder darueber.
+    """
+    try:
+        z = float(value or 0.0)
+    except (TypeError, ValueError):
+        z = 0.0
+    # Ein Balken darf seinen Kasten nicht verlassen: ueber 100 % wird
+    # gedeckelt (Budget-Ueberschreitung faerbt den Balken, statt ihn zu
+    # verlaengern), unter 0 % gaebe es ohnehin keine Breite.
+    z = max(0.0, min(100.0, z))
+    return f"{z:.{stellen}f}"
 
 
 def _money(value: float | None, stellen: int = 2) -> str:
@@ -421,6 +448,7 @@ def create_app(
     templates.env.filters["usd"] = _usd
     templates.env.filters["money"] = _money
     templates.env.filters["zahl"] = _zahl
+    templates.env.filters["css_pct"] = _css_pct
 
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -2032,39 +2060,96 @@ def create_app(
     def _dmy(iso: str) -> str:
         return f"{iso[8:10]}.{iso[5:7]}.{iso[0:4]}" if iso and len(iso) >= 10 else iso
 
+    # Die Zeitraum-Arten, die /ausgaben schneiden kann. `salary` bleibt die
+    # Vorgabe — der Gehaltsmonat ist die Frage, die taeglich zaehlt. Die
+    # uebrigen beantworten laengere Fragen („was hat 2025 gekostet").
+    _SPAN_MODES = ("salary", "calendar", "months", "year", "range")
+
     def _spending_data(request: Request, month: str | None, mode: str | None,
-                       account_ids: list[int] | None = None) -> dict:
+                       account_ids: list[int] | None = None, *,
+                       months: int | None = None, year: int | None = None,
+                       start: str | None = None, end: str | None = None,
+                       include_special: bool = False) -> dict:
         """Everything /ausgaben shows, as JSON — the page renders it with
         Alpine and refetches after a re-categorisation."""
         from datetime import date as _dt
+        from ..finance.periods import window_series
         lang = _lang(request)
-        mode = "calendar" if (mode or "").lower() == "calendar" else "salary"
+        mode = (mode or "").lower()
+        if mode not in _SPAN_MODES:
+            mode = "salary"
+        heute = _dt.today().isoformat()
         periods = None
+        windows = None
+        span = {"kind": mode, "months": int(months or 12), "year": int(year or 0),
+                "start": start or "", "end": end or ""}
+
+        if mode in ("months", "year", "range"):
+            if mode == "months":
+                windows = window_series("months", months=span["months"], today=heute)
+            elif mode == "year":
+                jahre = db.finance_available_periods().get("years") or []
+                j = span["year"] or (int(jahre[0]) if jahre else _dt.today().year)
+                span["year"] = j
+                windows = window_series("year", year=j, today=heute)
+            else:
+                windows = window_series("range", start=span["start"],
+                                        end=span["end"], today=heute)
+            # 🔴 Ein leerer Zeitraum ist keine Ansicht. Ein unvollstaendiges
+            #    Von–Bis faellt auf den Gehaltsmonat zurueck, statt eine
+            #    leere Seite zu zeigen, die wie „keine Buchungen" aussieht.
+            if not windows:
+                mode = "salary"
+                span["kind"] = "salary"
+            else:
+                # Gewaehlt ist das juengste Fenster — es sei denn, es ist
+                # ausdruecklich ein aelteres gewaehlt. Sonst koennte man die
+                # „12 Monate davor" nie ansehen.
+                _wkeys = [w["key"] for w in windows]
+                month = month if month in _wkeys else windows[0]["key"]
+
         if mode == "salary":
             fin = settings.finance
             periods = db.finance_salary_periods(
                 salary_match=fin.salary_match, anchor_day=fin.period_anchor_day,
-                monthly_budget=fin.monthly_budget, today=_dt.today().isoformat(),
+                monthly_budget=fin.monthly_budget, today=heute,
             )
             if not periods:
                 mode = "calendar"
+                span["kind"] = "calendar"
         data = db.finance_spend_by_category(month=month, periods=periods,
-                                            account_ids=account_ids)
+                                            windows=windows,
+                                            account_ids=account_ids,
+                                            include_special=include_special)
+        data["span"] = span
 
         def _label(key: str, a: str, b: str) -> str:
             if not key:
                 return ""
-            if data["mode"] == "salary":
-                return f"{_dmy(a)} – {_dmy(b)}"
-            return _month_label(key, lang)
+            if data["mode"] == "calendar":
+                return _month_label(key, lang)
+            # Ein volles Kalenderjahr sagt man als Jahr, nicht als zwei Daten.
+            if a and b and a[4:] == "-01-01" and b[4:] == "-12-31" and a[:4] == b[:4]:
+                return a[:4]
+            return f"{_dmy(a)} – {_dmy(b)}"
 
         month_options = []
         if data["mode"] == "salary":
             for p in reversed(periods or []):
                 month_options.append({"key": p["start"], "label": f"{_dmy(p['start'])} – {_dmy(p['end'])}"
                                       + (" · " + translate("finance.periods.now", lang) if p.get("is_current") else "")})
+        elif data["mode"] == "range":
+            for w in (windows or []):
+                month_options.append({"key": w["key"], "label": _label(w["key"], w["start"], w["end"])})
         else:
             month_options = [{"key": m, "label": _month_label(m, lang)} for m in data["months"]]
+        # Welche Jahre hat das Archiv ueberhaupt? Die Jahresauswahl soll nur
+        # anbieten, wozu es Buchungen gibt.
+        try:
+            data["years"] = [str(y) for y in (db.finance_available_periods().get("years") or [])]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("available years failed: %s", exc)
+            data["years"] = []
         data["month_label"] = _label(data["month"], data["range_start"], data["range_end"])
         data["prev_month_label"] = _label(data["prev_month"], data["prev_range_start"], data["prev_range_end"])
         data["range_label"] = f"{_dmy(data['range_start'])} – {_dmy(data['range_end'])}" if data.get("range_start") else ""
@@ -2093,21 +2178,48 @@ def create_app(
             not a["selected"] for a in data["accounts"])
         return data
 
+    def _span_args(months, year, start, end, sonder) -> dict:
+        """Die Zeitraum-Angaben aus der Adresse — an EINER Stelle gelesen,
+        damit Seite, JSON und PDF nie verschieden rechnen."""
+        return {
+            "months": _coerce_int(months) or None,
+            "year": _coerce_int(year) or None,
+            "start": (start or "").strip()[:10] or None,
+            "end": (end or "").strip()[:10] or None,
+            # 🔑 Nur fuer die Ansicht, nichts wird gespeichert: der Schalter
+            #    steht in der Adresse. Ein Link bleibt damit das, was er
+            #    zeigt — auch wenn ihn jemand weitergibt oder als Lesezeichen
+            #    ablegt.
+            "include_special": (sonder or "").lower() in ("1", "mit", "true", "ja", "yes"),
+        }
+
     @app.get("/api/ausgaben/data")
     def api_spending_data(request: Request, month: str | None = Query(None),
                           mode: str | None = Query(None),
-                          accounts: list[int] = Query(default=[])):
-        return _spending_data(request, month, mode, accounts or None)
+                          accounts: list[int] = Query(default=[]),
+                          months: str | None = Query(None),
+                          year: str | None = Query(None),
+                          start: str | None = Query(None),
+                          end: str | None = Query(None),
+                          sonder: str | None = Query(None)):
+        return _spending_data(request, month, mode, accounts or None,
+                              **_span_args(months, year, start, end, sonder))
 
     @app.get("/ausgaben", response_class=HTMLResponse)
     def spending_page(request: Request, month: str | None = Query(None),
                       mode: str | None = Query(None),
-                      accounts: list[int] = Query(default=[])):
+                      accounts: list[int] = Query(default=[]),
+                      months: str | None = Query(None),
+                      year: str | None = Query(None),
+                      start: str | None = Query(None),
+                      end: str | None = Query(None),
+                      sonder: str | None = Query(None)):
         """Spending of one month by transaction category — the same
         categories as the explorer, so every re-categorisation shows up
         here at once. `mode` = 'salary' (default, Gehalt bis Gehalt) or
         'calendar'. See db.finance_spend_by_category."""
-        data = _spending_data(request, month, mode, accounts or None)
+        data = _spending_data(request, month, mode, accounts or None,
+                              **_span_args(months, year, start, end, sonder))
         summary = db.finance_summary()
         has_data = bool(db.list_accounts()) and summary.get("tx_count", 0) > 0
         # „wieviel darf ich noch ausgeben" — dieselben Zahlen wie der
@@ -2140,6 +2252,53 @@ def create_app(
             request, "spending.html",
             {**base_ctx(request), "data": data, "has_data": has_data, "mode": data["mode"],
              "budget_period": budget_period},
+        )
+
+    @app.get("/ausgaben.pdf")
+    def spending_pdf(request: Request, month: str | None = Query(None),
+                     mode: str | None = Query(None),
+                     accounts: list[int] = Query(default=[]),
+                     months: str | None = Query(None),
+                     year: str | None = Query(None),
+                     start: str | None = Query(None),
+                     end: str | None = Query(None),
+                     sonder: str | None = Query(None)):
+        """Der gewaehlte Zeitraum als EIN Blatt A4.
+
+        🔑 Dieselbe Rechnung wie die Seite — `_spending_data`, nicht eine
+        zweite daneben. Ein Bericht, der etwas anderes sagt als der
+        Bildschirm, ist schlimmer als keiner.
+        """
+        from ..finance.report import spending_pdf as _zeichne
+        lang = _lang(request)
+        data = _spending_data(request, month, mode, accounts or None,
+                              **_span_args(months, year, start, end, sonder))
+        etiketten = _cat_labels(lang)
+        konten = ""
+        if data.get("accounts_filtered"):
+            namen = ", ".join(a["label"] for a in data.get("accounts") or []
+                              if a.get("selected"))
+            konten = translate("spending.pdf_accounts", lang).replace("{list}", namen)
+        try:
+            blatt = _zeichne(
+                data,
+                t=lambda k: translate(k, lang),
+                label=lambda k: etiketten.get(k, k),
+                geld=_money,
+                erzeugt=_dmy(datetime.now().date().isoformat()),
+                konten=konten,
+            )
+        except ImportError as exc:
+            # 🔴 Eine fehlende Bibliothek darf die Seite nicht mitnehmen —
+            #    sie wurde erst mit 0.94.0 verlangt, und es gibt
+            #    Installationen aus dem Quelltext, die `pip install` nicht
+            #    wiederholt haben.
+            logger.warning("PDF nicht moeglich: %s", exc)
+            raise HTTPException(503, "reportlab fehlt — bitte requirements.txt neu installieren")
+        name = "ausgaben-%s.pdf" % (data.get("range_start") or "zeitraum")
+        return Response(
+            content=blatt, media_type="application/pdf",
+            headers={"Content-Disposition": 'inline; filename="%s"' % name},
         )
 
     # ---------- Finance (Kontoauszüge) ----------
