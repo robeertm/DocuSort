@@ -115,12 +115,30 @@ def _eur(usd: float | None) -> str:
         return "—"
 
 
-def _money(value: float | None) -> str:
-    """Format an amount that is ALREADY in euros, German style."""
+def _zahl(value: float | None, stellen: int = 0) -> str:
+    """Eine Zahl, deutsch geschrieben: Punkt als Tausender, Komma als Komma.
+
+    🔴 WARUM ES DAS BRAUCHT (05.10.2026)
+    In den Vorlagen standen 50 Stellen mit `"%.2f"|format(x)` — Pythons
+    Formatierung schreibt `1836.60`: Punkt statt Komma, keine Tausender. Auf
+    einer Seite stand damit `1836.60 €`, auf der naechsten `48.720,00 €`. Zwei
+    Schreibweisen fuer dieselbe Sache lassen eine Oberflaeche zusammengestueckt
+    aussehen — und genau das war sie an der Stelle auch.
+    """
     if value is None:
         return "—"
-    text = f"{value:,.2f}"
-    return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".") + " €"
+    try:
+        text = f"{float(value):,.{stellen}f}"
+    except (TypeError, ValueError):
+        return "—"
+    return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
+def _money(value: float | None, stellen: int = 2) -> str:
+    """Ein Betrag, der BEREITS in Euro ist — deutsch geschrieben, mit Zeichen."""
+    if value is None:
+        return "—"
+    return _zahl(value, stellen) + " €"
 
 
 def _usd(usd: float | None) -> str:
@@ -402,6 +420,7 @@ def create_app(
     templates.env.filters["eur"] = _eur
     templates.env.filters["usd"] = _usd
     templates.env.filters["money"] = _money
+    templates.env.filters["zahl"] = _zahl
 
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 

@@ -141,7 +141,7 @@
     <div class="card p-3 sm:p-4 min-w-0">
       <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('analytics.total_spent') }}</div>
       <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums text-emerald-300 break-all">
-        {{ "%.2f"|format(summary.total_spent) }} €
+        {{ summary.total_spent | money }}
       </div>
     </div>
     <div class="card p-3 sm:p-4 min-w-0">
@@ -155,7 +155,7 @@
     <div class="card p-3 sm:p-4 min-w-0">
       <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('analytics.avg_per_receipt') }}</div>
       <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums break-all">
-        {% if summary.receipt_count > 0 %}{{ "%.2f"|format(summary.total_spent / summary.receipt_count) }} €{% else %}–{% endif %}
+        {% if summary.receipt_count > 0 %}{{ (summary.total_spent / summary.receipt_count) | money }}{% else %}–{% endif %}
       </div>
     </div>
   </div>
@@ -169,7 +169,7 @@
         {% for m in monthly %}
           <div class="flex flex-col items-center justify-end gap-1 group">
             <div class="text-[10px] tabular-nums text-ink-400 opacity-0 group-hover:opacity-100 transition">
-              {{ "%.0f"|format(m.total) }}
+              {{ m.total | zahl }}
             </div>
             <div class="w-full bg-emerald-500/30 hover:bg-emerald-500/50 rounded-t transition"
                  style="height: {{ (m.total / max_total * 100) if max_total > 0 else 0 }}%;"
@@ -198,7 +198,7 @@
               <div class="flex justify-between text-sm mb-1">
                 <span class="font-medium group-hover:text-emerald-300">{{ t('receipt.shop.' + s.type) }}</span>
                 <span class="tabular-nums text-ink-300">
-                  {{ "%.2f"|format(s.total) }} € <span class="text-ink-500 text-xs ml-1">· {{ s.n }}</span>
+                  {{ s.total | money }} <span class="text-ink-500 text-xs ml-1">· {{ s.n }}</span>
                 </span>
               </div>
               <div class="h-2 bg-ink-800 rounded overflow-hidden">
@@ -224,7 +224,7 @@
               <div class="flex justify-between text-sm mb-1">
                 <span class="font-medium">{{ t('receipt.cat.' + c.category) }}</span>
                 <span class="tabular-nums text-ink-300">
-                  {{ "%.2f"|format(c.total) }} € <span class="text-ink-500 text-xs ml-1">· {{ c.n }}</span>
+                  {{ c.total | money }} <span class="text-ink-500 text-xs ml-1">· {{ c.n }}</span>
                 </span>
               </div>
               <div class="h-2 bg-ink-800 rounded overflow-hidden">
@@ -250,9 +250,9 @@
         <div class="flex items-center justify-between gap-3 py-2.5">
           <div class="min-w-0">
             <div class="m-title">{{ it.name }}</div>
-            <div class="m-sub">{{ it.times }} × · Ø {{ "%.2f"|format(it.avg_unit) if it.avg_unit is defined else "" }}</div>
+            <div class="m-sub">{{ it.times }} × · Ø {{ it.avg_unit | zahl(2) if it.avg_unit is defined else "" }}</div>
           </div>
-          <div class="m-amount text-emerald-300">{{ "%.2f"|format(it.spent) }} €</div>
+          <div class="m-amount text-emerald-300">{{ it.spent | money }}</div>
         </div>
       {% endfor %}
     </div>
@@ -272,8 +272,8 @@
           <tr class="border-t border-ink-800/50">
             <td class="px-5 py-2 font-medium">{{ it.name }}</td>
             <td class="px-2 py-2 text-right tabular-nums">{{ it.times }}</td>
-            <td class="px-2 py-2 text-right tabular-nums text-emerald-300">{{ "%.2f"|format(it.spent) }} €</td>
-            <td class="px-5 py-2 text-right tabular-nums text-ink-300">{{ "%.2f"|format(it.avg_unit) }} €</td>
+            <td class="px-2 py-2 text-right tabular-nums text-emerald-300">{{ it.spent | money }}</td>
+            <td class="px-5 py-2 text-right tabular-nums text-ink-300">{{ it.avg_unit | money }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -321,7 +321,7 @@
               {% if it.quantity and it.quantity != 1 %} · {{ it.quantity }} ×{% endif %}
             </div>
           </div>
-          <div class="m-amount text-emerald-300">{{ "%.2f"|format(it.total_price) }} €</div>
+          <div class="m-amount text-emerald-300">{{ it.total_price | money }}</div>
         </div>
       {% endfor %}
     </div>
@@ -354,7 +354,7 @@
               {% if it.quantity is not none %}{{ "%g"|format(it.quantity) }}{% else %}—{% endif %}
             </td>
             <td class="px-5 py-2 text-right tabular-nums {% if it.total_price is not none and it.total_price < 0 %}text-rose-300{% endif %}">
-              {% if it.total_price is not none %}{{ "%.2f"|format(it.total_price) }} €{% else %}—{% endif %}
+              {% if it.total_price is not none %}{{ it.total_price | money }}{% else %}—{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -379,17 +379,17 @@
       <div class="rounded-xl bg-emerald-500/10 border border-emerald-500/25 px-3 py-2.5">
         <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('receipt.pay.matched') }}</div>
         <div class="text-2xl font-semibold tabular-nums leading-tight text-emerald-300">{{ pay.matched.count }}</div>
-        <div class="text-[11px] text-ink-500 tabular-nums">{{ "%.2f"|format(pay.matched.total) }} €</div>
+        <div class="text-[11px] text-ink-500 tabular-nums">{{ pay.matched.total | money }}</div>
       </div>
       <div class="rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2.5">
         <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('receipt.pay.cash') }}</div>
         <div class="text-2xl font-semibold tabular-nums leading-tight text-amber-300">{{ pay.cash.count }}</div>
-        <div class="text-[11px] text-ink-500 tabular-nums">{{ "%.2f"|format(pay.cash.total) }} €{% if pay.cash_uncategorised %} · {{ t('receipt.pay.uncategorised') | replace('{n}', pay.cash_uncategorised) }}{% endif %}</div>
+        <div class="text-[11px] text-ink-500 tabular-nums">{{ pay.cash.total | money }}{% if pay.cash_uncategorised %} · {{ t('receipt.pay.uncategorised') | replace('{n}', pay.cash_uncategorised) }}{% endif %}</div>
       </div>
       <div class="rounded-xl bg-ink-900/40 border border-ink-700/60 px-3 py-2.5">
         <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('receipt.pay.open') }}</div>
         <div class="text-2xl font-semibold tabular-nums leading-tight">{{ pay.open.count }}</div>
-        <div class="text-[11px] text-ink-500 tabular-nums">{{ "%.2f"|format(pay.open.total) }} €</div>
+        <div class="text-[11px] text-ink-500 tabular-nums">{{ pay.open.total | money }}</div>
       </div>
     </div>
 
@@ -409,7 +409,7 @@
                   <div class="h-full rounded-full bg-amber-500/60" style="width: {{ (c.total / cash_max * 100) | round(1) }}%"></div>
                 </div>
               </div>
-              <div class="text-sm tabular-nums">{{ "%.2f"|format(c.total) }} €</div>
+              <div class="text-sm tabular-nums">{{ c.total | money }}</div>
             </div>
           {% endfor %}
         </div>
@@ -434,7 +434,7 @@
               </div>
             </div>
             <div class="m-amount text-emerald-300">
-              {% if r.total_amount is not none %}{{ "%.2f"|format(r.total_amount) }} €{% else %}—{% endif %}
+              {% if r.total_amount is not none %}{{ r.total_amount | money }}{% else %}—{% endif %}
             </div>
           </div>
           <div class="mt-2">
@@ -531,7 +531,7 @@
               {% endif %}
             </td>
             <td class="px-5 py-2 text-right tabular-nums text-emerald-300 align-top">
-              {% if r.total_amount is not none %}{{ "%.2f"|format(r.total_amount) }} €{% else %}—{% endif %}
+              {% if r.total_amount is not none %}{{ r.total_amount | money }}{% else %}—{% endif %}
             </td>
           </tr>
           {% endfor %}

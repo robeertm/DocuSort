@@ -24,7 +24,14 @@
       <!-- Selection checkbox — sits over the link surface and stops navigation -->
       <button type="button"
               @click.prevent.stop="toggle({{ d.id }})"
-              class="absolute top-2 left-2 z-10 h-5 w-5 rounded border-2 border-ink-600 bg-ink-900/70 opacity-60 group-hover:opacity-100 flex items-center justify-center transition"
+              {# `tap`: bleibt ein 20-px-Quadrat, der Daumen bekommt trotzdem
+                 44 px (siehe input.css). Ohne das wurde daraus eine 20x44-Pille.
+                 🔑 Und `opacity-100` ohne Hover: auf einem Telefon gibt es kein
+                 Darueberfahren — bei 60 % sah es dauerhaft halb abgeschaltet aus. #}
+              {# 🔑 Rechts oben statt links: links musste der ganze Inhalt mit `pl-7`
+                 ausweichen, und das Kaestchen klebte trotzdem am Kategorie-Chip.
+                 Rechts ist die Ecke ohnehin leer. #}
+              class="tap absolute top-2 right-2 z-10 h-5 w-5 rounded border-2 border-ink-600 bg-ink-900/70 opacity-100 sm:opacity-60 sm:group-hover:opacity-100 flex items-center justify-center transition"
               :class="selected.has({{ d.id }}) ? '!border-emerald-400 !bg-emerald-500/40 !opacity-100' : ''"
               :aria-label="selected.has({{ d.id }}) ? tr('library.deselect') : tr('library.select')">
         <svg x-show="selected.has({{ d.id }})" x-cloak
@@ -33,7 +40,15 @@
         </svg>
       </button>
 
-      <div class="flex items-start justify-between gap-2 pl-7 flex-wrap">
+      {# 🔑 ZUERST DER NAME. Vorher stand der Kategorie-Chip oben — gross und
+         gruen, also das Erste, was das Auge nahm. Ein Dokument erkennt man
+         aber an seinem Namen; die Schublade ist die Nebenauskunft. #}
+      <h3 class="pr-7 font-semibold leading-snug text-ink-50 line-clamp-2">
+        {{ d.subject or d.filename }}
+      </h3>
+      <div class="mt-0.5 text-sm text-ink-300 truncate">{{ d.sender or '—' }}</div>
+
+      <div class="mt-2 flex items-start gap-1.5 flex-wrap">
         <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20 !whitespace-normal min-w-0">
           {{ cat(d.category) }}{% if d.subcategory %} · {{ sub(d.category, d.subcategory) }}{% endif %}
         </span>
@@ -46,11 +61,6 @@
         {% endif %}
       </div>
 
-      <h3 class="mt-3 font-semibold leading-snug text-ink-50 line-clamp-2">
-        {{ d.subject or d.filename }}
-      </h3>
-      <div class="mt-1 text-sm text-ink-300 truncate">{{ d.sender or '—' }}</div>
-
       {# Wo im Text es gefunden wurde. Ohne diese Zeile sieht ein Volltext-
          Treffer aus wie jeder andere, und niemand merkt, dass der INHALT
          durchsucht wurde. #}
@@ -62,7 +72,7 @@
       {% endif %}
 
       {% if d.tags_list %}
-        <div class="mt-2 flex flex-wrap gap-1 pl-0.5">
+        <div class="mt-1.5 flex flex-wrap gap-1">
           {% for tag in d.tags_list[:4] %}
             <span class="chip text-[10px] py-0.5 px-1.5 bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/20">
               #{{ tag }}
@@ -71,9 +81,15 @@
         </div>
       {% endif %}
 
-      <div class="mt-4 flex items-center justify-between text-xs text-ink-400">
+      {# 🔴 Sicherheit und Kosten sind KEINE Auskunft fuer den Alltag.
+         „91 % · $0.0028" unter jedem Dokument ist die Buchfuehrung des
+         Programms ueber sich selbst — auf einem Telefon, wo jede Zeile zaehlt,
+         verdraengt sie das, wonach man sucht. Auf dem Schreibtisch ist Platz
+         dafuer; auf dem Telefon bleibt das Datum. Beide Zahlen stehen
+         weiterhin vollstaendig auf der Dokumentseite. #}
+      <div class="mt-3 flex items-center justify-between text-xs text-ink-400">
         <span class="tabular-nums">{{ d.doc_date or '—' }}</span>
-        <span class="flex items-center gap-2">
+        <span class="hidden sm:flex items-center gap-2">
           {% if d.confidence is not none %}
             <span class="tabular-nums">{{ '%.0f'|format(d.confidence * 100) }} %</span>
             <span class="text-ink-500">·</span>

@@ -7,6 +7,54 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.93.0] - 2026-10-05
+
+### Changed
+
+📱 **The phone view, rebuilt rather than squeezed.** Measured at 420 × 912 —
+the iPhone Air — on sixteen pages, in German, with real data shapes:
+
+| | before | now |
+|---|---|---|
+| controls stretched into capsules | **62** | **0** |
+| text crushed into a narrow column | 16 lines of ~16 characters | **0** |
+| library, first document visible at | y ≈ 470 px | **y ≈ 403 px** |
+
+🔴 **The cause of the oversized buttons was the house rule itself.**
+`button { min-height: 44px }` pulls *every* button to thumb size — a 20 px
+checkbox became a 20 × 44 capsule, and a "×" became an 8 × 44 sliver. There
+was one on every library card. The new `.tap` class takes the minimum height
+back and gives the thumb an **invisible** 44 × 44 field instead: the eye sees
+a square, the thumb still hits. Measured — a tap 14 px beside the box lands,
+30 px beside it does not.
+
+Also: the finance intro card stacks instead of squeezing a paragraph into a
+125 px column · the library shows search and one filter row with a **count of
+active filters**, status as chips · cards lead with the **document name**
+instead of the category chip, and the confidence/cost figures are desktop-only
+· the bookings page gets a layout of its own on a phone — one headline figure,
+the income/expense pair, and what is *not* counted as a quiet line, instead of
+seven ragged tiles.
+
+💶 **One way to write a number.** Fifty places in the templates formatted with
+Python's `%.2f` — `1836.60` — while four pages each carried their own
+JavaScript formatter. One page said `1836.60 €`, the next `48.720,00 €`. There
+is now one filter pair on the server (`money`, `zahl`) and one helper in the
+browser (`DS.geld`, `DS.zahl`), and they agree.
+
+🎨 **The chart palette is one family.** Twelve colours of mixed saturation
+looked like a crayon box in a small donut. They now sit on one lightness step
+and walk the colour circle in order, starting at the brand green; the
+catch-all is deliberately muted.
+
+🔴 Two of my own mistakes, both caught by measuring rather than by reading:
+`position: relative` in the new `.tap` rule out-ranked the `absolute`
+utility, so every card's checkbox fell out of its corner in front of the
+title — fixed with `:where()`, which counts as zero. And the bulk rewrite of
+the number formatting produced `{{ a + b | money }}`, where the filter binds
+tighter than the plus: two pages answered 500 until every such expression got
+its brackets.
+
 ## [0.92.0] - 2026-10-05
 
 ### Added
