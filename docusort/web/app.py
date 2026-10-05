@@ -962,6 +962,15 @@ def create_app(
             "t": lambda key, **kw: translate(key, lang, **kw),
             "cat": lambda name: category_label(name, lang),
             "sub": lambda parent, name: subcategory_label(parent, name, lang),
+            # 🔑 Ein Hinweistext, der eine Kategorie BEIM NAMEN nennt, braucht
+            #    zwei Schritte: erst die Rolle zu dem Namen aufloesen, den DIESE
+            #    Installation fuehrt („Kontoauszug" oder „Bank statement"), dann
+            #    den Namen in die Sprache des Lesers beschriften. Nur der erste
+            #    Schritt waere falsch fuer eine deutsche Bibliothek, die jemand
+            #    auf Englisch ansieht; nur der zweite waere falsch fuer eine
+            #    Installation, in der die Kategorie umbenannt wurde.
+            "kat_text": lambda rolle, rueckfall="": category_label(
+                _kat_name(_kategorien(lang), rolle, rueckfall), lang),
             "js_translations": all_translations_for_js(lang),
             # Category labels: built-in via i18n, user-defined from the DB.
             "cat_labels": _cat_labels(lang),

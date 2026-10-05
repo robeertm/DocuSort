@@ -7,6 +7,49 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.93.1] - 2026-10-05
+
+### Fixed
+
+🏷 **Nine category names had no label in any language — and one of them was
+the one the statement reader writes.** Category names are stored as they are
+filed, because they are folder names on disk; the interface translates them
+for display. `Kontoauszug` and its six subcategories arrived with the bank
+statement reader and were never given a label, so an English, French, Spanish
+or Italian interface showed a card reading "Receipts · Supermarket" directly
+above one reading "Kontoauszug · Girokonto". `Bank/Vertrag`, `Bank/Sonstiges`
+and `Bank/Depot` had the same gap.
+
+It went unnoticed for months because a missing label falls back to the name
+itself — a gap looks exactly like a decision. It was found in a README
+screenshot.
+
+🔤 **Two English labels named a category differently from the English category
+list.** The interface said "Salary" and "Banking" while the list in the same
+installation offered "Payroll" and "Bank" — the same drawer under two words.
+The labels now use the word the list uses. (The booking type stays "Salary":
+a salary payment and a payroll document are different things.)
+
+A probe now holds the property: every name in the German category list has a
+label in all five languages, the English label keeps its role, and the
+category dropdown submits the canonical name rather than the label — which is
+why a French label never needs a role at all.
+
+🗣 **And four interface texts named a category in German.** /settings told an
+English reader "Every new Kontoauszug pauses after OCR"; the receipts rescue
+panel offered "Move to Kassenzettel" in French, Spanish and Italian too. These
+texts now carry a placeholder which the page fills in two steps: resolve the
+role to the name *this* installation uses, then label that name in the
+reader's language. Only the first step would be wrong for a German library
+viewed in English; only the second would be wrong where the category was
+renamed. (Three further strings carried the same German word but are called
+from nowhere — measured, not assumed. They were corrected along with the rest
+and were never a problem anyone could see.)
+
+📄 **The CSV import hint in French, Spanish and Italian still described one
+bank.** The importer has read nine for a while, recognises the bank from the
+columns and skips bookings it already has. Those three languages now say so.
+
 ## [0.93.0] - 2026-10-05
 
 ### Changed
