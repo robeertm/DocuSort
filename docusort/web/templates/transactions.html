@@ -148,7 +148,64 @@
   </div>
 
   <!-- ============================ KPIS ============================ -->
-  <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4 xl:grid-cols-7">
+  {# 🔴 AUF DEM TELEFON EINE EIGENE AUFTEILUNG, KEIN GEQUETSCHTES RASTER.
+     Sieben Kacheln in zwei Spalten ergaben: unterschiedliche Hoehen, eine
+     allein stehende in der letzten Reihe, Beschriftungen wie
+     „UMBUCHUNGEN (NICHT GEZAEHLT)" ueber zwei Zeilen — und ~500 px, bevor
+     ueberhaupt etwas Inhalt kam.
+
+     Eine Seite beantwortet eine Frage. Die Frage hier ist „wie steht es?",
+     und die Antwort ist EINE Zahl. Also: das Netto gross, darunter das Paar
+     Eingang/Ausgang, und was NICHT mitgezaehlt wurde als eine ruhige Zeile —
+     benannt, aber nicht so laut wie das Ergebnis.
+
+     Am Schreibtisch bleibt das Raster, dort hat es Platz. #}
+  <div class="sm:hidden space-y-2.5">
+    <div class="card p-4">
+      <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.net_col') }}</div>
+      <div class="mt-0.5 text-3xl font-semibold tabular-nums leading-none"
+           :class="agg.sum_net >= 0 ? 'text-emerald-300' : 'text-rose-300'"
+           x-text="fmtEur(agg.sum_net)"></div>
+      <div class="mt-1.5 text-xs text-ink-500">
+        <span x-text="agg.count.toLocaleString(DS_LOCALE)"></span>
+        {{ t('tx.bookings_short') }}<template x-if="agg.first_date"><span
+          ><span class="text-ink-500"> · </span><span x-text="agg.first_date + ' – ' + agg.last_date"></span></span></template>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-2.5">
+      <div class="card p-4">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.income_col') }}</div>
+        <div class="mt-0.5 text-lg font-semibold text-emerald-300 tabular-nums leading-tight" x-text="fmtEur(agg.sum_in)"></div>
+      </div>
+      <div class="card p-4">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.expense_col') }}</div>
+        <div class="mt-0.5 text-lg font-semibold text-rose-300 tabular-nums leading-tight" x-text="fmtEur(agg.sum_out)"></div>
+      </div>
+    </div>
+    {# Was nicht in die Rechnung eingeht, steht trotzdem da — nur leiser.
+       Eine Zahl, die spurlos verschwindet, sieht aus wie ein Fehler. #}
+    <div class="card p-4 text-xs leading-relaxed"
+         x-show="agg.transfer_count || agg.special_count || agg.saved" x-cloak>
+      <span class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.not_counted_mobile') }}</span>
+      <div class="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <template x-if="agg.transfer_count">
+          <span><span class="text-sky-300 tabular-nums font-medium"
+                      x-text="agg.transfer_count.toLocaleString(DS_LOCALE)"></span>
+                <span class="text-ink-400"> {{ t('tx.transfers_short') }}</span></span>
+        </template>
+        <template x-if="agg.special_count">
+          <span><span class="text-amber-300 tabular-nums font-medium" x-text="fmtEur(-(agg.special_out || 0))"></span>
+                <span class="text-ink-400"> {{ t('tx.special_kurz') }}</span></span>
+        </template>
+        <template x-if="agg.saved">
+          <span><span class="text-violet-200 tabular-nums font-medium" x-text="fmtEur(agg.saved || 0)"></span>
+                <span class="text-ink-400"> {{ t('tx.saved_col') }}</span></span>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <div class="hidden sm:grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4 xl:grid-cols-7">
     <div class="card p-3 sm:p-4">
       <div class="text-[11px] uppercase tracking-wider text-ink-500">{{ t('tx.counted') }}</div>
       <div class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums leading-tight" x-text="agg.count.toLocaleString(DS_LOCALE)"></div>
@@ -785,9 +842,7 @@ function txExplorer() {
     },
 
     fmtEur(v) {
-      const n = Number(v) || 0;
-      return n.toLocaleString(DS_LOCALE,
-        { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 });
+      return DS.geld(v);   // eine Fassung fuer alle (base.html)
     },
     catLabel(key) { return catLabel(key); },
 

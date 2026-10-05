@@ -25,7 +25,17 @@
       <div class="font-medium">{{ t('finance.csv.central_title') }}</div>
       <div class="text-xs text-ink-400 mt-0.5">{{ t('finance.csv.central_hint') }}</div>
     </div>
-    <span class="ml-auto shrink-0 btn-secondary text-xs">{{ t('finance.csv.central_cta') }}</span>
+    {# 🔴 AUF DEM TELEFON KEIN DRITTER BLOCK IN DER ZEILE.
+       Icon (48) + Knopf (~145) + zwei Abstaende liessen dem Text bei 420 px
+       genau 125 px — der Satz zerfiel in 16 Zeilen zu je ~16 Zeichen. Die
+       GANZE Karte ist ohnehin der Link, der Knopf also Dekoration: auf dem
+       Telefon steht an seiner Stelle ein Pfeil, und der Text bekommt die
+       Breite, die er braucht. #}
+    <span class="ml-auto hidden shrink-0 btn-secondary text-xs sm:inline-flex">{{ t('finance.csv.central_cta') }}</span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         class="ml-auto h-5 w-5 shrink-0 text-emerald-300 sm:hidden" aria-hidden="true">
+      <path d="M9 18l6-6-6-6"/>
+    </svg>
   </a>
 
   {% if not has_data %}
@@ -69,7 +79,7 @@
         </div>
         <div class="text-right">
           <div class="text-3xl sm:text-4xl font-semibold tabular-nums {% if over %}text-rose-300{% else %}text-emerald-300{% endif %}">
-            {{ "%.2f"|format(cp.remaining) }} €
+            {{ cp.remaining | money }}
           </div>
           <div class="text-xs text-ink-400">{{ t('finance.budget.remaining') }}</div>
         </div>
@@ -77,16 +87,16 @@
       {# progress bar: spent vs budget #}
       <div class="h-3 rounded-full bg-ink-800 overflow-hidden">
         <div class="h-full rounded-full {% if over %}bg-rose-500{% elif spent_pct > 80 %}bg-amber-400{% else %}bg-emerald-500{% endif %}"
-             style="width: {{ "%.1f"|format(spent_pct) }}%"></div>
+             style="width: {{ spent_pct | zahl(1) }}%"></div>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center">
         <div>
           <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.income_in') }}</div>
-          <div class="text-sm font-semibold tabular-nums text-emerald-300">{{ "%.0f"|format(cp.income) }} €</div>
+          <div class="text-sm font-semibold tabular-nums text-emerald-300">{{ cp.income | money(0) }}</div>
         </div>
         <div>
           <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.spent') }}</div>
-          <div class="text-sm font-semibold tabular-nums text-rose-300">{{ "%.0f"|format(cp.expense) }} €</div>
+          <div class="text-sm font-semibold tabular-nums text-rose-300">{{ cp.expense | money(0) }}</div>
         </div>
         <div>
           <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.days_left') }}</div>
@@ -94,14 +104,14 @@
         </div>
         <div>
           <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.budget.per_day') }}</div>
-          <div class="text-sm font-semibold tabular-nums {% if per_day < 0 %}text-rose-300{% else %}text-ink-200{% endif %}">{{ "%.2f"|format(per_day) }} €</div>
+          <div class="text-sm font-semibold tabular-nums {% if per_day < 0 %}text-rose-300{% else %}text-ink-200{% endif %}">{{ per_day | money }}</div>
         </div>
       </div>
       {% if cp.saved and cp.saved > 0 %}
-        <p class="text-xs text-ink-500 mt-3">{{ t('finance.budget.saved_note') | replace('{amt}', "%.0f"|format(cp.saved)) }}</p>
+        <p class="text-xs text-ink-500 mt-3">{{ t('finance.budget.saved_note') | replace('{amt}', cp.saved | zahl) }}</p>
       {% endif %}
       {% if finance_cfg.monthly_budget and finance_cfg.monthly_budget > 0 %}
-        <p class="text-[11px] text-ink-500 mt-1">{{ t('finance.budget.fixed_hint') | replace('{budget}', "%.0f"|format(finance_cfg.monthly_budget)) }}</p>
+        <p class="text-[11px] text-ink-500 mt-1">{{ t('finance.budget.fixed_hint') | replace('{budget}', finance_cfg.monthly_budget | zahl) }}</p>
       {% else %}
         <p class="text-[11px] text-ink-500 mt-1">{{ t('finance.budget.income_hint') }}</p>
       {% endif %}
@@ -120,7 +130,7 @@
       </div>
       <div class="text-right">
         <div class="text-3xl sm:text-4xl font-semibold tabular-nums {% if net_worth.total >= 0 %}text-ink-100{% else %}text-rose-300{% endif %}">
-          {{ "%.2f"|format(net_worth.total) }} €
+          {{ net_worth.total | money }}
         </div>
         <div class="text-xs text-ink-400">{{ t('finance.wealth.total') }}</div>
       </div>
@@ -128,23 +138,23 @@
     <div class="grid grid-cols-2 gap-3 mb-4">
       <div class="rounded-lg border border-ink-800 bg-ink-900/40 p-3">
         <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.wealth.spending') }}</div>
-        <div class="text-lg font-semibold tabular-nums text-sky-300">{{ "%.2f"|format(net_worth.spending_total) }} €</div>
+        <div class="text-lg font-semibold tabular-nums text-sky-300">{{ net_worth.spending_total | money }}</div>
       </div>
       <div class="rounded-lg border border-ink-800 bg-ink-900/40 p-3">
         <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.wealth.savings') }}</div>
-        <div class="text-lg font-semibold tabular-nums text-emerald-300">{{ "%.2f"|format(net_worth.savings_total) }} €</div>
+        <div class="text-lg font-semibold tabular-nums text-emerald-300">{{ net_worth.savings_total | money }}</div>
       </div>
     </div>
     {% if saved_external and saved_external.total > 0 %}
       <div class="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 mb-3">
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <div class="text-[10px] uppercase tracking-wider text-ink-500">{{ t('finance.wealth.external') }}</div>
-          <div class="text-lg font-semibold tabular-nums text-violet-200">{{ "%.2f"|format(saved_external.total) }} €</div>
+          <div class="text-lg font-semibold tabular-nums text-violet-200">{{ saved_external.total | money }}</div>
         </div>
         <p class="text-[11px] text-ink-500 mt-1">{{ t('finance.wealth.external_hint') }}
-          {% for r in saved_external.by_category %}<span class="ml-2 text-ink-400">{{ cat_labels.get(r.category, r.category) }} {{ "%.0f"|format(r.paid) }} €</span>{% endfor %}
+          {% for r in saved_external.by_category %}<span class="ml-2 text-ink-400">{{ cat_labels.get(r.category, r.category) }} {{ r.paid | money(0) }}</span>{% endfor %}
         </p>
-        <p class="text-[11px] text-ink-400 mt-1">{{ t('finance.wealth.incl_external') }}: <span class="tabular-nums text-ink-200">{{ "%.2f"|format(net_worth.total + saved_external.total) }} €</span></p>
+        <p class="text-[11px] text-ink-400 mt-1">{{ t('finance.wealth.incl_external') }}: <span class="tabular-nums text-ink-200">{{ (net_worth.total + saved_external.total) | money }}</span></p>
       </div>
     {% endif %}
     {% if not net_worth.has_savings %}
@@ -174,20 +184,20 @@
           {# dual bar: income above, expense below #}
           <div class="flex-1 min-w-[6rem] space-y-0.5">
             <div class="h-2 rounded-full overflow-hidden">
-              <div class="h-full bg-emerald-500 rounded-full" style="width: {{ "%.1f"|format(100 * p.income / pmax) }}%"></div>
+              <div class="h-full bg-emerald-500 rounded-full" style="width: {{ (100 * p.income / pmax) | zahl(1) }}%"></div>
             </div>
             <div class="h-2 rounded-full overflow-hidden">
-              <div class="h-full bg-rose-500 rounded-full" style="width: {{ "%.1f"|format(100 * p.expense / pmax) }}%"></div>
+              <div class="h-full bg-rose-500 rounded-full" style="width: {{ (100 * p.expense / pmax) | zahl(1) }}%"></div>
             </div>
           </div>
           <div class="flex gap-3 w-full sm:w-auto justify-end sm:justify-start">
-          <div class="w-20 shrink-0 text-right tabular-nums text-emerald-300">+{{ "%.0f"|format(p.income) }}</div>
-          <div class="w-20 shrink-0 text-right tabular-nums text-rose-300">−{{ "%.0f"|format(p.expense) }}</div>
+          <div class="w-20 shrink-0 text-right tabular-nums text-emerald-300">+{{ p.income | zahl }}</div>
+          <div class="w-20 shrink-0 text-right tabular-nums text-rose-300">−{{ p.expense | zahl }}</div>
           <div class="w-20 shrink-0 text-right tabular-nums font-semibold {% if p.net >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
-            {% if p.net >= 0 %}+{% endif %}{{ "%.0f"|format(p.net) }}
+            {% if p.net >= 0 %}+{% endif %}{{ p.net | zahl }}
           </div>
           <div class="w-16 shrink-0 text-right tabular-nums text-ink-500" title="{{ t('finance.periods.saved') }}">
-            {% if p.saved > 0 %}⇢{{ "%.0f"|format(p.saved) }}{% else %}—{% endif %}
+            {% if p.saved > 0 %}⇢{{ p.saved | zahl }}{% else %}—{% endif %}
           </div>
           </div>
         </div>
@@ -206,19 +216,19 @@
     <div class="card p-3 sm:p-4 min-w-0">
       <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('finance.income') }}</div>
       <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums text-emerald-300 break-all">
-        {{ "%.2f"|format(summary.income) }} €
+        {{ summary.income | money }}
       </div>
     </div>
     <div class="card p-3 sm:p-4 min-w-0">
       <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('finance.expense') }}</div>
       <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums text-rose-300 break-all">
-        {{ "%.2f"|format(summary.expense) }} €
+        {{ summary.expense | money }}
       </div>
     </div>
     <div class="card p-3 sm:p-4 min-w-0">
       <div class="text-xs uppercase tracking-wider text-ink-400 truncate">{{ t('finance.net') }}</div>
       <div class="mt-2 text-lg sm:text-2xl md:text-3xl font-semibold tabular-nums break-all {% if summary.net >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
-        {{ "%.2f"|format(summary.net) }} €
+        {{ summary.net | money }}
       </div>
     </div>
     <div class="card p-3 sm:p-4 min-w-0">
@@ -258,7 +268,7 @@
             <line x1="50" y1="{{ y }}" x2="{{ W - 10 }}" y2="{{ y }}"
                   stroke="currentColor" class="text-ink-700" stroke-width="0.5" stroke-dasharray="2 4"/>
           {% endfor %}
-          <text x="44" y="24" text-anchor="end" class="fill-ink-500" font-size="10">{{ "%.0f"|format(vmax) }}</text>
+          <text x="44" y="24" text-anchor="end" class="fill-ink-500" font-size="10">{{ vmax | zahl }}</text>
           <text x="44" y="{{ H - 18 }}" text-anchor="end" class="fill-ink-500" font-size="10">0</text>
           <path fill="rgb(16 185 129 / 0.15)" stroke="none"
                 d="M{{ ns.in_pts[0][0] }},{{ H - 20 }} {% for x,y in ns.in_pts %}L{{ x }},{{ y }} {% endfor %} L{{ ns.in_pts[-1][0] }},{{ H - 20 }} Z"/>
@@ -272,8 +282,8 @@
             {% set x = 50 + loop.index0 * step %}
             {% set y_in  = (H - 20) - (m.income / vmax) * (H - 40) %}
             {% set y_out = (H - 20) - (-m.expense / vmax) * (H - 40) %}
-            <circle cx="{{ x }}" cy="{{ y_in }}" r="3" fill="rgb(16 185 129)"><title>{{ m.month }} · {{ "%.0f"|format(m.income) }} € rein</title></circle>
-            <circle cx="{{ x }}" cy="{{ y_out }}" r="3" fill="rgb(244 63 94)"><title>{{ m.month }} · {{ "%.0f"|format(-m.expense) }} € raus</title></circle>
+            <circle cx="{{ x }}" cy="{{ y_in }}" r="3" fill="rgb(16 185 129)"><title>{{ m.month }} · {{ m.income | money(0) }} rein</title></circle>
+            <circle cx="{{ x }}" cy="{{ y_out }}" r="3" fill="rgb(244 63 94)"><title>{{ m.month }} · {{ (-m.expense) | money(0) }} raus</title></circle>
             {% if loop.index0 % label_step == 0 or loop.last %}
               <text x="{{ x }}" y="{{ H - 4 }}" text-anchor="middle" class="fill-ink-500" font-size="10">{{ m.month[5:] }}/{{ m.month[2:4] }}</text>
             {% endif %}
@@ -303,11 +313,13 @@
                 <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">{{ t('finance.savings_badge') }}</span>
               {% endif %}
               <span class="ml-auto tabular-nums whitespace-nowrap {% if a.balance >= 0 %}text-emerald-300{% else %}text-rose-300{% endif %}">
-                {{ "%.2f"|format(a.balance) }} €
+                {{ a.balance | money }}
               </span>
               <button type="button" @click="del({{ a.id }}, '{{ a.bank_name }} {{ a.iban_last4 }}')"
                       :disabled="deleting === {{ a.id }}"
-                      class="text-[11px] text-ink-500 hover:text-rose-300 underline shrink-0">×</button>
+                      {# `tap`: ein „x" ist 8 px breit — ohne die Klasse wurde daraus
+                         ein 8x44 px schmaler Schlauch. #}
+                      class="tap text-[11px] text-ink-500 hover:text-rose-300 underline shrink-0">×</button>
             </div>
             <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-500">
               <span class="font-mono">…{{ a.iban_last4 or '' }}</span>
@@ -321,7 +333,7 @@
               <span class="inline-flex items-center gap-1.5">
                 {{ t('finance.start_balance') }}:
                 <input type="text" inputmode="decimal"
-                       value="{{ "%.2f"|format(a.start_balance or 0) }}"
+                       value="{{ a.start_balance or 0 | zahl(2) }}"
                        @change="setStart({{ a.id }}, $event.target.value)"
                        class="w-24 bg-ink-900 border border-ink-700 rounded px-1.5 py-0.5 tabular-nums text-right text-ink-200"/>
                 €
@@ -438,7 +450,7 @@
   {% if open_categories and open_categories.count %}
   <div class="card p-4 mb-6 flex flex-wrap items-center gap-3">
     <span class="text-sm text-ink-300">
-      {{ t('finance.open.text') | replace('{n}', open_categories.count|string) | replace('{merchants}', open_categories.merchants|string) | replace('{amount}', "%.0f"|format(open_categories.amount)) }}
+      {{ t('finance.open.text') | replace('{n}', open_categories.count|string) | replace('{merchants}', open_categories.merchants|string) | replace('{amount}', open_categories.amount | zahl) }}
     </span>
     <a href="/transactions?open=sonstiges" class="ml-auto text-sm rounded-lg px-3 py-1.5 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30">
       {{ t('finance.open.cta') }} →
@@ -489,7 +501,7 @@
             <li class="flex items-baseline gap-2">
               <span class="truncate min-w-0 flex-1">{{ r.counterparty or '—' }}</span>
               <span class="text-ink-500 tabular-nums">{{ r.times }}×</span>
-              <span class="text-rose-300 tabular-nums">{{ "%.2f"|format(r.total) }} €</span>
+              <span class="text-rose-300 tabular-nums">{{ r.total | money }}</span>
             </li>
           {% endfor %}
         </ul>
@@ -505,7 +517,7 @@
             <li class="flex items-baseline gap-2">
               <span class="truncate min-w-0 flex-1">{{ r.counterparty or '—' }}</span>
               <span class="text-ink-500 tabular-nums">{{ r.times }}×</span>
-              <span class="text-emerald-300 tabular-nums">+{{ "%.2f"|format(r.total) }} €</span>
+              <span class="text-emerald-300 tabular-nums">+{{ r.total | money }}</span>
             </li>
           {% endfor %}
         </ul>
@@ -535,7 +547,7 @@
             </div>
           </div>
           <div class="m-amount {% if tx.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
-            {% if tx.amount > 0 %}+{% endif %}{{ "%.2f"|format(tx.amount) }} €
+            {% if tx.amount > 0 %}+{% endif %}{{ tx.amount | money }}
           </div>
         </div>
       {% endfor %}
@@ -561,7 +573,7 @@
             <td class="px-2 py-1 truncate max-w-[300px] text-ink-400 hidden md:table-cell">{{ tx.purpose[:80] }}</td>
             <td class="px-2 py-1 text-ink-400 hidden sm:table-cell">{% if tx.category %}{{ cat_labels.get(tx.category, tx.category) }}{% endif %}</td>
             <td class="px-3 sm:px-5 py-1 text-right tabular-nums whitespace-nowrap align-top {% if tx.amount < 0 %}text-rose-300{% else %}text-emerald-300{% endif %}">
-              {% if tx.amount > 0 %}+{% endif %}{{ "%.2f"|format(tx.amount) }} €
+              {% if tx.amount > 0 %}+{% endif %}{{ tx.amount | money }}
             </td>
           </tr>
           {% endfor %}
@@ -654,7 +666,7 @@ function trackerSettings() {
   return {
     salaryMatch: {{ finance_cfg.salary_match | tojson }},
     anchorDay: {{ finance_cfg.period_anchor_day | tojson }},
-    monthlyBudget: {{ ("%.2f"|format(finance_cfg.monthly_budget)) | tojson }},
+    monthlyBudget: {{ (finance_cfg.monthly_budget | zahl(2)) | tojson }},
     busy: false,
     msg: '',
     ok: false,

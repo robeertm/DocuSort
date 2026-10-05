@@ -63,11 +63,16 @@
          of the house, so it stays with the administrator — same rule as
          /api/export.zip enforces on the server. #}
       <a href="/api/export.zip{% if filter.year %}?year={{ filter.year }}{% if filter.category %}&category={{ filter.category }}{% endif %}{% elif filter.category %}?category={{ filter.category }}{% endif %}"
-         class="btn-secondary">
+         {# 🔑 Auf dem Telefon nur das Zeichen. „Als ZIP exportieren" ist
+            208 px breit und stand neben einer 100-px-Ueberschrift — eine
+            Nebenhandlung, die lauter war als der Name der Seite. Der
+            `title` sagt weiterhin, was passiert. #}
+         title="{{ t('library.export') }}"
+         class="btn-secondary !px-2.5 sm:!px-3.5">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
         </svg>
-        {{ t('library.export') }}
+        <span class="hidden sm:inline">{{ t('library.export') }}</span>
       </a>
     {% endif %}
   </div>
@@ -88,6 +93,15 @@
      navigates there gets a bare card grid with no page around it. #}
   hx-include="this"
 >
+  {# 🔴 AUF DEM TELEFON STAND HIER EINE WAND.
+     `sm:grid-cols-[1fr_auto_auto]` faellt unter 640 px auf EINE Spalte
+     zurueck — Suche, Status und „Zuruecksetzen" wurden drei volle Zeilen
+     uebereinander, dazu der Filter-Umschalter: vier Steuerelemente und
+     ~250 px, bevor das erste Dokument kam.
+
+     Jetzt gehoeren Status und Zuruecksetzen dorthin, wo die uebrigen Filter
+     stehen (auf dem Schreibtisch ist diese Leiste ohnehin immer offen, dort
+     aendert sich also fast nichts). Oben bleibt, wonach man wirklich sucht. #}
   <!-- Row 1: search + status + reset -->
   <div class="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
     <label class="relative block">
@@ -101,21 +115,50 @@
     </label>
     <input type="hidden" name="category" value="{{ filter.category or '' }}">
     <input type="hidden" name="year"     value="{{ filter.year or '' }}">
-    <select name="status" class="rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
+    <select name="status" class="hidden sm:block rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2.5 text-sm">
       <option value="">{{ t('library.all_statuses') }}</option>
       <option value="filed"     {% if filter.status == 'filed' %}selected{% endif %}>{{ t('library.status_filed') }}</option>
       <option value="review"    {% if filter.status == 'review' %}selected{% endif %}>{{ t('library.status_review') }}</option>
       <option value="failed"    {% if filter.status == 'failed' %}selected{% endif %}>{{ t('library.status_failed') }}</option>
       <option value="duplicate" {% if filter.status == 'duplicate' %}selected{% endif %}>{{ t('library.status_duplicate') }}</option>
     </select>
-    <a href="/library" class="btn-secondary">{{ t('library.reset') }}</a>
+    <a href="/library" class="hidden sm:inline-flex btn-secondary">{{ t('library.reset') }}</a>
   </div>
 
+  {# 🔑 Der Umschalter sagt, wie viele Filter gerade greifen. Ein Knopf, der
+     „Weitere Filter" heisst und nichts darueber verraet, ob welche aktiv sind,
+     zwingt zum Aufklappen, nur um nachzusehen. #}
+  {% set aktive = [filter.status, filter.sort if filter.sort != 'created_at' else '', filter.doc_from,
+                   filter.doc_to, filter.scan_from, filter.scan_to] | select | list | length %}
   <button type="button" class="sm:hidden w-full btn-ghost !justify-between border border-ink-700/60"
           @click="mFilters = !mFilters" :aria-expanded="mFilters">
-    <span>{{ t('library.more_filters') }}</span>
+    <span class="flex items-center gap-2">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 text-ink-400">
+        <path d="M3 5h18M6 12h12M10 19h4"/>
+      </svg>
+      {{ t('library.more_filters') }}
+      {% if aktive %}<span class="chip bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25">{{ aktive }}</span>{% endif %}
+    </span>
     <span x-text="mFilters ? '▲' : '▼'" class="text-ink-500"></span>
   </button>
+
+  {# 🔑 Status auf dem Telefon als Pillen, nicht als zweites Auswahlfeld:
+     zwei Felder mit demselben `name` wuerden beide abgeschickt. Pillen sind
+     hier ohnehin das bessere Mittel — ein Tipp statt Aufklappen, Rollen,
+     Auswaehlen, Schliessen. #}
+  <div class="sm:hidden flex flex-wrap items-center gap-1.5 border-t border-ink-700/50 pt-3"
+       :class="mFilters ? '' : 'hidden'">
+    {% for wert, schluessel in [('', 'library.all_statuses'), ('filed', 'library.status_filed'),
+                                ('review', 'library.status_review'), ('failed', 'library.status_failed'),
+                                ('duplicate', 'library.status_duplicate')] %}
+      <a href="{{ slice_ohne['status'] if not wert else (slice_ohne['status'] ~ ('&' if '?' in slice_ohne['status'] else '?') ~ 'status=' ~ wert) }}"
+         class="chip {{ 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25'
+                        if (filter.status or '') == wert else 'bg-ink-800 text-ink-300' }}">
+        {{ t(schluessel) }}
+      </a>
+    {% endfor %}
+    <a href="/library" class="ml-auto text-xs text-ink-400 underline underline-offset-2">{{ t('library.reset') }}</a>
+  </div>
 
   <!-- Row 2: sort + direction + date ranges + quick filters -->
   <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4 items-end border-t border-ink-700/50 pt-3"

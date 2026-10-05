@@ -63,7 +63,8 @@
     <div class="flex items-center gap-2 text-xs text-ink-500">
       <span x-show="lastUpdate" x-cloak>{{ t('hub.last_update') }} <span x-text="lastUpdate"></span></span>
       <button @click="refresh()" :disabled="loading"
-              class="rounded-lg border border-ink-700 px-2 py-1 hover:border-emerald-500/50 hover:text-emerald-300"
+              {# `tap`: ohne sie wurde aus dem kleinen Knopf ein 32x44-Schlauch. #}
+              class="tap rounded-lg border border-ink-700 px-2 py-1 hover:border-emerald-500/50 hover:text-emerald-300"
               :class="loading ? 'opacity-50' : ''"
               :aria-label="tr('hub.refresh')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -861,7 +862,10 @@
                       :disabled="doneDeadline === d.id"
                       :title="tr('dashboard.deadlines.done_hint')"
                       :aria-label="tr('dashboard.deadlines.done_hint')"
-                      class="group shrink-0 -m-2 p-2 flex items-start
+                      {# `tap`: der Haken ist ein 20-px-Quadrat und soll eines
+                         bleiben. Im Vault steht er seit 0.89.2 als offener
+                         Mangel („die Fristen-Karte hat genau diesen Mangel"). #}
+                      class="tap group shrink-0 -m-2 p-2 flex items-start
                              disabled:opacity-50 transition">
                 <span class="mt-0.5 h-5 w-5 rounded-md border border-ink-600 text-emerald-300
                              group-hover:border-emerald-400 group-hover:bg-emerald-500/10
@@ -1676,10 +1680,10 @@ function dashboard() {
     // a global: the card renders inside this component, and an undefined
     // helper in an x-text silently kills the whole card.
     eur(v) {
+      // 🔑 Eine Fassung fuer alle (base.html) — vorher brachte jede Seite
+      //    ihre eigene mit, mal mit zwei Nachkommastellen, mal ohne.
       if (v === null || v === undefined || v === '') return '';
-      const n = Number(v);
-      if (!isFinite(n)) return '';
-      return n.toLocaleString(DS_LOCALE, { style: 'currency', currency: 'EUR' });
+      return DS.geld(v);
     },
     statusClass(s) {
       switch (s) {

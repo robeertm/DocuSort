@@ -67,7 +67,12 @@
   </div>
   {% endif %}
   <div class="flex-1 min-w-0">
-    <div class="flex flex-wrap gap-2 mb-2">
+    {# 🔑 ZUERST DER NAME, dann die Schubladen. Vorher stand eine Reihe grosser
+       Pillen ueber dem Titel und nahm auf dem Telefon die halbe erste Zeile —
+       dieselbe Umstellung wie auf den Bibliothekskarten. #}
+    <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">{{ doc.subject or doc.filename }}</h1>
+    <div class="text-ink-300 mt-0.5">{{ doc.sender or '—' }}</div>
+    <div class="flex flex-wrap gap-1.5 mt-2">
       <span class="chip bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">{{ cat(doc.category) }}{% if doc.subcategory %} · {{ sub(doc.category, doc.subcategory) }}{% endif %}</span>
       {% for tag in doc.tags_list %}
         <a href="/library?tag={{ tag }}"
@@ -78,8 +83,6 @@
       {% if doc.status == 'duplicate' %}<span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">{{ t('card.duplicate') }}</span>{% endif %}
       {% if doc.ocr_used %}<span class="chip bg-indigo-500/10 text-indigo-300 ring-1 ring-indigo-500/20">{{ t('card.ocr') }}</span>{% endif %}
     </div>
-    <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">{{ doc.subject or doc.filename }}</h1>
-    <div class="text-ink-300 mt-1">{{ doc.sender or '—' }}</div>
   </div>
 </div>
 
@@ -161,11 +164,16 @@
                 :class="imgOk ? 'hidden sm:block' : 'block'"
                 title="PDF Preview"></iframe>
         <a href="/document/{{ doc.id }}/file" target="_blank" rel="noopener"
-           class="absolute top-2 right-2 btn-secondary !py-1.5 !px-2.5 text-xs opacity-0 group-hover:opacity-100 transition shadow-lg">
+           {# 🔴 `opacity-0 group-hover:opacity-100` ist eine Schreibtisch-Idee:
+              auf einem Telefon gibt es kein Darueberfahren, der Knopf stand
+              also dauerhaft gross ueber dem Dokument. Jetzt dort klein und nur
+              das Zeichen; am Schreibtisch bleibt es beim Erscheinen auf Zuruf. #}
+           title="{{ t('document.fullscreen') }}"
+           class="absolute top-2 right-2 btn-secondary !py-1.5 !px-2 text-xs opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition shadow-lg">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5">
             <path d="M3 7V3h4M21 7V3h-4M3 17v4h4M21 17v4h-4"/>
           </svg>
-          {{ t('document.fullscreen') }}
+          <span class="hidden sm:inline">{{ t('document.fullscreen') }}</span>
         </a>
       </div>
     {% else %}

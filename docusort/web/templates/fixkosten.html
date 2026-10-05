@@ -451,8 +451,7 @@ function fixkosten() {
     message: '', messageOk: false,
     rhythmLabel(i) { return T['fixed.rhythm.' + (i.rhythm || '')] || i.rhythm || ''; },
     fmtEur(v) {
-      const n = Number(v) || 0;
-      return n.toLocaleString(DS_LOCALE, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 });
+      return DS.geld(v);   // eine Fassung fuer alle (base.html)
     },
     catLabel(key) { return catLabel(key); },
     dispName(i) { return i.is_avg ? this.catLabel(i.category) + (' ' + tr('fixed.avg_no_contracts')) : i.name; },

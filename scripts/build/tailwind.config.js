@@ -3,6 +3,10 @@
 module.exports = {
   content: [
     "../../docusort/web/templates/**/*.html",
+    // 🔴 app.py baut Auszeichnung selbst zusammen (die gelbe Fundstelle in
+    //    der Suche). Ohne diese Zeile faellt `bg-amber-500/25` beim naechsten
+    //    Neubau lautlos aus dem Blatt — und die Markierung waere farblos.
+    "../../docusort/web/app.py",
   ],
   theme: {
     extend: {

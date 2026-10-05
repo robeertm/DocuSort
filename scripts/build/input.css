@@ -203,6 +203,35 @@
      die man antippt. */
   button:not(.tab), a.flex, a.block, a.inline-flex { min-height: 44px; }
   [data-tiny] button, [data-tiny] a { min-height: 0; }
+
+  /* 🔴 KLEINE STEUERELEMENTE DUERFEN KEINE PILLEN WERDEN.
+     Die Zeile darueber zieht JEDEN Knopf auf 44 px. Ein 20-px-Kaestchen wird
+     davon ein 20x44-Schlauch; am 05.10.2026 ueber alle Seiten gezaehlt: 62
+     Stueck, darunter die Auswahl auf JEDER Bibliothekskarte (41x) und ein
+     8x44 schmales „x" auf der Finanzseite. Auf dem Bildschirm sieht das aus
+     wie ein Fehler, und es IST einer: die Form sagt etwas anderes als die
+     Funktion.
+
+     🔑 `.tap` nimmt die Mindesthoehe zurueck und legt dem Daumen stattdessen
+     ein UNSICHTBARES 44x44-Feld darueber. Das Auge sieht ein Quadrat, der
+     Daumen trifft trotzdem — beides, statt eines von beiden.
+
+     (Die Alternative aus 0.89.2 — die ganze Zeile zum Knopf machen — bleibt
+     die bessere, wo eine Zeile da ist. Wo nur ein Kaestchen steht, ist das
+     hier die Loesung.) */
+  button.tap, a.tap, label.tap, summary.tap { min-height: 0; min-width: 0; }
+  /* 🔴 `position` MUSS schwaecher binden als eine Hilfsklasse.
+     Erst stand `position: relative` hier mit drin — `button.tap` (0,0,1,1)
+     sticht `.absolute` (0,0,1,0), und das Auswahlkaestchen jeder
+     Bibliothekskarte fiel aus seiner Ecke zurueck in den Textfluss und
+     schob sich vor den Titel. Im Messen war nichts davon zu sehen; erst
+     das Bild hat es gezeigt.
+     `:where()` zaehlt null — wer `absolute` schreibt, bekommt `absolute`. */
+  :where(button.tap, a.tap, label.tap, summary.tap) { position: relative; }
+  button.tap::after, a.tap::after, label.tap::after, summary.tap::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: 44px; height: 44px; transform: translate(-50%, -50%);
+  }
   .chip { padding: 0.25rem 0.625rem; font-size: 12.5px; }
 
   /* 3. Platz. Karten dürfen atmen, der Seitenrand bleibt stehen. */

@@ -6,12 +6,22 @@
    the whole set via html[data-theme="light"]. Categories get their colour by
    rank (largest first), the rest share the grey. #}
 <style>
+  /* 🔑 EINE HELLIGKEITSFAMILIE, NICHT ZWOELF EINZELFARBEN (05.10.2026).
+     Die vorige Reihe mischte kraeftige und stumpfe Toene (#199e70 neben
+     #ac764a neben #e0a04a). Nebeneinander in einem kleinen Ring sah das aus
+     wie ein Malkasten, nicht wie eine Auswertung.
+
+     Jetzt liegen alle zwoelf auf derselben Helligkeitsstufe und wandern in
+     geordneten Schritten durch den Farbkreis — beginnend bei der Hausfarbe.
+     Unterscheidbar bleiben sie (die Legende braucht das), aber sie gehoeren
+     sichtbar zusammen. `--cx` ist bewusst stumpf: der Rest soll nicht um
+     Aufmerksamkeit kaempfen. */
   .viz { --viz-track: #2c2c2a;
-    --c0:#3987e5; --c1:#d95926; --c2:#199e70; --c3:#8f74e0; --c4:#ac764a; --c5:#c98500;
-    --c6:#d55181; --c7:#2fa6b8; --c8:#9aa83a; --c9:#b06ac4; --c10:#5d8ad6; --c11:#e0a04a; --cx:#898781; }
+    --c0:#34d399; --c1:#38bdf8; --c2:#818cf8; --c3:#c084fc; --c4:#f472b6; --c5:#fb7185;
+    --c6:#fbbf24; --c7:#a3e635; --c8:#2dd4bf; --c9:#60a5fa; --c10:#e879f9; --c11:#fdba74; --cx:#64748b; }
   html[data-theme="light"] .viz { --viz-track: #e1e0d9;
-    --c0:#2a78d6; --c1:#eb6834; --c2:#1baf7a; --c3:#7c5cd4; --c4:#97633a; --c5:#eda100;
-    --c6:#e87ba4; --c7:#1f96a8; --c8:#7f8f2a; --c9:#9b55b5; --c10:#4a78c8; --c11:#d48f35; --cx:#898781; }
+    --c0:#059669; --c1:#0284c7; --c2:#4f46e5; --c3:#9333ea; --c4:#db2777; --c5:#e11d48;
+    --c6:#d97706; --c7:#65a30d; --c8:#0d9488; --c9:#2563eb; --c10:#c026d3; --c11:#ea580c; --cx:#64748b; }
 </style>
 
 <script>window.__spendingData = {{ data | tojson }};
@@ -689,8 +699,8 @@ function spendingPage(initial) {
     open: '', busy: false, learn: true, message: '', messageOk: true,
     init() { try { this.learn = localStorage.getItem('docusort-learn') !== '0'; } catch {} },
     saveLearn() { try { localStorage.setItem('docusort-learn', this.learn ? '1' : '0'); } catch {} },
-    fmt(v) { return (Number(v) || 0).toLocaleString(DS_LOCALE, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }); },
-    fmt0(v) { return Math.round(Number(v) || 0).toLocaleString(DS_LOCALE); },
+    fmt(v) { return DS.geld(v); },        // eine Fassung fuer alle (base.html)
+    fmt0(v) { return DS.zahl(v); },
     pct(v) { return this.d.total ? Math.round(v / this.d.total * 100) : 0; },
     label(k) { return (this.d.labels && this.d.labels[k]) || k; },
     color(i) { return 'var(' + (i < PAL.length ? PAL[i] : '--cx') + ')'; },

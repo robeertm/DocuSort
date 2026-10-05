@@ -439,6 +439,32 @@
 // neun Stellen fest „de-DE" — in der englischen Fassung las sich jeder
 // Betrag deutsch (50,16 € statt €50.16).
 const DS_LOCALE = {{ (lang ~ ('-US' if lang == 'en' else '-' ~ lang.upper())) | tojson }};
+
+// ── Geld und Zahlen: EINE Schreibweise fuer die ganze Oberflaeche ──────────
+//
+// 🔴 WARUM DAS HIER STEHT (05.10.2026)
+// Vier Seiten brachten je ihre eigene Fassung mit — mal mit
+// `minimumFractionDigits: 2`, mal ohne —, und die Vorlagen formatierten an 50
+// Stellen mit Pythons `%.2f`, also `1836.60`. Auf einer Seite stand
+// `1836.60 €`, auf der naechsten `48.720,00 €`. Dieselbe Sache, drei
+// Schreibweisen: so sieht eine Oberflaeche zusammengestueckt aus.
+//
+// 🔑 Dieselben Regeln wie die Filter `money` und `zahl` im Server (app.py) —
+// eine Zahl darf nicht anders aussehen, je nachdem wer sie gesetzt hat.
+window.DS = window.DS || {};
+DS.geld = function (v, stellen) {
+  const n = Number(v);
+  if (v === null || v === undefined || v === '' || !isFinite(n)) return '—';
+  const s = (stellen === undefined) ? 2 : stellen;
+  return n.toLocaleString(DS_LOCALE, { style: 'currency', currency: 'EUR',
+                                       minimumFractionDigits: s, maximumFractionDigits: s });
+};
+DS.zahl = function (v, stellen) {
+  const n = Number(v);
+  if (v === null || v === undefined || v === '' || !isFinite(n)) return '—';
+  const s = (stellen === undefined) ? 0 : stellen;
+  return n.toLocaleString(DS_LOCALE, { minimumFractionDigits: s, maximumFractionDigits: s });
+};
 const T = {{ js_translations | tojson }};
 const CAT_LABELS = {{ cat_labels | tojson }};
 function catLabel(key) { return CAT_LABELS[key] || T['finance.cat.' + key] || key; }
