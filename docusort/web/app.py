@@ -1336,6 +1336,23 @@ def create_app(
         media = "application/pdf" if path.suffix.lower() == ".pdf" else "application/octet-stream"
         return FileResponse(path, media_type=media, headers=headers)
 
+    @app.get("/document/{doc_id}/fundstellen")
+    def document_fundstellen(doc_id: int, q: str = Query("")):
+        """Wo im PDF das gesuchte Wort steht — Seite und Rechteck.
+
+        🔑 Die Suche findet ein Dokument an seinem INHALT; danach steht man vor
+        einem zwanzigseitigen Bescheid. Diese Auskunft sagt, wo die Stelle ist,
+        damit die Seite sie gelb hinterlegen kann.
+        """
+        from ..fundstellen import finde
+        doc = db.get(doc_id)
+        if not doc:
+            raise HTTPException(404, "Document not found")
+        pfad = doc.get("library_path") or ""
+        if not pfad or not path_is_file(pfad) or not pfad.lower().endswith(".pdf"):
+            return {"verfuegbar": False, "seiten": 0, "treffer": []}
+        return finde(Path(pfad), q or "")
+
     @app.get("/document/{doc_id}/page.png")
     def document_page_png(doc_id: int, p: int = 1, w: int = 0):
         """Eine Seite des Dokuments als Bild.

@@ -202,6 +202,8 @@
   "document.field_subject": "Objet",
   "document.field_tags": "Tags",
   "document.fullscreen": "Plein écran",
+  "document.hit_of": "Résultat {n} sur {total} · page {page}",
+  "document.hit_off": "masquer",
   "document.input_tokens": "Tokens entrée",
   "document.meta": "Métadonnées",
   "document.model": "Modèle",

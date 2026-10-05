@@ -202,6 +202,8 @@
   "document.field_subject": "Subject",
   "document.field_tags": "Tags",
   "document.fullscreen": "Fullscreen",
+  "document.hit_of": "Match {n} of {total} · page {page}",
+  "document.hit_off": "hide",
   "document.input_tokens": "Input tokens",
   "document.meta": "Metadata",
   "document.model": "Model",

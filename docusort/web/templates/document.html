@@ -94,10 +94,51 @@
          gerendertes Seitenbild (`/page.png`, Poppler) passt dagegen
          immer in die Breite. Schlägt das Rendern fehl (kein Poppler,
          verschlüsselte Datei), springt der iframe wieder ein. #}
+      {# 🔑 `data-frage` statt der Zeichenkette direkt im x-data-Ausdruck: das
+         Suchwort kommt vom Benutzer, und ein Apostroph darin wuerde sonst den
+         Alpine-Ausdruck zerreissen (im besten Fall). Als Attribut geht es
+         durch Jinjas Entschaerfung. #}
       <div class="relative group"
-           x-data="{ imgOk: true, shown: 1, pages: {{ doc.page_count or 1 }} }">
+           data-frage="{{ nav_filters.q or '' }}"
+           x-data="dokumentVorschau({{ doc.id }}, {{ doc.page_count or 1 }})">
 
-        <div class="sm:hidden" x-show="imgOk">
+        {# ── Die Fundstelle: Seitenbild mit gelbem Feld ──────────────────── #}
+        <div x-show="treffer.length" x-cloak>
+          <div class="relative bg-white">
+            <img :src="'/document/{{ doc.id }}/page.png?p=' + seite"
+                 :alt="tr('document.page_of').replace('{n}', seite).replace('{total}', pages)"
+                 class="w-full h-auto block">
+            <template x-for="(t, i) in aufSeite()" :key="'fs-' + i">
+              {# Alles in Anteilen der Seite — das Bild wird in einer anderen
+                 Breite gerendert, als die PDF-Seite misst, und die Spalte
+                 skaliert es noch einmal. #}
+              {# 🔴 `bg-amber-400/*` und `rounded-[2px]` stehen NICHT im gebauten
+                 tailwind.css — sie taeten lautlos nichts. Die 500er-Toene und
+                 das schlichte `rounded` sind drin (nachgesehen, nicht geraten). #}
+              <div class="absolute pointer-events-none rounded"
+                   {# 🔴 Kein `ring-amber-500`: im gebauten Blatt steht NUR `.ring-amber-500/20`
+                      — ein lockeres grep traf das Praefix und meldete faelschlich „da".
+                      Die aktuelle Stelle unterscheidet sich ueber die Deckkraft. #}
+                   :class="istAktuell(t) ? 'bg-amber-500/60' : 'bg-amber-500/25'"
+                   :style="'left:' + (t.x*100) + '%;top:' + (t.y*100) + '%;width:' +
+                           (t.b*100) + '%;height:' + (t.h*100) + '%'"></div>
+            </template>
+          </div>
+          <div class="flex items-center justify-between gap-2 border-b border-ink-700/40 px-3 py-2 text-xs">
+            <span class="text-ink-300"
+                  x-text="tr('document.hit_of').replace('{n}', aktuell+1).replace('{total}', treffer.length).replace('{page}', seite)"></span>
+            <span class="flex items-center gap-1">
+              <button type="button" class="btn-ghost !px-2 !py-1" @click="vorige()"
+                      :disabled="treffer.length < 2" title="‹">‹</button>
+              <button type="button" class="btn-ghost !px-2 !py-1" @click="naechste()"
+                      :disabled="treffer.length < 2" title="›">›</button>
+              <button type="button" class="btn-ghost !px-2 !py-1" @click="treffer = []"
+                      x-text="tr('document.hit_off')"></button>
+            </span>
+          </div>
+        </div>
+
+        <div class="sm:hidden" x-show="imgOk && !treffer.length">
           <template x-for="i in Math.min(shown, pages)" :key="'pg-' + i">
             <a :href="'/document/{{ doc.id }}/file'" target="_blank" rel="noopener" class="block">
               <img :src="'/document/{{ doc.id }}/page.png?p=' + i"
@@ -112,7 +153,10 @@
                   x-text="tr('document.show_all_pages').replace('{n}', pages)"></button>
         </div>
 
-        <iframe src="/document/{{ doc.id }}/file#toolbar=0&view=FitH"
+        {# Solange eine Fundstelle gezeigt wird, tritt der eingebettete
+           Betrachter zurueck — zwei Darstellungen derselben Seite
+           nebeneinander waeren nur Verwirrung. #}
+        <iframe x-show="!treffer.length" src="/document/{{ doc.id }}/file#toolbar=0&view=FitH"
                 class="w-full bg-white h-[40vh] sm:h-[55vh] lg:h-[calc(100vh-6rem)]"
                 :class="imgOk ? 'hidden sm:block' : 'block'"
                 title="PDF Preview"></iframe>
@@ -731,6 +775,45 @@ function editForm({ category, subcategory, cats, subMap, catLabels, subLabels })
         this.catOk = false;
         this.catMsg = e.message || String(e);
       }
+    },
+  };
+}
+
+// Die Vorschau: Seitenbilder, eingebetteter Betrachter — und die Fundstelle.
+//
+// 🔑 WARUM (05.10.2026): die Suche findet ein Dokument an seinem INHALT. Danach
+// stand man vor einem zwanzigseitigen Bescheid und suchte die Stelle von Hand.
+// Jetzt holt die Seite die Koordinaten (`/document/<id>/fundstellen`) und legt
+// ein gelbes Feld darueber.
+function dokumentVorschau(docId, pages) {
+  return {
+    imgOk: true, shown: 1, pages: pages,
+    treffer: [], aktuell: 0, seite: 1,
+    init() {
+      const frage = (this.$el.dataset.frage || '').trim();
+      if (!frage) return;
+      fetch('/document/' + docId + '/fundstellen?q=' + encodeURIComponent(frage))
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (!d || !d.treffer || !d.treffer.length) return;
+          this.treffer = d.treffer;
+          this.aktuell = 0;
+          this.seite = d.treffer[0].seite;
+        })
+        .catch(() => {});   // Kein Fund, kein Drama: die Seite bleibt, wie sie war.
+    },
+    // Nur die Stellen der gerade gezeigten Seite bekommen ein Feld.
+    aufSeite() { return this.treffer.filter(t => t.seite === this.seite); },
+    istAktuell(t) { return this.treffer[this.aktuell] === t; },
+    naechste() {
+      if (!this.treffer.length) return;
+      this.aktuell = (this.aktuell + 1) % this.treffer.length;
+      this.seite = this.treffer[this.aktuell].seite;
+    },
+    vorige() {
+      if (!this.treffer.length) return;
+      this.aktuell = (this.aktuell - 1 + this.treffer.length) % this.treffer.length;
+      this.seite = this.treffer[this.aktuell].seite;
     },
   };
 }

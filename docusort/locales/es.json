@@ -202,6 +202,8 @@
   "document.field_subject": "Asunto",
   "document.field_tags": "Etiquetas",
   "document.fullscreen": "Pantalla completa",
+  "document.hit_of": "Coincidencia {n} de {total} · página {page}",
+  "document.hit_off": "ocultar",
   "document.input_tokens": "Tokens entrada",
   "document.meta": "Metadatos",
   "document.model": "Modelo",
