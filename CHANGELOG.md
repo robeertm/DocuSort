@@ -7,6 +7,63 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.91.0] - 2026-10-05
+
+### Added
+
+🔍 **The search finds what is written, not just what a document is called.**
+It already read the full text, but it only matched whole words from their
+beginning, and it demanded every word you typed. Measured on a real library of
+688 documents: three words found 14 documents, four words with one of them
+slightly off found **nothing at all**.
+
+There is now a ladder of three rungs, and the page says which one answered:
+
+1. **exact** — all your words, from the start of a word (what it did before)
+2. **part of a word** — all your words, anywhere inside a word. "energie" now
+   finds "SachsenEnergie", "waren" finds "Haushaltswaren". German compounds
+   and company names are exactly where the old search went quiet.
+3. **closest** — most of your words, best match first. One word off no longer
+   costs you the whole answer.
+
+A rung is only used when the one above found nothing, so an exact answer never
+comes mixed with a vague one. Results now also show **where in the text** the
+match sits — unless that place is the sender or the subject, which the card
+already shows.
+
+🔑 The part-of-a-word rung is a second index (SQLite FTS5 trigram). It is built
+once, in the background, on first start after the update — 6.9 MB of text took
+a moment. Where SQLite is too old for it, the other two rungs carry on and
+nothing breaks.
+
+💡 **The edit fields suggest what already exists.** Type "spark" into the sender
+of a document waiting for review and you get "Sparkasse" and
+"Sparkassenversicherung" with the number of documents behind each — click, or
+arrow keys and Enter. Also for tags and subcategories. Without it the same
+sender slowly turns into three spellings, and every figure that groups by
+sender quietly falls apart. Matching is done on the server, so the German
+transliteration (ä→ae) lives in one place instead of two.
+
+### Fixed
+
+🔴 **Category names are translated — the comparisons on them were not.** Eleven
+places in the program compared a document's category against a fixed German
+word. `categories.yaml` ships in two languages, so in an **English**
+installation none of them matched. Two consequences, one of them bad:
+
+* `update_metadata` deleted a receipt's line items unless the category was
+  literally "Kassenzettel". In English it is "Receipts" — so **every** edit of
+  a receipt's metadata silently threw its items away. Counter-tested: on the
+  old code the probe reports "before 2, after 0".
+* The statement tidier wrote the category "Kontoauszug" into the database —
+  a name the English category list does not contain. The document landed in a
+  folder the interface never offers.
+
+Categories now carry a **role** (`kategorien.ROLLEN`): the role is what the
+program compares, the name is whatever stands in your list. Recognising and
+writing both go through that one table. A source-code guard fails the build if
+a fixed German category name shows up in a comparison again.
+
 ## [0.90.2] - 2026-10-04
 
 ### Changed

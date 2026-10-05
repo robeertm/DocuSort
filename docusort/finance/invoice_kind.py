@@ -28,6 +28,7 @@ ueber vorhandene Daten, und eine Meinung, die sich verbessert, soll nicht erst
 eine Wanderung durch den Bestand brauchen.
 """
 from __future__ import annotations
+from ..kategorien import ist as _kat_ist
 
 import re
 
@@ -53,7 +54,9 @@ _HINWEIS = (
 _NETTO = (r"\bnetto\b", r"zzgl\.?\s*(?:ges\.?\s*)?(?:mwst|ust)", r"ohne\s+mwst")
 
 # Kategorien, in denen ein Betrag grundsaetzlich kein offener Posten ist.
-_KEINE_RECHNUNG = {"Gehalt", "Kontoauszug"}
+# 🔴 Rollen, keine Woerter: dieselbe Kategorie heisst englisch „Payroll"
+# bzw. „Bank statement" (kategorien.ROLLEN).
+_KEINE_RECHNUNG_ROLLEN = ("gehalt", "kontoauszug")
 
 _RE_HINWEIS = re.compile("|".join(_HINWEIS), re.I)
 _RE_NETTO = re.compile("|".join(_NETTO), re.I)
@@ -78,7 +81,7 @@ def einordnen(beleg: str | None, betrag: float | None,
 
     text = (beleg or "").strip()
 
-    if (kategorie or "") in _KEINE_RECHNUNG:
+    if any(_kat_ist(kategorie, r) for r in _KEINE_RECHNUNG_ROLLEN):
         return {"art": "hinweis", "vorbehalt": "",
                 "grund": "Kategorie %s" % kategorie}
 

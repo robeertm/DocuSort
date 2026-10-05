@@ -529,9 +529,40 @@ def import_statement_file(db, path, *, doc_id: int, file_hash: str = "", known_n
                                  known_names=known_names, finalize=finalize)
 
 
-def statement_subject(st: "ParsedStatement") -> str:
-    kind = "Tagesgeld" if st.is_savings else "Girokonto"
-    return f"Kontoauszug {st.statement_no} {kind} …{st.account_iban[-4:]}".strip()
+def statement_namen(settings, *, is_savings: bool) -> tuple[str, str]:
+    """Wie heissen Kategorie und Unterkategorie eines Auszugs HIER?
+
+    🔴 Bis 05.10.2026 standen hier feste deutsche Woerter („Kontoauszug",
+    „Girokonto"/„Tagesgeld"). In einer ENGLISCHEN Installation heissen dieselben
+    Eintraege „Bank statement" und „Current account"/„Savings" — die Aufraeumung
+    schrieb also eine Kategorie in die Datenbank, die es in der Liste des
+    Benutzers gar nicht gibt, und legte das Dokument in einen Ordner, den die
+    Oberflaeche nicht anbietet.
+
+    Gefragt wird jetzt die konfigurierte Liste (`kategorien.ROLLEN`). Steht die
+    Rolle dort nicht mehr, kommt "" zurueck — und der Aufrufer laesst das
+    Dokument lieber in Ruhe, statt einen erfundenen Ordner anzulegen.
+    """
+    from ..kategorien import name_fuer, untername_fuer
+    kats = getattr(settings, "categories", None) or []
+    kat = name_fuer(kats, "kontoauszug")
+    unter = untername_fuer(kats, "kontoauszug", "tagesgeld" if is_savings else "giro")
+    return kat, unter
+
+
+def statement_subject(st: "ParsedStatement", settings=None) -> str:
+    """Die eine Stelle, die den Betreff eines Auszugs baut.
+
+    🔑 Vorher stand dieselbe Zeichenkette zweimal da — hier und in
+    `tidy_statement_documents`. Zwei Zeichenwege sind eine stehende Schuld: der
+    naechste Umbau trifft nur einen davon.
+    """
+    kat, unter = statement_namen(settings, is_savings=bool(st.is_savings))
+    return betreff_bauen(kat, st.statement_no, unter, st.account_iban)
+
+
+def betreff_bauen(kategorie: str, nummer: str, unter: str, iban: str) -> str:
+    return f"{kategorie} {nummer} {unter} …{(iban or '')[-4:]}".strip()
 
 
 def tidy_statement_documents(db, settings, *, log=None, only_doc_ids: set[int] | None = None) -> dict:
@@ -568,9 +599,16 @@ def tidy_statement_documents(db, settings, *, log=None, only_doc_ids: set[int] |
         p = Path(r["library_path"] or "")
         if not p.exists():
             continue
-        kind = "Tagesgeld" if int(r["is_savings"] or 0) else "Girokonto"
-        last4 = (r["iban"] or "")[-4:]
-        subject = f"Kontoauszug {r['statement_no']} {kind} …{last4}".strip()
+        kat, kind = statement_namen(settings, is_savings=bool(int(r["is_savings"] or 0)))
+        if not kat or not kind:
+            # 🔴 Lieber nichts tun als eine Kategorie erfinden, die es in der
+            # Liste dieser Installation nicht gibt — sie waere ein Ordner auf
+            # der Platte, den die Oberflaeche nie anbietet.
+            log.warning("Kontoauszug-Aufraeumung uebersprungen: die Rolle "
+                        "'kontoauszug' steht nicht in den Kategorien dieser "
+                        "Installation.")
+            continue
+        subject = betreff_bauen(kat, r["statement_no"], kind, r["iban"] or "")
         date = r["period_end"] or r["doc_date"] or ""
         # Sender = the bank as it names itself on the statement. Read once per
         # statement and remembered in statements.extra_json, so the LLM's
@@ -592,12 +630,12 @@ def tidy_statement_documents(db, settings, *, log=None, only_doc_ids: set[int] |
             with db._lock:
                 db._conn.execute("UPDATE statements SET extra_json = ? WHERE id = ?", (_json.dumps(extra), int(r["stmt_id"])))
                 db._conn.commit()
-        same = (r["category"] == "Kontoauszug" and (r["subcategory"] or "") == kind and (r["doc_date"] or "") == date
+        same = (r["category"] == kat and (r["subcategory"] or "") == kind and (r["doc_date"] or "") == date
                 and (r["subject"] or "") == subject and (r["sender"] or "") == sender and r["status"] == "filed")
         if same:
             continue
         try:
-            new_path = target_path(settings.paths.library, date, "Kontoauszug", sender, subject,
+            new_path = target_path(settings.paths.library, date, kat, sender, subject,
                                    settings.filename_template, settings.max_filename_length, p.suffix,
                                    subcategory=kind, current_path=p)
             if new_path != p:
@@ -609,7 +647,7 @@ def tidy_statement_documents(db, settings, *, log=None, only_doc_ids: set[int] |
                 tags = []
             if "kontoauszug" not in tags:
                 tags.append("kontoauszug")
-            db.update_metadata(int(r["doc_id"]), category="Kontoauszug", subcategory=kind, tags=tags[:8],
+            db.update_metadata(int(r["doc_id"]), category=kat, subcategory=kind, tags=tags[:8],
                                doc_date=date, sender=sender, subject=subject, filename=new_path.name,
                                library_path=str(new_path), status="filed")
             out["changed"] += 1

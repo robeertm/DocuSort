@@ -7,6 +7,7 @@ is moved to its new category folder and the DB row is updated in place
 """
 
 from __future__ import annotations
+from .kategorien import ist as _kat_ist
 
 import logging
 import shutil
@@ -99,7 +100,7 @@ def retry_document(
                 or "kreditkart"  in subj_l):
             is_bank_lookalike = True
 
-    if cls.category == "Kontoauszug" or is_bank_lookalike:
+    if _kat_ist(cls.category, "kontoauszug") or is_bank_lookalike:
         local_providers = ("openai_compat", "bridge")
         # 🔴 DATENSCHUTZ: gefragt ist, wer DIESES Dokument rechnet — nicht, was
         #    in der Datei steht. Hier entscheidet sich, ob ein Kontoauszug das

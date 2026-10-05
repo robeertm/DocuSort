@@ -12,6 +12,7 @@ DOCUSORT_LOG_LEVEL (DEBUG/INFO/WARNING/ERROR) controls verbosity.
 """
 
 from __future__ import annotations
+from .kategorien import ist as _kat_ist
 
 import argparse
 import hashlib
@@ -334,7 +335,7 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         # Receipts get a second-pass LLM extraction for the line items so
         # the analytics dashboard can do per-item aggregation. We only run
         # this for category=Kassenzettel to keep the cost bounded.
-        if cls.category == "Kassenzettel" and ocr_res.text:
+        if _kat_ist(cls.category, "kassenzettel") and ocr_res.text:
             try:
                 from .receipts import ReceiptExtractor
                 # 🔴 Anbieter UND Modell aus DERSELBEN Quelle. Frueher stand

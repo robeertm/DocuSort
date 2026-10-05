@@ -36,6 +36,108 @@ from typing import Any, Iterable
 
 from .aehnlichkeit import AEHNLICH_AB, gleich as namen_gleich, schlicht as _schlicht, zu_aehnlich
 
+# ── Rollen: was eine Kategorie BEDEUTET, unabhaengig davon, wie sie heisst ──
+#
+# 🔴 WARUM ES DAS GIBT (05.10.2026)
+#
+# Elf Stellen im Programm verglichen einen Kategorienamen mit einem festen
+# DEUTSCHEN Wort — `== "Kontoauszug"`, `!= "Kassenzettel"`, `in ("Rechnung",
+# "Quittung", …)`. Die Kategorienamen kommen aber aus `categories.yaml`, und
+# die gibt es in zwei Fassungen: deutsch („Kontoauszug", „Kassenzettel") und
+# englisch („Bank statement", „Receipts"). In einer ENGLISCHEN Installation
+# traf also keine dieser Stellen zu.
+#
+# Was das anrichtete:
+#   * `tidy_statement_documents` schrieb die Kategorie „Kontoauszug" in die
+#     Datenbank — ein Name, der in der englischen Liste gar nicht vorkommt.
+#     Der Auszug landete in einem Ordner, den die Oberflaeche nicht anbietet.
+#   * 🔴 `db.update_metadata` loescht die Belegposten eines Dokuments, sobald
+#     seine Kategorie NICHT „Kassenzettel" ist. In einer englischen
+#     Installation heisst sie „Receipts" — jede Metadatenaenderung an einem
+#     Kassenzettel warf also seine Posten weg. Still.
+#
+# Die Rolle ist der stabile Begriff; der NAME ist, was in der Liste des
+# Benutzers steht. Zwei Richtungen, beide hier:
+#
+#   `ist(name, "kontoauszug")`  — erkennt einen Namen (beide Sprachen, auch
+#                                 eigene Schreibweisen des Benutzers)
+#   `name_fuer(kategorien, …)`  — liefert den Namen, der GESCHRIEBEN werden
+#                                 muss, aus der konfigurierten Liste
+#
+# 🔑 Wer hier eine Rolle ergaenzt, ergaenzt sie fuer ALLE Leser auf einmal —
+# genau darum steht es in diesem Modul und nicht elfmal verstreut.
+
+ROLLEN: dict[str, tuple[str, ...]] = {
+    "kontoauszug":  ("Kontoauszug", "Bank statement", "Bank Statement"),
+    "bank":         ("Bank",),
+    "kassenzettel": ("Kassenzettel", "Receipts", "Receipt"),
+    "gehalt":       ("Gehalt", "Payroll"),
+    "rechnung":     ("Rechnung", "Rechnungen", "Invoices", "Invoice"),
+    "quittung":     ("Quittung", "Quittungen", "Receipt voucher"),
+}
+
+# Die Unterkategorien des Kontoauszugs — dieselbe Frage eine Ebene tiefer.
+UNTERROLLEN: dict[str, dict[str, tuple[str, ...]]] = {
+    "kontoauszug": {
+        "giro":        ("Girokonto", "Current account", "Current Account"),
+        "tagesgeld":   ("Tagesgeld", "Savings"),
+        "kreditkarte": ("Kreditkarte", "Credit card", "Credit Card"),
+        "depot":       ("Depot", "Securities"),
+        "paypal":      ("PayPal",),
+        "sonstiges":   ("Sonstiges", "Other"),
+    },
+}
+
+_NACH_NAME: dict[str, str] = {
+    _schlicht(n): rolle for rolle, namen in ROLLEN.items() for n in namen
+}
+
+
+def rolle_von(name: str | None) -> str:
+    """Welche Rolle traegt dieser Kategoriename — oder "" wenn keine."""
+    return _NACH_NAME.get(_schlicht(name or ""), "")
+
+
+def ist(name: str | None, rolle: str) -> bool:
+    """Meint dieser Kategoriename die gesuchte Rolle?
+
+    🔑 Ersetzt jedes `== "Kontoauszug"`. Vergleicht entakzentuiert und ohne
+    Ruecksicht auf Gross-/Kleinschreibung (`_schlicht`), damit auch
+    „kontoauszug" oder „Bank Statement" treffen.
+    """
+    return rolle_von(name) == rolle
+
+
+def name_fuer(kategorien: Iterable[dict[str, Any]] | None, rolle: str,
+              rueckfall: str = "") -> str:
+    """Der Name, unter dem diese Rolle in DIESER Installation steht.
+
+    Gesucht wird in der konfigurierten Liste — also in dem, was die Oberflaeche
+    anbietet und was als Ordnername auf der Platte landet. Steht die Rolle dort
+    nicht (der Benutzer hat die Kategorie geloescht oder umbenannt), kommt
+    `rueckfall` zurueck; der Aufrufer entscheidet dann, ob er lieber nichts tut.
+    """
+    for c in (kategorien or []):
+        if rolle_von(c.get("name")) == rolle:
+            return str(c.get("name") or "")
+    return rueckfall
+
+
+def untername_fuer(kategorien: Iterable[dict[str, Any]] | None, rolle: str,
+                   unterrolle: str, rueckfall: str = "") -> str:
+    """Dasselbe fuer eine Unterkategorie, z. B. „giro" unter „kontoauszug"."""
+    gesucht = {_schlicht(n) for n in UNTERROLLEN.get(rolle, {}).get(unterrolle, ())}
+    if not gesucht:
+        return rueckfall
+    for c in (kategorien or []):
+        if rolle_von(c.get("name")) != rolle:
+            continue
+        for u in (c.get("subcategories") or []):
+            if _schlicht(str(u)) in gesucht:
+                return str(u)
+    return rueckfall
+
+
 # Mehr als das passt in keine Auswahlliste und in keinen Dateinamen mehr.
 MAX_NAME = 40
 MAX_BESCHREIBUNG = 400
