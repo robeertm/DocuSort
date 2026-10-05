@@ -507,10 +507,14 @@
                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm tabular-nums">
       </label>
 
-      <label class="block">
+      <label class="block relative" x-data="vorschlagsfeld('sender')">
         <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_sender') }}</span>
         <input type="text" name="sender" value="{{ doc.sender or '' }}" maxlength="120"
+               @input="hole(frage($el))" @focus="hole(frage($el))"
+               @keydown="taste($event, $el)" @blur="setTimeout(() => offen = false, 160)"
+               autocomplete="off"
                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+        {% include "_vorschlagsliste.html" %}
       </label>
 
       <label class="block">
@@ -519,12 +523,16 @@
                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
       </label>
 
-      <label class="block">
+      <label class="block relative" x-data="vorschlagsfeld('tag')">
         <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_tags') }}</span>
         <input type="text" name="tags"
                value="{{ doc.tags_list | join(', ') if doc.tags_list else '' }}"
                placeholder="{{ t('document.tags_placeholder') }}"
+               @input="hole(frage($el))" @focus="hole(frage($el))"
+               @keydown="taste($event, $el)" @blur="setTimeout(() => offen = false, 160)"
+               autocomplete="off"
                class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+        {% include "_vorschlagsliste.html" %}
         <span class="block text-[11px] text-ink-500 mt-1">{{ t('document.tags_hint') }}</span>
       </label>
 
@@ -723,6 +731,65 @@ function editForm({ category, subcategory, cats, subMap, catLabels, subLabels })
         this.catOk = false;
         this.catMsg = e.message || String(e);
       }
+    },
+  };
+}
+
+// Vorschlaege beim Tippen — Absender, Marken, Unterkategorien.
+//
+// 🔑 WARUM (05.10.2026): wer einen Absender von Hand eintraegt, soll sehen,
+// welche es schon gibt — drei Buchstaben genuegen. Ohne das entstehen
+// Schreibvarianten desselben Absenders, und jede Auswertung zerfaellt an ihnen.
+//
+// 🔴 GEFILTERT WIRD AUF DEM SERVER. Die deutsche Umschrift (ä→ae) steht in
+// `aehnlichkeit.schlicht` — einmal. Eine zweite Fassung hier waere zwei Regeln,
+// die auseinanderlaufen.
+function vorschlagsfeld(feld) {
+  return {
+    offen: false, treffer: [], gewaehlt: -1, laeuft: null,
+    async hole(wert) {
+      // Entprellt: wer tippt, soll nicht bei jedem Zeichen eine Anfrage
+      // ausloesen — und eine spaete Antwort darf eine fruehe nicht ueberholen.
+      clearTimeout(this.laeuft);
+      this.laeuft = setTimeout(async () => {
+        try {
+          const r = await fetch('/api/vorschlaege?feld=' + encodeURIComponent(feld)
+                                + '&q=' + encodeURIComponent(wert || ''));
+          if (!r.ok) { this.treffer = []; return; }
+          const d = await r.json();
+          this.treffer = d.treffer || [];
+          this.gewaehlt = -1;
+          this.offen = this.treffer.length > 0;
+        } catch (e) { this.treffer = []; this.offen = false; }
+      }, 140);
+    },
+    runter() { if (this.offen && this.gewaehlt < this.treffer.length - 1) this.gewaehlt++; },
+    hoch()   { if (this.offen && this.gewaehlt > 0) this.gewaehlt--; },
+    // 🔑 Bei Marken wird nur das LETZTE Stueck ersetzt: „steuer, rechn" soll
+    // zu „steuer, rechnung" werden, nicht zu „rechnung".
+    nimm(el, wert) {
+      if (feld === 'tag' && el.value.includes(',')) {
+        const teile = el.value.split(',');
+        teile[teile.length - 1] = ' ' + wert;
+        el.value = teile.join(',');
+      } else {
+        el.value = wert;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      this.offen = false; this.treffer = []; this.gewaehlt = -1;
+    },
+    taste(ev, el) {
+      if (!this.offen) return;
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); this.runter(); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); this.hoch(); }
+      else if (ev.key === 'Enter' && this.gewaehlt >= 0) {
+        ev.preventDefault(); this.nimm(el, this.treffer[this.gewaehlt].wert);
+      } else if (ev.key === 'Escape') { this.offen = false; }
+    },
+    // Was beim Tippen in das Feld gegeben wird — bei Marken nur das letzte Stueck.
+    frage(el) {
+      const v = el.value || '';
+      return (feld === 'tag' && v.includes(',')) ? v.split(',').pop().trim() : v;
     },
   };
 }

@@ -1,3 +1,14 @@
+{# 🔑 Wenn die Suche lockern musste, sagt sie das. Eine weite Antwort, die
+   aussieht wie eine genaue, ist schlimmer als keine. #}
+{% if such_stufe == 'teilwort' %}
+  <div class="mb-3 rounded-lg px-3 py-2 text-xs bg-sky-500/10 text-sky-200 ring-1 ring-sky-500/20">
+    {{ t('library.search.hint_teilwort') }}
+  </div>
+{% elif such_stufe == 'locker' %}
+  <div class="mb-3 rounded-lg px-3 py-2 text-xs bg-amber-500/10 text-amber-200 ring-1 ring-amber-500/20">
+    {{ t('library.search.hint_locker') }}
+  </div>
+{% endif %}
 {% if docs %}
 {# Clicking a card forwards the current slice to the detail page, which
    reads it back for the prev/next arrow keys AND for every way out again
@@ -39,6 +50,16 @@
         {{ d.subject or d.filename }}
       </h3>
       <div class="mt-1 text-sm text-ink-300 truncate">{{ d.sender or '—' }}</div>
+
+      {# Wo im Text es gefunden wurde. Ohne diese Zeile sieht ein Volltext-
+         Treffer aus wie jeder andere, und niemand merkt, dass der INHALT
+         durchsucht wurde. #}
+      {% if d.fundstelle_html %}
+        <div class="mt-2 text-[11px] leading-relaxed text-ink-400 line-clamp-2"
+             title="{{ t('library.search.found_in') }}">
+          {{ d.fundstelle_html }}
+        </div>
+      {% endif %}
 
       {% if d.tags_list %}
         <div class="mt-2 flex flex-wrap gap-1 pl-0.5">

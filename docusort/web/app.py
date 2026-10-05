@@ -27,6 +27,7 @@ from .. import auth as _auth
 from ..classifier import Classifier
 from ..config import AppSettings, get_api_key, is_configured, load_secrets
 from ..db import Database, MODEL_PRICING, LIBRARY_SORT_DEFAULT, LIBRARY_DIR_DEFAULT
+from ..kategorien import ist as _kat_ist, name_fuer as _kat_name
 from ..i18n import (
     LANGUAGE_NAMES, SUPPORTED, all_translations_for_js, category_label,
     detect_language, subcategory_label, translate,
@@ -1066,6 +1067,7 @@ def create_app(
             sort_key = LIBRARY_SORT_DEFAULT
         sort_dir = "asc" if (dir or "").lower() == "asc" else "desc"
 
+        such_bericht: dict[str, Any] = {}
         docs = db.list_documents(
             category=category or None, subcategory=subcategory or None,
             tag=tag or None, status=status or None,
@@ -1073,10 +1075,11 @@ def create_app(
             order_by=sort_key, sort_dir=sort_dir,
             doc_from=doc_from or None, doc_to=doc_to or None,
             scan_from=scan_from or None, scan_to=scan_to or None,
-            limit=500,
+            limit=500, such_bericht=such_bericht,
         )
         for d in docs:
             _decode_tags(d)
+            _fundstelle_auszeichnen(d)
         years = db.distinct_years()
         tree = db.tree()
         tags = db.all_tags(trash=trash)
@@ -1086,6 +1089,12 @@ def create_app(
                       "sort": sort_key, "dir": sort_dir,
                       "doc_from": doc_from, "doc_to": doc_to,
                       "scan_from": scan_from, "scan_to": scan_to}
+        # 🔑 Nur melden, wenn wirklich gelockert wurde UND etwas gefunden —
+        # eine leere Antwort braucht keine Erklaerung, warum sie weit gesucht
+        # hat, und eine genaue erst recht nicht.
+        such_stufe = such_bericht.get("stufe") or ""
+        if not docs or such_stufe == "genau":
+            such_stufe = ""
         qs = _slice_qs({**filter_ctx, "trash": trash})
         # 🔴 WHAT GOES IN THE ADDRESS BAR (04.10.2026)
         #
@@ -1116,7 +1125,10 @@ def create_app(
              # three filters that existed when it was written, so dropping
              # the year silently threw away the sort and both date ranges.
              "slice_ohne": {k: _slice_qs({**filter_ctx, "trash": trash, k: None})
-                            for k in _SLICE_FILTERS}},
+                            for k in _SLICE_FILTERS},
+             # Welche Stufe der Suchleiter geantwortet hat ("" = die genaue,
+             # darueber sagt die Seite nichts).
+             "such_stufe": such_stufe},
             headers=kopf,
         )
 
@@ -1127,6 +1139,87 @@ def create_app(
             doc["tags_list"] = _json.loads(doc.get("tags") or "[]") or []
         except Exception:
             doc["tags_list"] = []
+        return doc
+
+    # ---------- Vorschlaege beim Tippen (v0.91) ----------
+    @app.get("/api/vorschlaege")
+    def api_vorschlaege(feld: str = Query("sender"), q: str = Query(""),
+                        limit: int = Query(8)):
+        """Was es schon gibt, waehrend man tippt.
+
+        🔑 WARUM DAS NOETIG IST (05.10.2026)
+        Wer ein Dokument aus der Durchsicht von Hand korrigiert, tippt den
+        Absender neu — und weiss in dem Moment nicht, wie er beim letzten Mal
+        geschrieben wurde. Ein Feld, das waehrend des Tippens zeigt, was es
+        schon gibt, beantwortet das, bevor die Frage entsteht.
+
+        Ohne das entstehen Schreibvarianten: „Sparkasse", „Sparkasse Dresden",
+        „sparkasse" liegen dann als DREI Absender in der Bibliothek, und jede
+        Auswertung zerfaellt an ihnen.
+
+        🔴 GEFILTERT WIRD HIER, NICHT IM BROWSER. Die deutsche Umschrift
+        (ä→ae) und das Entakzentuieren stehen in `aehnlichkeit.schlicht` —
+        EINMAL. Eine zweite Fassung davon in JavaScript waere zwei Regeln, die
+        auseinanderlaufen, sobald eine von beiden angefasst wird.
+        """
+        from ..aehnlichkeit import schlicht as _schlicht
+        roh = (q or "").strip()
+        limit = max(1, min(int(limit or 8), 25))
+        if feld == "tag":
+            paare = [(w, n) for w, n in db.all_tags()]
+        elif feld == "subcategory":
+            # Alle Unterkategorien aller Kategorien, ohne Zaehlung — sie sind
+            # eine Auswahl, keine Haeufigkeit.
+            paare = [(u, 0) for c in _kategorien()
+                     for u in (c.get("subcategories") or [])]
+        else:
+            paare = db.senders_with_counts()
+
+        gesucht = _schlicht(roh)
+        if not gesucht:
+            # Ohne Eingabe: die haeufigsten — das ist die nuetzlichste Antwort
+            # auf „was gibt es hier ueberhaupt".
+            treffer = paare[:limit]
+        else:
+            vorn, drin = [], []
+            for wert, n in paare:
+                s = _schlicht(wert)
+                if s.startswith(gesucht):
+                    vorn.append((wert, n))
+                elif gesucht in s:
+                    drin.append((wert, n))
+            # 🔑 Wer am Anfang passt, steht oben: „spark" meint eher
+            # „Sparkasse" als „Autosparkasse".
+            treffer = (vorn + drin)[:limit]
+        return {"feld": feld, "q": roh,
+                "treffer": [{"wert": w, "anzahl": n} for w, n in treffer]}
+
+    def _fundstelle_auszeichnen(doc: dict) -> dict:
+        """Die Fundstelle aus der Suche in sichere Auszeichnung wandeln.
+
+        🔑 Die Datenbank liefert den Ausschnitt mit ‹ › um das gefundene Wort.
+        Erst wird der ganze Text ENTSCHAERFT (ein Dokument kann alles
+        enthalten, auch `<script>`), danach werden genau diese beiden Zeichen
+        zu einer Auszeichnung. Andersherum waere es eine Luecke.
+        """
+        roh = (doc.get("fundstelle") or "").strip()
+        if not roh:
+            doc["fundstelle_html"] = ""
+            return doc
+        # 🔑 Nur zeigen, was die Karte nicht ohnehin zeigt. Die Datenbank
+        # nimmt die Spalte mit dem besten Treffer — das ist oft der Absender,
+        # und der steht zwei Zeilen darueber. „H‹artley› Hardwa…" unter
+        # „Hartley Hardware" ist Rauschen, keine Auskunft.
+        nackt = roh.replace("\u2039", "").replace("\u203a", "").replace("…", "").strip()
+        schon = " ".join(str(doc.get(f) or "") for f in ("sender", "subject", "filename"))
+        if nackt and nackt.casefold() in schon.casefold():
+            doc["fundstelle_html"] = ""
+            return doc
+        from markupsafe import Markup, escape
+        sicher = str(escape(roh))
+        sicher = (sicher.replace("\u2039", '<mark class="bg-amber-500/25 text-amber-100 rounded px-0.5">')
+                        .replace("\u203a", "</mark>"))
+        doc["fundstelle_html"] = Markup(sicher)
         return doc
 
     # ---------- Document detail ----------
@@ -1187,7 +1280,7 @@ def create_app(
             doc_from=nav_filters["doc_from"], doc_to=nav_filters["doc_to"],
             scan_from=nav_filters["scan_from"], scan_to=nav_filters["scan_to"],
         )
-        receipt = db.get_receipt(doc_id) if doc.get("category") == "Kassenzettel" else None
+        receipt = db.get_receipt(doc_id) if _kat_ist(doc.get("category"), "kassenzettel") else None
         # Statement card surfaces for Kontoauszug AND any legacy Bank
         # document (the classifier picked Bank for actual statements
         # before v0.13.0, sometimes with subcategory=Konto, sometimes
@@ -1196,7 +1289,10 @@ def create_app(
         # button and the privacy preview. Non-statement Bank docs (a
         # contract, a Wertpapier-Abrechnung, …) just return zero
         # transactions on extract — wasted LLM call but not harmful.
-        is_statement_candidate = doc.get("category") in ("Kontoauszug", "Bank")
+        # 🔴 Rollen, keine Woerter — englisch heissen sie „Bank statement" und
+        # „Bank" (kategorien.ROLLEN).
+        is_statement_candidate = any(_kat_ist(doc.get("category"), r)
+                                     for r in ("kontoauszug", "bank"))
         statement = db.get_statement(doc_id) if is_statement_candidate else None
         from ..receipts import SHOP_TYPES, ITEM_CATEGORIES, PAYMENT_METHODS
         from ..finance.categories import TX_CATEGORIES, TX_TYPES
@@ -2425,7 +2521,7 @@ def create_app(
         category = doc.get("category") or ""
         statement = None
         receipt = None
-        if category in ("Kontoauszug", "Bank"):
+        if any(_kat_ist(category, r) for r in ("kontoauszug", "bank")):
             stmt = db.get_statement(doc_id)
             if stmt:
                 statement = {
@@ -2436,7 +2532,7 @@ def create_app(
                     "bank_name":      stmt.get("bank_name"),
                     "acknowledged_empty": bool(stmt.get("acknowledged_empty") or 0),
                 }
-        if category in ("Rechnung", "Quittung", "Kassenzettel"):
+        if any(_kat_ist(category, r) for r in ("rechnung", "quittung", "kassenzettel")):
             r = db.get_receipt(doc_id)
             if r:
                 receipt = {
@@ -2752,7 +2848,10 @@ def create_app(
                         target.write_bytes(data)
                     except Exception as exc:  # noqa: BLE001
                         raise HTTPException(500, f"ablegen {fname!r}: {exc}") from exc
-                    reports.append({**_report_to_dict(ImportReport(file_label=fname)), "queued": True, "bank": "Kontoauszug"})
+                    reports.append({**_report_to_dict(ImportReport(file_label=fname)), "queued": True,
+                                    # Der Name, unter dem die Kategorie in DIESER
+                                    # Installation steht — nicht das deutsche Wort.
+                                    "bank": _kat_name(_kategorien(), "kontoauszug", "Bank")})
                     continue
                 try:
                     rep = import_csv(db, data, file_label=fname, account_iban_hint=iban_hint)

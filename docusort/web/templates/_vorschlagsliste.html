@@ -1,0 +1,28 @@
+{# Die Liste unter einem Eingabefeld. Gehoert in ein Element mit
+   `x-data="vorschlagsfeld('<feld>')"` und `class="relative"`.
+
+   🔑 `x-cloak` ist nicht Kosmetik: ohne es blitzt die Liste bei jedem
+   Seitenaufbau einmal auf, bevor Alpine sie versteckt. #}
+<div x-show="offen && treffer.length" x-cloak
+     {# 🔴 KEIN `top-full`: die Klasse steht NICHT im gebauten tailwind.css und
+        taete nichts. Dieselbe Falle wie bei `xl:flex` (02.10.). Das Hausmuster
+        fuer Aufklappmenues (base.html, fixkosten.html) kommt ohne aus —
+        `absolute` mit `top:auto` setzt die Liste dorthin, wo sie im Fluss
+        stuende: direkt unter das Feld. #}
+     {# 🔴 `inset-x-0` statt `left-0 right-0`: `left-0` steht nicht im gebauten
+        Blatt, `inset-x-0` schon (spending.html benutzt es). #}
+     class="absolute inset-x-0 z-30 mt-1 overflow-hidden rounded-xl
+            border border-ink-700 bg-ink-900 shadow-xl">
+  <template x-for="(v, i) in treffer" :key="v.wert">
+    <button type="button"
+            @mousedown.prevent="nimm($el.closest('label').querySelector('input'), v.wert)"
+            @mouseenter="gewaehlt = i"
+            :class="gewaehlt === i ? 'bg-ink-800' : ''"
+            class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm
+                   text-ink-100 hover:bg-ink-800">
+      <span class="truncate" x-text="v.wert"></span>
+      <span class="shrink-0 text-[11px] tabular-nums text-ink-500"
+            x-show="v.anzahl > 0" x-text="v.anzahl"></span>
+    </button>
+  </template>
+</div>

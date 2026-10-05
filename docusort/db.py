@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
+from .kategorien import ist as _kat_ist
 
 
 logger = logging.getLogger("docusort.db")
@@ -835,6 +836,85 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)"
         )
 
+        # ── v0.91: Teilwort-Suche über den ganzen Text ──────────────────────
+        #
+        # 🔑 WARUM EIN ZWEITER INDEX
+        # `documents_fts` zerlegt in WOERTER und sucht am Wortanfang. Damit
+        # findet „haushalt" das Wort „Haushaltswaren" — „waren" aber nicht.
+        # Deutsche Zusammensetzungen und Firmennamen („SachsenEnergie") sind
+        # genau der Fall, in dem das zu wenig ist. Der Trigramm-Index sucht
+        # Zeichenketten statt Woerter: jede Teilzeichenkette ab drei Zeichen.
+        #
+        # 🔴 ER DARF DEN START NIE VERHINDERN. Der Trigramm-Tokenizer gibt es
+        # erst ab SQLite 3.34. Stuende dieses CREATE im SCHEMA, wuerde eine
+        # aeltere Fassung beim Start sterben — genau der Fehler, der am
+        # 04.10.2026 Kunden eine Stunde lahmgelegt hat (ein Index auf eine
+        # Spalte, die es noch nicht gab). Darum hier, in einem try, und das
+        # Ergebnis steht als Merkmal in `meta`: wer es nicht kann, sucht
+        # weiter wie bisher.
+        #
+        # 🔑 Die Kosten sind gemessen, nicht geschaetzt: Roberts Bibliothek
+        # traegt 6,9 MB Text in 688 Dokumenten. Ein Trigramm-Index darueber
+        # kostet ein paar Dutzend MB — fuer eine Suche, die wirklich findet.
+        self._such_trigramm = False
+        try:
+            self._conn.execute(
+                """CREATE VIRTUAL TABLE IF NOT EXISTS documents_tri USING fts5(
+                       filename, sender, subject, extracted_text,
+                       content='documents', content_rowid='id',
+                       tokenize='trigram'
+                   )"""
+            )
+            # Die drei Ausloeser halten ihn mit `documents` gleich — dieselbe
+            # Bauart wie bei `documents_fts` darueber.
+            self._conn.execute(
+                """CREATE TRIGGER IF NOT EXISTS documents_tri_ai AFTER INSERT ON documents BEGIN
+                       INSERT INTO documents_tri(rowid, filename, sender, subject, extracted_text)
+                       VALUES (new.id, new.filename, new.sender, new.subject, new.extracted_text);
+                   END"""
+            )
+            self._conn.execute(
+                """CREATE TRIGGER IF NOT EXISTS documents_tri_ad AFTER DELETE ON documents BEGIN
+                       INSERT INTO documents_tri(documents_tri, rowid, filename, sender, subject, extracted_text)
+                       VALUES ('delete', old.id, old.filename, old.sender, old.subject, old.extracted_text);
+                   END"""
+            )
+            self._conn.execute(
+                """CREATE TRIGGER IF NOT EXISTS documents_tri_au AFTER UPDATE ON documents BEGIN
+                       INSERT INTO documents_tri(documents_tri, rowid, filename, sender, subject, extracted_text)
+                       VALUES ('delete', old.id, old.filename, old.sender, old.subject, old.extracted_text);
+                       INSERT INTO documents_tri(rowid, filename, sender, subject, extracted_text)
+                       VALUES (new.id, new.filename, new.sender, new.subject, new.extracted_text);
+                   END"""
+            )
+            # 🔑 Einmal befuellen — ein Index mit Ausloesern kennt nur, was NACH
+            # ihm geschrieben wurde. Ohne das faende die Teilwort-Suche genau
+            # die Dokumente nicht, die schon da sind.
+            #
+            # 🔴 UND NICHT MIT `COUNT(*)` PRUEFEN, OB ER LEER IST. Bei einer
+            # FTS5-Tabelle mit externem Inhalt (`content='documents'`) zaehlt
+            # `COUNT(*)` die QUELLTABELLE — sie meldete 40, obwohl im Index
+            # kein einziges Trigramm stand. Der Aufbau lief darum nie, und die
+            # Teilwort-Suche fand lautlos nichts. Ein Zaehler, der einen toten
+            # Wert abfragt.
+            #
+            # Also ein eigener Merker, der genau das festhaelt, was passiert
+            # ist: „dieser Index wurde einmal aufgebaut".
+            if self._conn.execute(
+                    "SELECT value FROM meta WHERE key = 'such.trigramm_aufgebaut'"
+            ).fetchone() is None:
+                self._conn.execute("INSERT INTO documents_tri(documents_tri) VALUES('rebuild')")
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('such.trigramm_aufgebaut', '1')")
+                logger.info("DB migration: Trigramm-Index fuer die Teilwort-Suche aufgebaut")
+            self._conn.commit()
+            self._such_trigramm = True
+        except sqlite3.Error as exc:
+            # Kein Drama und kein Abbruch: die Suche laeuft dann wie bisher.
+            logger.warning("Teilwort-Suche nicht verfuegbar (SQLite %s): %s",
+                           sqlite3.sqlite_version, exc)
+            self._such_trigramm = False
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -1182,12 +1262,19 @@ class Database:
             # keeps its statement and bookings whatever the category says — a
             # hand edit must never wipe a month of finances via the cascade.
             # The tidy step files it back under Kontoauszug on the next run.
-            if category != "Kontoauszug":
+            # 🔴 Rolle, nicht Wort: in einer englischen Installation heisst
+            # diese Kategorie „Bank statement". Der feste Vergleich traf dort
+            # nie zu — siehe kategorien.ROLLEN.
+            if not _kat_ist(category, "kontoauszug"):
                 self._conn.execute(
                     "DELETE FROM statements WHERE doc_id = ? AND opening_balance IS NULL "
                     "  AND COALESCE(file_hash, '') NOT LIKE 'csv-import:%'", (doc_id,)
                 )
-            if category != "Kassenzettel":
+            # 🔴 DIESE ZEILE HAT DATEN GELOESCHT. In einer englischen
+            # Installation heisst die Kategorie „Receipts", der Vergleich mit
+            # „Kassenzettel" war also IMMER wahr — jede Metadatenaenderung an
+            # einem Kassenzettel warf still seine Belegposten weg.
+            if not _kat_ist(category, "kassenzettel"):
                 self._conn.execute(
                     "DELETE FROM receipts WHERE doc_id = ?", (doc_id,)
                 )
@@ -1753,6 +1840,81 @@ class Database:
         # regex above, so there are no embedded quotes to escape.
         return " ".join(f'"{p}"*' for p in parts)
 
+    # ── Die Suchleiter (v0.91) ─────────────────────────────────────────────
+    #
+    # 🔴 WARUM DIE SUCHE MEHR ALS EINE STUFE BRAUCHT
+    #
+    # Bis hierher galt: ALLE eingegebenen Woerter mussten vorkommen, jedes am
+    # WORTANFANG. An einer echten Bibliothek mit 688 Dokumenten gemessen:
+    #
+    #     zwei Woerter                         39 Treffer
+    #     zwei andere Woerter                  14 Treffer
+    #     vier Woerter, eines daneben       🔴  0 Treffer
+    #
+    # Ein falsches Wort, und die Suche schweigt. Gefordert war das Gegenteil:
+    # wer einen Teil eines Namens eingibt, soll den Treffer bekommen — und
+    # mehrere, wenn mehrere ins Raster passen.
+    #
+    # Also drei Stufen, von streng nach weit. Die erste, die etwas findet,
+    # gewinnt — und die Oberflaeche sagt dazu, WELCHE es war, damit niemand
+    # eine weite Antwort fuer eine genaue haelt:
+    #
+    #   1. `genau`     alle Woerter, am Wortanfang          (wie bisher)
+    #   2. `teilwort`  alle Woerter, irgendwo im Text       (Trigramm)
+    #                  → „energie" findet „SachsenEnergie"
+    #   3. `locker`    die meisten Woerter, nach Relevanz   (ODER + bm25)
+    #                  → ein Wort daneben kostet nicht mehr alles
+    #
+    # 🔑 Eine Stufe wird nur betreten, wenn die vorige NICHTS gefunden hat.
+    # Wer eine genaue Antwort bekommt, bekommt keine ungenaue dazu.
+
+    @staticmethod
+    def _tri_match_query(raw: str) -> str | None:
+        """Dieselben Woerter als TEILZEICHENKETTEN (Trigramm-Index).
+
+        🔑 Der Trigramm-Tokenizer kann erst ab drei Zeichen suchen — kuerzere
+        Woerter werden weggelassen statt die ganze Frage unbrauchbar zu machen.
+        """
+        import re as _re
+        if not raw:
+            return None
+        parts = [p for p in _re.findall(r"[0-9A-Za-zÀ-ÿ_]+", raw) if len(p) >= 3]
+        if not parts:
+            return None
+        return " ".join(f'"{p}"' for p in parts)
+
+    @staticmethod
+    def _oder_match_query(raw: str) -> str | None:
+        """Die meisten Woerter statt aller — ODER, bewertet nach Relevanz.
+
+        🔑 Ein einzelnes Wort braucht diese Stufe nicht: bei einem Wort ist
+        ODER dasselbe wie UND. Sie wird nur gebaut, wenn es wirklich mehrere
+        sind — sonst wuerde die Oberflaeche „ungenauer Treffer" sagen, wo gar
+        nichts gelockert wurde.
+        """
+        import re as _re
+        if not raw:
+            return None
+        parts = _re.findall(r"[0-9A-Za-zÀ-ÿ_]+", raw)
+        if len(parts) < 2:
+            return None
+        return " OR ".join(f'"{p}"*' for p in parts)
+
+    def such_stufen(self, roh: str) -> list[tuple[str, str, str]]:
+        """Die Leiter als Liste: (Name der Stufe, Tabelle, Ausdruck)."""
+        stufen: list[tuple[str, str, str]] = []
+        genau = self._fts_match_query(roh)
+        if genau:
+            stufen.append(("genau", "documents_fts", genau))
+        if getattr(self, "_such_trigramm", False):
+            teil = self._tri_match_query(roh)
+            if teil:
+                stufen.append(("teilwort", "documents_tri", teil))
+        locker = self._oder_match_query(roh)
+        if locker:
+            stufen.append(("locker", "documents_fts", locker))
+        return stufen
+
     def _order_clause(self, order_by: str, sort_dir: str, *, fts: bool) -> str:
         expr_tmpl = self._SORT_EXPR.get(order_by)
         if expr_tmpl is None or (order_by == "relevance" and not fts):
@@ -1795,7 +1957,15 @@ class Database:
         scan_to: str | None = None,    # ISO date, filter created_at day <=
         limit: int = 200,
         offset: int = 0,
+        such_bericht: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        """`such_bericht` ist ein Ausgabefach: wird ein Woerterbuch
+        hineingegeben, steht danach darin, WELCHE Stufe der Suchleiter
+        geantwortet hat (`stufe`) und mit welchem Ausdruck (`ausdruck`).
+
+        🔑 Ein Ausgabefach statt eines zweiten Rueckgabewertes, weil sonst
+        jeder der zwoelf Aufrufer umgeschrieben werden muesste — und weil die
+        meisten die Auskunft gar nicht brauchen."""
         params: list[Any] = []
         # `_csv_container` is the sentinel category used by CSV-import
         # stub documents — they're never user-visible and must not
@@ -1807,7 +1977,7 @@ class Database:
         )
         trash_clause_plain = trash_clause.replace("d.", "")
         tag_like = f'%"{tag}"%' if tag else None
-        match_query = self._fts_match_query(query) if query else None
+        stufen = self.such_stufen(query) if query else []
 
         def _common_filters(prefix: str) -> tuple[list[str], list[Any]]:
             """Filter clauses shared by the FTS and non-FTS paths.
@@ -1854,20 +2024,45 @@ class Database:
                 pr.append(scan_to)
             return cl, pr
 
-        if match_query:
-            sql = (
-                "SELECT d.* FROM documents d "
-                "JOIN documents_fts f ON f.rowid = d.id "
-                f"WHERE documents_fts MATCH ? AND {trash_clause}"
-            )
-            params.append(match_query)
-            extra, extra_p = _common_filters("d.")
-            for c in extra:
-                sql += f" AND {c}"
-            params += extra_p
-            sql += " " + self._order_clause(order_by, sort_dir, fts=True)
-            sql += " LIMIT ? OFFSET ?"
-            params += [limit, offset]
+        if stufen:
+            # 🔑 Die Leiter wird hier wirklich gestiegen: Stufe fuer Stufe
+            # gefragt, die erste mit einem Treffer gewinnt. Steht am Ende
+            # nichts da, bleibt es bei der letzten Stufe — dann ist die
+            # Antwort ehrlich leer und nicht bloss ungefragt.
+            rows = []
+            benutzt = stufen[-1]
+            for name, tabelle, ausdruck in stufen:
+                # 🔑 Die Fundstelle mitliefern. Ohne sie sieht ein Treffer
+                # aus wie jeder andere Treffer, und niemand merkt, dass im
+                # INHALT gesucht wurde. Die Spalte -1 waehlt diejenige, in der
+                # der Treffer am besten passt.
+                sql = (
+                    f"SELECT d.*, snippet({tabelle}, -1, '\u2039', '\u203a', '…', 12) AS fundstelle "
+                    "FROM documents d "
+                    f"JOIN {tabelle} f ON f.rowid = d.id "
+                    f"WHERE {tabelle} MATCH ? AND {trash_clause}"
+                )
+                versuch: list[Any] = [ausdruck]
+                extra, extra_p = _common_filters("d.")
+                for c in extra:
+                    sql += f" AND {c}"
+                versuch += extra_p
+                # Eine gelockerte Suche ohne Relevanz waere eine Liste in
+                # zufaelliger Ordnung — der beste Treffer stuende irgendwo.
+                sortierung = "relevance" if name == "locker" else order_by
+                sql += " " + self._order_clause(sortierung, sort_dir, fts=True)
+                sql += " LIMIT ? OFFSET ?"
+                versuch += [limit, offset]
+                with self._lock:
+                    rows = self._conn.execute(sql, versuch).fetchall()
+                if rows:
+                    benutzt = (name, tabelle, ausdruck)
+                    break
+            if such_bericht is not None:
+                such_bericht["stufe"] = benutzt[0]
+                such_bericht["ausdruck"] = benutzt[2]
+                such_bericht["treffer"] = len(rows)
+            return [dict(r) for r in rows]
         else:
             where = [trash_clause_plain]
             extra, extra_p = _common_filters("")
