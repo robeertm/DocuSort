@@ -776,8 +776,96 @@ def main(argv: list[str] | None = None) -> int:
                         help="Read every Kontoauszug-PDF in the library into the finances (v0.47.0), then exit")
     parser.add_argument("--reocr-statements", action="store_true",
                         help="Re-read PDFs for Kontoauszug/Bank docs and refresh stored OCR text — fixes truncated text from earlier installs")
+    # ---- Wieder hineinkommen, wenn das Passwort nicht mehr geht ----
+    # 🔴 Siehe docusort/notzugang.py. Ohne das hier ist die Anmeldung die
+    #    einzige Tuer, und wer sie zuzieht, kommt an seine eigenen Dokumente
+    #    nicht mehr heran — auch nicht als Besitzer der Maschine.
+    parser.add_argument("--list-users", action="store_true",
+                        help="List the accounts in this installation and exit")
+    parser.add_argument("--reset-password", nargs="?", const="", metavar="USER",
+                        help="Set a NEW random password for USER (default: the "
+                             "first admin), print it once and exit. Run this on "
+                             "the machine DocuSort runs on when you are locked out.")
+    parser.add_argument("--add-admin", nargs="?", const="notzugang", metavar="NAME",
+                        help="Create an ADDITIONAL admin account with a random "
+                             "password, leaving every existing account untouched")
+    parser.add_argument("--reset-postwache", action="store_true",
+                        help="Roll a NEW pairing secret for the Postwache "
+                             "machine account and print it once. Enter the same "
+                             "word in Postwache afterwards.")
     parser.add_argument("--version", action="version", version=f"docusort {__version__}")
     args = parser.parse_args(argv)
+
+    if (args.list_users or args.reset_password is not None
+            or args.add_admin is not None or args.reset_postwache):
+        # 🔴 NICHT `from .config import load_config` — der Name waere damit
+        #    fuer die GANZE Funktion lokal, und die spaetere Zeile
+        #    `settings = load_config()` (die den Modul-Import meint) liefe in
+        #    einen UnboundLocalError. Das hat beim ersten Versuch JEDEN Start
+        #    zum Absturz gebracht: der Container kam hoch, die Oberflaeche
+        #    antwortete HTTP 000. Gefunden vom Auslieferungstor, nicht von
+        #    einem Test der neuen Befehle — die liefen alle gruen, weil bei
+        #    ihnen der Block ja AUSGEFUEHRT wurde.
+        from . import config as _config
+        from . import notzugang
+        from .db import Database
+        try:
+            einst = _config.load_config()
+            db = Database(Path(einst.paths.db))
+        except Exception as exc:                      # noqa: BLE001
+            print("cannot open the database: %s" % exc, file=sys.stderr)
+            return 2
+
+        if args.list_users:
+            leute = notzugang.benutzer_auflisten(db)
+            if not leute:
+                print("no accounts in this installation")
+                return 1
+            print("%-24s %-8s %-8s %s" % ("USERNAME", "ROLE", "ACTIVE", "LAST LOGIN"))
+            for u in leute:
+                print("%-24s %-8s %-8s %s"
+                      % (u["username"], u.get("role") or "",
+                         "yes" if u.get("is_active") else "NO",
+                         u.get("last_login") or "never"))
+            return 0
+
+        try:
+            if args.reset_postwache:
+                name, pw = notzugang.postwache_zuruecksetzen(db, einst.config_dir)
+                was = "New Postwache pairing word"
+            elif args.add_admin is not None:
+                name, pw = notzugang.notkonto_anlegen(db, args.add_admin or "notzugang")
+                was = "New admin account"
+            else:
+                name, pw = notzugang.passwort_setzen(db, args.reset_password or "")
+                was = "Password reset"
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        except LookupError as exc:
+            if str(exc) == "keine Konten":
+                print("this installation has no accounts yet — open the web "
+                      "interface, it will ask you to create the first one",
+                      file=sys.stderr)
+            else:
+                print("no such account: %s" % exc, file=sys.stderr)
+                print("run with --list-users to see the accounts", file=sys.stderr)
+            return 2
+        # 🔑 EINMAL anzeigen, nirgends speichern, nicht ins Protokoll.
+        print("")
+        print("  %s" % was)
+        print("  ----------------------------------------")
+        print("  user:     %s" % name)
+        print("  password: %s" % pw)
+        print("  ----------------------------------------")
+        if args.reset_postwache:
+            print("  Enter exactly this word in Postwache as well — it is the")
+            print("  same on both sides. Until you do, Postwache cannot deliver.")
+        else:
+            print("  Log in with this and DocuSort will ask you to choose a new one.")
+            print("  It is shown here once and is not stored anywhere.")
+        print("")
+        return 0
 
     if args.check_update or args.update:
         from . import updater

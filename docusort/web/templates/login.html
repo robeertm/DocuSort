@@ -30,5 +30,87 @@
     </div>
     <button type="submit" class="btn-primary w-full justify-center">{{ t('auth.login_action') }}</button>
   </form>
+
+  {# 🔴 WER AUSGESPERRT IST, SIEHT GENAU DIESE SEITE.
+     Ein Zurueck-Weg, der nur im Handbuch steht, ist fuer ihn nicht da.
+     Darum steht er hier — zugeklappt, damit er die Anmeldung nicht
+     zustellt, aber EINEN Klick entfernt.
+     🔑 Verraten wird nichts: alle Wege fuehren an einen Ort, an den ohnehin
+     nur kommt, wer Zugriff auf die Maschine hat.
+
+     🔴 UND HIER LAEUFT KEIN ALPINE. `auth_base.html` laedt es nicht — die
+     Anmeldeseite soll von keinem Rahmenwerk abhaengen. Ein erster Entwurf
+     benutzte `x-data`/`@click`, und der Knopf tat schlicht NICHTS: keine
+     Fehlermeldung, kein Eintrag, nur ein Knopf, der sich druecken liess.
+     Darum hier schlichtes JavaScript. #}
+  <details class="mt-5 text-xs text-ink-500">
+    <summary class="cursor-pointer select-none hover:text-ink-300 py-2">
+      {{ t('auth.forgot_title') }}
+    </summary>
+
+    {% if hat_kanal %}
+      <p class="mt-2 leading-relaxed">{{ t('auth.reset.via_channel') }}</p>
+    {% else %}
+      <p class="mt-2 leading-relaxed">{{ t('auth.reset.via_file') }}</p>
+    {% endif %}
+    <button type="button" id="ds-reset-knopf"
+            class="btn-secondary mt-2 w-full justify-center !py-2 text-xs
+                   disabled:opacity-50 disabled:cursor-not-allowed">
+      {% if hat_kanal %}{{ t('auth.reset.send') }}{% else %}{{ t('auth.reset.write') }}{% endif %}
+    </button>
+    <div id="ds-reset-meldung" hidden
+         class="mt-2 rounded-lg px-3 py-2 leading-relaxed"></div>
+
+    {# Und der Weg fuer den, der auf der Konsole sitzt. #}
+    <p class="mt-3 leading-relaxed">{{ t('auth.forgot_hint') }}</p>
+    <pre class="mt-1 whitespace-pre-wrap break-all rounded-lg bg-ink-950/70
+                border border-ink-800 p-2 text-[11px] leading-relaxed
+                text-ink-300"><code>{{ t('auth.reset.command') }}</code></pre>
+    <p class="mt-2 leading-relaxed">{{ t('auth.forgot_hint2') }}</p>
+  </details>
+
+  <script>
+    (function () {
+      var knopf = document.getElementById('ds-reset-knopf');
+      var kasten = document.getElementById('ds-reset-meldung');
+      if (!knopf || !kasten) return;
+      var T = {{ {
+        'sent':    t('auth.reset.sent'),
+        'file':    t('auth.reset.file_written'),
+        'failed':  t('auth.reset.failed'),
+        'sending': t('auth.reset.sending'),
+      } | tojson }};
+      var urtext = knopf.textContent;
+      function zeige(text, gut) {
+        kasten.innerHTML = text;
+        kasten.className = 'mt-2 rounded-lg px-3 py-2 leading-relaxed border ' +
+          (gut ? 'bg-emerald-500/10 text-emerald-200 border-emerald-500/30'
+               : 'bg-rose-500/10 text-rose-200 border-rose-500/30');
+        kasten.hidden = false;
+      }
+      knopf.addEventListener('click', function () {
+        knopf.disabled = true;
+        knopf.textContent = T.sending;
+        fetch('/login/reset', { method: 'POST' })
+          .then(function (r) {
+            return r.json().catch(function () { return {}; })
+              .then(function (j) { return { ok: r.ok, j: j }; });
+          })
+          .then(function (a) {
+            if (!a.ok) throw new Error(a.j.detail || T.failed);
+            var j = a.j;
+            // 🔑 Der Text sagt, WOHIN es gegangen ist — sonst sucht jemand in
+            //    Telegram, waehrend die Datei auf der Platte liegt.
+            var txt = (j.weg === 'datei')
+              ? T.file.replace('{file}', '<code>config/' + j.dateiname + '</code>')
+              : T.sent.replace('{channel}', (j.kanaele || []).join(', '));
+            zeige(txt.replace('{user}', '<b>' + j.benutzer + '</b>')
+                     .replace('{min}', j.gueltig_min), true);
+          })
+          .catch(function (e) { zeige(e.message || T.failed, false); })
+          .then(function () { knopf.disabled = false; knopf.textContent = urtext; });
+      });
+    })();
+  </script>
 </div>
 {% endblock %}
