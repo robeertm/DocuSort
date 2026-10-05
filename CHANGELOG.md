@@ -7,6 +7,86 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.94.0] - 2026-10-05
+
+### Fixed
+
+📉 **Every bar in "Income & spending per salary month" was the same length.**
+The chart listed eighteen periods — one bar for money in, one for money out —
+and all of them ran the full width of the card. It had not shown anything for
+some time, and it looked entirely healthy while doing so.
+
+The width was written by the display formatter:
+
+    style="width: {{ x | zahl(1) }}%"   ->   width: 6,1%
+
+That formatter writes numbers the German way, with a comma. CSS cannot read a
+comma there, so the browser discards the whole declaration — no error, no
+console message, nothing wrong-looking in the source — and the bar falls back
+to the full width of its box. The same formatter was on the budget progress
+bar, and on the starting-balance input field, where a Jinja precedence detail
+(`a or 0 | zahl(2)` binds as `a or (0 | zahl(2))`) meant an existing balance
+was printed raw while only the fallback was formatted.
+
+Display formatting now stops where a machine reads: a separate `css_pct`
+filter writes CSS widths, clamped to 0–100. A probe renders the page and
+holds the property — every width is a number CSS can parse, and two different
+values produce two different bar lengths. A bar chart where every bar is
+equally long is a failure even when every value is valid.
+
+📱 **The account filter could not be reached on a phone.** The panel is 256
+pixels wide and was pinned to the right edge of its button. On a phone the
+toolbar sits on the left, so the panel extended off the left side of the
+screen: its left edge started at −129 px. A strip of it was visible and not a
+single checkbox could be ticked. The same filter on /fixkosten had it too.
+
+The phone probe could not have found this: the panel is `x-show` and therefore
+invisible until opened, and invisible elements are (rightly) skipped. It now
+opens every disclosure it can find — any button whose `relative` box contains
+an `x-show` panel — and measures each one. Nothing else is clicked.
+
+📐 **And the salary-month table ran off the left on a 360 px phone.** Four
+fixed number columns plus their gaps come to 340 px; a 360 px phone leaves
+about 328 px after the page margin, and because the row is right-aligned the
+income column started at −17 px. The columns are narrower below `sm`. Found
+by the extended probe, not reported.
+
+### Added
+
+🗓 **/ausgaben can cut any period, not just one month.** The salary month
+stays the default and keeps its list — it is the question that matters daily.
+Beside it: the last 3, 6, 12 or 24 months, a calendar year, or a free
+from–to. Every one of them carries a previous period of the *same length*, so
+the comparison means something: a year against the year before, a free range
+against the equally long range immediately before it. An incomplete from–to
+falls back to the salary month rather than showing an empty page, which would
+look like "no bookings".
+
+◆ **Special pots can be counted back in.** The figure that says how much was
+left out is now the switch that puts it back — one click, and the view
+recalculates with those categories included; the badge then says so. It is a
+property of the *view* and lives in the address, so a link still shows what it
+says. Which categories *are* special pots is a setting and is not touched.
+
+📄 **And the period can be exported as a PDF — one sheet, A4.** Totals,
+comparison with the previous period, every category with its bar and share,
+income by category when it fits, fixed against variable at the foot. It is
+drawn from the same calculation the page uses, never a second one beside it.
+
+Nothing flows onto a second page: the number of rows is computed from the
+space that is actually left, and whatever does not fit is summarised as
+"Others (n)". A canvas never breaks a page by itself — it would simply draw
+past the bottom edge and lose the content — so the probe checks the position
+of every piece of text, not just the page count.
+
+The sheet embeds Bitstream Vera (shipped with reportlab). The fourteen
+built-in PDF fonts are not embedded, and the original Helvetica has no euro
+sign at all; the substitute glyph is wider than the declared metric, so
+"9.000,00 € aus Sondertöpfen" came out as "€aus" — the space was drawn and
+then covered. That was found by looking at the sheet, not by measuring it.
+
+This adds `reportlab` to the requirements.
+
 ## [0.93.1] - 2026-10-05
 
 ### Fixed

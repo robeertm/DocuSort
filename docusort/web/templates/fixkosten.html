@@ -31,7 +31,7 @@
                         : tr('spending.accounts_all')"></span>
         </button>
         <div x-show="accOpen" x-cloak
-             class="absolute right-0 z-30 mt-1 w-64 rounded-xl border border-ink-700 bg-ink-900 p-3 shadow-xl text-left">
+             class="absolute left-0 sm:left-auto sm:right-0 z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-xl border border-ink-700 bg-ink-900 p-3 shadow-xl text-left">
           <div class="text-[10px] uppercase tracking-wider text-ink-500 mb-2">{{ t('spending.accounts_title') }}</div>
           <div class="space-y-1.5 max-h-60 overflow-y-auto">
             <template x-for="a in accounts" :key="a.id">

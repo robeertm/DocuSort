@@ -5309,16 +5309,25 @@ class Database:
     def finance_spend_by_category(self, *, month: str | None = None,
                                   periods: list[dict[str, Any]] | None = None,
                                   history: int = 6,
-                                  account_ids: list[int] | None = None) -> dict[str, Any]:
+                                  account_ids: list[int] | None = None,
+                                  windows: list[dict[str, Any]] | None = None,
+                                  include_special: bool = False) -> dict[str, Any]:
         """Spending of one month by *transaction category* — the categories
         the user assigns, the classifier explains and the rules learn. One
         system for the whole app (v0.45 — before that the spending tab did
         not notice a re-categorisation at all).
 
-        Two ways to cut a "month":
+        Drei Arten, einen "Monat" zu schneiden:
+        - `windows` given → frei gewaehlte Fenster (Jahr, letzte N Monate,
+          Von–Bis), neuestes zuerst; gebaut von `finance.periods.window_series`.
+          Hat Vorrang vor `periods`, weil es die ausdrueckliche Wahl ist.
         - `periods` given → salary months (Gehalt bis Gehalt); `month` is the
           period's start date and the result carries `range_start`/`range_end`.
-        - no `periods` → calendar months, `month` is 'YYYY-MM'.
+        - sonst → calendar months, `month` is 'YYYY-MM'.
+
+        `include_special=True` zaehlt die Sondertoepfe MIT. Die Kennzahl
+        `special_total` meldet sie weiterhin — dann eben als mitgezaehlte
+        Summe, damit die Seite sagen kann, welche Rechnung gerade gilt.
         Only outgoing bookings on spending accounts count — savings accounts,
         internal transfers and saving categories (money moved, not spent) are
         excluded. Per category: total, count, share, top payees, the bookings
@@ -5330,6 +5339,16 @@ class Database:
         # 🔴 Vor dem Schloss holen — `_rows()` nimmt es selbst.
         sonder_cats = self.finance_special_categories()
         s_sql, s_par = self.sonder_sql(sonder_cats)
+        # 🔑 ZWEI Bedingungen, nicht eine. `s_sql` erkennt einen
+        #    Sondertopf und wird IMMER gebraucht — die Seite weist die
+        #    Summe aus, egal wie gerechnet wird. `x_sql` entscheidet, was
+        #    herausgefiltert wird, und ist leer, sobald mitgezaehlt wird.
+        #    Beides in eine Bedingung zu legen hiesse: wer die Toepfe
+        #    einblendet, sieht nicht mehr, WIEVIEL er damit eingeblendet hat.
+        if include_special:
+            x_sql, x_par = "(0)", []
+        else:
+            x_sql, x_par = s_sql, list(s_par)
         fixed = set(self.finance_fixed_categories())
         # A booking is a fixed cost when it belongs to a counted item on
         # /fixkosten (same payee, same amount class) — not when its whole
@@ -5345,7 +5364,14 @@ class Database:
                 return True
             # a category counted as a monthly average on /fixkosten
             return (r.get("category") or "sonstiges") in avg_cats
-        if periods:
+        if windows:
+            # Schon neuestes zuerst — `window_series` liefert es so.
+            plist = [{"key": w["key"], "start": w["start"], "end": w["end"],
+                      "is_current": bool(w.get("is_current")), "due_date": ""}
+                     for w in windows]
+            keys = [p["key"] for p in plist]
+            mode = "range"
+        elif periods:
             plist = [{"key": p["start"], "start": p["start"], "end": p["end"],
                       "is_current": p.get("is_current", False), "due_date": p.get("due_date", "")}
                      for p in reversed(periods)]      # newest first, like the calendar list
@@ -5373,7 +5399,7 @@ class Database:
         def _range(key: str) -> tuple[str, str]:
             if not key:
                 return "", ""
-            if mode == "salary":
+            if plist:
                 p = next((x for x in plist if x["key"] == key), None)
                 if not p:
                     return "", ""
@@ -5426,11 +5452,11 @@ class Database:
                          AND COALESCE(a.is_savings, 0) = 0
                          AND COALESCE(t.category, '') != 'uebertrag'
                          AND COALESCE(t.category, '') NOT IN (""" + ",".join("?" * len(saving)) + """)
-                         AND NOT """ + s_sql + """
+                         AND NOT """ + x_sql + """
                          AND """ + ("t.amount > 0" if income else "t.amount < 0") + acc_sql + """
                          AND t.booking_date >= ? AND t.booking_date <= ?
                        ORDER BY t.booking_date DESC, t.id DESC""",
-                    (*saving, *s_par, *acc_args, a, b),
+                    (*saving, *x_par, *acc_args, a, b),
                 ).fetchall()
             return [dict(r) for r in rows]
 
@@ -5546,6 +5572,7 @@ class Database:
             "special_total": round(float(srow["summe"] or 0.0), 2),
             "special_count": int(srow["n"] or 0),
             "special_cats": list(sonder_cats),
+            "special_included": bool(include_special),
             "range_start": rs, "range_end": re_,
             "prev_month": prev_month, "prev_range_start": prs, "prev_range_end": pre,
             "total": total, "fixed_total": fixed_total, "variable_total": round(total - fixed_total, 2),

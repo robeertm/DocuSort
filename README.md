@@ -100,7 +100,25 @@ choose to send to an AI model — and you can point that at a local model too.
 - **Fixed costs found automatically** — same payee, steady amount, steady
   rhythm — with a monthly and a yearly figure.
 - **Salary month** instead of calendar month: the period runs from one salary
-  to the next, which is how a household actually budgets.
+  to the next, which is how a household actually budgets. It is the default —
+  and beside it the same page cuts **the last 3, 6, 12 or 24 months, a
+  calendar year, or any from–to you type**. Each of those carries a previous
+  period of the *same length*, so the comparison means something: a year
+  against the year before, a free range against the equally long one before
+  it.
+- **Special pots can be counted back in.** Categories you have marked as a
+  special pot (a kitchen, a roof, a wedding) are left out of the monthly
+  figures, because one of those months would otherwise bury every other.
+  The badge that tells you how much was left out is the switch that puts it
+  back: one click and the view recalculates with them included. It is a
+  property of the view and lives in the address, so a link still shows what
+  it says — the setting for which categories *are* special pots is not
+  touched.
+- **Any period as a PDF, on one sheet.** Totals, the comparison with the
+  period before, every category with its bar and share, income by category,
+  fixed against variable. Drawn from the same calculation the page uses, and
+  it never runs onto a second page: what does not fit is summarised rather
+  than cut off.
 - **Invoices are matched to the bookings that paid them** (amount to the cent,
   payee tokens, date window, assigned one-to-one closest-first).
 - **Pick the accounts that count.** On the spending and the fixed-costs page
