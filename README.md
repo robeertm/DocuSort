@@ -142,9 +142,13 @@ months so you can see which one actually went best.
 ### On a phone
 
 The phone view is built for the phone, not squeezed down from the desktop:
-a tab bar within thumb reach, tables turned into readable rows, every
-control at least 44 pixels tall, and filters that fold away instead of
-standing in front of your data.
+a tab bar within thumb reach, tables turned into readable rows, filters that
+fold away instead of standing in front of your data, and cards that lead with
+the document's name.
+
+Controls are not all stretched to thumb size — a checkbox stays a checkbox.
+Each one carries an invisible 44 × 44 field instead, so the eye sees a square
+and the thumb still hits it. Measured on an iPhone Air, 420 × 912 points.
 
 <table>
   <tr>
@@ -156,6 +160,11 @@ standing in front of your data.
     <td><a href="docs/screenshots/20-mobile-daily.png"><img src="docs/screenshots/20-mobile-daily.png" alt="Daily chart on a phone" /></a></td>
     <td><a href="docs/screenshots/21-mobile-game.png"><img src="docs/screenshots/21-mobile-game.png" alt="Saving game on a phone" /></a></td>
     <td><a href="docs/screenshots/23-mobile-fixed.png"><img src="docs/screenshots/23-mobile-fixed.png" alt="Fixed costs on a phone" /></a></td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/24-mobile-library.png"><img src="docs/screenshots/24-mobile-library.png" alt="Library on a phone: each card leads with the document name" /></a></td>
+    <td><a href="docs/screenshots/13-mobile-spending.png"><img src="docs/screenshots/13-mobile-spending.png" alt="Monthly spending on a phone" /></a></td>
+    <td></td>
   </tr>
 </table>
 
