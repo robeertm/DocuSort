@@ -7,6 +7,51 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.97.0] - 2026-10-05
+
+### Added
+
+🎯 **A budget planner.** A new tab that asks what none of the other pages do:
+*what would happen if.* Everything else looks backwards at money already
+spent — this one looks forward, and it starts from measurement rather than
+from guesswork.
+
+**Income is the median of your regular earnings**, and only the regular ones.
+An inheritance, a tax refund, a closed savings account are real money, but
+nothing a monthly commitment may stand on; they are listed with their total
+and deliberately left out of every figure. The current month is never counted
+either — on its third day it would make any household look frugal. Median
+rather than average throughout, because a single kitchen paid in cash would
+otherwise set the level for the whole year.
+
+**A contract is not a habit.** Both repeat, and the fixed-costs detector sees
+both the rent and the weekly supermarket. But the rent is the same amount on
+the same day and the supermarket is not, and only what truly repeats becomes
+the **floor** of a pot: the slider will not go below it, because that part
+needs a cancellation rather than a decision. Tick the contract and the floor
+drops. A premium paid once a year shows nothing in eleven months and is
+budgeted monthly all the same.
+
+**The goal is three blocks that add up**, and you use only the ones you need:
+simply more left over each month, a housing cost that is known to change
+(moving, a mortgage instead of rent), or a sum by a date, which becomes a
+monthly rate. A bar that stays in view says what is still missing.
+
+**Then you move the sliders.** What you take from one pot lands in what is
+left over, live. Beside them, where something can be found: proposals measured
+straight out of your own bookings, each naming the figures it rests on — "in
+the cheapest month it was 186 €, usually 540 €". Cancelling your own rent is
+not offered as a saving; that is a move, and the goal already models it.
+
+**And a local model may add ideas.** It suggests where and how, in one
+concrete sentence — and every amount it names is capped at the measured room
+of that pot before it is shown. DocuSort does the arithmetic, never the model.
+Without a model the planner is complete; the measured half is the half that
+cannot be wrong.
+
+Nothing is written while you drag. Calculating is a question, saving is a
+decision, and only the Save button writes.
+
 ## [0.96.0] - 2026-10-05
 
 ### Fixed

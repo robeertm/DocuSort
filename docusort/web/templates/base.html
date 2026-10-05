@@ -74,7 +74,7 @@
     ('/library', t('nav.library')), ('/library?status=review', t('nav.review')), ('/analytics', t('nav.analytics')),
   ] %}
   {% set nav_finanzen = [
-    ('/finance', t('nav.finance_overview')), ('/rechnungen', t('nav.invoices')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')),
+    ('/finance', t('nav.finance_overview')), ('/rechnungen', t('nav.invoices')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')), ('/budget', t('nav.budget')),
   ] %}
   {# Die flache Liste — fuer den Streifen und alles, was keinen Platz fuer ein
      Menue hat. Sie wird aus denselben beiden Gruppen gebaut, damit die
@@ -621,6 +621,8 @@ function updateBanner() {
           <span class="w-6 text-center">📒</span>{{ t('nav.transactions') }}</a>
         <a href="/fixkosten" class="sheet-row" {% if path == '/fixkosten' %}aria-current="page"{% endif %}>
           <span class="w-6 text-center">🔁</span>{{ t('nav.fixed') }}</a>
+        <a href="/budget" class="sheet-row" {% if path == '/budget' %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center">🎯</span>{{ t('nav.budget') }}</a>
         <a href="/library?status=review" class="sheet-row">
           <span class="w-6 text-center">👀</span>{{ t('nav.review') }}</a>
         {% if me.is_admin %}
