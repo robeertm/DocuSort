@@ -149,12 +149,22 @@
      (kein Betrag gelesen), erfährt das samt Weg dorthin. #}
   <div x-show="f.q && (daten.stufe || daten.ausgeblendet || daten.nur_bibliothek)"
        x-cloak class="space-y-2">
+    {# 🔴 EIGENE TEXTE, NICHT DIE DER BIBLIOTHEK (06.10.2026)
+
+       Zuerst standen hier `library.search.hint_*` — dieselbe Leiter, also
+       dieselben Worte. Falsch, und zwar an einer Stelle, die zaehlt: der
+       Bibliothekstext verspricht „das passendste zuerst", weil die Bibliothek
+       bei einer gelockerten Suche nach RELEVANZ sortiert. Diese Seite sortiert
+       nach Datum und gruppiert nach Thema. An Roberts Bestand gemessen fand
+       „stadtwerke radeberg" so 136 von 152 Rechnungen — jede, die seinen
+       Wohnort nennt. Das ist ein brauchbares Verhalten, aber nur, wenn
+       danebensteht, WAS es ist. #}
     <div x-show="daten.stufe === 'teilwort'"
          class="rounded-lg px-3 py-2 text-xs bg-sky-500/10 text-sky-200 ring-1 ring-sky-500/20"
-         x-text="tr('library.search.hint_teilwort')"></div>
+         x-text="tr('inv.search.part')"></div>
     <div x-show="daten.stufe === 'locker'"
          class="rounded-lg px-3 py-2 text-xs bg-amber-500/10 text-amber-200 ring-1 ring-amber-500/20"
-         x-text="tr('library.search.hint_locker')"></div>
+         x-text="tr('inv.search.loose')"></div>
     <div x-show="!hinweise && daten.ausgeblendet"
          class="rounded-lg px-3 py-2 text-xs bg-ink-800/60 text-ink-300 ring-1 ring-ink-700">
       <span x-text="tr('inv.hidden_hits', {n: daten.ausgeblendet || 0})"></span>

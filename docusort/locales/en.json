@@ -937,6 +937,8 @@
   "inv.reset": "reset",
   "inv.rows": "The invoices",
   "inv.search": "Search",
+  "inv.search.loose": "No document contains all your words — showing every one that contains at least one of them. A narrower search helps.",
+  "inv.search.part": "No exact match — showing documents that contain your words anywhere in the text.",
   "inv.search_hint": "sender, subject, evidence, content …",
   "inv.sender": "Sender",
   "inv.show_notes": "show notes",

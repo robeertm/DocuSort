@@ -7,6 +7,109 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.98.1] - 2026-10-06
+
+### Fixed
+
+🔴 **Installing a second time from a different folder took the installation
+over — and showed an empty library.** Reported after a broken release and the
+update that followed it: a user could not reach his database any more and
+uploaded every document again.
+
+Reproduced on a real Docker machine, and it is exactly what happens. The
+install directory follows the **working directory** (`$PWD/docusort`), and the
+compose file it writes mounts **relatively** (`./data:/data`). Whoever runs the
+one-liner a second time while standing somewhere else — in the downloads
+folder, in the home directory, inside the installation itself — gets a second
+directory. The container is called `docusort` either way, so compose rebuilds
+it with the new paths. DocuSort runs, the library is empty, and the old
+database sits untouched in the first folder. Measured: return code 0, not one
+word about it.
+
+**The installer no longer follows the working directory.** It asks, in order:
+`DOCUSORT_DIR` if you set it · where the **running** container keeps its
+documents · whether you are standing **inside** an installation (that is how
+`docusort/docusort` was born) · whether one is already next to you. Only then
+does it make a new one. Simulated on a real Docker machine: a second run from
+another folder now says *"Using …/zuhause/docusort — this is where the running
+DocuSort keeps its documents"*, the container keeps its data, and the three
+documents are still there. Standing inside the installation no longer creates a
+nested one.
+
+**And it looks for an archive that nothing is using.** Two levels deep in the
+places people actually stand, never the whole disk. If the folder this run
+would have used is empty and exactly one such archive exists, it installs
+*there* instead — without moving a single file.
+
+### Added
+
+🔀 **Two archives can be made into one.** Whoever ended up with two data
+directories has their post in halves — and usually uploaded the second half by
+hand. `--merge-from` puts them together:
+
+```
+docker run --rm -v <installation>/data:/data -v <installation>/config:/app/config \
+  -v <other>/data:/fremd:ro ghcr.io/robeertm/docusort:latest \
+  python -m docusort --merge-from /fremd
+```
+
+It **shows** first and writes nothing; `--merge-apply` carries it out. The
+installer offers the same thing when it finds another archive, asks before
+doing anything, and stops the container while it works — two writers on one
+SQLite file is a way to lose both halves.
+
+What it promises, and what is measured in `probe_zusammenfuehren.py` (39
+checks, against real databases and real files):
+
+* **Nothing is deleted.** The source is opened read-only, the target is backed
+  up first.
+* **Nothing is duplicated.** The same document in both archives is recognised
+  by its **content** (SHA256), not by its name — a PDF uploaded twice under two
+  names counts once. Bookings go by their hash, accounts by the IBAN hash.
+* **The file comes with the row.** A row whose PDF is missing is *not* taken
+  over, and it is named.
+* **Running it twice changes nothing the second time.**
+* **The other archive is untouched**, so every step is reversible.
+* Learned rules and categories are merged; accounts, sessions and settings of
+  the target are left exactly as they are.
+
+### Fixed
+
+**If this happened to you, nothing is lost.** Ask Docker where the current
+installation keeps its data:
+
+```
+docker inspect docusort --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}
+{{end}}'
+```
+
+and look for the other one:
+
+```
+find / -name docusort.db 2>/dev/null
+```
+
+The bigger file is your archive. Stop the container, put the old `data`,
+`config` and `logs` folders back beside the compose file that is in use (or run
+`docker compose up -d` in the old folder instead), and everything is there
+again.
+
+🔴 **Three comment lines in the installer were executed as commands.** The
+compose file is written through an unquoted heredoc, so the backticks around
+`restarting` and `scanned=0` were command substitution. Users saw
+`install.sh: line 100: restarting: command not found` during an otherwise
+healthy install, and the words were missing from the generated file.
+
+The hint above a relaxed search on the invoice page promised something the page
+does not do. It was the library's text, reused because both use the same search
+ladder — but the library sorts a relaxed answer **by relevance** and says "the
+best one first". The invoice page sorts by date and groups by topic.
+
+Measured on a real archive: `stadtwerke radeberg` found 136 of 152 invoices —
+every one that names the town. That is useful behaviour, but only when the line
+beside it says what it is. The page now has its own two sentences, and neither
+promises an order.
+
 ## [0.98.0] - 2026-10-06
 
 ### Fixed

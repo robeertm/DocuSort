@@ -937,6 +937,8 @@
   "inv.reset": "réinitialiser",
   "inv.rows": "Les factures",
   "inv.search": "Recherche",
+  "inv.search.loose": "Aucun document ne contient tous les mots — voici tous ceux qui en contiennent au moins un. Une recherche plus précise aide.",
+  "inv.search.part": "Aucune correspondance exacte — voici les documents où vos mots apparaissent quelque part dans le texte.",
   "inv.search_hint": "expéditeur, objet, justificatif, contenu …",
   "inv.sender": "Expéditeur",
   "inv.show_notes": "afficher les mentions",

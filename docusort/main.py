@@ -793,8 +793,48 @@ def main(argv: list[str] | None = None) -> int:
                         help="Roll a NEW pairing secret for the Postwache "
                              "machine account and print it once. Enter the same "
                              "word in Postwache afterwards.")
+    # ---- Zwei Archive zu einem machen ----
+    # 🔴 Siehe docusort/zusammenfuehren.py. Wer durch den alten Installer zwei
+    #    Datenverzeichnisse hat, braucht einen Weg zusammen — und zwar einen,
+    #    der erst zeigt und dann schreibt.
+    parser.add_argument("--merge-from", metavar="DATENORDNER",
+                        help="Show what another DocuSort data directory would "
+                             "add to this one (documents, bookings, learned "
+                             "rules). Nothing is written without --merge-apply.")
+    parser.add_argument("--merge-apply", action="store_true",
+                        help="Really carry out the merge shown by --merge-from. "
+                             "The target database is backed up first.")
     parser.add_argument("--version", action="version", version=f"docusort {__version__}")
     args = parser.parse_args(argv)
+
+    if args.merge_from:
+        # 🔴 NICHT `from .config import load_config` — siehe die Begruendung
+        #    im Block darunter: der Name waere damit fuer die ganze Funktion
+        #    lokal und riss beim ersten Versuch JEDEN Start mit.
+        from . import config as _config
+        from . import zusammenfuehren as _zus
+        try:
+            einst = _config.load_config()
+        except Exception as exc:                      # noqa: BLE001
+            print("cannot read the configuration: %s" % exc, file=sys.stderr)
+            return 2
+        ziel_daten = Path(einst.paths.db).parent.parent
+        quelle_daten = Path(args.merge_from)
+        if (quelle_daten / "library" / "docusort.db").exists():
+            pass
+        elif (quelle_daten / "data" / "library" / "docusort.db").exists():
+            # 🔑 Der Mensch zeigt auf den Installationsordner, nicht auf `data`.
+            #    Beides annehmen ist freundlicher als eine Belehrung.
+            quelle_daten = quelle_daten / "data"
+        bericht = _zus.zusammenfuehren(ziel_daten, quelle_daten,
+                                       trocken=not args.merge_apply)
+        _zus.bericht_zeigen(bericht)
+        if bericht["fehler"] and not bericht["dokumente_neu"] \
+                and not bericht["dokumente_bekannt"]:
+            return 2
+        if not args.merge_apply:
+            print("  Run it again with --merge-apply to carry it out.")
+        return 0
 
     if (args.list_users or args.reset_password is not None
             or args.add_admin is not None or args.reset_postwache):
