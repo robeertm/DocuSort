@@ -129,6 +129,48 @@
     <span x-text="tr('inv.net_caveat', {n: daten.summen?.netto_vorbehalt || 0})"></span>
   </div>
 
+  <!-- ===== Was die Suche getan hat ===== -->
+  {# 🔴 WARUM DIESER KASTEN EXISTIERT (06.10.2026)
+
+     Gemeldet wurde, daß diese Seite bei einer Suche nicht alles anzeigt —
+     anders als die Bibliothek. Zwei Ursachen, beide hier sichtbar gemacht
+     statt verschwiegen:
+
+     1. die Suche verglich nur sechs Felder als Teilzeichenkette — zwei Wörter
+        fanden nie etwas. Jetzt dieselbe Suchleiter wie in der Bibliothek, und
+        wenn sie lockern mußte, sagt sie das (dieselben Texte, einmal gepflegt).
+     2. Treffer, die KEINE Forderung sind (Rente, Guthaben, Ersparnis), liegen
+        hinter dem Schalter „Hinweise zeigen". Die Zahl daneben zählte über den
+        ganzen Bestand — bei einer Suche sprach sie also von Dokumenten, die
+        gar nicht gesucht waren. Jetzt zählt sie die EIGENEN Treffer, und hier
+        steht, daß es sie gibt.
+
+     Und wer in der Bibliothek Treffer hat, die hier nie erscheinen können
+     (kein Betrag gelesen), erfährt das samt Weg dorthin. #}
+  <div x-show="f.q && (daten.stufe || daten.ausgeblendet || daten.nur_bibliothek)"
+       x-cloak class="space-y-2">
+    <div x-show="daten.stufe === 'teilwort'"
+         class="rounded-lg px-3 py-2 text-xs bg-sky-500/10 text-sky-200 ring-1 ring-sky-500/20"
+         x-text="tr('library.search.hint_teilwort')"></div>
+    <div x-show="daten.stufe === 'locker'"
+         class="rounded-lg px-3 py-2 text-xs bg-amber-500/10 text-amber-200 ring-1 ring-amber-500/20"
+         x-text="tr('library.search.hint_locker')"></div>
+    <div x-show="!hinweise && daten.ausgeblendet"
+         class="rounded-lg px-3 py-2 text-xs bg-ink-800/60 text-ink-300 ring-1 ring-ink-700">
+      <span x-text="tr('inv.hidden_hits', {n: daten.ausgeblendet || 0})"></span>
+      <button type="button" @click="hinweise = true; holen()"
+              class="underline underline-offset-2 hover:text-ink-100"
+              x-text="tr('inv.show_notes')"></button>
+    </div>
+    <div x-show="daten.nur_bibliothek"
+         class="rounded-lg px-3 py-2 text-xs bg-ink-800/60 text-ink-300 ring-1 ring-ink-700">
+      <span x-text="tr('inv.only_library', {n: daten.nur_bibliothek || 0})"></span>
+      <a :href="'/library?q=' + encodeURIComponent(f.q)"
+         class="underline underline-offset-2 hover:text-ink-100"
+         x-text="tr('inv.only_library_link')"></a>
+    </div>
+  </div>
+
   <!-- ===== Gruppen ===== -->
   <section class="card p-0 overflow-hidden" x-show="daten.gruppen && daten.gruppen.length" x-cloak>
     <div class="px-4 py-3 border-b border-ink-700/60 flex items-center justify-between">

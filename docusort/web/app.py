@@ -3703,12 +3703,34 @@ def create_app(
         arten = ("forderung", "gutschrift", "hinweis", "unbekannt") \
             if (art or "").strip() == "alle" else liste(art)
 
+        # 🔴 DIE SUCHE GEHT UEBER DIESELBE LEITER WIE DIE BIBLIOTHEK.
+        #    Gemeldet wurde, dass diese Seite bei einer Suche nicht alles
+        #    anzeigt, anders als die Bibliothek. Vorher wurde die Eingabe
+        #    als Teilzeichenkette mit sechs Feldern verglichen — zwei Woerter
+        #    fanden nie etwas, der Inhalt eines Scans wurde gar nicht gelesen.
+        #
+        # 🔑 Die Leiter wird auf die Dokumente eingegrenzt, die diese Seite
+        #    ueberhaupt zeigt (einen gelesenen Betrag haben). Sonst gewaenne
+        #    eine Stufe mit Treffern, die hier alle herausfallen, und die
+        #    Antwort waere leer, obwohl die naechste Stufe geliefert haette.
+        such = (q or "").strip()
+        stufe, ids = ("", None)
+        nur_bibliothek = 0
+        if such:
+            stufe, ids = db.such_dokument_ids(
+                such, zusatz="d.due_amount IS NOT NULL")
+            # Was die Suche sonst noch gefunden haette — in der Bibliothek,
+            # ohne gelesenen Betrag. Nur die Zahl, nie die Dokumente.
+            _, alle_ids = db.such_dokument_ids(such)
+            nur_bibliothek = len(alle_ids - ids)
+
         return auswerten(
             db.invoice_rows(),
             von=(von or "").strip(), bis=(bis or "").strip(),
             kategorien=liste(kategorie), zustaende=liste(zustand),
-            arten=arten, suche=(q or "").strip(),
+            arten=arten, suche=such,
             gruppe=(gruppe or "kategorie").strip(),
+            ids=ids, stufe=stufe, nur_bibliothek=nur_bibliothek,
         )
 
     @app.get("/transactions", response_class=HTMLResponse)

@@ -1915,6 +1915,53 @@ class Database:
             stufen.append(("locker", "documents_fts", locker))
         return stufen
 
+    def such_dokument_ids(
+        self, roh: str, *, zusatz: str = "", zusatz_params: tuple = (),
+    ) -> tuple[str, set[int]]:
+        """Dieselbe Suchleiter wie die Bibliothek — als Menge von Dokument-IDs.
+
+        🔴 WARUM ES DAS GIBT (06.10.2026). Gemeldet wurde, dass die Suche auf
+        der Rechnungsseite nicht alles anzeigt, anders als die Suche in der
+        Bibliothek. Das war kein Gefuehl. Die
+        Rechnungsseite verglich die Eingabe als TEILZEICHENKETTE mit sechs
+        Feldern; die Bibliothek sucht im ganzen Text, Wort fuer Wort. Gemessen
+        an denselben Dokumenten:
+
+            telekom rechnung  ->  Bibliothek 3,  Rechnungen 0
+            telekom maerz     ->  Bibliothek 1,  Rechnungen 0
+            kundennummer      ->  Bibliothek 1,  Rechnungen 0
+            123456            ->  Bibliothek 1,  Rechnungen 0
+
+        Zwei Woerter fanden NIE etwas, solange sie nicht zusammenhaengend in
+        EINEM Feld standen — und der Inhalt eines Scans wurde gar nicht gelesen.
+
+        🔑 `zusatz` grenzt die Leiter auf die Dokumente ein, um die es auf der
+        rufenden Seite ueberhaupt geht. Ohne das koennte die erste Stufe mit
+        Treffern gewinnen, die dort alle herausgefiltert werden — und die
+        Antwort waere leer, obwohl die naechste Stufe geliefert haette.
+        """
+        stufen = self.such_stufen(roh) if roh else []
+        if not stufen:
+            return "", set()
+        # 🔑 Findet KEINE Stufe etwas, heisst die Antwort auch keine Stufe. Die
+        #    Bibliothek nennt in diesem Fall ebenfalls keine — eine leere
+        #    Antwort braucht keine Erklaerung, wie weit gesucht wurde.
+        benutzt, ids = "", set()
+        for name, tabelle, ausdruck in stufen:
+            sql = (f"SELECT d.id FROM documents d JOIN {tabelle} f "
+                   f"ON f.rowid = d.id WHERE {tabelle} MATCH ? "
+                   "AND d.deleted_at IS NULL AND d.category != '_csv_container'")
+            p: list[Any] = [ausdruck]
+            if zusatz:
+                sql += " AND " + zusatz
+                p += list(zusatz_params)
+            with self._lock:
+                reihen = self._conn.execute(sql, p).fetchall()
+            if reihen:
+                benutzt, ids = name, {int(r["id"]) for r in reihen}
+                break
+        return benutzt, ids
+
     def _order_clause(self, order_by: str, sort_dir: str, *, fts: bool) -> str:
         expr_tmpl = self._SORT_EXPR.get(order_by)
         if expr_tmpl is None or (order_by == "relevance" and not fts):

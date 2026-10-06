@@ -7,6 +7,88 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.98.0] - 2026-10-06
+
+### Fixed
+
+🔎 **The search under *Invoices* now searches where the library searches.** It
+was reported that this page does not show everything, unlike the library. It
+did not. The page compared what you typed against six fields as a plain
+substring; the library reads the whole document, word by word. Measured on the
+same documents, before the fix:
+
+| typed | library | invoices |
+|---|---|---|
+| `telekom rechnung` | 3 | **0** |
+| `telekom maerz` | 1 | **0** |
+| `kundennummer` | 1 | **0** |
+| `123456` | 1 | **0** |
+
+Two words could only ever match if they stood next to each other **in one
+field**, and the text of a scan was not read at all. The page now uses the
+same three-step search ladder as the library (exact · part-of-word · the most
+words, by relevance) and says when it had to relax — alongside the field
+match, which stays: the amount that was read out of a document
+(*"Rechnungsbetrag 54,95 €"*) is in no full-text index, and whoever types
+`54,95` means the amount.
+
+Two more things that quietly hid results:
+
+* The counter next to *show notes* counted across the **whole** archive. With
+  a search running it therefore spoke of documents nobody was looking for —
+  or stayed silent about the three hits that were sitting behind it. It now
+  counts your own hits, and a line says so when there are any.
+* A document that matches but has **no amount read from it** can never appear
+  on this page. That is now said, with the count and a link into the library,
+  instead of being passed over in silence.
+
+🧭 **One navigation instead of three.** The same areas were reached in three
+different ways: from 1536 px a flat row plus a finance menu, between 768 and
+1535 px a scrolling strip with all nine targets in a different order, and on
+the phone a sheet with a third order — *receipts* in the middle of the finance
+block, two targets sharing one icon, and on the large screen no mark at all
+for the page you were on.
+
+There is now **one list**: two groups (*Documents*, *Finance*), one order, one
+icon per target, one rule for "where am I". The wide screen shows it as two
+menus, the phone as a sheet with the same headings — same content, same
+order, both marked. The scrolling strip is gone: two menu buttons need about
+200 px instead of 879, which is what made the strip necessary in the first
+place. Measured at 1536 px, every language now has over 640 px to spare.
+
+🤖 **The local-model setup keeps Ollama alive on Linux.** Reported: the setup
+file has to be fetched again and again, otherwise the AI will not start. The
+reason stood in the source as an intention — without a systemd service Ollama
+was started as a child of the setup script, and the comment said the next run
+of the file would do it again. After a logout or a reboot it was gone, and the
+way back led through a *new* launcher, because the ticket in the old one is
+spent after its first success.
+
+Three gaps closed, all on Linux:
+
+* **A service that exists but is switched off** (the default in the Arch
+  family) was only *restarted*, never *enabled* — that holds until the machine
+  is switched off. It is now enabled, and the setup says so.
+* **The address was right but the service was dead** — the setup reported
+  success without anything listening and died three steps later with
+  "Ollama is not reachable". It now asks whether the service runs, starts it,
+  and only then reports success.
+* **No service at all**: Ollama now gets a service of its own under your
+  account (`~/.config/systemd/user/docusort-ollama.service`) that starts at
+  login, restarts after a crash and, with linger, comes back after a reboot —
+  the twin of the startup item on macOS, which had been there for months. If
+  something else already starts Ollama, it is named and left alone.
+
+Every one of these is guarded by a test bench that fakes the machine
+(`systemctl`, `sudo`, `loginctl` and `ollama` are stand-ins): 117 checks, with
+a counter-test that turns red against the old behaviour.
+
+### Changed
+
+The gear for *Settings* is visible from 768 px upwards. It used to appear only
+from 1536 px, because the strip below the header carried it in between — and
+that strip is gone.
+
 ## [0.97.1] - 2026-10-05
 
 ### Fixed

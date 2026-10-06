@@ -36,6 +36,20 @@
   [x-cloak] { display: none !important; }
 
   /* ==========================================================
+     NAVIGATION — ein Muster fuer Kopfzeile und Handy-Blatt.
+     🔴 Vorher gab es drei Navigationen und KEINE Markierung der
+     aktuellen Seite auf dem grossen Bildschirm. Die Antwort auf
+     „wo bin ich" steht jetzt an EINER Stelle: `aria-current`.
+     ========================================================== */
+  .nav-link { @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 min-h-[44px] text-sm font-medium transition whitespace-nowrap text-ink-300 hover:bg-ink-700/50; }
+  .nav-link[aria-current="page"] { @apply bg-emerald-500/10 text-emerald-300; }
+  .nav-menu { @apply absolute right-0 mt-2 w-60 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30 py-1; }
+  .nav-row { @apply flex items-center gap-2.5 px-3 py-2 min-h-[40px] text-sm text-ink-100 hover:bg-ink-700/60; }
+  .nav-row[aria-current="page"] { @apply bg-emerald-500/10 text-emerald-300; }
+  /* Ueberschrift einer Gruppe im „Mehr"-Blatt — dieselbe Gruppierung wie oben. */
+  .sheet-head { @apply px-4 pt-2 pb-1 text-[11px] uppercase tracking-wider text-ink-500; }
+
+  /* ==========================================================
      HANDY — eigene Regeln, nicht das Desktop-Layout in schmal.
      Alles unter 640 px. Gemessen wird gegen drei Dinge:
      Tippfläche >= 44 px (Apple-Richtwert), Fließtext >= 13 px,
