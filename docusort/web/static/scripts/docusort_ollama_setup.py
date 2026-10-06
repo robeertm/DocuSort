@@ -521,6 +521,40 @@ def systemd_host() -> str:
     return ""
 
 
+def systemd_angeschaltet(dienst: str = "ollama", nutzer: bool = False) -> str:
+    """Was systemd ueber das HOCHFAHREN sagt: `enabled`, `disabled`, `static`, …
+
+    🔴 DIE FRAGE, DIE HIER GEFEHLT HAT. Ein Paket darf einen Dienst mitbringen,
+    ohne ihn anzuschalten — in der Arch-Familie ist das die Regel, nicht die
+    Ausnahme. Dann laeuft Ollama, solange es jemand startet, und ist nach dem
+    naechsten Hochfahren weg. Der Einrichter hat den Dienst bisher nur NEU
+    GESTARTET. Das haelt genau bis zum Ausschalten.
+    """
+    return _sagt(["systemctl"] + (["--user"] if nutzer else [])
+                 + ["is-enabled", dienst])
+
+
+def systemd_lebt(dienst: str = "ollama", nutzer: bool = False) -> bool:
+    """Laeuft der Dienst JETZT? Nicht dasselbe wie „es gibt ihn"."""
+    return _sagt(["systemctl"] + (["--user"] if nutzer else [])
+                 + ["is-active", dienst]) == "active"
+
+
+def systemd_anschalten(dienst: str = "ollama") -> bool:
+    """Dafuer sorgen, dass der Dienst beim Hochfahren mitkommt.
+
+    Gibt zurueck, ob er es danach WIRKLICH tut — nicht, ob der Befehl abgesetzt
+    wurde. „enable gelaufen" und „kommt wieder" sind zwei Aussagen.
+    """
+    zustand = systemd_angeschaltet(dienst)
+    if zustand in ("enabled", "enabled-runtime", "static", "indirect",
+                   "alias", "generated"):
+        return True
+    if not als_root(["systemctl", "enable", dienst]):
+        return False
+    return systemd_angeschaltet(dienst) not in ("disabled", "masked", "")
+
+
 def wurzelweg() -> list:
     """How does one become root ON THIS machine? Asked, not assumed.
 
@@ -609,10 +643,30 @@ def systemd_binden(bind: str) -> bool:
     #    blocked — a firewall question, not a bind question.
     vorher = systemd_host()
     if vorher == want:
-        good("The service is already set to %s — leaving it alone." % want)
+        good("The service is already set to %s — leaving the setting alone."
+             % want)
+        # 🔴 „DIE ADRESSE STIMMT" IST NICHT „ES LAEUFT". Hier meldete der
+        #    Einrichter Erfolg, obwohl der Dienst gestoppt war: die Adresse
+        #    steht im drop-in vom letzten Lauf, der Dienst war nach dem
+        #    Hochfahren nur nie gestartet. Der Lauf starb drei Schritte spaeter
+        #    an „Ollama is not reachable" — und sagte nie, dass niemand horcht.
+        if not systemd_lebt():
+            warn("But the service is not running.")
+            info("This needs your password once — the one you use to log in.")
+            if not als_root(["systemctl", "start", "ollama"]):
+                warn("The ollama service did not start.")
+                info("Its own words:  systemctl status ollama")
+                return False
+            good("Started it.")
+        dienst_bleibt()
+        if warte_auf_ollama():
+            good("Ollama is up.")
+            return True
+        warn("The service is running but does not answer yet.")
+        info("Its own words:  systemctl status ollama")
         info("If DocuSort still cannot reach it, something between the two "
              "machines is blocking port %d." % OLLAMA_PORT)
-        return True
+        return False
 
     # 🔴 Drop-ins are merged in filename order, last one wins. If a file that
     #    sorts AFTER ours already sets the address, ours would be outvoted in
@@ -677,14 +731,41 @@ def systemd_binden(bind: str) -> bool:
             info("  %s" % os.path.join(DROPIN_DIR, n))
         return False
     good("The service now listens on %s." % want)
+    dienst_bleibt()
     # 🔑 „restarted" is not „answering". Ask it, do not assume it.
-    for _ in range(SERVE_WAIT):
-        if ollama_antwortet("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
-            good("Ollama is up.")
-            return True
-        time.sleep(1)
+    if warte_auf_ollama():
+        good("Ollama is up.")
+        return True
     warn("The service restarted but does not answer yet.")
     info("Its own words:  systemctl status ollama")
+    return False
+
+
+def dienst_bleibt() -> bool:
+    """Kommt der `ollama`-DIENST nach einem Neustart von allein zurueck?
+
+    🔴 Das ist die Haelfte, die hier gefehlt hat. `systemctl restart` holt
+    Ollama fuer HEUTE zurueck; ob es morgen wieder da ist, entscheidet
+    `enable`. Ein Paket, das den Dienst mitbringt, ohne ihn anzuschalten, ist
+    in der Arch-Familie der Normalfall — und der Nutzer sieht den Unterschied
+    erst beim naechsten Hochfahren.
+    """
+    if systemd_anschalten():
+        good("It also comes back by itself after a restart.")
+        return True
+    warn("Ollama runs now, but it is switched OFF for the next restart.")
+    info("Nothing on this machine would start it again. Whoever administers")
+    info("it can switch that on once:")
+    info("  sudo systemctl enable ollama")
+    return False
+
+
+def warte_auf_ollama(sekunden: int = 0) -> bool:
+    """Antwortet Ollama hier, innerhalb der Wartezeit?"""
+    for _ in range(sekunden or SERVE_WAIT):
+        if ollama_antwortet("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
+            return True
+        time.sleep(1)
     return False
 
 
@@ -769,7 +850,279 @@ def serve(bind: str) -> bool:
     #    with a failure whose cause was knowable before the attempt.
     if platform.system() == "Linux" and systemd_hat_ollama():
         return systemd_binden(bind)
+    # 🔴 Kein Systemdienst — und HIER lag „immer wieder die Datei holen". Von
+    #    Hand gestartet haelt Ollama bis zum Abmelden. Hat dieser Rechner ein
+    #    systemd fuer den Benutzer (fast jedes Linux mit Oberflaeche), bekommt
+    #    Ollama einen eigenen Dienst und kommt von allein zurueck.
+    if platform.system() == "Linux" and systemd_nutzer_da():
+        return nutzerdienst(bind)
+    return _von_hand(bind)
 
+
+# ----------------------------------------- Ollama als Dienst DIESES Benutzers
+# 🔴 WARUM DIESER ABSCHNITT EXISTIERT (06.10.2026)
+#
+# Gemeldet wurde, dass die Einrichtungsdatei auf Linux IMMER WIEDER geholt
+# werden muss, damit das Modell wieder laeuft, und dass sonst eine
+# Fehlermeldung kommt. Das war kein Raetsel, es stand als Absicht im Quelltext
+# dieser Datei:
+#
+#     „Without one, Ollama is started by hand and there is nothing to make
+#      permanent either; the next run of this file does it again."
+#
+# Also: ohne systemd-Dienst lief Ollama als KIND dieses Skripts. Mit dem
+# naechsten Abmelden oder Hochfahren war es weg, DocuSort meldete einen Fehler,
+# und der Weg zurueck fuehrte ueber einen NEUEN Starter — der alte traegt einen
+# Zettel, der beim ersten Erfolg verbraucht wird.
+#
+# Auf dem Mac stand die Antwort seit Monaten daneben: ein LaunchAgent, der beim
+# Anmelden startet und nachstartet. Linux hat denselben Mechanismus; er heisst
+# anders und braucht nicht einmal root.
+NUTZER_UNIT = "docusort-ollama.service"
+
+
+def nutzer_unit_pfad() -> str:
+    basis = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config")
+    return os.path.join(basis, "systemd", "user", NUTZER_UNIT)
+
+
+def systemd_nutzer_da() -> bool:
+    """Gibt es auf diesem Rechner ein systemd FUER DEN BENUTZER?
+
+    🔑 Gefragt, nicht angenommen: in einem Container, auf einem nackten Server
+    ohne Sitzung oder unter einem anderen Init-System gibt es keinen
+    Benutzer-Bus — dann ist `systemctl --user` nicht die Antwort, und eine
+    Fehlermeldung darueber waere Laerm.
+    """
+    if not have("systemctl"):
+        return False
+    try:
+        r = subprocess.run(["systemctl", "--user", "list-unit-files",
+                            "--type=service"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=5)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def nutzerdienst_da() -> bool:
+    return os.path.exists(nutzer_unit_pfad())
+
+
+def fremder_starter() -> str:
+    """Startet auf diesem Rechner schon irgendetwas anderes Ollama?
+
+    🔴 Sonst stellt der Einrichter einen ZWEITEN Starter daneben, und nach dem
+    naechsten Hochfahren streiten sich zwei um denselben Port. Einer besitzt
+    ihn, und wer das ist, wird gefragt und nicht geraten.
+    """
+    for n in _sagt(["systemctl", "--user", "list-unit-files", "ollama*"]).split():
+        if n.endswith(".service") and n != NUTZER_UNIT:
+            return "the user service %s" % n
+    auto = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config"), "autostart")
+    try:
+        for n in sorted(os.listdir(auto)):
+            if not n.endswith(".desktop"):
+                continue
+            try:
+                with open(os.path.join(auto, n), encoding="utf-8",
+                          errors="replace") as fh:
+                    if "ollama" in fh.read().lower():
+                        return "the autostart entry %s" % n
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return ""
+
+
+def linger_an() -> bool:
+    """Darf dieser Benutzer Dienste haben, OHNE angemeldet zu sein?
+
+    🔑 Ohne das startet ein Benutzerdienst erst beim Anmelden. Auf einem
+    Schreibtischrechner ist das genau richtig; auf einem Rechner, der nur
+    hochfaehrt und arbeitet, ist es der Unterschied zwischen wiederkommen und
+    wiederkommen, sobald sich jemand anmeldet. Also wird es gesetzt, und wenn
+    es nicht geht, wird genau das gesagt.
+    """
+    wer = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+    if not wer or not have("loginctl"):
+        return False
+    if "yes" in _sagt(["loginctl", "show-user", wer, "-p", "Linger"]).lower():
+        return True
+    try:
+        if subprocess.call(["loginctl", "enable-linger", wer],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=30) == 0:
+            return True
+    except Exception:
+        pass
+    if als_root(["loginctl", "enable-linger", wer], timeout=30):
+        return True
+    return "yes" in _sagt(["loginctl", "show-user", wer, "-p", "Linger"]).lower()
+
+
+def nutzerdienst(bind: str) -> bool:
+    """Ollama einen eigenen Dienst dieses Benutzers geben — und ihn starten.
+
+    Der Zwilling von `_launchagent_darwin`: startet beim Anmelden, startet nach
+    einem Absturz nach, traegt seine Adresse bei sich und braucht kein root.
+    Zum Rueckbau reicht das Loeschen EINER Datei; der Befehl dazu steht in ihr.
+    """
+    pfad = shutil.which("ollama") or ""
+    if not os.path.isabs(pfad):
+        # 🔴 Eine Unit erbt KEIN PATH. Ohne vollen Pfad waere der Dienst
+        #    geschrieben und wuerde bei jedem Start scheitern.
+        warn("Could not find the full path to the ollama program.")
+        return _von_hand(bind)
+    ziel = nutzer_unit_pfad()
+    inhalt = (
+        "# Written by the DocuSort setup.\n"
+        "# It keeps Ollama running: at login, after a crash, after a reboot.\n"
+        "# To undo it:\n"
+        "#   systemctl --user disable --now %s\n"
+        "#   rm %s\n"
+        "[Unit]\n"
+        "Description=Ollama (set up by DocuSort)\n"
+        "After=network-online.target\n"
+        "\n"
+        "[Service]\n"
+        "ExecStart=%s serve\n"
+        'Environment="OLLAMA_HOST=%s:%d"\n'
+        # Ein Modell im Speicher halten: es neu zu laden kostet auf einer NAS
+        # gemessene 30 s, und zwar genau dann, wenn nach einer Pause der erste
+        # Scan hereinfaellt.
+        'Environment="OLLAMA_KEEP_ALIVE=-1"\n'
+        "Restart=always\n"
+        "RestartSec=3\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+        % (NUTZER_UNIT, ziel, pfad, bind, OLLAMA_PORT))
+    step("Setting Ollama up as your own service (listening on %s:%d)"
+         % (bind, OLLAMA_PORT))
+    try:
+        os.makedirs(os.path.dirname(ziel), exist_ok=True)
+        with open(ziel, "w", encoding="utf-8") as fh:
+            fh.write(inhalt)
+    except Exception as exc:
+        warn("Could not write %s: %s" % (ziel, exc))
+        return _von_hand(bind)
+    # 🔴 Eine von Hand gestartete Kopie haelt den Port, und der Dienst wuerde
+    #    daran scheitern — mit „address already in use" im Journal, wo niemand
+    #    nachsieht. Diese Kopie gehoert uns: der vorige Lauf dieser Datei hat
+    #    sie gestartet.
+    if ollama_antwortet("http://127.0.0.1:%d" % OLLAMA_PORT, 2.0):
+        info("Stopping the copy that was started by hand — the service takes "
+             "over the port.")
+        subprocess.run(["pkill", "-f", "ollama serve"], capture_output=True)
+        time.sleep(1)
+    _sagt(["systemctl", "--user", "daemon-reload"])
+    try:
+        rc = subprocess.call(["systemctl", "--user", "enable", "--now",
+                              NUTZER_UNIT], timeout=60)
+    except Exception as exc:
+        warn("Could not start the service: %s" % exc)
+        return _von_hand(bind)
+    if rc != 0:
+        warn("systemd refused the service.")
+        for z in _sagt(["journalctl", "--user", "-u", NUTZER_UNIT, "-n", "12",
+                        "--no-pager"]).splitlines()[-12:]:
+            info(z[:200])
+        return _von_hand(bind)
+    if not warte_auf_ollama(SERVE_WAIT * 2):
+        warn("The service was started but Ollama does not answer yet.")
+        for z in _sagt(["journalctl", "--user", "-u", NUTZER_UNIT, "-n", "12",
+                        "--no-pager"]).splitlines()[-12:]:
+            info(z[:200])
+        return False
+    good("Ollama is up, and it starts again with your session.")
+    if linger_an():
+        good("It also comes back after a reboot without anyone logging in.")
+    else:
+        info("It starts as soon as you log in. To have it come back on a")
+        info("machine nobody logs into, an administrator can run once:")
+        info("  sudo loginctl enable-linger %s"
+             % (os.environ.get("USER") or "<your user>"))
+    info("Undo: systemctl --user disable --now %s && rm %s"
+         % (NUTZER_UNIT, ziel))
+    return True
+
+
+def nutzerdienst_abraeumen() -> None:
+    """Hat der Rechner inzwischen einen Systemdienst, gehoert ihm der Port.
+
+    🔑 Dann muss unser Benutzerdienst weg — zwei Besitzer eines Ports sind
+    einer zu viel, und der zweite stirbt still.
+    """
+    if not nutzerdienst_da():
+        return
+    info("This machine now has an ollama system service, so the one DocuSort "
+         "set up for your account is no longer needed.")
+    _sagt(["systemctl", "--user", "disable", "--now", NUTZER_UNIT])
+    try:
+        os.remove(nutzer_unit_pfad())
+    except OSError:
+        pass
+    _sagt(["systemctl", "--user", "daemon-reload"])
+
+
+def bleibt_ollama(bind: str) -> None:
+    """Kommt Ollama nach einem Neustart von allein zurueck?
+
+    🔴 DIE FRAGE, DIE NIEMAND GESTELLT HAT. Bisher endete der Einrichter mit
+    „✓ Done", und das stimmte auch — fuer heute. Ob es morgen noch gilt, hing
+    davon ab, wie Ollama auf diesen Rechner gekommen war. Das ist kein Detail,
+    sondern der Unterschied zwischen einer Einrichtung und einer Gewohnheit.
+    """
+    system = platform.system()
+    step("Checking that Ollama comes back on its own")
+    if system == "Linux":
+        if systemd_hat_ollama():
+            dienst_bleibt()
+            nutzerdienst_abraeumen()
+            return
+        if nutzerdienst_da() and systemd_angeschaltet(
+                NUTZER_UNIT, nutzer=True).startswith("enabled"):
+            good("Ollama runs as your own service and starts with your session.")
+            return
+        fremd = fremder_starter()
+        if fremd:
+            good("Something already starts Ollama here: %s." % fremd)
+            info("Left alone — two starters would fight over port %d."
+                 % OLLAMA_PORT)
+            return
+        if systemd_nutzer_da():
+            nutzerdienst(bind)
+            return
+        warn("Nothing on this machine will start Ollama again after a reboot.")
+        info("There is no systemd here, so this file cannot set that up.")
+        info("Until then: start it with `ollama serve` after a restart, or run")
+        info("this file again — it is the same amount of work either way.")
+        return
+    if system == "Darwin":
+        if os.path.exists(os.path.expanduser(
+                "~/Library/LaunchAgents/%s.plist" % AGENT_LABEL)):
+            return good("Ollama starts at login (startup item already there).")
+        if os.path.isdir("/Applications/Ollama.app"):
+            return good("The Ollama app starts itself at login.")
+        # Homebrew's ollama brings no startup item of its own — measured on a
+        # real Mac: after a reboot nothing was running at all.
+        _launchagent_darwin("%s:%d" % (bind, OLLAMA_PORT))
+        return
+    if system == "Windows":
+        good("The Windows installer starts Ollama with your account.")
+
+
+def _von_hand(bind: str) -> bool:
+    """Der letzte Ausweg: Ollama als Kind dieses Skripts.
+
+    🔴 Haelt nur, solange diese Sitzung haelt — darum steht das hier unten und
+    wird auch so gesagt, statt als Erfolg verbucht zu werden.
+    """
     env = dict(os.environ, OLLAMA_HOST="%s:%d" % (bind, OLLAMA_PORT))
     log = os.path.join(os.path.expanduser("~"), "ollama-docusort.log")
     seit = os.path.getsize(log) if os.path.exists(log) else 0
@@ -786,11 +1139,12 @@ def serve(bind: str) -> bool:
         warn("Could not start Ollama: %s" % exc)
         return False
     info("log: %s" % log)
-    for _ in range(SERVE_WAIT):
-        if ollama_antwortet("http://127.0.0.1:%d" % OLLAMA_PORT, 1.0):
-            good("Ollama is up.")
-            return True
-        time.sleep(1)
+    if warte_auf_ollama():
+        good("Ollama is up.")
+        # 🔴 Nicht mehr behaupten als wahr ist: so gestartet haelt es, bis
+        #    sich jemand abmeldet oder den Rechner neu startet.
+        info("Started by hand, so it runs until you log out or reboot.")
+        return True
     warn("Ollama did not answer within %d s." % SERVE_WAIT)
     why_it_failed(log, seit)
     return False
@@ -893,11 +1247,19 @@ def bind_permanently(bind: str) -> None:
         #    the setting cannot drift away from the process it belongs to.
         _launchagent_darwin(value)
     elif system == "Linux":
-        # A service is set up and restarted in `serve()` — nothing to say here.
-        # Without one, Ollama is started by hand and there is nothing to make
-        # permanent either; the next run of this file does it again.
-        if not systemd_hat_ollama():
-            info("Ollama is not a service here; this file starts it when needed.")
+        # 🔴 HIER STAND DER FEHLER. Wortwoertlich: „Without one, Ollama is
+        #    started by hand and there is nothing to make permanent either; the
+        #    next run of this file does it again." Das war die Ursache der
+        #    gemeldeten Lage, in der die Datei immer wieder geholt werden
+        #    musste — als Absicht aufgeschrieben. Auf dem Mac stand zwei Zeilen
+        #    darueber die richtige Antwort und auf Linux keine.
+        #
+        # Die Adresse DAUERHAFT zu machen heisst auf Linux: Ollama gehoert
+        # einem Dienst. Welchem, entscheidet `serve()` (Systemdienst) bzw.
+        # `nutzerdienst()` (Dienst dieses Benutzers) — beide tragen die Adresse
+        # bei sich, und `bleibt_ollama()` prueft am Ende, dass es wirklich einen
+        # gibt. Hier ist darum nichts zu tun, und das ist keine Luecke mehr.
+        pass
     elif system == "Windows":
         try:
             subprocess.check_call(["setx", "OLLAMA_HOST", value],
@@ -1158,6 +1520,13 @@ def main() -> int:
     else:
         # 🔑 Kein Mangel, sondern der Normalzustand eines frischen Ollama.
         good("Ollama answers. No model on it yet — fetching one now.")
+
+    # 🔴 „Es laeuft" ist nicht „es laeuft auch morgen". Diese Frage kommt
+    #    bewusst HIER und nicht nur im Zweig, der Ollama selbst gestartet hat:
+    #    wer es vor diesem Lauf von Hand gestartet hatte, war am schlimmsten
+    #    dran — fuer ihn sah alles fertig aus, und nach dem naechsten
+    #    Hochfahren war nichts mehr da.
+    bleibt_ollama(bind)
 
     # 4. Model — take what is already there before downloading gigabytes.
     # 🔑 The measurement decides, not a fixed default: on a machine with

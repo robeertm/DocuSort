@@ -47,39 +47,57 @@
 <body class="min-h-full bg-gradient-to-b from-ink-950 via-ink-900 to-ink-950 text-ink-100 antialiased">
 
 <header class="sticky top-0 z-20 backdrop-blur bg-ink-900/70 border-b border-ink-800">
-  {# One list feeds both menus so the order is the same on every device.
-     Desktop shows the links from lg upwards; below that the scroll strip
-     under the header carries the same items in the same order.
+  {# ════════════════════ DIE NAVIGATION — EINE QUELLE ════════════════════
 
-     🔴 WARUM DIE FINANZZIELE EIN MENUE SIND (04.10.2026)
+     🔴 WARUM DAS HIER STEHT (06.10.2026). Gemeldet wurde, dass dieselben
+     Bereiche auf dem grossen Bildschirm und auf dem Handy jeweils anders zu
+     erreichen sind. Nachgezaehlt: DREI Navigationen mit drei verschiedenen
+     Gruppierungen, drei Reihenfolgen und drei Antworten auf die Frage, wo man
+     gerade ist:
 
-     Acht Beschriftungen passen nicht neben Logo und Bedienknoepfe. Gemessen
-     bei 1536 px — die Leiste ist dort gedeckelt, mehr Bildschirm bringt also
-     nichts (Links brauchen / haben / Reserve):
+       ab 2xl   drei flache Links + ein Finanzmenue, KEINE Markierung der
+                aktuellen Seite, Zahnrad nur hier sichtbar
+       md–2xl   ein Scrollstreifen mit ALLEN neun Zielen flach nebeneinander,
+                andere Reihenfolge, ebenfalls keine Markierung
+       < md     vier Tabs + „Mehr"-Blatt, dort die Finanzziele mit „Auswertung"
+                mitten drin und „Review" dahinter — wieder eine andere
+                Reihenfolge, und 🧾 zweimal fuer zwei verschiedene Ziele
 
-         de  879 / 888  →   +9 px     fr  938 / 892  →  −46 px, ZWEI Zeilen
-         en  791 / 922  →  +131 px    es  803 / 941  →  +138 px
-                                        it  792 / 902  →  +110 px
+     Jetzt gibt es EINE Liste, `nav_gruppen`, und drei Darstellungen davon.
+     Gruppe, Reihenfolge, Sinnbild und Beschriftung stehen genau einmal; eine
+     neue Seite wird an einer Stelle eingetragen und erscheint ueberall.
 
-     Deutsch passte um NEUN Pixel — in Roberts Browser nicht mehr, dort rutschte
-     „Fixkosten" allein in eine zweite Zeile. Franzoesisch brach schon im
-     Pruefstand um, seit dem 02.10., und niemand hat es gemeldet: die Probe
-     bewachte den Upload-Knopf, aber nicht die Links.
+     🔑 Dass die Darstellung sich unterscheidet, ist kein Wildwuchs, sondern
+     der Unterschied zwischen Maus und Daumen: oben ein Menue, unten ein
+     Blatt. Was dieselbe Form haben MUSS, ist der Inhalt — und die Antwort
+     auf „wo bin ich": `aria-current="page"`, ueberall aus derselben Regel.
 
-     🔑 Neun Pixel sind keine Loesung, auch wenn sie gruen messen. Fuenf der
-     acht Ziele sind Finanzen — die liegen jetzt unter einem Menue, und die
-     Leiste hat in jeder Sprache ueber 350 px Luft. Im Streifen (md–2xl) und
-     auf dem Handy bleiben alle acht flach nebeneinander: dort ist Platz. #}
-  {% set nav_haupt = [
-    ('/library', t('nav.library')), ('/library?status=review', t('nav.review')), ('/analytics', t('nav.analytics')),
+     🔴 Der Scrollstreifen ist ersatzlos weg. Er war die Antwort auf ein
+     Breitenproblem (acht deutsche Begriffe brauchen bei 1536 px 879 px und
+     haben 888 — neun Pixel Reserve, in Roberts Browser keine mehr). Zwei
+     Menueknoepfe brauchen rund 200 px statt 879; damit ist das Problem nicht
+     verschoben, sondern weg, und zwar in JEDER Sprache. #}
+  {% set pfad = request.url.path if request else '/' %}
+  {% set frage = request.url.query if request else '' %}
+  {# Wo bin ich? EINE Regel, von allen drei Darstellungen benutzt. „Review"
+     ist dieselbe Seite wie die Bibliothek mit einem Filter — ohne diese
+     Unterscheidung leuchten beide Zeilen gleichzeitig. #}
+  {% set hier = '/library?status=review' if (pfad == '/library' and 'status=review' in frage) else pfad %}
+  {% set nav_gruppen = [
+       ('nav.group.docs', [
+          ('/library',               'nav.library',   '📚'),
+          ('/library?status=review', 'nav.review',    '👀'),
+          ('/analytics',             'nav.analytics', '🛒'),
+       ]),
+       ('nav.finance', [
+          ('/finance',      'nav.finance_overview', '💶'),
+          ('/rechnungen',   'nav.invoices',         '🧾'),
+          ('/ausgaben',     'nav.spending',         '📊'),
+          ('/transactions', 'nav.transactions',     '📒'),
+          ('/fixkosten',    'nav.fixed',            '🔁'),
+          ('/budget',       'nav.budget',           '🎯'),
+       ]),
   ] %}
-  {% set nav_finanzen = [
-    ('/finance', t('nav.finance_overview')), ('/rechnungen', t('nav.invoices')), ('/ausgaben', t('nav.spending')), ('/transactions', t('nav.transactions')), ('/fixkosten', t('nav.fixed')), ('/budget', t('nav.budget')),
-  ] %}
-  {# Die flache Liste — fuer den Streifen und alles, was keinen Platz fuer ein
-     Menue hat. Sie wird aus denselben beiden Gruppen gebaut, damit die
-     Reihenfolge nirgends auseinanderlaeuft. #}
-  {% set nav_items = nav_haupt + [('/finance', t('nav.finance'))] + nav_finanzen[1:] %}
   <nav class="mx-auto max-w-screen-2xl px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-1.5 sm:gap-x-2.5 2xl:gap-x-4">
     <a href="/" class="flex items-center gap-2 font-semibold tracking-tight text-lg shrink-0 min-h-[44px]">
       <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
@@ -92,48 +110,42 @@
       <span class="hidden sm:inline">DocuSort</span>
       <span class="hidden 2xl:inline text-xs text-ink-400 font-normal ml-1">v{{ version }}</span>
     </a>
-    {# 🔴 WARUM DIE LINKS EINEN EIGENEN KASTEN HABEN (02.10.2026)
-       Vorher lagen Logo, Links und die rechte Knopfgruppe als GESCHWISTER in
-       einer `flex-wrap`-Reihe. Die Reihe war randvoll: ein achter Eintrag
-       (`/rechnungen`) genügte, und der Upload-Knopf — das LETZTE Element —
-       rutschte in eine zweite Zeile, ganz nach links.
-       Gemessen mit Chromium bei 1280/1366/1440/1536/1680/1920 px: ohne den
-       achten Eintrag passte alles, mit ihm brach es bei VIER der sechs
-       Breiten. Dass mehr Bildschirm nicht half, liegt an `max-w-screen-2xl`:
-       die Leiste ist bei 1536 px gedeckelt, 1920 px bringen keinen Platz.
-       Jetzt dürfen nur noch die LINKS untereinander umbrechen. Die rechte
-       Gruppe ist `shrink-0` und kann die Zeile nicht mehr verlassen — der
-       Upload-Knopf steht immer oben rechts, bei jeder Sprache und jeder Zahl
-       von Einträgen. #}
-    <div class="hidden 2xl:flex flex-1 min-w-0 flex-wrap items-center justify-end
-                gap-x-4 gap-y-1">
-    {% for href, label in nav_haupt %}
-      <a href="{{ href }}" class="btn-ghost">{{ label }}</a>
-    {% endfor %}
-      {# Dasselbe Muster wie Sprachwahl und Kontomenue nebenan: klicken,
-         nicht schweben — ein Menue, das beim Vorbeifahren aufgeht, erwischt
-         man auf dem Weg zum Upload-Knopf. #}
-      <div class="relative" x-data="{ open: false }" @click.outside="open = false">
-        <button type="button" @click="open = !open" class="btn-ghost"
-                :aria-expanded="open" aria-haspopup="menu">
-          {{ t('nav.finance') }}
+    {# 🔑 EIN MUSTER, ZWEI GRUPPEN, AB md. Beide Knoepfe sehen gleich aus,
+       verhalten sich gleich (klicken, nicht schweben — ein Menue, das beim
+       Vorbeifahren aufgeht, erwischt man auf dem Weg zum Upload-Knopf) und
+       markieren die aktuelle Seite nach derselben Regel. Der frueher noetige
+       Scrollstreifen darunter ist damit ueberfluessig: zwei Knoepfe brauchen
+       in jeder Sprache rund 200 px, nicht 879. #}
+    <div class="hidden md:flex flex-1 min-w-0 items-center justify-end gap-1 lg:gap-2">
+      {% for gruppe, ziele in nav_gruppen %}
+      {% set in_gruppe = ziele | selectattr('0', 'equalto', hier) | list | length > 0 %}
+      <div class="relative" x-data="{ auf: false }" @click.outside="auf = false"
+           @keydown.escape="auf = false">
+        <button type="button" @click="auf = !auf" class="nav-link"
+                {% if in_gruppe %}aria-current="page"{% endif %}
+                :aria-expanded="auf" aria-haspopup="menu">
+          {{ t(gruppe) }}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-               class="h-4 w-4 opacity-60" :class="open ? 'rotate-180' : ''">
+               class="h-4 w-4 opacity-60 transition" :class="auf ? 'rotate-180' : ''">
             <path d="M6 9l6 6 6-6"/>
           </svg>
         </button>
-        <div x-show="open" x-cloak x-transition.opacity role="menu"
-             class="absolute right-0 mt-2 w-52 rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden z-30">
-          {% for href, label in nav_finanzen %}
-            <a href="{{ href }}" role="menuitem"
-               class="block px-3 py-2 text-sm hover:bg-ink-700/60">{{ label }}</a>
+        <div x-show="auf" x-cloak x-transition.opacity role="menu" class="nav-menu">
+          {% for href, schluessel, zeichen in ziele %}
+            <a href="{{ href }}" role="menuitem" class="nav-row"
+               {% if href == hier %}aria-current="page"{% endif %}>
+              <span class="w-5 text-center" aria-hidden="true">{{ zeichen }}</span>
+              {{ t(schluessel) }}
+            </a>
           {% endfor %}
         </div>
       </div>
+      {% endfor %}
     </div>
-    {# Unterhalb von xl ist der Linkkasten ausgeblendet — dann schiebt dieser
-       Abstandhalter die rechte Gruppe nach rechts. #}
-    <div class="flex-1 2xl:hidden"></div>
+    {# Unter md gibt es keinen Linkkasten (dort traegt die Tab-Leiste am
+       unteren Rand die Navigation) — dann schiebt dieser Abstandhalter die
+       rechte Gruppe nach rechts. #}
+    <div class="flex-1 md:hidden"></div>
 
     {# Die rechte Gruppe: eine Einheit, die NIE umbricht.
        🔑 Das Zahnrad steht hier und nicht bei den Links: es ist ein
@@ -142,7 +154,13 @@
        im Bild sofort zu sehen, in den Zahlen nicht. #}
     <div class="flex items-center gap-1.5 sm:gap-x-2.5 shrink-0">
     {% if me and me.is_admin %}
-    <a href="/settings" class="hidden 2xl:inline-flex btn-ghost" :aria-label="tr('nav.settings')">
+    {# 🔑 Ab md sichtbar, nicht erst ab 2xl: der Scrollstreifen, der die
+       Einstellungen dazwischen trug, ist weg — ohne das waere der Weg dorthin
+       zwischen 768 und 1535 px nur noch ueber das Handy-Blatt gegangen, das
+       dort gar nicht angezeigt wird. #}
+    <a href="/settings" class="hidden md:inline-flex btn-ghost"
+       {% if pfad == '/settings' %}aria-current="page"{% endif %}
+       :aria-label="tr('nav.settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -311,24 +329,6 @@
       <span class="hidden sm:inline">{{ t('nav.upload') }}</span>
     </a>
     </div>
-  </nav>
-  {# Der frühere Scrollstreifen unter der Kopfzeile ist weg: er zeigte je
-     nach Sprache drei bis vier Ziele, der Rest lag hinter einer Wischgeste,
-     die niemand vermutet. Auf dem Handy führt jetzt die Tab-Leiste am
-     unteren Rand (Daumenreichweite), zwischen md und 2xl der Streifen.
-     🔑 Die Grenze lag bis 02.10.2026 bei xl. Mit acht Einträgen passen die
-     deutschen Begriffe bei 1280 px nicht mehr neben die Bedienknöpfe —
-     gemessen, und im Bild war zu sehen, wie „Fixkosten" allein in eine
-     zweite Zeile rutschte. Unterhalb von 2xl trägt sie jetzt dieser
-     Streifen: eine volle Zeile, alles sichtbar, nichts verrutscht. #}
-  <nav class="hidden md:flex 2xl:hidden mx-auto max-w-screen-2xl px-4 pb-2 gap-1 text-sm overflow-x-auto">
-    <a href="/" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('nav.dashboard') }}</a>
-    {% for href, label in nav_items %}
-      <a href="{{ href }}" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ label }}</a>
-    {% endfor %}
-    {% if me and me.is_admin %}
-    <a href="/settings" class="btn-ghost shrink-0 px-3 whitespace-nowrap">{{ t('nav.settings') }}</a>
-    {% endif %}
   </nav>
 </header>
 
@@ -559,17 +559,16 @@ function updateBanner() {
    im „Mehr"-Blatt. Der Upload sitzt in der Mitte, weil er die
    zentrale Anlaufstelle ist: alles kommt hier herein.
    ========================================================== #}
-{% set path = request.url.path if request else '/' %}
 <div x-data="{ more: false }" class="md:hidden">
 
   <nav class="tabbar" aria-label="{{ t('nav.menu_title') }}">
-    <a href="/" class="tab" {% if path == '/' %}aria-current="page"{% endif %}>
+    <a href="/" class="tab" {% if pfad == '/' %}aria-current="page"{% endif %}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
         <path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>
       </svg>
       {{ t('nav.home') }}
     </a>
-    <a href="/library" class="tab" {% if path == '/library' %}aria-current="page"{% endif %}>
+    <a href="/library" class="tab" {% if pfad == '/library' %}aria-current="page"{% endif %}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
         <path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4Z"/><path d="M20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6Z"/>
       </svg>
@@ -582,7 +581,7 @@ function updateBanner() {
         </svg>
       </span>
     </a>
-    <a href="/finance" class="tab" {% if path == '/finance' %}aria-current="page"{% endif %}>
+    <a href="/finance" class="tab" {% if pfad == '/finance' %}aria-current="page"{% endif %}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
         <path d="M3 17V9M9 17V5M15 17v-6M21 17V8"/><path d="M3 21h18"/>
       </svg>
@@ -610,33 +609,36 @@ function updateBanner() {
         <button type="button" @click="more = false" class="btn-ghost !px-3 !py-1.5 text-sm">{{ t('nav.close') }}</button>
       </div>
 
+      {# 🔑 DIESELBE LISTE WIE OBEN, derselbe Zeichensatz, dieselbe Reihenfolge
+         — nur als Blatt statt als Menue. Vorher stand hier eine eigene
+         Aufzaehlung: „Auswertung" mitten zwischen den Finanzzielen, „Review"
+         dahinter, und 🧾 zweimal fuer zwei verschiedene Ziele. Wer eine Seite
+         dazubaut, traegt sie jetzt an EINER Stelle ein. #}
+      {% for gruppe, ziele in nav_gruppen %}
       <div class="py-1">
-        <a href="/rechnungen" class="sheet-row" {% if path == '/rechnungen' %}aria-current="page"{% endif %}>
-          <span class="w-6 text-center">🧾</span>{{ t('nav.invoices') }}</a>
-        <a href="/ausgaben" class="sheet-row" {% if path == '/ausgaben' %}aria-current="page"{% endif %}>
-          <span class="w-6 text-center">📊</span>{{ t('nav.spending') }}</a>
-        <a href="/analytics" class="sheet-row" {% if path == '/analytics' %}aria-current="page"{% endif %}>
-          <span class="w-6 text-center">🧾</span>{{ t('nav.analytics') }}</a>
-        <a href="/transactions" class="sheet-row" {% if path == '/transactions' %}aria-current="page"{% endif %}>
-          <span class="w-6 text-center">📒</span>{{ t('nav.transactions') }}</a>
-        <a href="/fixkosten" class="sheet-row" {% if path == '/fixkosten' %}aria-current="page"{% endif %}>
-          <span class="w-6 text-center">🔁</span>{{ t('nav.fixed') }}</a>
-        <a href="/budget" class="sheet-row" {% if path == '/budget' %}aria-current="page"{% endif %}>
-          <span class="w-6 text-center">🎯</span>{{ t('nav.budget') }}</a>
-        <a href="/library?status=review" class="sheet-row">
-          <span class="w-6 text-center">👀</span>{{ t('nav.review') }}</a>
-        {% if me.is_admin %}
-        <a href="/settings" class="sheet-row" {% if path == '/settings' %}aria-current="page"{% endif %}>
+        <div class="sheet-head">{{ t(gruppe) }}</div>
+        {% for href, schluessel, zeichen in ziele %}
+        <a href="{{ href }}" class="sheet-row"
+           {% if href == hier %}aria-current="page"{% endif %}>
+          <span class="w-6 text-center" aria-hidden="true">{{ zeichen }}</span>{{ t(schluessel) }}</a>
+        {% endfor %}
+      </div>
+      {% endfor %}
+
+      <div class="py-1 border-t border-ink-700/60">
+        <div class="sheet-head">{{ t('nav.group.account') }}</div>
+        {% if me and me.is_admin %}
+        <a href="/settings" class="sheet-row" {% if pfad == '/settings' %}aria-current="page"{% endif %}>
           <span class="w-6 text-center">⚙️</span>{{ t('nav.settings') }}</a>
-        <a href="/users" class="sheet-row" {% if path == '/users' %}aria-current="page"{% endif %}>
+        <a href="/users" class="sheet-row" {% if pfad == '/users' %}aria-current="page"{% endif %}>
           <span class="w-6 text-center">👥</span>{{ t('auth.users') }}</a>
         {% endif %}
-        <a href="/konto" class="sheet-row" {% if path == '/konto' %}aria-current="page"{% endif %}>
+        <a href="/konto" class="sheet-row" {% if pfad == '/konto' %}aria-current="page"{% endif %}>
           <span class="w-6 text-center">🙋</span>{{ t('auth.account') }}</a>
       </div>
 
       <div class="border-t border-ink-700/60 mt-1 pt-2">
-        <div class="px-4 pb-1 text-[11px] uppercase tracking-wider text-ink-500">{{ t('nav.appearance') }}</div>
+        <div class="sheet-head">{{ t('nav.appearance') }}</div>
         <div class="px-4 pb-2 flex flex-wrap gap-2">
           {# Der Knopf nennt das ZIEL, nicht beide Möglichkeiten —
              „Hell / Dunkel" sagt niemandem, was ein Tipp bewirkt. #}

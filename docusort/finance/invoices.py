@@ -82,7 +82,8 @@ def anreichern(zeilen: list[dict]) -> list[dict]:
     return aus
 
 
-def _passt(z: dict, *, von, bis, kategorien, zustaende, arten, suche) -> bool:
+def _passt(z: dict, *, von, bis, kategorien, zustaende, arten, suche,
+           ids=None) -> bool:
     datum = z.get("doc_date") or ""
     # 🔴 Ein Dokument OHNE Datum faellt aus einem Zeitraum heraus — es
     #    stillschweigend mitzuzaehlen hiesse, eine Spanne zu behaupten, die
@@ -98,11 +99,24 @@ def _passt(z: dict, *, von, bis, kategorien, zustaende, arten, suche) -> bool:
     if arten and z["art"] not in arten:
         return False
     if suche:
+        # 🔑 ZWEI WEGE, UND BEIDE WERDEN GEBRAUCHT.
+        #
+        # `ids` ist die Antwort der Suchleiter — dieselbe, die die Bibliothek
+        # benutzt: Wort fuer Wort, im ganzen Text eines Dokuments, Teilwoerter
+        # und ein falsches Wort verzeihend. Sie findet „telekom maerz" ueber
+        # zwei Felder hinweg und „kundennummer" im Inhalt eines Scans.
+        #
+        # Daneben bleibt der Vergleich mit den Feldern DIESER Seite, denn zwei
+        # davon stehen in keinem Volltextindex: der gelesene Betrag
+        # (`due_amount_src`, „Rechnungsbetrag 54,95 €") und der Dateiname. Wer
+        # „54,95" tippt, meint den Betrag.
         n = suche.lower()
         felder = (z.get("sender"), z.get("subject"), z.get("category"),
                   z.get("subcategory"), z.get("original_name"),
                   z.get("due_amount_src"))
-        if not any(n in (f or "").lower() for f in felder):
+        im_feld = any(n in (f or "").lower() for f in felder)
+        im_text = ids is not None and int(z.get("id") or 0) in ids
+        if not (im_feld or im_text):
             return False
     return True
 
@@ -123,7 +137,8 @@ def _gruppenname(z: dict, gruppe: str) -> str:
 
 def auswerten(zeilen: list[dict], *, von: str = "", bis: str = "",
               kategorien=(), zustaende=(), arten=(), suche: str = "",
-              gruppe: str = "kategorie") -> dict:
+              gruppe: str = "kategorie", ids=None, stufe: str = "",
+              nur_bibliothek: int = 0) -> dict:
     """Die ganze Seite in einem Aufruf.
 
     `arten` leer heisst: nur was zaehlt (Forderungen und Gutschriften). Wer
@@ -135,10 +150,19 @@ def auswerten(zeilen: list[dict], *, von: str = "", bis: str = "",
     alle = anreichern(zeilen)
     gewaehlt = tuple(arten) if arten else ZAEHLENDE_ARTEN
 
-    treffer = [z for z in alle
-               if _passt(z, von=von, bis=bis, kategorien=tuple(kategorien),
-                         zustaende=tuple(zustaende), arten=gewaehlt,
-                         suche=suche)]
+    def passt(z, arten_):
+        return _passt(z, von=von, bis=bis, kategorien=tuple(kategorien),
+                      zustaende=tuple(zustaende), arten=arten_, suche=suche,
+                      ids=ids)
+
+    treffer = [z for z in alle if passt(z, gewaehlt)]
+    # 🔴 WIE VIELE WERDEN HIER WIRKLICH VERSTECKT. Vorher zaehlte diese Zahl
+    #    ueber den GESAMTEN Bestand — bei einer Suche stand also „(60)" neben
+    #    dem Schalter, waehrend von den eigenen Treffern gar keiner ausgeblendet
+    #    war. Oder umgekehrt: drei Treffer lagen unter dem Schalter und die Zahl
+    #    sprach von sechzig. Gezaehlt wird jetzt, was dieselbe Frage OHNE den
+    #    Artenfilter ergibt.
+    ohne_artenfilter = [z for z in alle if passt(z, ())]
 
     summen = {"anzahl": len(treffer), "gesamt": 0.0,
               "offen": 0.0, "abgehakt": 0.0, "bezahlt": 0.0,
@@ -180,6 +204,19 @@ def auswerten(zeilen: list[dict], *, von: str = "", bis: str = "",
         "arten_vorhanden": sorted({z["art"] for z in alle}),
         "zeitraum": {"von": min(daten) if daten else "",
                      "bis": max(daten) if daten else ""},
-        "ausgeblendet": len(alle) - len([
-            z for z in alle if z["art"] in gewaehlt]),
+        "ausgeblendet": len(ohne_artenfilter) - len(treffer),
+        # Welche Stufe der Suchleiter geantwortet hat — eine weite Antwort, die
+        # wie eine genaue aussieht, waere schlimmer als keine.
+        # 🔴 Nur wenn die Leiter WIRKLICH gelockert hat und daraus ein
+        #    sichtbarer Treffer wurde. „54,95" findet seine zwei Rechnungen
+        #    ueber den gelesenen Betrag, nicht ueber den Volltext — ein Schild
+        #    „ungenauer Treffer" waere dort eine Falschaussage.
+        "stufe": stufe if (suche and stufe not in ("", "genau") and ids
+                           and any(int(z.get("id") or 0) in ids
+                                   for z in treffer)) else "",
+        # 🔑 Treffer, die es gibt, die aber keine Rechnung sind: ein Dokument
+        #    ohne gelesenen Betrag steht auf dieser Seite nicht. Das stumm zu
+        #    uebergehen heisst, jemanden suchen zu lassen, was man selbst schon
+        #    gefunden hat.
+        "nur_bibliothek": nur_bibliothek if suche else 0,
     }
