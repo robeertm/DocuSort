@@ -937,6 +937,8 @@
   "inv.reset": "zurücksetzen",
   "inv.rows": "Einzelne Rechnungen",
   "inv.search": "Suche",
+  "inv.search.loose": "Kein Dokument enthält alle Wörter — gezeigt wird jedes, in dem mindestens eines vorkommt. Enger suchen hilft.",
+  "inv.search.part": "Kein genauer Treffer — gezeigt werden Dokumente, in denen deine Wörter irgendwo im Text stehen.",
   "inv.search_hint": "Absender, Betreff, Beleg, Inhalt …",
   "inv.sender": "Absender",
   "inv.show_notes": "Hinweise zeigen",

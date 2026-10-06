@@ -937,6 +937,8 @@
   "inv.reset": "restablecer",
   "inv.rows": "Las facturas",
   "inv.search": "Buscar",
+  "inv.search.loose": "Ningún documento contiene todas las palabras: se muestran todos los que contienen al menos una. Buscar con más precisión ayuda.",
+  "inv.search.part": "Sin coincidencia exacta: se muestran documentos en los que tus palabras aparecen en algún lugar del texto.",
   "inv.search_hint": "remitente, asunto, evidencia, contenido …",
   "inv.sender": "Remitente",
   "inv.show_notes": "mostrar avisos",

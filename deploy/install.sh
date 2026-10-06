@@ -54,6 +54,142 @@ if [ -n "$ANDERE" ]; then
 fi
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 WO GEHOERT DIESE INSTALLATION HIN? (06.10.2026)
+#
+# Gemeldet: nach einer fehlerhaften Fassung und dem Update danach kam ein
+# Nutzer nicht mehr an seine Datenbank und hat alle Dokumente neu hochgeladen.
+# Nachgestellt und gemessen, und es stimmt — nur war nichts verloren:
+#
+#   `DIR` hing am ARBEITSVERZEICHNIS (`$PWD/docusort`), und die erzeugte
+#   compose-Datei mountet RELATIV (`./data:/data`). Wer den Einzeiler ein
+#   zweites Mal laufen laesst und dabei woanders steht — im Download-Ordner,
+#   im Heimatverzeichnis, in der Installation selbst —, bekam ein ZWEITES
+#   Verzeichnis. Der Container heisst in beiden Faellen `docusort`, also baute
+#   compose ihn mit den NEUEN Pfaden neu: DocuSort lief, die Bibliothek war
+#   leer, und die alte Datenbank lag unversehrt im anderen Ordner.
+#   Gemessen: Rueckgabe 0, KEIN Wort dazu.
+#
+# 🔑 DIE KUR IST NICHT EINE WARNUNG, SONDERN DER RICHTIGE ORDNER.
+#    Das Arbeitsverzeichnis ist die schlechteste aller Quellen — es sagt nur,
+#    wo jemand zufaellig stand. Es gibt bessere, und sie werden der Reihe nach
+#    gefragt:
+#
+#      1. `DOCUSORT_DIR` — ausdruecklich gesagt gewinnt immer.
+#      2. der LAUFENDE Container: wo liegen SEINE Daten? Das ist die
+#         Installation, die dieser Rechner benutzt.
+#      3. steht man MITTEN DRIN? Dann ist es dieser Ordner, nicht ein
+#         `docusort/docusort` darunter.
+#      4. liegt daneben schon eine? Dann die.
+#      5. sonst: eine neue, hier.
+#
+#    Danach wird noch gefragt, ob irgendwo eine Datenbank liegt, die NIEMAND
+#    benutzt — der Zustand, in dem der Nutzer stand. Verschoben wird dabei
+#    nichts: ein Installer, der die Dokumente eines Menschen umraeumt, ist
+#    schlimmer als das Problem. Er zeigt sie, und wenn das Ziel leer ist und es
+#    genau EINE gibt, richtet er sich nach ihr.
+# ══════════════════════════════════════════════════════════════════════════
+
+# Sieht dieser Ordner nach einer DocuSort-Installation aus?
+ist_installation() {
+  [ -n "${1:-}" ] || return 1
+  [ -f "$1/docker-compose.yml" ] && grep -q "docusort" "$1/docker-compose.yml" 2>/dev/null && return 0
+  [ -f "$1/data/library/docusort.db" ] && return 0
+  return 1
+}
+
+# Wo liegen die Daten des laufenden Containers? (Leer, wenn es keinen gibt.)
+LAUFEND_DATEN="$(docker inspect docusort \
+                 --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' \
+                 2>/dev/null || true)"
+LAUFEND_DIR=""
+if [ -n "$LAUFEND_DATEN" ]; then
+  _k="$(dirname "$LAUFEND_DATEN")"
+  # 🔴 Nur uebernehmen, wenn daneben wirklich eine compose-Datei liegt. Bei
+  #    einem benannten Volume zeigt `.Source` nach /var/lib/docker, und dessen
+  #    Elternordner ist keine Installation.
+  [ -f "$_k/docker-compose.yml" ] && LAUFEND_DIR="$_k"
+fi
+
+GRUND=""
+if [ -n "${DOCUSORT_DIR:-}" ]; then
+  GRUND="you said so (DOCUSORT_DIR)"
+elif [ -n "$LAUFEND_DIR" ]; then
+  DIR="$LAUFEND_DIR"
+  GRUND="this is where the running DocuSort keeps its documents"
+elif ist_installation "$PWD"; then
+  # 🔴 Genau hier entstand `docusort/docusort`: wer IN seiner Installation
+  #    steht und den Einzeiler noch einmal startet, meint diese.
+  DIR="$PWD"
+  GRUND="you are standing in it"
+elif ist_installation "$PWD/docusort"; then
+  DIR="$PWD/docusort"
+  GRUND="it is already here"
+fi
+
+# 🔑 Eine Datenbank, die niemand benutzt. Gesucht wird in den Ordnern, in denen
+#    Menschen wirklich stehen, zwei Ebenen tief — kein Durchsuchen der Platte.
+WAISEN=""
+for _ort in "$PWD" "$PWD/.." "${HOME:-/nonexistent}" "$(dirname "$DIR")" \
+            /volume1/docker /opt /srv; do
+  [ -d "$_ort" ] || continue
+  for _k in "$_ort"/data/library/docusort.db "$_ort"/*/data/library/docusort.db \
+            "$_ort"/*/*/data/library/docusort.db; do
+    [ -f "$_k" ] || continue
+    _d="$(cd "$(dirname "$_k")/../.." 2>/dev/null && pwd)" || continue
+    [ "$_d" = "$DIR" ] && continue
+    [ "$_d/data" = "$LAUFEND_DATEN" ] && continue
+    case " $WAISEN " in *" $_d "*) continue ;; esac
+    WAISEN="$WAISEN $_d"
+  done
+done
+WAISEN="$(printf '%s' "$WAISEN" | sed 's/^ *//')"
+
+if [ -n "$WAISEN" ]; then
+  _anzahl=0
+  for _w in $WAISEN; do _anzahl=$((_anzahl + 1)); done
+  warn "🔴 There is a DocuSort database here that nothing is using:"
+  for _w in $WAISEN; do
+    warn "     $_w/data/library/docusort.db  ($(du -h "$_w/data/library/docusort.db" 2>/dev/null | cut -f1), last written $(date -r "$_w/data/library/docusort.db" '+%Y-%m-%d %H:%M' 2>/dev/null))"
+  done
+  # 🔴 UND ES WIRD NICHT VON SELBST DORTHIN UMGEZOGEN.
+  #
+  # Der erste Entwurf tat genau das: Ziel leer, genau ein Fund — also
+  # „installing there instead". In der Simulation hat das sofort zugeschlagen,
+  # und zwar falsch: eine FRISCHE Installation im Heimatverzeichnis fand eine
+  # Datenbank im Download-Ordner und verlegte sich dorthin. Niemand hatte
+  # danach gefragt, und auf dem Schirm stand ein Pfad, den der Mensch nie
+  # genannt hatte.
+  #
+  # 🔑 Gezeigt wird es, entschieden wird es nicht. Wer es benutzen will, sagt
+  #    es mit DOCUSORT_DIR — und wer beide Haelften zusammen haben will,
+  #    bekommt weiter unten das Angebot, sie zu vereinigen. Das ist die
+  #    Korrektur, die nichts ueberrascht.
+  warn "   Not touched — this run installs into $DIR."
+  warn "   To use that one instead:  DOCUSORT_DIR=<folder> $0"
+  warn ""
+fi
+
+if [ -n "$GRUND" ]; then
+  say "Using $DIR — $GRUND"
+else
+  say "Fresh installation in $DIR"
+fi
+
+# 🔴 Ein zweiter Container waere ein zweiter Haushalt. Wer wirklich einen
+#    will, sagt es mit DOCUSORT_DIR; ohne das richtet sich der Installer nach
+#    oben aus und aktualisiert die vorhandene Installation.
+if [ -n "$LAUFEND_DIR" ] && [ "$LAUFEND_DIR" != "$DIR" ]; then
+  warn "A DocuSort is already running from $LAUFEND_DIR."
+  warn "   This run uses $DIR instead, so the container will be rebuilt there"
+  warn "   and the other folder keeps its documents untouched."
+fi
+
+# 🔑 Was mit den gefundenen Archiven geschieht, entscheidet sich NACH der
+#    Installation — vorher laeuft noch nichts, was sie zusammenfuehren
+#    koennte. Der Merker traegt sie bis dorthin.
+ZUSAMMEN="$WAISEN"
+
 say "Installing into $DIR"
 # Every host path the compose file below mounts, created before the daemon is
 # asked for it. `logs` was missing here and the installer still stopped on some
@@ -132,9 +268,16 @@ services:
     command:
       - --cleanup
       # 🔴 OHNE DIESE FLAGGE KOMMT EINE KAPUTTE FASSUNG NIE ZURUECK.
-      #    Watchtower sieht Container im Zustand `restarting` sonst GAR
-      #    NICHT — am Pi gemessen: laufend `scanned=1, updated=1`,
-      #    abstuerzend `scanned=0`. Startet DocuSort nach einem Update
+      # 🔴 Die Zeichen um die Woerter unten sind ABSICHTLICH einfache
+      #    Anfuehrungszeichen. Dieser Block ist ein Heredoc OHNE Schutz
+      #    (<<YAML, nicht <<'YAML') — die Dollarzeichen darin sollen ja
+      #    maskiert durchgehen. Damit sind Backticks KOMMANDOS: beim Lauf
+      #    stand auf dem Schirm von Nutzern
+      #        install.sh: line 100: restarting: command not found
+      #    waehrend die Worte aus der erzeugten Datei verschwanden.
+      #    Watchtower sieht Container im Zustand 'restarting' sonst GAR
+      #    NICHT — am Pi gemessen: laufend 'scanned=1, updated=1',
+      #    abstuerzend 'scanned=0'. Startet DocuSort nach einem Update
       #    nicht mehr, bliebe es stehen, bis jemand von Hand eingreift.
       #    Mit der Flagge holt der naechste Lauf die heile Fassung.
       - --include-restarting
@@ -174,6 +317,7 @@ done < <(sed -n 's#^[[:space:]]*-[[:space:]]*\./\([^:]*\):.*#\1#p' "$DIR/docker-
 say "Pulling images (DocuSort, plus a local AI service of about 5.5 GB so you"
 say "can work without any cloud later — the model itself is only fetched when"
 say "you ask for it in DocuSort). Not wanted? docker compose stop ollama"
+
 say "Pulling $IMAGE"
 # 🔴 Ein fehlgeschlagener Abruf ist nicht dasselbe wie ein fehlendes Abbild.
 #    Mit `pull && up -d` riss eine kurze Netzstoerung (oder eine Registry, die
@@ -266,6 +410,66 @@ else
       exit 1
       ;;
   esac
+fi
+
+# ══════════════════════════════════════════════════════════════════════════
+# 🔑 ZWEI ARCHIVE ZU EINEM (06.10.2026)
+#
+# Wer durch den alten Installer zwei Datenverzeichnisse hat, hat seine Post in
+# zwei Haelften — und hat die zweite oft von Hand noch einmal hochgeladen. Das
+# laesst sich zusammenlegen, und zwar ohne dass etwas doppelt wird: DocuSort
+# erkennt dasselbe Dokument am INHALT (SHA256), Buchungen an ihrem Hash.
+#
+# 🔴 Gefragt wird ueber /dev/tty, nicht ueber stdin — bei `curl | bash` ist
+#    stdin das SKRIPT. Ohne Terminal wird nichts getan und der Befehl gezeigt.
+# 🔴 Und der Container wird dafuer angehalten: zwei Schreiber auf einer
+#    SQLite-Datei sind ein Weg, beide Haelften zu verlieren.
+# ══════════════════════════════════════════════════════════════════════════
+if [ -n "${ZUSAMMEN:-}" ] && [ -f "$DIR/data/library/docusort.db" ]; then
+  for _w in $ZUSAMMEN; do
+    [ -f "$_w/data/library/docusort.db" ] || continue
+    say ""
+    say "Another archive is lying next to this one:"
+    say "   $_w/data"
+    say "Looking at what it would add (nothing is written):"
+    if ! docker run --rm \
+         -v "$DIR/data:/data" -v "$DIR/config:/app/config" \
+         -v "$_w/data:/fremd:ro" "$IMAGE" \
+         python -m docusort --merge-from /fremd 2>&1 | sed 's/^/     /'; then
+      warn "   Could not look into it — leaving both alone."
+      continue
+    fi
+    _JA=""
+    if [ -r /dev/tty ]; then
+      printf '\n  Merge it into this installation? Nothing is deleted, and the\n'
+      printf '  database is backed up first. [y/N] '
+      read -r _JA < /dev/tty || _JA=""
+      printf '\n'
+    fi
+    case "$_JA" in
+      [yYjJ]*)
+        say "Stopping DocuSort for the merge …"
+        ( cd "$DIR" && $COMPOSE stop docusort >/dev/null 2>&1 || true )
+        if docker run --rm \
+           -v "$DIR/data:/data" -v "$DIR/config:/app/config" \
+           -v "$_w/data:/fremd:ro" "$IMAGE" \
+           python -m docusort --merge-from /fremd --merge-apply \
+           2>&1 | sed 's/^/     /'; then
+          say "Merged. The other folder is untouched — delete it when you are sure."
+        else
+          warn "The merge did not finish. Both archives are as they were,"
+          warn "and a backup of this one lies next to its database."
+        fi
+        ( cd "$DIR" && $COMPOSE start docusort >/dev/null 2>&1 || true )
+        ;;
+      *)
+        say "Left alone. To do it later:"
+        say "   docker run --rm -v $DIR/data:/data -v $DIR/config:/app/config \\"
+        say "     -v $_w/data:/fremd:ro $IMAGE \\"
+        say "     python -m docusort --merge-from /fremd --merge-apply"
+        ;;
+    esac
+  done
 fi
 
 # `hostname -I` is Linux-only, and with `set -euo pipefail` a failing one took

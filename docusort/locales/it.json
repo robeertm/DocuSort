@@ -937,6 +937,8 @@
   "inv.reset": "reimposta",
   "inv.rows": "Le fatture",
   "inv.search": "Cerca",
+  "inv.search.loose": "Nessun documento contiene tutte le parole: vengono mostrati tutti quelli che ne contengono almeno una. Una ricerca più stretta aiuta.",
+  "inv.search.part": "Nessuna corrispondenza esatta: vengono mostrati i documenti in cui le tue parole compaiono da qualche parte nel testo.",
   "inv.search_hint": "mittente, oggetto, riscontro, contenuto …",
   "inv.sender": "Mittente",
   "inv.show_notes": "mostra avvisi",
