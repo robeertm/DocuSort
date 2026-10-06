@@ -13,6 +13,9 @@ IMAGE="${DOCUSORT_IMAGE:-ghcr.io/robeertm/docusort:latest}"
 # to ask and the check below has to say so instead of pretending to measure.
 VEROEFFENTLICHT=1
 DIR="${DOCUSORT_DIR:-$PWD/docusort}"
+# Der Weg, auf dem die meisten hier ankommen — gebraucht fuer Hinweise, die
+# dem Menschen sagen, wie er diesen Installer noch einmal startet.
+EINZEILER="https://raw.githubusercontent.com/robeertm/DocuSort/main/deploy/install.sh"
 PORT="${DOCUSORT_PORT:-9876}"
 TZ_DEFAULT="${TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##')}"
 TZ_DEFAULT="${TZ_DEFAULT:-Europe/Berlin}"
@@ -166,7 +169,12 @@ if [ -n "$WAISEN" ]; then
   #    bekommt weiter unten das Angebot, sie zu vereinigen. Das ist die
   #    Korrektur, die nichts ueberrascht.
   warn "   Not touched — this run installs into $DIR."
-  warn "   To use that one instead:  DOCUSORT_DIR=<folder> $0"
+  # 🔴 NICHT `$0`. Dieses Skript laeuft im Normalfall als `curl … | bash` —
+  #    dann ist `$0` schlicht `bash`, und auf dem Schirm stuende ein Befehl,
+  #    der nichts tut. Der Weg, auf dem der Mensch hergekommen ist, steht
+  #    oben im Kopf dieser Datei; genau der gehoert hierher.
+  warn "   To use that one instead, run the installer with it named:"
+  warn "     DOCUSORT_DIR=<folder> bash -c \"\$(curl -fsSL $EINZEILER)\""
   warn ""
 fi
 
