@@ -403,6 +403,13 @@ Subcategory MUST be empty "" or one of the parent's listed subs. Tags is an arra
 """
 
 
+# 🔴 GEMESSEN, NICHT GESCHAETZT: 32 413 Zeichen Prompt ergaben an
+#    qwen2.5:7b-instruct 10 309 Token — 3,14 Zeichen je Token (Deutsch mit
+#    Fachbegriffen). Hier wird nach UNTEN gerundet, damit die Rechnung
+#    „wieviel passt noch hinein" im Zweifel zu wenig statt zu viel sagt.
+ZEICHEN_JE_TOKEN = 3.0
+
+
 def _build_system_prompt(categories: list[dict[str, Any]]) -> str:
     # Categories from config override the baked-in list, but the structure
     # above is intentionally verbose so the full prompt crosses the 2048-
@@ -610,6 +617,46 @@ class Classifier:
         }
         self._system_prompt = _build_system_prompt(categories)
 
+    def _platz_fuer_text(self, vorhanden: int) -> int:
+        """Wieviele Zeichen des Dokuments duerfen mit — und warum nicht mehr.
+
+        🔑 `ai.max_text_chars = 0` HEISST: so viel, wie das Modell kann.
+        Dieselbe Lesart wie bei `timeout_seconds`, und aus demselben Grund:
+        bei einem eigenen Rechner kostet ein Token nichts ausser Zeit, und
+        eine feste Zahl ist immer entweder zu klein fuer das grosse Dokument
+        oder zu gross fuer das kleine Modell.
+
+        🔴 DIE NULL MUSS JEDEN BODEN UEBERLEBEN. Sie wird deshalb ZUERST
+        geprueft. Waere sie durch ein `max(...)` gelaufen, staende „keine
+        Grenze" in den Einstellungen und es passierte nichts.
+
+        🔴 UND UNBEGRENZT GIBT ES NICHT. Die Grenze gehoert dem Modell, nicht
+        DocuSort: qwen2.5:7b fasst 32 768 Token, davon gehen der Systemtext
+        (rund 9 000 Token), die Antwort und eine Reserve ab — es bleiben rund
+        71 000 Zeichen fuer das Dokument. Was darueber liegt, wird gekuerzt,
+        und das steht dann im Protokoll, statt stillzuschweigen.
+        """
+        eingestellt = int(getattr(self.settings, "max_text_chars", 0) or 0)
+        if eingestellt > 0:
+            return eingestellt
+        try:
+            grenze = int(self.provider.max_context() or 0)
+        except Exception:  # noqa: BLE001
+            grenze = 0
+        if grenze <= 0:
+            # Wer seine Grenze nicht nennt (gehostete Dienste, fremde
+            # Endpunkte), bekommt die alte Vorgabe — dort kostet jedes Token
+            # Geld, und „so viel wie moeglich" waere dort die falsche Vorgabe.
+            return 12000
+        frei = grenze - int(len(self._system_prompt) / ZEICHEN_JE_TOKEN) - 600 - 512
+        platz = max(2000, int(frei * ZEICHEN_JE_TOKEN))
+        if vorhanden > platz:
+            logger.warning(
+                "Das Dokument hat %d Zeichen, in das Modell passen davon %d "
+                "(Modellgrenze %d Token). %d Zeichen gehen nicht mit.",
+                vorhanden, platz, grenze, vorhanden - platz)
+        return platz
+
     def classify(self, text: str, *, was: str = "") -> Classification:
         """`was` ist der Dateiname und dient nur der Anzeige. Er steht hier,
         damit der Halter (`ai_targets.ClassifierHandle`) und der nackte
@@ -637,7 +684,7 @@ class Classifier:
         #    Wer ein grosses Fenster hat, stellt ihn hoch; wer ein kleines hat,
         #    runter. Und wenn es trotzdem nicht reicht, faellt das jetzt auf:
         #    siehe `_ist_einordnung`.
-        user = _build_user_message(body, self.settings.max_text_chars)
+        user = _build_user_message(body, self._platz_fuer_text(len(body)))
         logger.debug("Calling %s model=%s, text_len=%d, pseudo=%s",
                      self.provider.name, self.settings.model, len(text),
                      bool(pseudo))
