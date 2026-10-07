@@ -192,12 +192,62 @@ class ImportReport:
     #    dem Zellinhalt. Ohne das meldet ein Import, der NICHTS einlesen konnte,
     #    nur „0 Buchungen“, und genau so sieht fuer den Nutzer „laedt nicht ein“ aus.
     invalid_example: str = ""
+    # 🔴 DER GRUND ALS SCHLUESSEL, nicht als fertiger Satz. DocuSort spricht
+    #    fuenf Sprachen; ein Grund, den nur deutsche Nutzer lesen koennen, ist
+    #    fuer alle anderen dieselbe Null wie vorher. `errors` traegt weiter den
+    #    englischen Wortlaut (Protokoll, API), `error_keys` den Schluessel mit
+    #    seinen Parametern — uebersetzt wird dort, wo die Sprache des Nutzers
+    #    bekannt ist: in der Weboberflaeche.
+    error_keys: list[dict] = field(default_factory=list)
+    invalid_example_key: str = ""
+    invalid_example_params: dict = field(default_factory=dict)
     # 🔴 Nur DANN darf die Oberflaeche nach der Konto-IBAN fragen. Vorher setzte
     #    `/upload` bei JEDEM Fehler `hint_iban` — ein unbekannter Spaltenkopf
     #    oder eine unlesbare Zeile kam beim Nutzer als „nennt kein Konto" an,
     #    und der echte Grund wurde dabei weggeworfen.
     needs_account_iban: bool = False
     errors: list[str] = field(default_factory=list)
+
+
+def aufloesen(key: str, params: dict, lang: str) -> str:
+    """Einen Grund in EINER Sprache zusammensetzen.
+
+    🔑 Ein Grund kann einen Grund enthalten: der aeussere Satz nennt die Zahl
+    der verworfenen Zeilen, der innere, warum die erste verworfen wurde. Der
+    innere steckt als eigener Schluessel in `reason_key`, damit nicht ein
+    englischer Teilsatz mitten in einem franzoesischen Satz landet. Beide
+    werden hier in derselben Sprache gesetzt.
+    """
+    from ..i18n import translate
+    werte = {k: v for k, v in (params or {}).items()
+             if k not in ("reason_key", "reason_params")}
+    innen = (params or {}).get("reason_key")
+    if innen:
+        werte["reason"] = translate(innen, lang, **((params or {}).get("reason_params") or {}))
+    return translate(key, lang, **werte)
+
+
+def _fehler(report: "ImportReport", key: str, **params) -> None:
+    """Einen Grund anhaengen — als Schluessel UND als englischen Wortlaut.
+
+    🔑 `errors` bleibt, was es war: lesbarer Text fuer Protokoll und API.
+    `error_keys` ist das, woraus die Oberflaeche den Satz in der Sprache des
+    Nutzers baut. Beide gehen nur ueber diese Funktion, damit keiner von
+    beiden vergessen wird.
+    """
+    from ..i18n import translate
+    report.error_keys.append({"key": key, "params": dict(params)})
+    report.errors.append(aufloesen(key, params, "en"))
+
+
+def _grund(report: "ImportReport", key: str, **params) -> None:
+    """Warum die erste verworfene Zeile verworfen wurde — ebenso zweifach."""
+    from ..i18n import translate
+    if report.invalid_example_key:
+        return
+    report.invalid_example_key = key
+    report.invalid_example_params = dict(params)
+    report.invalid_example = translate(key, "en", **params)
 
 
 def _decode_bytes(data: bytes) -> str:
@@ -350,7 +400,7 @@ def parse_csv(data: bytes | str, *, file_label: str = "",
     report = ImportReport(file_label=file_label)
     text = data if isinstance(data, str) else _decode_bytes(data)
     if not text.strip():
-        report.errors.append("CSV is empty")
+        _fehler(report, "finance.csv.err_empty")
         return [], report
 
     dialect = _detect_dialect(text)
@@ -378,10 +428,7 @@ def parse_csv(data: bytes | str, *, file_label: str = "",
         if not report.balance_date:
             report.balance_date, report.balance_amount = _find_balance(cells)
     if not mapping:
-        report.errors.append(
-            "Kein Spaltenkopf mit Buchungsdatum und Betrag gefunden — ist das ein Umsatz-Export "
-            "(Sparkasse, DKB, ING, Volksbank, comdirect, Commerzbank, Deutsche Bank, N26, Consorsbank)?"
-        )
+        _fehler(report, "finance.csv.err_no_header")
         return [], report
     report.bank = _detect_bank(header)
     own_hint = normalise_iban(account_iban_hint or "")
@@ -412,20 +459,20 @@ def parse_csv(data: bytes | str, *, file_label: str = "",
             amount = None if deb is None and cred is None else round((cred or 0.0) - abs(deb or 0.0), 2)
         if amount is None:
             report.rows_invalid += 1
-            if not report.invalid_example:
-                roh = cell(raw_row, "amount") or cell(raw_row, "debit") or cell(raw_row, "credit")
-                report.invalid_example = (
-                    "der Betrag war nicht lesbar (%s)"
-                    % (f'\u201e{roh[:40]}\u201c' if roh else "die Spalte war leer"))
+            roh = cell(raw_row, "amount") or cell(raw_row, "debit") or cell(raw_row, "credit")
+            if roh:
+                _grund(report, "finance.csv.bad_amount", cell=roh[:40])
+            else:
+                _grund(report, "finance.csv.bad_amount_empty")
             continue
         booking_date = normalise_date(cell(raw_row, "booking_date"))
         if not booking_date:
             report.rows_invalid += 1        # trailing summary / balance lines land here
-            if not report.invalid_example:
-                roh = cell(raw_row, "booking_date")
-                report.invalid_example = (
-                    "das Buchungsdatum war nicht lesbar (%s)"
-                    % (f'\u201e{roh[:40]}\u201c' if roh else "die Spalte war leer"))
+            roh = cell(raw_row, "booking_date")
+            if roh:
+                _grund(report, "finance.csv.bad_date", cell=roh[:40])
+            else:
+                _grund(report, "finance.csv.bad_date_empty")
             continue
         value_date = normalise_date(cell(raw_row, "value_date"))
 
@@ -680,9 +727,7 @@ def import_csv(db, data: bytes | str, *, file_label: str = "",
     if not rows:
         if report.rows_skipped and not report.rows_inserted:
             report.needs_account_iban = True
-            report.errors.append(
-                "Die Datei nennt keine IBAN des eigenen Kontos — bitte die Konto-IBAN im Feld neben dem Import angeben."
-            )
+            _fehler(report, "finance.csv.err_no_own_iban")
         # 🔴 EINE NULL OHNE GRUND IST KEINE ANTWORT. Der Spaltenkopf wurde
         #    erkannt, Zeilen waren da — und trotzdem kam nichts an. Bisher stand
         #    dann „0 Buchungen“ und sonst nichts; aus Sicht des Nutzers hat die
@@ -690,13 +735,17 @@ def import_csv(db, data: bytes | str, *, file_label: str = "",
         #    Jetzt nennt der Bericht die Zahl, den Grund und ein Beispiel aus der
         #    Datei — damit man am Telefon sagen kann, was drinsteht.
         elif report.rows_invalid and not report.rows_inserted:
-            report.errors.append(
-                "%d Zeile(n) gelesen, aber keine einzige verwertbar — %s. "
-                "Kommt die Datei wirklich aus der Umsatz-Übersicht des Kontos "
-                "(nicht aus einem Depot- oder Kreditkarten-Export)?"
-                % (report.rows_invalid,
-                   report.invalid_example or "Datum oder Betrag standen nicht in den erwarteten Spalten")
-            )
+            # Der Grund steckt als eigener Schluessel im Satz — die Oberflaeche
+            # setzt beide in der Sprache des Nutzers zusammen.
+            if not report.invalid_example_key:
+                _grund(report, "finance.csv.bad_unknown")
+            # 🔴 Der Grund geht als SCHLUESSEL mit, nicht als fertiger Text.
+            #    Sonst stuende der englische Teilsatz mitten im franzoesischen
+            #    Satz — uebersetzt wird beides, und zwar in derselben Sprache.
+            _fehler(report, "finance.csv.err_nothing_usable",
+                    count=report.rows_invalid,
+                    reason_key=report.invalid_example_key,
+                    reason_params=report.invalid_example_params)
         return report
     import_rows(db, rows, report, account_holder_hint=account_holder_hint)
     logger.info(
