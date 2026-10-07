@@ -1677,25 +1677,40 @@ def create_app(
                     # comdirect would otherwise look like a clean import
                     # that silently stored nothing.
                     if rep.errors:
+                        # 🔴 `hint_iban` NUR, wenn die fehlende eigene IBAN
+                        #    wirklich der Grund war. Vorher stand hier fest
+                        #    `True` — ein unbekannter Spaltenkopf oder eine
+                        #    Datei, aus der keine einzige Zeile lesbar war, kam
+                        #    beim Nutzer als „nennt kein Konto“ an, und der
+                        #    echte Grund wurde dabei verworfen. Genau so sieht
+                        #    „laedt nicht ein“ aus: es passiert etwas, aber
+                        #    nichts davon stimmt.
+                        # 🔴 DER GANZE BERICHT, nicht drei Felder. Vorher wurde
+                        #    hier ein Minimal-Woerterbuch gebaut und alles andere
+                        #    verworfen — wie viele Zeilen gelesen, wie viele
+                        #    verworfen, welche Bank. Genau die Zahlen braucht
+                        #    aber, wer am Telefon erklaeren soll, was los ist.
                         imported.append({
+                            **_report_to_dict(rep),
                             "file_label": up.filename or "",
                             "error": "; ".join(rep.errors),
-                            "hint_iban": True,
+                            "hint_iban": bool(getattr(rep, "needs_account_iban", False)),
                         })
-                        logger.warning("CSV-Upload %s ohne eigene IBAN: %s",
+                        logger.warning("CSV-Upload %s nicht eingelesen: %s",
                                        up.filename, rep.errors)
                     else:
                         imported.append(_report_to_dict(rep))
                         logger.info("Uploaded CSV %s -> %d Buchungen",
                                     up.filename, rep.rows_inserted)
                 except Exception as exc:  # noqa: BLE001
-                    # The usual cause is a file without its own IBAN (N26,
-                    # comdirect). Say so and point at the one place that can
-                    # ask for it, instead of a bare failure.
+                    # Hier ist der Importeur wirklich gestolpert — die fehlende
+                    # eigene IBAN meldet er ueber `report.errors`, nicht durch
+                    # eine Ausnahme. Also den echten Text zeigen und NICHT nach
+                    # der Konto-IBAN fragen, die hier nichts heilt.
                     imported.append({
                         "file_label": up.filename or "",
-                        "error": f"{exc}",
-                        "hint_iban": True,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "hint_iban": False,
                     })
                     logger.warning("CSV-Upload %s fehlgeschlagen: %s", up.filename, exc)
                 continue
