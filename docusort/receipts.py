@@ -526,8 +526,28 @@ class ReceiptExtractor:
         do_pseudo = self.pseudonymize and not is_local
         pseudo = None
         if do_pseudo:
-            from .finance.pseudonymizer import pseudonymize_for_cloud
-            body, pseudo = pseudonymize_for_cloud(body, self.holder_names)
+            # 🔴 HIER STAND `from .finance.pseudonymizer import
+            #    pseudonymize_for_cloud` — UND DIESES MODUL GIBT ES NICHT.
+            #    Die Pseudonymisierung wurde in v0.33.0 ausgebaut (siehe
+            #    `classifier.py`), dieser Aufruf blieb liegen. Weil
+            #    `finance.pseudonymize` standardmaessig AN ist, scheiterte
+            #    damit bei JEDEM Wolken-Anbieter schon der Import; der
+            #    Aufrufer fing die Ausnahme und schrieb eine Warnung. Die
+            #    Kassenzettel-Auswertung war also fuer alle, die nicht lokal
+            #    rechnen, stillschweigend ausser Betrieb.
+            #
+            # 🔑 Es wird NICHT heimlich ungeschuetzt gesendet. Gefordert
+            #    war, dass Namen die Maschine nicht verlassen; eine Maskierung,
+            #    die es nicht gibt, darf nicht als erledigt gelten. Also
+            #    verweigern — sichtbar, mit Grund, und mit dem Weg hinaus:
+            #    lokal rechnen, oder die Maskierung ausdruecklich abwaehlen.
+            raise ProviderError(
+                "Receipt extraction needs pseudonymisation before sending to "
+                "a cloud provider (%s), and the masking step is not available "
+                "in this build. Nothing was sent. Either classify on a local "
+                "provider, or switch `finance.pseudonymize` off deliberately "
+                "to send the text unmasked." % self.provider.name
+            )
 
         try:
             resp = self.provider.classify(

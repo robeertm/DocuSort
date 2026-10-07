@@ -7,6 +7,102 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.99.3] - 2026-10-07
+
+### Fixed
+
+🔴 **"Retry classification" erased the document's stored text.** Reported as
+a button that does nothing. It was three separate defects, and none of them
+was a dead button.
+
+The filing step stored the text as `text[: settings.claude.max_text_chars]`.
+`settings.claude` is only another name for the same AI block, and since
+`max_text_chars = 0` came to mean *as much as the model can take*, that
+expression was `text[:0]` — **empty**. Every click therefore deleted the
+document's stored text. Measured on a live archive: the document that had
+just been retried held 0 characters.
+
+The main pipeline keeps up to 200 000 characters at the very same point, with
+a comment explaining why: second-pass extractors for statements and receipts
+need the booking table that sits past the model's input limit. Two code paths
+doing one job, answering differently — and the one that ran less often was
+the one that threw data away. It now stores what the pipeline stores. How much
+the model *sees* is decided when the prompt is built, which is where it
+belongs; the database has no business truncating.
+
+🔴 **There was no button for 711 of 862 documents.** The card was shown only
+for `status in ('review', 'failed')` — fourteen documents. For everything
+already filed there was no way to ask for a second opinion, although "filed
+under the wrong category" is the most common reason to want one. It is now
+offered for filed, review and failed documents alike.
+
+🔴 **The result did not survive the page reload.** It was displayed for
+1.5 seconds, then the page rebuilt itself and took the message with it. When
+the model returned the same answer as before, nothing was left to see —
+indistinguishable from a button that does nothing. The outcome now survives
+the reload, and it names what changed: the previous classification, the new
+one, and the resulting state. When the answer is unchanged, it says so
+instead of staying silent.
+
+### Removed
+
+🔴 **82 lines in `retry.py` that could never run.** When a reclassified
+document turned out to be a bank statement, the code called a helper whose
+first act was `from .finance import StatementExtractor` — a class that does
+not exist anywhere in the project. Every call therefore died on the import,
+and an `except Exception` above it turned that into a log line. What went down
+with it were the only places that enforced `finance.local_only` and
+`finance.review_before_send`: two privacy switches guarding a path that was
+not there.
+
+The main pipeline reads statements with `finance.pdf_statement`, a text parser
+that checks the bookings against the statement's own opening and closing
+balance and sends nothing to any model. That same reader is now used here,
+with the same follow-up work. **One reader, two callers** — the same file
+produces the same bookings whichever way it arrived.
+
+🔴 **The alias `settings.claude`.** It pointed at `settings.ai`, and it had
+exactly one reader left in the whole project — the line above that erased
+document text. That `claude.max_text_chars` and `ai.max_text_chars` are one
+and the same field was invisible at the call site. A second spelling for one
+field costs nothing and hides everything. A legacy `claude:` section in an
+existing config.yaml is still read, in one place, where it belongs.
+
+### Fixed
+
+🔴 **Receipt extraction was out of service on every cloud provider, in
+silence.** With a cloud provider and the default `finance.pseudonymize = true`,
+`receipts.py` imported `finance.pseudonymizer` — a module removed in v0.33.0
+whose call site stayed behind. The import failed, the caller logged a warning,
+and no receipt was ever extracted. It never showed here because this
+installation classifies locally, where the masking step is skipped anyway.
+
+Nothing is sent unmasked to paper over it. The masking step is genuinely
+absent, so a masking requirement that cannot be met is now refused out loud,
+naming both ways forward: classify locally, or switch pseudonymisation off
+deliberately.
+
+### Added
+
+`pruefstaende/probe_leichen.py`: every project-internal import must resolve —
+module and name, wherever it sits, including inside a branch that rarely runs.
+Python checks an import inside a function only when the function is called,
+which is why both defects above survived for so long. **312 imports across 69
+files**, plus a counter-test that the sieve really does catch an invented
+class, a check that no template is left without a caller, and a guard against
+a second spelling for the AI block returning.
+
+### Changed
+
+Two interface texts claimed the document is sent to Claude. On this
+installation it is classified by the machine standing next to it. Reworded in
+all five languages, together with the processing label.
+
+`pruefstaende/probe_neu_klassifizieren.py`: **50 green, 0 red**, including a
+browser run that clicks the button and checks the message is still there after
+the reload.
+
+
 ## [0.99.2] - 2026-10-07
 
 ### Fixed

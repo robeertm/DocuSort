@@ -1,9 +1,17 @@
-"""Re-classify a document that previously failed or landed in review.
+"""Re-classify a document — from review, from failed, or simply filed wrong.
 
-Uses stored extracted_text when present so we don't re-pay for OCR; falls
-back to a fresh OCR run if the text is empty. On success the physical file
-is moved to its new category folder and the DB row is updated in place
-(keeping the same `id` but accumulating token usage).
+Uses the stored extracted text so no OCR is paid for twice; only an empty
+text falls back to a fresh OCR run. On success the file is moved to its new
+category folder and the DB row is updated in place, keeping the same `id`
+and accumulating token usage.
+
+🔑 The stored text is kept in full (200 000 characters, as the main
+pipeline does). How much of it the model gets to see is decided when the
+prompt is built — never by what the database happens to hold.
+
+🔑 A document that turns out to be a bank statement is handed to the
+same reader the main pipeline uses (`finance.pdf_statement`), so the same
+file produces the same bookings whichever way it got here.
 """
 
 from __future__ import annotations
@@ -11,7 +19,6 @@ from .kategorien import ist as _kat_ist
 
 import logging
 import shutil
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,10 +26,22 @@ from .classifier import Classifier
 from .config import AppSettings
 from .db import Database
 from .ocr import extract_text
-from .organizer import _parse_iso_date, _slug, build_filename, _uniquify  # type: ignore
+from .organizer import _parse_iso_date, build_filename, _uniquify  # type: ignore
 
 
 logger = logging.getLogger("docusort.retry")
+
+
+def _sieht_wie_bank_aus(cls) -> bool:
+    """Ein Dokument, das das Modell „Bank" nennt und das nach einem Auszug
+    klingt. Die Kategorie allein reicht nicht: „Bank" traegt auch jeder
+    Werbebrief einer Bank."""
+    if cls.category != "Bank":
+        return False
+    subj = (cls.subject or "").lower()
+    return ((cls.subcategory or "").lower() in ("konto", "karte")
+            or any(w in subj for w in ("kontoauszug", "girokonto",
+                                       "tagesgeld", "kreditkart")))
 
 
 def retry_document(
@@ -34,6 +53,14 @@ def retry_document(
     doc = db.get(doc_id)
     if not doc:
         raise ValueError(f"document {doc_id} not found")
+
+    # 🔑 Den Stand VORHER festhalten. Ohne ihn kann die Oberflaeche
+    #    nicht zwischen „das Modell sagt etwas Neues" und „das Modell sagt
+    #    dasselbe wie vorher" unterscheiden — und genau das sah fuer den
+    #    Benutzer aus wie ein Knopf, der nichts tut.
+    vorher_kategorie = doc.get("category") or ""
+    vorher_unter = doc.get("subcategory") or ""
+    vorher_status = doc.get("status") or ""
 
     text = doc.get("extracted_text") or ""
     if not text:
@@ -81,153 +108,96 @@ def retry_document(
         library_path=str(target),
         filename=target.name,
         status=status,
-        extracted_text=text[: settings.claude.max_text_chars],
+        # 🔴 DEN GANZEN TEXT BEHALTEN, nicht auf die Modellgrenze kuerzen.
+        #    Hier stand `text[: settings.claude.max_text_chars]`. Das kuerzte
+        #    genau das weg, was die Hauptverarbeitung ABSICHTLICH behaelt
+        #    (main.py speichert 200 000 Zeichen, mit Begruendung) — und seit
+        #    `max_text_chars = 0` „so viel, wie das Modell kann" heisst, war
+        #    `text[:0]` LEER: jeder Klick auf „Neu klassifizieren" loeschte den
+        #    gespeicherten Text des Dokuments. Damit war auch das Versprechen
+        #    des Knopfes hin, beim naechsten Mal ohne neue Texterkennung
+        #    auszukommen. Wieviel das Modell SIEHT, entscheidet der
+        #    Klassifizierer beim Senden; die Datenbank hat damit nichts zu tun.
+        extracted_text=text[:200_000],
     )
 
-    # If the reclassification landed on Kontoauszug (or a Bank-tagged
-    # statement-lookalike), kick off the second-pass extraction in the
-    # same call. Without this step the user has to click "Auswerten"
-    # on every single doc — defeats the whole "Re-queue all" workflow.
+    # 🔴 HIER STAND EIN ZWEITER KONTOAUSZUG-LESER — UND ER KONNTE NIE LAUFEN.
+    #    Der Block rief `_extract_statement_inline()`, und das Erste, was die
+    #    Funktion tat, war `from .finance import StatementExtractor`. Diese
+    #    Klasse gibt es im ganzen Projekt NICHT. Der Import scheiterte also
+    #    jedes Mal, und ein `except Exception` darueber schrieb eine Warnung
+    #    ins Protokoll — 82 Zeilen, die aussahen wie eine Funktion und nie
+    #    eine waren. Mitgeschleppt wurden dabei die einzigen Durchsetzungen
+    #    von `finance.local_only` und `finance.review_before_send`: Schalter,
+    #    die nur einen Weg bewachten, den es nicht gab.
+    #
+    # 🔑 EIN LESER, ZWEI AUFRUFER. Die Hauptverarbeitung liest Auszuege
+    #    mit `import_statement_file` — ein Textparser, der die Buchungen
+    #    gegen Anfangs- und Schlussbestand des Auszugs selbst prueft und
+    #    dabei NICHTS an ein Modell schickt. Damit erledigt sich die
+    #    Datenschutzfrage an dieser Stelle von selbst, statt von zwei
+    #    Schaltern bewacht zu werden. Genau derselbe Aufruf steht jetzt hier,
+    #    mit denselben Nacharbeiten (neu einsortieren, Auszugsdokumente
+    #    aufraeumen) — wer neu klassifiziert, bekommt dasselbe Ergebnis wie
+    #    wer die Datei neu einwirft.
     statement_result: dict[str, Any] | None = None
-    is_bank_lookalike = False
-    if cls.category == "Bank":
-        subj_l = (cls.subject or "").lower()
-        sub_l  = (cls.subcategory or "").lower()
-        if (sub_l in ("konto", "karte")
-                or "kontoauszug" in subj_l
-                or "girokonto"   in subj_l
-                or "tagesgeld"   in subj_l
-                or "kreditkart"  in subj_l):
-            is_bank_lookalike = True
-
-    if _kat_ist(cls.category, "kontoauszug") or is_bank_lookalike:
-        local_providers = ("openai_compat", "bridge")
-        # 🔴 DATENSCHUTZ: gefragt ist, wer DIESES Dokument rechnet — nicht, was
-        #    in der Datei steht. Hier entscheidet sich, ob ein Kontoauszug das
-        #    Haus verlassen darf (`finance.local_only`). Wer auf einen Anbieter
-        #    in der Wolke umschaltet, waehrend in der config.yaml noch
-        #    `openai_compat` steht, haette seine Kontoauszuege dorthin
-        #    geschickt — und DocuSort haette gemeldet, es rechne lokal.
-        from .ai_targets import aktive_ai
-        _ai = aktive_ai(classifier, settings.ai)
-        is_local = _ai.provider in local_providers
-        # Same gates as the primary pipeline in main.py: respect the
-        # user's local-only and review-before-send settings.
-        if settings.finance.local_only and not is_local:
-            logger.info(
-                "retry %d: skipped statement extraction (local_only=true, "
-                "provider=%s)", doc_id, _ai.provider,
+    if _kat_ist(cls.category, "kontoauszug") or _sieht_wie_bank_aus(cls):
+        try:
+            from .finance.pdf_statement import (import_statement_file,
+                                                tidy_statement_documents)
+            rep, st = import_statement_file(
+                db, target, doc_id=doc_id,
+                file_hash=str(doc.get("content_hash") or ""),
             )
-        elif settings.finance.review_before_send and not is_local:
-            with db._lock:
-                db._conn.execute(
-                    "UPDATE documents SET status = 'pending_review' WHERE id = ?",
-                    (doc_id,),
+            if st is not None:
+                statement_result = {
+                    "statement_no": st.statement_no,
+                    "account_kind": st.account_kind,
+                    "transactions": rep.rows_inserted,
+                    "overlap": rep.rows_overlap,
+                    "skipped": rep.statements_skipped,
+                    "errors": list(rep.errors),
+                }
+                logger.info(
+                    "retry %d: Kontoauszug %s (%s): %d Buchungen neu, "
+                    "%d Ueberschneidungen", doc_id, st.statement_no,
+                    st.account_kind, rep.rows_inserted, rep.rows_overlap,
                 )
-            logger.info("retry %d: paused for user review (cloud provider)", doc_id)
-        else:
-            try:
-                statement_result = _extract_statement_inline(
-                    doc_id=doc_id, text=text, classifier=classifier,
-                    settings=settings, db=db, target=target,
-                    is_local=is_local, was_lookalike=is_bank_lookalike,
-                )
-                logger.info("retry %d: statement extracted (%d transactions)",
-                            doc_id, statement_result.get("transactions", 0))
-            except Exception as exc:
-                logger.warning("retry %d: statement extraction failed: %s",
-                               doc_id, exc)
+                if rep.statements:
+                    try:
+                        db.finance_reclassify(force=False)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("retry %d: reclassify failed: %s", doc_id, exc)
+                    try:
+                        tidy_statement_documents(db, settings, log=logger,
+                                                 only_doc_ids={doc_id})
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("retry %d: tidy failed: %s", doc_id, exc)
+            else:
+                # Kein Auszug, den dieser Leser versteht. Das ist kein Fehler
+                # des Knopfes — und es wird gesagt, nicht verschwiegen.
+                statement_result = {"transactions": 0, "unreadable": True,
+                                    "errors": list(rep.errors)}
+                logger.info("retry %d: als Kontoauszug eingeordnet, aber der "
+                            "Auszugsleser erkennt die Vorlage nicht", doc_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("retry %d: Kontoauszug-Import fehlgeschlagen: %s",
+                           doc_id, exc)
 
     return {
         "doc_id": doc_id,
         "status": status,
         "category": cls.category,
+        "subcategory": cls.subcategory or "",
         "confidence": cls.confidence,
         "cost_usd": cls.cost_usd,
+        "category_before": vorher_kategorie,
+        "subcategory_before": vorher_unter,
+        "status_before": vorher_status,
+        "changed": (cls.category != vorher_kategorie
+                    or (cls.subcategory or "") != vorher_unter),
         "library_path": str(target),
         "statement": statement_result,
     }
 
 
-def _extract_statement_inline(*, doc_id: int, text: str,
-                              classifier: Classifier,
-                              settings: AppSettings, db: Database,
-                              target: Path, is_local: bool,
-                              was_lookalike: bool) -> dict[str, Any]:
-    """Run the second-pass statement extraction and persist the result.
-    Mirrors the equivalent block in main.py — kept inline here so a
-    bulk re-queue can complete without a separate user click."""
-    from hashlib import sha256
-    from .finance import StatementExtractor
-
-    from .ai_targets import aktive_ai, aufgaben_anbieter
-    extractor = StatementExtractor(
-        aufgaben_anbieter(classifier), aktive_ai(classifier, settings.ai).model,
-        max_text_chars=max(settings.ai.max_text_chars, 32000),
-        holder_names=settings.finance.holder_names,
-    )
-    do_pseudo = settings.finance.pseudonymize and not is_local
-    stmt = extractor.extract(text, pseudonymize=do_pseudo)
-
-    account_id: int | None = None
-    if stmt.iban_hash:
-        account_id = db.upsert_account(
-            bank_name=stmt.bank_name or "Unbekannt",
-            iban=stmt.iban,
-            iban_last4=stmt.iban_last4,
-            iban_hash=stmt.iban_hash,
-            account_holder=stmt.account_holder,
-            currency=stmt.currency,
-        )
-
-    tx_payload: list[dict] = []
-    for tx in stmt.transactions:
-        key = (
-            (stmt.iban_hash or "no-iban") + "|" +
-            (tx.booking_date or "") + "|" +
-            f"{tx.amount:.2f}" + "|" +
-            (tx.purpose or "")
-        )
-        d = tx.as_dict()
-        d["tx_hash"] = sha256(key.encode("utf-8")).hexdigest()
-        tx_payload.append(d)
-
-    file_hash = ""
-    try:
-        with open(target, "rb") as fh:
-            file_hash = sha256(fh.read()).hexdigest()
-    except OSError:
-        pass
-
-    db.upsert_statement(
-        doc_id,
-        account_id=account_id,
-        period_start=stmt.period_start,
-        period_end=stmt.period_end,
-        statement_no=stmt.statement_no,
-        opening_balance=stmt.opening_balance,
-        closing_balance=stmt.closing_balance,
-        currency=stmt.currency,
-        file_hash=file_hash,
-        privacy_mode=stmt.privacy_mode,
-        transactions=tx_payload,
-        extra_json=stmt.raw_response,
-        extraction_warning=stmt.extraction_warning,
-    )
-
-    # Promote a Bank lookalike to Kontoauszug so /finance picks it up
-    # everywhere else (mirrors what backfill_statements + main.py do).
-    if was_lookalike:
-        with db._lock:
-            db._conn.execute(
-                "UPDATE documents SET category = 'Kontoauszug' WHERE id = ?",
-                (doc_id,),
-            )
-            db._conn.commit()
-
-    return {
-        "transactions":  len(tx_payload),
-        "period_start":  stmt.period_start,
-        "period_end":    stmt.period_end,
-        "iban_last4":    stmt.iban_last4,
-    }

@@ -231,11 +231,14 @@ class AppSettings:
     dry_run: bool = False
     config_dir: Path = field(default_factory=lambda: DEFAULT_CONFIG_DIR)
 
-    # Backwards-compat: code that historically referenced `settings.claude`
-    # still works because `claude` is an alias for the same AI block.
-    @property
-    def claude(self) -> AISettings:
-        return self.ai
+    # 🔴 HIER STAND EIN ALIAS `claude` AUF `ai`. Er hat genau einen
+    #    Leser ueberlebt — und der schrieb `settings.claude.max_text_chars`,
+    #    wo `settings.ai.max_text_chars` stand. Dass beides dasselbe Feld ist,
+    #    war an der Schreibweise nicht zu sehen; als die 0 dort ihre Bedeutung
+    #    aenderte, loeschte diese Zeile Dokumenttexte (siehe `retry.py`).
+    #    Eine zweite Schreibweise fuer dasselbe Feld kostet nichts und
+    #    verbirgt alles. Die `claude:`-Sektion in einer alten config.yaml
+    #    wird weiterhin gelesen — unten in `load_config`, an einer Stelle.
 
 
 def _clamp_anchor_day(v: Any) -> int:
