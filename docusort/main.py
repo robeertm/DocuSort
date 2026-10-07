@@ -231,7 +231,12 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
         if settings.dry_run:
             return
 
-        status = "filed" if cls.is_confident and cls.confidence > 0 else "review"
+        # 🔴 HIER STAND `cls.is_confident and cls.confidence > 0` — in
+        #    `retry.py` dagegen nur `cls.is_confident`. Zwei Wege, eine
+        #    Entscheidung, zwei Schreibweisen. Der Schutz gegen „Zuversicht 0
+        #    gilt als sicher" steckt jetzt in `is_confident` selbst, also an
+        #    EINER Stelle, und beide Wege fragen dasselbe.
+        status = "filed" if cls.is_confident else "review"
         if cls.confidence == 0 and cls.reasoning.startswith("No text"):
             status = "failed"
 

@@ -497,6 +497,38 @@
     {% endif %}
 
 
+    {# 🔴 `statement` und `is_statement_candidate` wurden seit Langem berechnet
+       und an diese Vorlage gegeben — und NIRGENDS benutzt: eine
+       Datenbankabfrage je Seitenaufruf fuer nichts. Gleichzeitig sah ein
+       Kontoauszug, aus dem keine einzige Buchung gelesen wurde, auf dieser
+       Seite genauso aus wie einer mit 200 Buchungen.
+
+       Am echten Archiv gemessen: 375 Dokumente der Kategorie Kontoauszug,
+       134 ohne eingelesenen Auszug — davon 117 Duplikate, die zu Recht
+       keinen haben, und 17 abgelegte, aus denen wirklich nichts gelesen
+       wurde. Siebzehn Auszuege, die in den Finanzen fehlen, ohne dass es
+       irgendwo stand.
+
+       🔑 Eine Luecke, die niemand sieht, wird niemand schliessen. #}
+    {% if is_statement_candidate %}
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('doc.stmt.heading') }}</h2>
+      {% if statement and statement.transactions %}
+        <p class="text-sm text-emerald-300">{{ t('doc.stmt.read', count=statement.transactions | length) }}</p>
+        <p class="text-xs text-ink-400 mt-1">
+          {{ t('doc.stmt.about', no=statement.statement_no or '—',
+                bank=statement.bank_name or '—', last4=statement.iban_last4 or '????') }}
+        </p>
+      {% else %}
+        <p class="text-sm text-amber-300">{{ t('doc.stmt.none') }}</p>
+        <p class="text-xs text-ink-400 mt-2">{{ t('doc.stmt.none_hint') }}</p>
+        {% if doc.status in ('filed', 'review', 'failed') and not doc.deleted_at %}
+        <p class="text-xs text-ink-400 mt-1">{{ t('doc.stmt.none_retry') }}</p>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+
     {# 🔴 Stand auf `doc.status in ('review', 'failed')` — also 14 von 862
        Dokumenten. Wer ein ABGELEGTES Dokument neu einordnen wollte, fand
        keinen Knopf; genau das hiess „beim Neuklassifizieren passiert

@@ -16,7 +16,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from .kategorien import ist as _kat_ist
 
 
@@ -3388,7 +3388,6 @@ class Database:
         name) and apply it to every other unpinned booking of that
         counterparty. Returns counts so the UI can say what happened."""
         from .finance.classify import rule_targets
-        from .finance.buckets import merchant_key as _mk
         n = self.transactions_set_category(tx_ids, category)
         with self._lock:
             self._conn.executemany(

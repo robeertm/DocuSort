@@ -29,15 +29,52 @@ from ..config import AppSettings, get_api_key, is_configured, load_secrets
 from ..db import Database, MODEL_PRICING, LIBRARY_SORT_DEFAULT, LIBRARY_DIR_DEFAULT
 from ..kategorien import ist as _kat_ist, name_fuer as _kat_name
 from ..i18n import (
-    LANGUAGE_NAMES, SUPPORTED, all_translations_for_js, category_label,
-    detect_language, subcategory_label, translate,
+    LANGUAGE_NAMES, SUPPORTED, all_translations_for_js, category_label, detect_language, setze_anfrage_sprache,
+    subcategory_label, translate, uebersetze_jetzt,
 )
 from ..providers import PROVIDERS
-from ..providers.pricing import all_pricing
 from .. import __version__
 
 
 logger = logging.getLogger("docusort.web")
+
+
+def _http_fehler(status: int, schluessel: str, /, **params) -> HTTPException:
+    """Ein Fehler, den der Benutzer in SEINER Sprache liest.
+
+    🔴 Hier lag der groesste Einzelbefund des Audits: 172 `HTTPException`
+    in dieser Datei, VIER davon uebersetzt — und 76 Stellen in den Vorlagen
+    zeigen `detail` dem Benutzer unverblumt an. Wer DocuSort auf Italienisch
+    benutzte, bekam im Fehlerfall Deutsch oder Englisch.
+
+    🔑 Die Sprache kommt aus der Kontextvariablen, die die Middleware je
+    Anfrage setzt — darum braucht kein Handler dafuer ein `request` in der
+    Signatur, und darum gibt es keine Ausrede mehr, eine Meldung fest
+    hinzuschreiben. `pruefstaende/probe_sprachen.py` laesst auch keine mehr
+    durch.
+
+    Meldungen, die eine fremde Ausnahme weitergeben, bekommen einen
+    uebersetzten Satz und den Originalgrund als `{grund}` — der Text einer
+    Bibliothek laesst sich nicht uebersetzen, der Satz darum herum schon.
+
+    🔴 ZWEI DINGE AN DER BENENNUNG, die das Tor gefunden hat und ich nicht:
+
+    1. Die Funktion hiess `fehler`. In diesem Quelltext gibt es
+       `bewegt, fehler = [], []` — eine lokale Liste mit demselben Namen
+       macht den Modulnamen fuer die GANZE Funktion unerreichbar, und zwar
+       mit `UnboundLocalError` schon vor der Zuweisung. Ein Helfer, der
+       ueberall gerufen wird, darf keinen Namen tragen, den jemand als
+       Variable benutzen will.
+
+    2. Der Parameter hiess `key`. Aufrufe wie
+       `_http_fehler(404, "err.target_unknown", key=key)` — der Rechenort heisst
+       nun einmal `key` — sind damit ein Namenskonflikt:
+       *got multiple values for argument 'key'*. Darum sind beide Parameter
+       jetzt **nur positionell** (`/`): ein `status=` oder `schluessel=` im
+       Aufruf landet dann im Platzhalter-Woerterbuch, wo es hingehoert, und
+       kann nichts mehr verdecken.
+    """
+    return HTTPException(status, uebersetze_jetzt(schluessel, **params))
 ALLOWED_SUFFIXES = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 
@@ -314,20 +351,6 @@ def _doc_job_status(doc_id: int) -> dict | None:
 # poll progress.
 _receipt_reextract_lock = threading.Lock()
 _receipt_reextract: dict | None = None
-
-
-def _doc_job_progress(doc_id: int, *, current_page: int, total_pages: int) -> None:
-    """Update the per-doc job entry with per-page progress. Called by
-    the extractor's `on_page_progress` callback so the doc-detail page
-    can show "Seite X/Y" while a long PDF is grinding through."""
-    with _doc_jobs_lock:
-        j = _doc_jobs.get(doc_id)
-        if j is None:
-            return
-        j["current_page"] = int(current_page)
-        j["total_pages"] = int(total_pages)
-
-
 # 🔴 EIN ABZEICHEN, DAS UEBER DEN FALSCHEN TEIL BERICHTET
 # Bis 0.75.0 stand auf der Startseite fest „Bridge offline" — auch dann, wenn
 # gar keine Bruecke eingestellt war. Nach dem Umzug auf ein lokales Modell
@@ -491,6 +514,29 @@ def create_app(
     )
 
     @app.middleware("http")
+    async def sprache_der_anfrage(request: Request, call_next):
+        """Die Sprache dieser Anfrage festhalten — vor allen anderen Toren.
+
+        🔑 Sie muss ZUERST stehen: auch eine Abweisung aus dem
+        Einrichtungs- oder Anmeldetor ist ein Text, den ein Mensch liest.
+        Middleware laeuft in umgekehrter Registrierungsreihenfolge, die
+        zuletzt registrierte zuerst — darum wird diese hier als erste
+        definiert und ist damit die aeusserste.
+        """
+        marke = setze_anfrage_sprache(_lang(request))
+        try:
+            return await call_next(request)
+        finally:
+            # 🔴 Zuruecksetzen, nicht liegenlassen: Kontexte werden
+            #    wiederverwendet, und eine haengengebliebene Sprache waere
+            #    ein Fehler, der nur bei zwei Benutzern gleichzeitig auffaellt.
+            try:
+                from ..i18n import _anfrage_sprache
+                _anfrage_sprache.reset(marke)
+            except Exception:       # noqa: BLE001 — nie die Antwort gefaehrden
+                pass
+
+    @app.middleware("http")
     async def first_run_gate(request: Request, call_next):
         path = request.url.path
         if not is_configured(settings) and not any(
@@ -630,7 +676,7 @@ def create_app(
         mis-listed in the allowlist still cannot be abused."""
         me = getattr(request.state, "user", None)
         if me is None or not me.is_admin:
-            raise HTTPException(status_code=403, detail="admin only")
+            raise _http_fehler(403, "err.admin_only")
         return me
 
     # ----- first-run claim -----
@@ -814,7 +860,7 @@ def create_app(
     def api_me(request: Request):
         me = getattr(request.state, "user", None)
         if me is None:
-            raise HTTPException(status_code=401, detail="not authenticated")
+            raise _http_fehler(401, "err.not_authenticated")
         return {"id": me.id, "username": me.username, "display_name": me.display_name,
                 "role": me.role, "is_admin": me.is_admin,
                 "must_change_password": me.must_change_password}
@@ -823,7 +869,7 @@ def create_app(
     def api_me_password(request: Request, payload: dict = Body(...)):
         me = getattr(request.state, "user", None)
         if me is None:
-            raise HTTPException(status_code=401, detail="not authenticated")
+            raise _http_fehler(401, "err.not_authenticated")
         current = str(payload.get("current") or "")
         new = str(payload.get("new") or "")
         row = db.user_get(me.id)
@@ -876,7 +922,7 @@ def create_app(
         role = str(payload.get("role") or _auth.ROLE_USER)
         display_name = str(payload.get("display_name") or "").strip()
         if role not in _auth.ROLES:
-            raise HTTPException(status_code=400, detail="unknown role")
+            raise _http_fehler(400, "err.role_unknown")
         problem = _auth.username_problem(username) or _auth.password_problem(password)
         if problem:
             raise HTTPException(status_code=400, detail=translate(problem, lang))
@@ -894,14 +940,14 @@ def create_app(
         lang = _lang(request)
         row = db.user_get(user_id)
         if not row:
-            raise HTTPException(status_code=404, detail="no such user")
+            raise _http_fehler(404, "err.user_missing")
         fields: dict = {}
         if "display_name" in payload:
             fields["display_name"] = str(payload["display_name"] or "").strip()
         if "role" in payload:
             role = str(payload["role"])
             if role not in _auth.ROLES:
-                raise HTTPException(status_code=400, detail="unknown role")
+                raise _http_fehler(400, "err.role_unknown")
             fields["role"] = role
         if "is_active" in payload:
             fields["is_active"] = 1 if payload["is_active"] else 0
@@ -945,7 +991,7 @@ def create_app(
         lang = _lang(request)
         row = db.user_get(user_id)
         if not row:
-            raise HTTPException(status_code=404, detail="no such user")
+            raise _http_fehler(404, "err.user_missing")
         if row["role"] == _auth.ROLE_ADMIN and db.admin_count() <= 1:
             raise HTTPException(status_code=409,
                                 detail=translate("auth.err.last_admin", lang))
@@ -1198,7 +1244,7 @@ def create_app(
         # are the admin's business, so refuse that view here.
         _me_lib = getattr(request.state, "user", None)
         if trash and _me_lib is not None and not _me_lib.is_admin:
-            raise HTTPException(status_code=403, detail="admin only")
+            raise _http_fehler(403, "err.admin_only")
 
         # Sanitise sort + direction here so the template can echo the
         # exact effective values back into its controls. The ground order
@@ -1392,7 +1438,7 @@ def create_app(
     ):
         doc = db.get(doc_id)
         if not doc:
-            raise HTTPException(404, "Document not found")
+            raise _http_fehler(404, "err.doc_missing")
         if doc.get("category") == "_csv_container":
             # The per-account CSV-import container is not a document: send
             # the visitor to that account's bookings instead of a page that
@@ -1466,11 +1512,11 @@ def create_app(
     def document_file(doc_id: int, download: bool = False):
         doc = db.get(doc_id)
         if not doc:
-            raise HTTPException(404, "Document not found")
+            raise _http_fehler(404, "err.doc_missing")
         # CSV-import container stubs have no file (library_path ''), and
         # Path('') is '.', which exists → FileResponse on a directory → 500.
         if not doc.get("library_path") or not path_is_file(doc["library_path"]):
-            raise HTTPException(404, "File missing on disk")
+            raise _http_fehler(404, "err.file_missing")
         path = Path(doc["library_path"])
         headers = {}
         if download:
@@ -1489,7 +1535,7 @@ def create_app(
         from ..fundstellen import finde
         doc = db.get(doc_id)
         if not doc:
-            raise HTTPException(404, "Document not found")
+            raise _http_fehler(404, "err.doc_missing")
         pfad = doc.get("library_path") or ""
         if not pfad or not path_is_file(pfad) or not pfad.lower().endswith(".pdf"):
             return {"verfuegbar": False, "seiten": 0, "treffer": []}
@@ -1507,9 +1553,9 @@ def create_app(
         from ..preview import render_page, DEFAULT_WIDTH
         doc = db.get(doc_id)
         if not doc:
-            raise HTTPException(404, "Document not found")
+            raise _http_fehler(404, "err.doc_missing")
         if not doc.get("library_path") or not path_is_file(doc["library_path"]):
-            raise HTTPException(404, "File missing on disk")
+            raise _http_fehler(404, "err.file_missing")
         # Die Datenbank kennt ihren wirklichen Ort; `settings.paths.db`
         # kann auf ein Verzeichnis zeigen, das es hier gar nicht gibt.
         img = render_page(Path(doc["library_path"]), Path(getattr(db, "path", settings.paths.db)),
@@ -1517,7 +1563,7 @@ def create_app(
         if not img:
             # Kein Poppler, verschlüsselt oder kaputt — die Seite fällt
             # dann auf den eingebetteten Betrachter zurück.
-            raise HTTPException(404, "No preview available")
+            raise _http_fehler(404, "err.no_preview")
         return FileResponse(img, media_type="image/png",
                             headers={"Cache-Control": "private, max-age=86400"})
 
@@ -1552,11 +1598,11 @@ def create_app(
         from ..finance.dates import normalise_date
 
         if category not in _category_names():
-            raise HTTPException(400, f"Unknown category: {category}")
+            raise _http_fehler(400, "err.cat_unknown", name=category)
         allowed_subs = _subcategory_map().get(category, [])
         sub = subcategory.strip()
         if sub and sub not in allowed_subs:
-            raise HTTPException(400, f"Unknown subcategory {sub!r} under {category}")
+            raise _http_fehler(400, "err.subcat_unknown", sub=sub, name=category)
 
         # tags: comma-separated text → cleaned list of <=3 lowercase short labels
         tag_list: list[str] = []
@@ -1571,13 +1617,13 @@ def create_app(
 
         doc = db.get(doc_id)
         if not doc:
-            raise HTTPException(404, "Document not found")
+            raise _http_fehler(404, "err.doc_missing")
         if doc.get("deleted_at"):
-            raise HTTPException(400, "Document is in trash — restore first")
+            raise _http_fehler(400, "err.doc_in_trash")
 
         old_path = Path(doc["library_path"])
         if not old_path.exists():
-            raise HTTPException(404, "File missing on disk")
+            raise _http_fehler(404, "err.file_missing")
 
         new_path = target_path(
             settings.paths.library,
@@ -1814,7 +1860,7 @@ def create_app(
     @app.post("/api/language/{lang}")
     def set_language(lang: str):
         if lang not in SUPPORTED:
-            raise HTTPException(400, f"Unsupported language: {lang}")
+            raise _http_fehler(400, "err.lang_unsupported", lang=lang)
         resp = JSONResponse({"lang": lang})
         # one-year cookie; SameSite=Lax plays nice with the PR-style
         # navigation the UI does after switching language.
@@ -1862,9 +1908,9 @@ def create_app(
         cat = str((payload or {}).get("category") or "").strip()
         known = set(db.finance_category_keys())
         if cat and cat not in known:
-            raise HTTPException(400, f"unknown category {cat!r}")
+            raise _http_fehler(400, "err.cat_unknown", name=cat)
         if not db.receipt_set_cash_category(receipt_id, cat):
-            raise HTTPException(404, "receipt not found")
+            raise _http_fehler(404, "err.receipt_missing")
         return {"ok": True, "category": cat}
 
     @app.get("/api/receipts/stats")
@@ -1896,11 +1942,11 @@ def create_app(
         receipt row yet (force=False). Single-instance: returns 409 if a
         run is already in flight. Poll /api/receipts/reextract/status."""
         if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
+            raise _http_fehler(503, "err.ai_setup_first")
         global _receipt_reextract
         with _receipt_reextract_lock:
             if _receipt_reextract is not None and _receipt_reextract.get("running"):
-                raise HTTPException(409, "a receipt re-extract is already running")
+                raise _http_fehler(409, "err.receipt_busy")
             _receipt_reextract = {
                 "running": True,
                 "force": bool(force),
@@ -1976,13 +2022,12 @@ def create_app(
         produced 0 items. No mutations, no LLM calls."""
         from ..receipts_salvage import (
             text_looks_like_kassenzettel,
-            _RECEIPT_SIGNALS,
             _INVOICE_BLOCKERS,
             _PROMOTABLE_CATEGORIES,
         )
         doc = db.get(doc_id)
         if not doc:
-            raise HTTPException(404, "document not found")
+            raise _http_fehler(404, "err.doc_missing")
         text = doc.get("extracted_text") or ""
         is_receipt, signals = text_looks_like_kassenzettel(text)
         blockers_hit = [
@@ -2028,25 +2073,21 @@ def create_app(
             except (TypeError, ValueError):
                 continue
         if not doc_ids:
-            raise HTTPException(400, "doc_ids must be a non-empty list of integers")
+            raise _http_fehler(400, "err.doc_ids_list")
         return promote_to_kassenzettel(db, doc_ids)
 
     @app.post("/api/document/{doc_id}/receipt/extract")
     def api_extract_receipt(doc_id: int):
         if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
+            raise _http_fehler(503, "err.ai_setup_first")
         doc = db.get(doc_id)
         if not doc:
-            raise HTTPException(404, "document not found")
+            raise _http_fehler(404, "err.doc_missing")
         text = doc.get("extracted_text") or ""
         if not text:
-            raise HTTPException(400, "no OCR text stored — re-classify the document first")
+            raise _http_fehler(400, "err.no_text_stored")
         if not _doc_job_start(doc_id, "receipt"):
-            raise HTTPException(
-                409,
-                "extraction already running for this document — wait for the "
-                "current run to finish before retrying",
-            )
+            raise _http_fehler(409, "err.extract_busy")
         try:
             from ..receipts import ReceiptExtractor
             # 🔴 Anbieter UND Modell aus DERSELBEN Quelle, siehe
@@ -2063,7 +2104,7 @@ def create_app(
                 r = extractor.extract(text)
             except Exception as exc:
                 logger.exception("Receipt extract failed for %d", doc_id)
-                raise HTTPException(500, f"extract failed: {exc}")
+                raise _http_fehler(500, "err.extract_failed", grund=exc)
             db.upsert_receipt(
                 doc_id,
                 shop_name=r.shop_name, shop_type=r.shop_type,
@@ -2088,7 +2129,7 @@ def create_app(
         a re-extract round trip."""
         from ..receipts import SHOP_TYPES, ITEM_CATEGORIES, PAYMENT_METHODS
         if not db.get(doc_id):
-            raise HTTPException(404, "document not found")
+            raise _http_fehler(404, "err.doc_missing")
 
         def _opt_float(value, name):
             if value in (None, ""):
@@ -2096,32 +2137,32 @@ def create_app(
             try:
                 return float(value)
             except (TypeError, ValueError):
-                raise HTTPException(400, f"{name} must be a number")
+                raise _http_fehler(400, "err.not_a_number", feld=name)
 
         shop_name = (payload.get("shop_name") or "").strip()[:200]
         shop_type = (payload.get("shop_type") or "").strip().lower()
         if shop_type and shop_type not in SHOP_TYPES:
-            raise HTTPException(400, f"shop_type must be one of {list(SHOP_TYPES)}")
+            raise _http_fehler(400, "err.shop_type_oneof", werte=list(SHOP_TYPES))
         payment_method = (payload.get("payment_method") or "").strip().lower()
         if payment_method and payment_method not in PAYMENT_METHODS:
-            raise HTTPException(400, f"payment_method must be one of {list(PAYMENT_METHODS)}")
+            raise _http_fehler(400, "err.payment_oneof", werte=list(PAYMENT_METHODS))
         total_amount = _opt_float(payload.get("total_amount"), "total_amount")
         currency = (payload.get("currency") or "EUR").strip()[:8] or "EUR"
         receipt_date = (payload.get("receipt_date") or "").strip()[:10]
 
         raw_items = payload.get("items") or []
         if not isinstance(raw_items, list):
-            raise HTTPException(400, "items must be a list")
+            raise _http_fehler(400, "err.items_list")
         items = []
         for idx, it in enumerate(raw_items):
             if not isinstance(it, dict):
-                raise HTTPException(400, f"item {idx} must be an object")
+                raise _http_fehler(400, "err.item_object", nr=idx)
             name = (it.get("name") or "").strip()[:200]
             if not name:
                 continue   # skip blank rows silently
             cat = (it.get("item_category") or "").strip().lower()
             if cat and cat not in ITEM_CATEGORIES:
-                raise HTTPException(400, f"item_category must be one of {list(ITEM_CATEGORIES)}")
+                raise _http_fehler(400, "err.item_cat_oneof", werte=list(ITEM_CATEGORIES))
             items.append({
                 "name": name,
                 "quantity":     _opt_float(it.get("quantity"),    f"items[{idx}].quantity"),
@@ -2397,7 +2438,7 @@ def create_app(
             #    Installationen aus dem Quelltext, die `pip install` nicht
             #    wiederholt haben.
             logger.warning("PDF nicht moeglich: %s", exc)
-            raise HTTPException(503, "reportlab fehlt — bitte requirements.txt neu installieren")
+            raise _http_fehler(503, "err.pdf_lib_missing")
         name = "ausgaben-%s.pdf" % (data.get("range_start") or "zeitraum")
         return Response(
             content=blatt, media_type="application/pdf",
@@ -2780,7 +2821,7 @@ def create_app(
         navigating away mid-extraction."""
         doc = db.get(doc_id)
         if not doc:
-            raise HTTPException(404, "document not found")
+            raise _http_fehler(404, "err.doc_missing")
         running = _doc_job_status(doc_id)
         # When the bulk worker is currently processing THIS doc, the
         # per-doc registry is empty (the bulk path uses the activity
@@ -2870,7 +2911,7 @@ def create_app(
                 "SELECT id FROM accounts WHERE id = ?", (account_id,)
             ).fetchone()
             if not row:
-                raise HTTPException(404, "account not found")
+                raise _http_fehler(404, "err.account_missing")
             tx_count = db._conn.execute(
                 "SELECT COUNT(*) FROM transactions WHERE account_id = ?", (account_id,)
             ).fetchone()[0]
@@ -2963,9 +3004,9 @@ def create_app(
                 (tx_id,),
             ).fetchone()
         if row is None:
-            raise HTTPException(404, f"transaction {tx_id} not found")
+            raise _http_fehler(404, "err.tx_missing", tx_id=tx_id)
         if not isinstance(payload, dict):
-            raise HTTPException(400, "payload must be an object")
+            raise _http_fehler(400, "err.payload_object")
 
         allowed = {"booking_date", "value_date", "amount",
                    "counterparty", "counterparty_iban", "purpose",
@@ -2983,18 +3024,18 @@ def create_app(
                 try:
                     updates[k] = round(float(v), 2)
                 except (TypeError, ValueError):
-                    raise HTTPException(400, f"amount must be a number, got {v!r}") from None
+                    raise _http_fehler(400, "err.amount_not_number", wert=v) from None
                 if abs(updates[k]) > 10_000_000:
-                    raise HTTPException(400, "amount out of safe range")
+                    raise _http_fehler(400, "err.amount_range")
             elif k == "category":
                 cat = str(v).strip().lower()
                 if cat and cat not in db.finance_category_keys():
-                    raise HTTPException(400, f"category must be one of {db.finance_category_keys()}")
+                    raise _http_fehler(400, "err.cat_oneof", werte=db.finance_category_keys())
                 updates[k] = cat
             elif k == "tx_type":
                 t = str(v).strip().lower()
                 if t and t not in TX_TYPES:
-                    raise HTTPException(400, f"tx_type must be one of {list(TX_TYPES)}")
+                    raise _http_fehler(400, "err.tx_type_oneof", werte=list(TX_TYPES))
                 updates[k] = t
             elif k in ("booking_date", "value_date"):
                 from ..finance.dates import normalise_date as _normalise_date
@@ -3023,7 +3064,7 @@ def create_app(
                 )
                 db._conn.commit()
             except Exception as exc:  # noqa: BLE001
-                raise HTTPException(500, f"update failed: {exc}") from exc
+                raise _http_fehler(500, "err.update_failed", grund=exc) from exc
         return {"ok": True, "updated": 1, "tx_id": tx_id, "fields": list(updates)}
 
     @app.delete("/api/transaction/{tx_id}")
@@ -3037,7 +3078,7 @@ def create_app(
             )
             db._conn.commit()
         if cur.rowcount == 0:
-            raise HTTPException(404, f"transaction {tx_id} not found")
+            raise _http_fehler(404, "err.tx_missing", tx_id=tx_id)
         return {"ok": True, "deleted": 1, "tx_id": tx_id}
 
     @app.post("/api/account/{account_id}/transaction")
@@ -3052,33 +3093,33 @@ def create_app(
         from ..finance.dates import normalise_date as _normalise_date
         from hashlib import sha256
         if not isinstance(payload, dict):
-            raise HTTPException(400, "payload must be an object")
+            raise _http_fehler(400, "err.payload_object")
         with db._lock:
             account = db._conn.execute(
                 "SELECT * FROM accounts WHERE id = ?", (account_id,),
             ).fetchone()
         if account is None:
-            raise HTTPException(404, f"account {account_id} not found")
+            raise _http_fehler(404, "err.account_missing", account_id=account_id)
 
         try:
             amount = round(float(payload.get("amount")), 2)
         except (TypeError, ValueError):
-            raise HTTPException(400, "amount is required and must be a number") from None
+            raise _http_fehler(400, "err.amount_required") from None
         if abs(amount) > 10_000_000:
-            raise HTTPException(400, "amount out of safe range")
+            raise _http_fehler(400, "err.amount_range")
         booking_date = _normalise_date(str(payload.get("booking_date") or "").strip())
         if not booking_date:
-            raise HTTPException(400, "booking_date is required (ISO YYYY-MM-DD)")
+            raise _http_fehler(400, "err.booking_date_required")
         value_date = _normalise_date(str(payload.get("value_date") or "").strip())
         counterparty = str(payload.get("counterparty") or "").strip()[:200]
         counterparty_iban = str(payload.get("counterparty_iban") or "").strip()[:34]
         purpose = str(payload.get("purpose") or "").strip()[:500]
         tx_type = str(payload.get("tx_type") or "").strip().lower()
         if tx_type and tx_type not in TX_TYPES:
-            raise HTTPException(400, f"tx_type must be one of {list(TX_TYPES)}")
+            raise _http_fehler(400, "err.tx_type_oneof", werte=list(TX_TYPES))
         category = str(payload.get("category") or "").strip().lower()
         if category and category not in db.finance_category_keys():
-            raise HTTPException(400, f"category must be one of {db.finance_category_keys()}")
+            raise _http_fehler(400, "err.cat_oneof", werte=db.finance_category_keys())
 
         h_iban = account["iban_hash"] or "no-iban"
         key = f"{h_iban}|{booking_date}|{amount:.2f}|{purpose}"
@@ -3099,90 +3140,23 @@ def create_app(
                 )
                 db._conn.commit()
             except Exception as exc:  # noqa: BLE001
-                raise HTTPException(500, f"insert failed: {exc}") from exc
+                raise _http_fehler(500, "err.insert_failed", grund=exc) from exc
         return {"ok": True, "tx_id": cur.lastrowid, "tx_hash": tx_hash}
 
-    @app.post("/api/finance/import-csv")
-    async def api_finance_import_csv(request: Request):
-        """Import a bank CSV export (Sparkasse, DKB, ING, Volksbank, comdirect, …).
-
-        Optional form field / query param `account_iban`: the account's own
-        IBAN for files that carry none (comdirect, N26).
-
-        Accepts either:
-        - `multipart/form-data` with one or more files in the `files`
-          field — typical from a `<input type=file multiple>` upload
-        - raw CSV body (`text/csv` or `text/plain`) — the simplest
-          curl-friendly form
-
-        Each file produces an `ImportReport` with `rows_inserted`,
-        `rows_duplicate`, `rows_invalid`, `accounts_touched`. Dedup
-        is automatic (UNIQUE constraint on `transactions.tx_hash`)
-        so re-importing an overlapping CSV is a safe no-op.
-        """
-        from ..finance.csv_import import import_csv, ImportReport
-        ct = (request.headers.get("content-type") or "").lower()
-        reports: list[dict] = []
-        if ct.startswith("multipart/"):
-            form = await request.form()
-            files = form.getlist("files")
-            if not files:
-                # Some browsers post a single "file" field name.
-                files = form.getlist("file")
-            if not files:
-                raise HTTPException(400, "no files in upload")
-            iban_hint = str(form.get("account_iban") or "").strip()
-            for f in files:
-                if not hasattr(f, "filename"):
-                    continue
-                data = await f.read()
-                fname = f.filename or ""
-                if fname.lower().endswith(".pdf") or data[:5] == b"%PDF-":
-                    # A Kontoauszug-PDF takes the normal document route:
-                    # inbox → OCR → library, and the pipeline reads its
-                    # bookings into the finances (v0.47.0). Duplicates are
-                    # caught by the document hash, then by the statement's
-                    # file hash and period.
-                    try:
-                        inbox = settings.paths.inbox
-                        inbox.mkdir(parents=True, exist_ok=True)
-                        safe = Path(fname).name or "kontoauszug.pdf"
-                        target = inbox / safe
-                        n = 1
-                        while target.exists():
-                            n += 1
-                            target = inbox / f"{Path(safe).stem}-{n}{Path(safe).suffix}"
-                        target.write_bytes(data)
-                    except Exception as exc:  # noqa: BLE001
-                        raise HTTPException(500, f"ablegen {fname!r}: {exc}") from exc
-                    reports.append({**_report_to_dict(ImportReport(file_label=fname)), "queued": True,
-                                    # Der Name, unter dem die Kategorie in DIESER
-                                    # Installation steht — nicht das deutsche Wort.
-                                    "bank": _kat_name(_kategorien(), "kontoauszug", "Bank")})
-                    continue
-                try:
-                    rep = import_csv(db, data, file_label=fname, account_iban_hint=iban_hint)
-                except Exception as exc:  # noqa: BLE001
-                    raise HTTPException(500, f"import {fname!r}: {exc}") from exc
-                reports.append(_report_to_dict(rep))
-        else:
-            body = await request.body()
-            if not body:
-                raise HTTPException(400, "request body is empty")
-            try:
-                rep = import_csv(db, body, file_label="(uploaded)",
-                                 account_iban_hint=str(request.query_params.get("account_iban") or ""))
-            except Exception as exc:  # noqa: BLE001
-                raise HTTPException(500, f"import failed: {exc}") from exc
-            reports.append(_report_to_dict(rep))
-
-        total_inserted = sum(r["rows_inserted"] for r in reports)
-        total_dup = sum(r["rows_duplicate"] for r in reports)
-        return {
-            "files":           reports,
-            "total_inserted":  total_inserted,
-            "total_duplicate": total_dup,
-        }
+    # 🔴 HIER STAND EIN ZWEITER IMPORTWEG: `POST /api/finance/import-csv`.
+    #    Rund 70 Zeilen, die `/upload` nachbauten — `multipart/form-data`
+    #    UND rohes CSV im Rumpf, laut eigenem Docstring „curl-friendly" —
+    #    mitsamt einer DRITTEN Kopie der Inbox-Ablage fuer PDF-Auszuege und
+    #    OHNE die uebersetzten Fehlermeldungen aus 0.98.3. Aufgerufen hat ihn
+    #    niemand: nicht die Oberflaeche, nicht die Postwache, nichts.
+    #
+    # 🔑 ES GIBT EINEN WEG HINEIN, UND DAS IST `/upload`. Die Route dort
+    #    entscheidet am Dateityp, was in die Bibliothek und was in die
+    #    Finanzen geht; die Postwache liefert durch dieselbe Tuer. Ein
+    #    zweiter Eingang ist kein Komfort, sondern eine zweite Stelle, an der
+    #    sich das Verhalten auseinanderentwickelt — hier nachweislich
+    #    geschehen. `probe_csv_upload.py` bewacht jetzt nicht mehr nur, DASS
+    #    `/upload` funktioniert, sondern dass es der EINZIGE Weg ist.
 
     @app.post("/api/finance/reset")
     def api_finance_reset(payload: dict = Body(default={})):
@@ -3194,15 +3168,11 @@ def create_app(
         dry = bool(payload.get("dry_run") or False) if isinstance(payload, dict) else False
         confirmed = bool(payload.get("confirm") or False) if isinstance(payload, dict) else False
         if not dry and not confirmed:
-            raise HTTPException(
-                400,
-                "Pass {\"confirm\": true} to actually wipe, or "
-                "{\"dry_run\": true} to preview.",
-            )
+            raise _http_fehler(400, "err.reset_needs_confirm")
         try:
             return reset_finance_data(db, dry_run=dry)
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"reset failed: {type(exc).__name__}: {exc}") from exc
+            raise _http_fehler(500, "err.reset_failed", art=type(exc).__name__, grund=exc) from exc
 
     @app.post("/api/transactions/categorize")
     def api_transactions_categorize(payload: dict):
@@ -3213,15 +3183,13 @@ def create_app(
         ids = payload.get("ids") or []
         cat = (payload.get("category") or "").strip()
         if not isinstance(ids, list) or not ids:
-            raise HTTPException(400, "ids must be a non-empty list")
+            raise _http_fehler(400, "err.ids_list")
         if cat not in db.finance_category_keys():
-            raise HTTPException(
-                400, f"unknown category {cat!r} — must be one of {db.finance_category_keys()}",
-            )
+            raise _http_fehler(400, "err.cat_unknown_oneof", name=cat, werte=db.finance_category_keys())
         try:
             int_ids = [int(i) for i in ids]
         except (TypeError, ValueError):
-            raise HTTPException(400, "ids must be integers")
+            raise _http_fehler(400, "err.ids_integers")
         from ..finance.categories import INCOME_CATEGORIES
         if cat in INCOME_CATEGORIES:
             marks = ",".join("?" * len(int_ids))
@@ -3230,7 +3198,7 @@ def create_app(
                     f"SELECT COUNT(*) FROM transactions WHERE id IN ({marks}) AND amount < 0", int_ids
                 ).fetchone()[0]
             if debits:
-                raise HTTPException(400, "Ausgaben sind nie Erstattungen — eine Abbuchung kann keine Einnahme-Kategorie bekommen.")
+                raise _http_fehler(400, "err.expense_no_income_cat")
         # v0.43: a manual assignment teaches a rule for the counterparty
         # (IBAN + name) and applies it to that counterparty's other bookings
         # — unless the caller says learn=false („nur diese Buchung").
@@ -3267,14 +3235,14 @@ def create_app(
             is_saving=(bool(payload["is_saving"]) if "is_saving" in payload else None),
         )
         if not ok:
-            raise HTTPException(404, "category not found")
+            raise _http_fehler(404, "err.cat_missing")
         return {"ok": True, "labels": _cat_labels(_lang(request))}
 
     @app.delete("/api/finance/categories/{key}")
     def api_finance_category_delete(key: str, request: Request):
         res = db.finance_category_delete(key)
         if not res["deleted"]:
-            raise HTTPException(404, "category not found")
+            raise _http_fehler(404, "err.cat_missing")
         return {"ok": True, **res, "keys": _cat_keys(request), "labels": _cat_labels(_lang(request))}
 
     @app.get("/api/finance/unresolved")
@@ -3302,9 +3270,9 @@ def create_app(
         cat = (payload.get("category") or "").strip()
         name = (payload.get("name") or "").strip()
         if kind not in ("iban", "merchant", "merchant_amount") or not value:
-            raise HTTPException(400, "kind must be 'iban', 'merchant' or 'merchant_amount' and value non-empty")
+            raise _http_fehler(400, "err.rule_kind_invalid")
         if cat not in db.finance_category_keys():
-            raise HTTPException(400, f"unknown category {cat!r}")
+            raise _http_fehler(400, "err.cat_unknown", name=cat)
         direction = (payload.get("direction") or "").strip()
         rid = db.finance_rule_upsert(kind, value, cat, source="user", sample_name=name, direction=direction)
         # A merchant with an IBAN gets both keys so name variants are covered.
@@ -3321,7 +3289,7 @@ def create_app(
         rules = {r["id"]: r for r in db.finance_rules_list()}
         r = rules.get(int(rule_id))
         if not r:
-            raise HTTPException(404, "rule not found")
+            raise _http_fehler(404, "err.rule_missing")
         db.finance_rule_delete(int(rule_id))
         # Bookings of that counterparty fall back to the built-in patterns.
         reverted = db._apply_rules_to_merchants([(r["match_kind"], r["match_value"])])
@@ -3341,7 +3309,7 @@ def create_app(
         rule always wins) and are applied immediately. Background job,
         progress via /api/finance/ai-progress."""
         if classifier is None:
-            raise HTTPException(503, "KI nicht verfügbar — bitte zuerst /setup abschließen")
+            raise _http_fehler(503, "err.ai_setup_first")
         from .. import activity
         existing = activity.get_job("kategorien-ai")
         if existing.running:
@@ -3411,7 +3379,7 @@ def create_app(
         try:
             out = backfill_library_statements(db, settings=settings)
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"Kontoauszüge einlesen: {exc}") from exc
+            raise _http_fehler(500, "err.statements_read", grund=exc) from exc
         db.meta_set("finance.statement_backfill", "2")
         return out
 
@@ -3428,7 +3396,7 @@ def create_app(
         try:
             return {"ok": True, **deadline_match.run_now(db)}
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"Abgleich mit den Finanzen: {exc}") from exc
+            raise _http_fehler(500, "err.finance_match", grund=exc) from exc
 
     @app.post("/api/finance/gap-ack")
     def api_finance_gap_ack(payload: dict = Body(...)):
@@ -3440,11 +3408,11 @@ def create_app(
         try:
             account_id = int(payload.get("account_id"))
         except (TypeError, ValueError):
-            raise HTTPException(400, "account_id must be a number") from None
+            raise _http_fehler(400, "err.account_id_number") from None
         after = str(payload.get("after") or "").strip()
         before = str(payload.get("before") or "").strip()
         if not after or not before:
-            raise HTTPException(400, "after and before are required")
+            raise _http_fehler(400, "err.after_before_required")
         ack = bool(payload.get("acknowledged", True))
         db.finance_gap_acknowledge(account_id, after, before, ack)
         return {"ok": True, "acknowledged": ack}
@@ -3491,7 +3459,7 @@ def create_app(
     def api_finance_fixed_categories_set(payload: dict):
         cats = payload.get("categories")
         if not isinstance(cats, list):
-            raise HTTPException(400, "categories must be a list")
+            raise _http_fehler(400, "err.categories_list")
         return {"ok": True, "categories": db.finance_set_fixed_categories([str(c) for c in cats])}
 
     # ---------- Sonderausgaben ----------
@@ -3509,7 +3477,7 @@ def create_app(
     def api_finance_special_categories_set(payload: dict):
         cats = payload.get("categories")
         if not isinstance(cats, list):
-            raise HTTPException(400, "categories must be a list")
+            raise _http_fehler(400, "err.categories_list")
         return {"ok": True,
                 "categories": db.finance_set_special_categories([str(c) for c in cats])}
 
@@ -3522,7 +3490,7 @@ def create_app(
         """
         ids = payload.get("ids")
         if not isinstance(ids, list) or not ids:
-            raise HTTPException(400, "ids must be a non-empty list")
+            raise _http_fehler(400, "err.ids_list")
         an = bool(payload.get("besonders", True))
         n = db.transactions_set_special([int(i) for i in ids], an)
         logger.info("Sonderausgabe %s: %d Buchung(en)",
@@ -3542,7 +3510,7 @@ def create_app(
         key = (payload.get("key") or "").strip()
         mode = (payload.get("mode") or "").strip()
         if not key or mode not in ("in", "out", ""):
-            raise HTTPException(400, "key required, mode in|out|''")
+            raise _http_fehler(400, "err.key_and_mode_required")
         return {"ok": True, "overrides": db.finance_fixed_cost_override(key, mode)}
 
     @app.get("/fixkosten", response_class=HTMLResponse)
@@ -3788,7 +3756,7 @@ def create_app(
         privacy toggles (and vice versa)."""
         from ..settings_writer import update_finance
         if not isinstance(payload, dict):
-            raise HTTPException(400, "payload must be an object")
+            raise _http_fehler(400, "err.payload_object")
 
         kwargs: dict = {"config_dir": settings.config_dir}
 
@@ -3859,7 +3827,7 @@ def create_app(
         bank_name: str}. Drives the net-worth split and lets the user
         mark which accounts are Sparkonten."""
         if not isinstance(payload, dict):
-            raise HTTPException(400, "payload must be an object")
+            raise _http_fehler(400, "err.payload_object")
         is_savings = payload.get("is_savings")
         start_balance = payload.get("start_balance")
         bank_name = payload.get("bank_name")
@@ -3867,7 +3835,7 @@ def create_app(
         if start_balance is not None and start_balance != "":
             sb = _coerce_float(start_balance)
             if sb is None:
-                raise HTTPException(400, "start_balance must be a number")
+                raise _http_fehler(400, "err.start_balance_number")
         row = db.set_account_meta(
             account_id,
             is_savings=None if is_savings is None else bool(is_savings),
@@ -3875,7 +3843,7 @@ def create_app(
             bank_name=None if bank_name is None else str(bank_name),
         )
         if row is None:
-            raise HTTPException(404, f"account {account_id} not found")
+            raise _http_fehler(404, "err.account_missing", account_id=account_id)
         return {"ok": True, "account": {
             "id": row["id"],
             "bank_name": row["bank_name"],
@@ -4007,10 +3975,9 @@ def create_app(
         von = [" ".join(str(v).split()) for v in (payload.get("von") or [])]
         von = [v for v in von if v and v != nach]
         if not nach or not von:
-            raise HTTPException(400, "Bitte Ziel und mindestens eine andere "
-                                     "Schreibweise angeben.")
+            raise _http_fehler(400, "err.merge_needs_two")
         if len(nach) > 120:
-            raise HTTPException(400, "Der Name ist zu lang.")
+            raise _http_fehler(400, "err.name_too_long")
 
         bewegt, fehler = [], []
         for schreibweise in von:
@@ -4083,7 +4050,7 @@ def create_app(
         if parent:
             unter = _kat.unterkategorien(kats)
             if parent not in unter:
-                raise HTTPException(400, "Diese Kategorie gibt es nicht: %s" % parent)
+                raise _http_fehler(400, "err.cat_unknown", name=parent)
             # 🔑 Eine Unterkategorie muss sich nur von ihren GESCHWISTERN
             #    unterscheiden. „Sonstiges" unter zwei Daechern ist richtig.
             gegen = unter[parent]
@@ -4117,7 +4084,7 @@ def create_app(
         offen = [v for v in db.doc_categories_custom(status="vorschlag")
                  if v["name"] == name and (v["parent"] or "") == parent]
         if not offen:
-            raise HTTPException(404, "Diesen Vorschlag gibt es nicht (mehr).")
+            raise _http_fehler(404, "err.suggestion_gone")
         # 🔴 Noch einmal pruefen. Zwischen Vorschlag und Bestaetigung koennen
         #    Tage liegen, und in der Zeit kann jemand genau diese Kategorie
         #    von Hand angelegt haben.
@@ -4127,7 +4094,7 @@ def create_app(
             _kat.pruefe_namen(name, gegen)
         except _kat.NameFehler as exc:
             db.doc_category_delete(name, parent)
-            raise HTTPException(400, "%s Der Vorschlag wurde verworfen." % exc)
+            raise _http_fehler(400, "err.suggestion_rejected", grund=exc)
         db.doc_category_set_status(name, parent, "aktiv")
         n = _kategorien_geaendert()
         logger.info("Vorschlag angenommen: %r (unter %r), an %d Klassifizierer",
@@ -4148,9 +4115,7 @@ def create_app(
         parent = " ".join(str(payload.get("parent") or "").split())
         res = db.doc_category_delete(name, parent)
         if not res["deleted"]:
-            raise HTTPException(404, "Diese Kategorie steht nicht in der "
-                                     "eigenen Liste — eingebaute lassen sich "
-                                     "nicht entfernen.")
+            raise _http_fehler(404, "err.cat_builtin")
         n = _kategorien_geaendert()
         logger.info("Kategorie entfernt: %r (unter %r), %d Dokument(e) tragen "
                     "sie weiter, an %d Klassifizierer",
@@ -4222,7 +4187,7 @@ def create_app(
         the user having to click each one. Returns immediately; work
         runs in a background thread. Poll /api/library/retry-progress."""
         if classifier is None:
-            raise HTTPException(503, "classifier not available — finish /setup first")
+            raise _http_fehler(503, "err.ai_setup_first")
         from .. import activity
         existing = activity.get_job("retry-review")
         if existing.running:
@@ -4406,7 +4371,7 @@ def create_app(
         ids = payload.get("ids") or []
         category = payload.get("category", "")
         if category not in _category_names():
-            raise HTTPException(400, f"Unknown category: {category}")
+            raise _http_fehler(400, "err.cat_unknown", name=category)
         ok, errors = [], []
         for doc_id in ids:
             try:
@@ -4481,7 +4446,7 @@ def create_app(
             try:
                 id_list = [int(x) for x in ids.split(",") if x.strip()]
             except ValueError:
-                raise HTTPException(400, "Invalid ids parameter")
+                raise _http_fehler(400, "err.ids_invalid")
         name = suggested_filename(category=category, year=year, trash=include_trash)
         return StreamingResponse(
             stream_zip(
@@ -4505,15 +4470,11 @@ def create_app(
     def sync_run():
         from .. import sync as sync_mod
         if not settings.sync.enabled:
-            raise HTTPException(400, "sync disabled — set sync.enabled=true in config.yaml")
+            raise _http_fehler(400, "err.sync_disabled")
         # rclone is only needed for the cloud backend. A local-folder mirror
         # uses rsync (with a pure-Python fallback), so don't gate it on rclone.
         if settings.sync.target_type == "rclone" and not sync_mod.rclone_available():
-            raise HTTPException(
-                503,
-                "rclone is not installed. On Debian: sudo apt install rclone, "
-                "then run `rclone config` once to set up your remote.",
-            )
+            raise _http_fehler(503, "err.rclone_missing")
         return sync_mod.run_sync_async(settings)
 
     # ---------- Sync: headless rclone remote setup ----------
@@ -4603,7 +4564,7 @@ def create_app(
         from .. import rclone_setup
         ok = rclone_setup.remove_remote(name)
         if not ok:
-            raise HTTPException(404, f"remote {name!r} not found in rclone.conf")
+            raise _http_fehler(404, "err.rclone_remote_missing", name=name)
         return {"ok": True}
 
     @app.post("/api/sync/test/{name}")
@@ -4728,7 +4689,7 @@ def create_app(
         url = (url or "").strip().rstrip("/")
         model = (model or "").strip()
         if not url or not model:
-            raise HTTPException(400, "url and model required")
+            raise _http_fehler(400, "err.url_model_required")
         # The openai_compat provider expects an OpenAI-style /v1 base URL;
         # Ollama exposes that at /v1.
         base_url = url if url.endswith("/v1") else url + "/v1"
@@ -5003,10 +4964,10 @@ def create_app(
         liste, _ = _ai_ziele_jetzt()
         ziel = next((t for t in liste if t.key == key), None)
         if ziel is None:
-            raise HTTPException(404, f"unknown target: {key}")
+            raise _http_fehler(404, "err.target_unknown", key=key)
         ergebnis = _t.aufwecken(ziel)
         if not ergebnis.get("ok"):
-            raise HTTPException(502, ergebnis.get("grund") or "wake failed")
+            raise _http_fehler(502, "err.wake_failed") if not ergebnis.get("grund") else HTTPException(502, str(ergebnis["grund"]))
         return {"ok": True, "state": _t.zustand(ziel)}
 
     @app.post("/api/ai/target/pull")
@@ -5023,7 +4984,7 @@ def create_app(
         liste, _ = _ai_ziele_jetzt()
         ziel = next((t for t in liste if t.key == key), None)
         if ziel is None:
-            raise HTTPException(404, f"unknown target: {key}")
+            raise _http_fehler(404, "err.target_unknown", key=key)
         marke = f"{ziel.model} → {ziel.label or ziel.key}"
         laufend = any(w.get("name") == marke
                       for w in _activity.work_snapshot())
@@ -5060,21 +5021,20 @@ def create_app(
         from .. import ai_targets as _t, settings_writer
         key = str((payload or {}).get("key") or "").strip()
         if not key:
-            raise HTTPException(400, "key required")
+            raise _http_fehler(400, "err.key_required")
         if not hasattr(classifier, "wechsle"):
             # Kein Halter — etwa weil die KI nicht eingerichtet ist.
-            raise HTTPException(409, "no switchable classifier")
+            raise _http_fehler(409, "err.no_switchable")
         try:
             ziel = classifier.wechsle(key)
         except KeyError:
-            raise HTTPException(404, f"unknown target: {key}")
+            raise _http_fehler(404, "err.target_unknown", key=key)
         except Exception as exc:  # noqa: BLE001
             # 🔑 Der Halter laesst bei einem Baufehler das ALTE Ziel stehen, die
             #    Installation bleibt also arbeitsfaehig. Das gehoert in die
             #    Antwort, damit niemand glaubt, es sei nun gar nichts aktiv.
             logger.error("KI-Ziel %s laesst sich nicht aufbauen: %s", key, exc)
-            raise HTTPException(
-                502, f"target {key} could not be built: {exc}")
+            raise _http_fehler(502, "err.target_build_failed", key=key, grund=exc)
         # Merken, damit der Wechsel einen Neustart uebersteht. Scheitert das
         # Schreiben, ist der Wechsel trotzdem schon wirksam — das sagen wir,
         # statt ihn zurueckzunehmen.
@@ -5120,7 +5080,7 @@ def create_app(
         from .. import settings_writer
         modus = str((payload or {}).get("modus") or "").strip().lower()
         if modus not in ("auto", "fest"):
-            raise HTTPException(400, "modus must be auto or fest")
+            raise _http_fehler(400, "err.modus_invalid")
         # 🔴 Erst die laufende Einstellung, dann die Datei. Scheitert das
         #    Schreiben, arbeitet DocuSort trotzdem schon so — das sagen wir,
         #    statt die Aenderung stillschweigend zurueckzunehmen.
@@ -5203,7 +5163,7 @@ def create_app(
         model = str((payload or {}).get("model") or "").strip()
         label = str((payload or {}).get("label") or "").strip()
         if not url or not model:
-            raise HTTPException(400, "url and model required")
+            raise _http_fehler(400, "err.url_model_required")
         basis = url if url.endswith("/v1") else url + "/v1"
         from urllib.parse import urlsplit
         rechner = urlsplit(url).hostname or url
@@ -5238,11 +5198,11 @@ def create_app(
         from .. import settings_writer
         key = str((payload or {}).get("key") or "").strip()
         if not key:
-            raise HTTPException(400, "key required")
+            raise _http_fehler(400, "err.key_required")
         vorhanden = _ziel_konfig()
         bleibt = [r for r in vorhanden if r.get("key") != key]
         if len(bleibt) == len(vorhanden):
-            raise HTTPException(404, f"unknown target: {key}")
+            raise _http_fehler(404, "err.target_unknown", key=key)
         settings_writer.update_ai_targets(targets=bleibt,
                                           config_dir=settings.config_dir)
         settings.ai.targets = bleibt
@@ -5284,17 +5244,15 @@ def create_app(
         liste, aktiv = _ai_ziele_jetzt()
         ziel = next((t for t in liste if t.key == key), None)
         if ziel is None:
-            raise HTTPException(404, f"unknown target: {key}")
+            raise _http_fehler(404, "err.target_unknown", key=key)
         if not model:
-            raise HTTPException(400, "model required")
+            raise _http_fehler(400, "err.model_required")
         if key == aktiv and model.split(":latest")[0] == (
                 ziel.model or "").split(":latest")[0]:
-            raise HTTPException(
-                409, "that is the model this machine is using right now — "
-                     "switch to another machine first")
+            raise _http_fehler(409, "err.model_in_use")
         ok, grund = local_ai.modell_loeschen(ziel.base_url, model)
         if not ok:
-            raise HTTPException(502, grund or "delete failed")
+            raise _http_fehler(502, "err.delete_failed") if not grund else HTTPException(502, str(grund))
         logger.info("Modell %s auf %s geloescht", model, key)
         from .. import ai_targets as _t
         return {"ok": True, "state": _t.zustand(ziel)}
@@ -5359,17 +5317,13 @@ def create_app(
 
         hw = hardware.pruefe()
         if hw.get("urteil") == "nein":
-            raise HTTPException(
-                409, "this machine does not have enough memory for a local "
-                     "model — use a cloud provider instead")
+            raise _http_fehler(409, "err.not_enough_memory")
         modell = str(hw.get("modell") or hardware.MODELL_GROSS)
 
         klient = getattr(getattr(request, "client", None), "host", "") or ""
         gefunden = local_ai.discover(settings.ai.base_url or "", klient)
         if not gefunden:
-            raise HTTPException(
-                503, "no local model service is reachable — the bundled "
-                     "ollama service does not seem to be running")
+            raise _http_fehler(503, "err.no_local_ai_service")
         wurzel = gefunden[0]["url"].rstrip("/")
         basis = wurzel if wurzel.endswith("/v1") else wurzel + "/v1"
 
@@ -5487,7 +5441,7 @@ def create_app(
             return PlainTextResponse(path.read_text(encoding="utf-8"),
                                      media_type="text/x-python; charset=utf-8")
         except OSError as exc:
-            raise HTTPException(404, f"setup script missing: {exc}")
+            raise _http_fehler(404, "err.setup_script_missing", grund=exc)
 
     @app.get("/api/local-ai/installer")
     def api_local_ai_installer(request: Request, os: str = "mac"):
@@ -5605,7 +5559,7 @@ def create_app(
             ]).encode("utf-8")
             name, media = f"docusort-ollama-{short}.bat", "application/x-bat"
         else:
-            raise HTTPException(400, f"unknown os: {os!r}")
+            raise _http_fehler(400, "err.os_unknown", os=os)
 
         return Response(
             content=content, media_type=media,
@@ -5634,8 +5588,7 @@ def create_app(
         from .. import local_ai
         ticket = str(payload.get("ticket") or "")
         if not local_ai.check_setup_ticket(ticket):
-            raise HTTPException(401, "setup ticket invalid or expired — "
-                                     "download the setup again")
+            raise _http_fehler(401, "err.ticket_invalid_download")
         # 🔴 DIE ADRESSE WIRD GEMESSEN, NICHT GEGLAUBT. Das Einrichtungsskript
         #    fragte frueher seine eigene Routing-Tabelle, welche Adresse es fuer
         #    DocuSort benutzen wuerde, und schickte die. Aus Sicht jenes
@@ -5656,7 +5609,7 @@ def create_app(
         if einzeln and einzeln not in kandidaten:
             kandidaten.insert(0, einzeln)
         if not kandidaten:
-            raise HTTPException(400, "url required")
+            raise _http_fehler(400, "err.url_required")
 
         gewaehlt, versucht = "", []
         for roh in kandidaten:
@@ -5695,7 +5648,7 @@ def create_app(
         from .. import local_ai, updater
         ticket = str(payload.get("ticket") or "")
         if not local_ai.check_setup_ticket(ticket):
-            raise HTTPException(401, "setup ticket invalid or expired")
+            raise _http_fehler(401, "err.ticket_invalid")
         local_ai.spend_setup_ticket(ticket)
         return updater.restart_service()
 
@@ -5704,19 +5657,19 @@ def create_app(
         from .. import settings_writer
         provider = (payload.get("provider") or "").strip()
         if provider not in PROVIDERS:
-            raise HTTPException(400, f"unknown provider: {provider}")
+            raise _http_fehler(400, "err.provider_unknown", provider=provider)
         model = (payload.get("model") or "").strip()
         if not model:
-            raise HTTPException(400, "model required")
+            raise _http_fehler(400, "err.model_required")
         base_url = (payload.get("base_url") or "").strip()
         if provider == "openai_compat" and not base_url:
-            raise HTTPException(400, "openai_compat requires base_url")
+            raise _http_fehler(400, "err.base_url_required")
         api_key = payload.get("api_key")  # may be empty if user doesn't change it
         if provider not in ("openai_compat", "bridge") and api_key is not None and not api_key.strip():
             # Allow blank when there's already a key — either in secrets.yaml
             # or in the legacy environment variable (ANTHROPIC_API_KEY etc.).
             if not get_api_key(settings, provider):
-                raise HTTPException(400, "api_key required for this provider")
+                raise _http_fehler(400, "err.api_key_required")
             api_key = None  # don't overwrite
         if provider == "bridge":
             api_key = None  # bridge does not use an API key at all
@@ -5886,7 +5839,7 @@ def create_app(
             filename = f"docusort-bridge-{host_short}.bat"
             media    = "application/x-bat"
         else:
-            raise HTTPException(400, f"unknown os: {os!r}")
+            raise _http_fehler(400, "err.os_unknown", os=os)
 
         from fastapi.responses import Response
         return Response(
@@ -5908,7 +5861,7 @@ def create_app(
         from ..bridge.server import get_bridge
         bridge = get_bridge()
         if not bridge.is_connected():
-            raise HTTPException(409, "no bridge client is connected")
+            raise _http_fehler(409, "err.no_bridge")
         try:
             data = bridge.call(
                 system_prompt="You are a JSON echo. Reply with exactly: "
@@ -6127,8 +6080,7 @@ def create_app(
             token = (load_secrets(settings.config_dir)
                      .get("telegram_bot_token") or "").strip()
         if not token:
-            raise HTTPException(400, "no bot token yet — paste the token from "
-                                     "@BotFather first")
+            raise _http_fehler(400, "err.no_bot_token")
         try:
             return _notifier.telegram_find_chats(token)
         except ValueError as exc:
@@ -6141,7 +6093,7 @@ def create_app(
         from .. import notifier as _notifier
         disp = _notifier.get_dispatcher()
         if not disp.channels_summary():
-            raise HTTPException(409, "no channel configured / enabled")
+            raise _http_fehler(409, "err.no_channel")
         # Send synchronously so we can report the *real* outcome — a
         # fire-and-forget test that always says "sent" is exactly why a
         # broken Telegram setup looks like it works.
@@ -6157,7 +6109,7 @@ def create_app(
             # Every channel failed — hand the first concrete reason back to
             # the UI so the owner sees what to fix.
             detail = "; ".join(f"{r['channel']}: {r['error']}" for r in failed)
-            raise HTTPException(502, detail or "test delivery failed")
+            raise _http_fehler(502, "err.test_delivery_failed") if not detail else HTTPException(502, str(detail))
         return {"ok": True, "channels": ok_channels, "results": results}
 
     @app.post("/api/settings/sync")
@@ -6170,13 +6122,13 @@ def create_app(
         source      = (payload.get("source") or "library").strip()
 
         if target_type not in ("local", "rclone"):
-            raise HTTPException(400, "target_type must be 'local' or 'rclone'")
+            raise _http_fehler(400, "err.target_type_invalid")
         if source not in ("library", "library_and_trash"):
-            raise HTTPException(400, "source must be 'library' or 'library_and_trash'")
+            raise _http_fehler(400, "err.source_invalid")
         if enabled and target_type == "local" and not local_path:
-            raise HTTPException(400, "local_path required when sync is enabled")
+            raise _http_fehler(400, "err.local_path_required")
         if enabled and target_type == "rclone" and not remote:
-            raise HTTPException(400, "remote required when sync is enabled")
+            raise _http_fehler(400, "err.remote_required")
 
         # Validate the local path: must be writable and must NOT be the
         # library itself (we'd be syncing onto our own source).
@@ -6185,9 +6137,9 @@ def create_app(
             try:
                 p.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
-                raise HTTPException(400, f"cannot create {p}: {exc}")
+                raise _http_fehler(400, "err.cannot_create", pfad=p, grund=exc)
             if p == settings.paths.library or settings.paths.library in p.parents:
-                raise HTTPException(400, f"target {p} overlaps the library — pick a different folder")
+                raise _http_fehler(400, "err.overlaps_library", pfad=p)
 
         settings_writer.update_sync(
             enabled=enabled, target_type=target_type, local_path=local_path,
@@ -6215,7 +6167,7 @@ def create_app(
             start = (path or str(Path.home())).strip()
             target = Path(start).expanduser().resolve()
         except Exception as exc:
-            raise HTTPException(400, f"invalid path: {exc}")
+            raise _http_fehler(400, "err.path_invalid", grund=exc)
         if not target.exists():
             # Fall back to the closest existing ancestor — useful when the
             # user pastes a path that doesn't exist yet.
@@ -6283,7 +6235,7 @@ def create_app(
         from .. import settings_writer
         lang = (payload.get("default_language") or "").strip()
         if lang not in SUPPORTED:
-            raise HTTPException(400, f"unsupported language: {lang}")
+            raise _http_fehler(400, "err.lang_unsupported", lang=lang)
         settings_writer.update_web(
             default_language=lang, config_dir=settings.config_dir,
         )
@@ -6297,13 +6249,13 @@ def create_app(
         try:
             port = int(payload.get("port") or 0)
         except (TypeError, ValueError):
-            raise HTTPException(400, "port must be an integer")
+            raise _http_fehler(400, "err.port_integer")
         if port < 1 or port > 65535:
-            raise HTTPException(400, "port must be between 1 and 65535")
+            raise _http_fehler(400, "err.port_range")
         if host and host not in ("0.0.0.0", "127.0.0.1", "::", "::1") \
                 and not host.replace(".", "").replace(":", "").replace("-", "").isalnum():
             # Light sanity check — accept hostnames + dotted IPs, refuse weird input.
-            raise HTTPException(400, f"unusual host value: {host!r}")
+            raise _http_fehler(400, "err.host_unusual", host=host)
         settings_writer.update_web(
             host=host or None, port=port, config_dir=settings.config_dir,
         )
@@ -6333,7 +6285,7 @@ def create_app(
     @app.post("/api/document/{doc_id}/retry")
     def retry_doc(doc_id: int):
         if classifier is None:
-            raise HTTPException(503, "classifier not available in this process")
+            raise _http_fehler(503, "err.ai_not_here")
         from ..retry import retry_document
         try:
             return retry_document(doc_id, settings, classifier, db)
@@ -6341,7 +6293,7 @@ def create_app(
             raise HTTPException(400, str(exc))
         except Exception as exc:
             logger.exception("retry failed for %d", doc_id)
-            raise HTTPException(500, f"retry failed: {exc}")
+            raise _http_fehler(500, "err.retry_failed", grund=exc)
 
     # ---------- Deadlines: tick off as erledigt ----------
     @app.post("/api/document/{doc_id}/paid")
@@ -6355,7 +6307,7 @@ def create_app(
         raw = (payload or {}).get("tx_id", None)
         tx_id = None if raw in (None, "", 0) else int(raw)
         if not db.set_deadline_paid(doc_id, tx_id):
-            raise HTTPException(404, "document or booking not found")
+            raise _http_fehler(404, "err.doc_or_booking_missing")
         return {"ok": True, "payment": db.deadline_payment(doc_id)}
 
     @app.post("/api/document/{doc_id}/deadline-done")
@@ -6364,7 +6316,7 @@ def create_app(
         the dashboard 'Fällig demnächst' card — or restore it with ?done=false.
         The due_date is preserved on the document itself."""
         if not db.set_deadline_done(doc_id, done):
-            raise HTTPException(404, f"document {doc_id} not found")
+            raise _http_fehler(404, "err.doc_missing", doc_id=doc_id)
         return {"ok": True, "id": doc_id, "done": done}
 
     # ---------- Updater ----------
@@ -6399,7 +6351,7 @@ def create_app(
             raise HTTPException(409, str(exc)) from None
         except Exception as exc:
             logger.exception("Update failed")
-            raise HTTPException(500, f"Update failed: {exc}")
+            raise _http_fehler(500, "err.update_failed", grund=exc)
         if result.get("updated"):
             restart = updater.restart_service()
             result["restart"] = restart

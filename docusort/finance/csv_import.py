@@ -37,7 +37,6 @@ import io
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
 
 from .dates import iban_hash, normalise_date, normalise_iban
 

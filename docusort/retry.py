@@ -27,6 +27,7 @@ from .config import AppSettings
 from .db import Database
 from .ocr import extract_text
 from .organizer import _parse_iso_date, build_filename, _uniquify  # type: ignore
+from .i18n import uebersetze_jetzt as _u
 
 
 logger = logging.getLogger("docusort.retry")
@@ -52,7 +53,7 @@ def retry_document(
 ) -> dict[str, Any]:
     doc = db.get(doc_id)
     if not doc:
-        raise ValueError(f"document {doc_id} not found")
+        raise ValueError(_u("err.doc_missing", doc_id=doc_id))
 
     # 🔑 Den Stand VORHER festhalten. Ohne ihn kann die Oberflaeche
     #    nicht zwischen „das Modell sagt etwas Neues" und „das Modell sagt
@@ -67,13 +68,13 @@ def retry_document(
         # extracted_text was never stored — re-OCR from whichever file we still have.
         source = Path(doc.get("library_path") or doc.get("processed_path") or "")
         if not source.exists():
-            raise ValueError(f"source file missing: {source}")
+            raise ValueError(_u("err.source_file_missing", pfad=source))
         logger.info("retry %d: no stored text, re-OCRing %s", doc_id, source)
         ocr_res = extract_text(source, settings.ocr)
         text = ocr_res.text
 
     if not text:
-        raise ValueError("no extractable text")
+        raise ValueError(_u("err.no_text_in_file"))
 
     cls = classifier.classify(text)
     logger.info(
@@ -84,7 +85,7 @@ def retry_document(
     # Move the file to its new home.
     current = Path(doc["library_path"])
     if not current.exists():
-        raise ValueError(f"library file missing: {current}")
+        raise ValueError(_u("err.library_file_missing", pfad=current))
 
     year = _parse_iso_date(cls.date).strftime("%Y")
     if cls.is_confident:
