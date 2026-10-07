@@ -7,6 +7,53 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.99.1] - 2026-10-07
+
+### Changed
+
+🔑 **`ai.max_text_chars = 0` now means: as much of the document as the model
+can take.** Asked directly: why a fixed 12 000 and not everything?
+
+Because "everything" does not exist — but the ceiling belongs to the model,
+not to DocuSort, and 12 000 was far below it. Measured on
+`qwen2.5:7b-instruct`:
+
+```
+model limit            32 768 tokens   ← from the weights, not a setting
+system prompt           9 025 tokens   (28 339 characters of instructions)
+answer + reserve        1 112 tokens
+──────────────────────────────────────
+left for the document  22 630 tokens ≈ 71 000 characters
+```
+
+So nearly six times the old figure fits. DocuSort now **asks the model** —
+Ollama reports `<architecture>.context_length` from `/api/show` — and uses
+what is left after the instructions. A hosted service that does not state a
+limit keeps the old default of 12 000: there every token costs money, and
+"as much as possible" would be the wrong default.
+
+🔴 **Zero has to survive every floor.** It is checked first, before any
+`max(...)`, so that "no limit" in the settings does not quietly become the
+limit it replaced. Same reading as `ai.timeout_seconds`, for the same reason:
+on a machine of one's own, a token costs nothing but time.
+
+🔴 **And `num_ctx` never asks for more than the model has.** A window beyond
+the architectural limit is not generosity — it is memory reserved for
+something the model cannot use.
+
+🔑 **A document that still does not fit says so.** Count of characters, how
+many fit, the model's limit, and how many are left out — in the log, instead
+of silence.
+
+### Added
+
+🧪 `probe_ollama_kontext.py` grew two sections: that the limit is read from
+the model and asked only once, that `num_ctx` is capped at it, and that a
+configured `0` really opens the window (66 630 characters at a 32 768-token
+model, against 12 000 before) while a provider that states no limit keeps the
+old default. **33 green, 0 red.**
+
+
 ## [0.99.0] - 2026-10-07
 
 ### Fixed

@@ -49,6 +49,10 @@ class OpenAICompatProvider(Provider):
         self.timeout = timeout
         # Einmal gefragt, dann gemerkt: ist das hinten ein Ollama?
         self._ist_ollama: bool | None = None
+        self._max_ctx: int | None = None
+        # Welches Modell zuletzt gefragt wurde — `max_context()` braucht einen
+        # Namen, und `classify` kennt ihn erst beim Aufruf.
+        self._modell: str = ""
 
     def runtime(self) -> dict[str, Any]:
         """Ask the endpoint what it has loaded.
@@ -168,6 +172,34 @@ class OpenAICompatProvider(Provider):
         n = ((gebraucht + schritt - 1) // schritt) * schritt
         return max(schritt, n)
 
+    def max_context(self) -> int:
+        """Wieviel Token fasst dieses Modell ueberhaupt? 0, wenn unbekannt.
+
+        🔑 Ollama sagt es selbst: `/api/show` liefert in `model_info` einen
+        Schluessel `<architektur>.context_length` — fuer qwen2.5:7b sind das
+        32 768. Das steht in den Gewichten des Modells, nicht in einer
+        Einstellung, und es ist die einzige Zahl, die wirklich eine Grenze
+        ist. Einmal gefragt, dann gemerkt.
+        """
+        if self._max_ctx is not None:
+            return self._max_ctx
+        self._max_ctx = 0
+        if self.ist_ollama() and self._modell:
+            try:
+                req = request.Request(
+                    self._wurzel() + "/api/show",
+                    data=json.dumps({"model": self._modell}).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST")
+                with request.urlopen(req, timeout=10) as r:
+                    info = (json.loads(r.read().decode()).get("model_info") or {})
+                for k, v in info.items():
+                    if k.endswith(".context_length") and isinstance(v, int) and v > 0:
+                        self._max_ctx = int(v)
+                        break
+            except Exception:  # noqa: BLE001 — wer nicht antwortet, weiss es eben nicht
+                self._max_ctx = 0
+        return self._max_ctx
+
     def classify(self, *, system_prompt, user_prompt, model,
                  max_output_tokens: int = 600,
                  timeout: float | None = None) -> ProviderResponse:
@@ -175,6 +207,8 @@ class OpenAICompatProvider(Provider):
         # when given (long extractions on a local Ollama can take
         # several minutes).
         request_timeout = timeout if timeout is not None else self.timeout
+        if model and model != self._modell:
+            self._modell, self._max_ctx = model, None
         # 🔑 0 (oder weniger) HEISST: KEINE ZEITGRENZE — rechnen lassen.
         #    Bei einem lokalen Modell kostet die Zeit nichts ausser Zeit, und
         #    ein Abbruch kurz vor der Antwort wirft die GANZE Rechenzeit weg.
@@ -269,6 +303,14 @@ class OpenAICompatProvider(Provider):
         """
         zeichen = len(system_prompt or "") + len(user_prompt or "")
         num_ctx = self.kontext_fuer(zeichen, max_output_tokens)
+        # 🔴 NIE MEHR VERLANGEN, ALS DAS MODELL HAT. Ein `num_ctx` ueber der
+        #    Architekturgrenze ist keine Grosszuegigkeit — Ollama kappt es
+        #    ohnehin, und wer es nicht kappt, belegt Speicher fuer ein Fenster,
+        #    das das Modell nicht benutzen kann. Was dann trotzdem nicht
+        #    hineinpasst, steht unten im Protokoll.
+        grenze = self.max_context()
+        if grenze > 0:
+            num_ctx = min(num_ctx, grenze)
         body = {
             "model": model,
             "stream": False,

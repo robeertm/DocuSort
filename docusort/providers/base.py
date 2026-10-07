@@ -40,6 +40,18 @@ class Provider:
 
     name: str = "abstract"
 
+    def max_context(self) -> int:
+        """How many tokens this model can take in total — 0 when unknown.
+
+        🔑 Only a provider that can ASK its model answers this. A hosted
+        service bills per token, so there the limit that matters is the
+        user's wallet, not the architecture; local engines charge nothing
+        and the only real ceiling is the model itself. DocuSort uses this
+        to send as much of a document as physically fits instead of a fixed
+        number that was chosen once and then never matched any model.
+        """
+        return 0
+
     def classify(
         self,
         *,
