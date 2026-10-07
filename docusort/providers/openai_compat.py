@@ -47,6 +47,8 @@ class OpenAICompatProvider(Provider):
             self.base_url += "/v1"
         self.api_key = api_key or "ollama"
         self.timeout = timeout
+        # Einmal gefragt, dann gemerkt: ist das hinten ein Ollama?
+        self._ist_ollama: bool | None = None
 
     def runtime(self) -> dict[str, Any]:
         """Ask the endpoint what it has loaded.
@@ -113,6 +115,59 @@ class OpenAICompatProvider(Provider):
                                   else "gemischt")
         return info
 
+    def _wurzel(self) -> str:
+        """Die Adresse OHNE `/v1` — dort liegt Ollamas eigene Schnittstelle."""
+        w = (self.base_url or "").rstrip("/")
+        return w[:-3].rstrip("/") if w.endswith("/v1") else w
+
+    def ist_ollama(self) -> bool:
+        """Antwortet hinten ein Ollama? Einmal gefragt, dann gemerkt.
+
+        🔑 Das entscheidet, ob DocuSort sagen DARF, wie gross der Kontext
+        sein soll. Ueber die OpenAI-Schnittstelle kann es das nicht: gemessen
+        am 07.10.2026 wird `num_ctx` dort in JEDER Schreibweise verworfen —
+        als eigenes Feld, in `options`, egal wie. Ollamas eigene
+        Schnittstelle nimmt es an.
+        """
+        if self._ist_ollama is None:
+            try:
+                req = request.Request(self._wurzel() + "/api/version")
+                with request.urlopen(req, timeout=3) as r:
+                    self._ist_ollama = bool(json.loads(r.read().decode()).get("version"))
+            except Exception:  # noqa: BLE001
+                self._ist_ollama = False
+        return bool(self._ist_ollama)
+
+    # 🔴 GEMESSEN, NICHT GESCHAETZT. Ein echter Lauf am 07.10.2026:
+    #    32 413 Zeichen Prompt ergaben 10 309 Token, also 3,14 Zeichen je
+    #    Token (Deutsch mit Fachbegriffen). Mit 2,5 wird nach oben gerundet —
+    #    ein zu grosser Kontext kostet Arbeitsspeicher, ein zu kleiner wirft
+    #    die Anweisungen weg, und nur das zweite ist ein Fehler.
+    ZEICHEN_JE_TOKEN = 2.5
+
+    @classmethod
+    def kontext_fuer(cls, zeichen: int, max_output_tokens: int = 600) -> int:
+        """Wie gross muss der Kontext sein, damit ALLES hineinpasst?
+
+        🔴 WARUM DAS UEBERHAUPT GERECHNET WIRD. Ohne Angabe schneidet Ollama
+        bei 2048 Token ab — gemessen: von 10 309 Token eines Prompts wurden
+        2 050 ausgewertet, 80 % fielen weg. Und zwar STILL: die Antwort kommt,
+        sie ist nur schlechter. Am echten Archiv sichtbar als Gefaelle mit der
+        Dokumentgroesse — Zuversicht 0,87 unter 2 000 Zeichen gegen 0,67 ueber
+        10 000, und 29 Dokumente, auf die das Modell mit einem voellig anderen
+        JSON-Schema antwortete, weil die Anweisung dazu abgeschnitten war.
+
+        🔑 Gerechnet wird aus dem, was WIRKLICH geschickt wird, plus Platz
+        fuer die Antwort und eine Reserve. Nicht gedeckelt auf einen Wert, der
+        „reichen sollte" — der Prompt bestimmt die Groesse, nicht umgekehrt.
+        """
+        gebraucht = int(zeichen / cls.ZEICHEN_JE_TOKEN) + int(max_output_tokens) + 512
+        # Auf das naechste Vielfache von 2048 aufrunden: Ollama rechnet den
+        # Zwischenspeicher in Bloecken, und krumme Werte bringen nichts.
+        schritt = 2048
+        n = ((gebraucht + schritt - 1) // schritt) * schritt
+        return max(schritt, n)
+
     def classify(self, *, system_prompt, user_prompt, model,
                  max_output_tokens: int = 600,
                  timeout: float | None = None) -> ProviderResponse:
@@ -133,6 +188,15 @@ class OpenAICompatProvider(Provider):
         #    nicht ewig an einem Rechner, den es nicht gibt.
         if request_timeout is not None and request_timeout <= 0:
             request_timeout = None
+        # 🔑 OLLAMA BEKOMMT SEINEN EIGENEN WEG — und zwar nur deshalb, weil
+        #    die OpenAI-Schnittstelle `num_ctx` verwirft und damit bei 2048
+        #    Token abschneidet. Alles andere bleibt, wie es war.
+        if self.ist_ollama():
+            return self._ollama_classify(
+                system_prompt=system_prompt, user_prompt=user_prompt, model=model,
+                max_output_tokens=max_output_tokens, request_timeout=request_timeout,
+            )
+
         body: dict[str, Any] = {
             "model": model,
             "max_tokens": max_output_tokens,
@@ -184,4 +248,79 @@ class OpenAICompatProvider(Provider):
         return ProviderResponse(
             raw_text=raw, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+        )
+
+
+    def _ollama_classify(self, *, system_prompt: str, user_prompt: str, model: str,
+                         max_output_tokens: int, request_timeout) -> ProviderResponse:
+        """Ueber Ollamas EIGENE Schnittstelle — die einzige, die `num_ctx` annimmt.
+
+        🔴 WAS HIER BEHOBEN WIRD. Ueber `/v1/chat/completions` wertete Ollama
+        von einem 10 309 Token langen Prompt genau 2 050 aus. Nicht wegen
+        Zwischenspeicherung — ein frischer, nicht zwischenspeicherbarer Prompt
+        wurde zweimal in Folge ebenso abgeschnitten. Die Anweisung, wie die
+        Antwort aussehen soll, steht im vorderen Teil des Systemtextes; was
+        dahinter liegt, sah das Modell nie. Gemeldet wurde es als Nachlassen
+        der Erkennung gegenueber frueher — und genau das war es, messbar.
+
+        🔑 `num_ctx` kommt aus dem, was wirklich geschickt wird. Rechenzeit
+        ist bei einem eigenen Rechner kein Argument gegen ein richtiges
+        Ergebnis; ein abgeschnittener Prompt ist eines gegen jedes.
+        """
+        zeichen = len(system_prompt or "") + len(user_prompt or "")
+        num_ctx = self.kontext_fuer(zeichen, max_output_tokens)
+        body = {
+            "model": model,
+            "stream": False,
+            # Ollamas eigenes Wort fuer „antworte in JSON".
+            "format": "json",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "options": {"num_ctx": num_ctx, "num_predict": int(max_output_tokens)},
+        }
+        req = request.Request(
+            self._wurzel() + "/api/chat",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=request_timeout) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:400]
+            raise ProviderError(
+                f"ollama HTTP {exc.code} from {self._wurzel()}: {detail}"
+            ) from exc
+        except (error.URLError, TimeoutError) as exc:
+            raise ProviderError(
+                f"ollama could not be reached at {self._wurzel()}: {exc}"
+            ) from exc
+
+        raw = ((payload.get("message") or {}).get("content") or "")
+        if not raw:
+            raise ProviderError(f"ollama returned no content: {str(payload)[:300]}")
+        in_tok = int(payload.get("prompt_eval_count") or 0)
+        out_tok = int(payload.get("eval_count") or 0)
+
+        # 🔴 STILL SCHLECHTER WERDEN DARF ES NIE WIEDER. Genau das war der
+        #    Fehler: die Antwort kam, sie war nur unbrauchbar, und nichts im
+        #    Protokoll sagte warum. Reicht der Kontext fuer den Prompt nicht,
+        #    steht das jetzt da — mit beiden Zahlen.
+        geschaetzt = int(zeichen / self.ZEICHEN_JE_TOKEN)
+        if geschaetzt > num_ctx:
+            import logging
+            logging.getLogger("docusort.providers").warning(
+                "Ollama: der Prompt braucht etwa %d Token, der Kontext fasst %d — "
+                "%d Token werden abgeschnitten, und das Modell sieht die Anweisung "
+                "zur Antwortform womoeglich nicht.",
+                geschaetzt, num_ctx, geschaetzt - num_ctx,
+            )
+
+        return ProviderResponse(
+            raw_text=raw, model=model,
+            input_tokens=in_tok, output_tokens=out_tok,
+            cost_usd=calculate_cost("openai_compat", model, in_tok, out_tok),
         )
