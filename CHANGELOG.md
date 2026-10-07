@@ -7,6 +7,47 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.99.2] - 2026-10-07
+
+### Fixed
+
+🔴 **The first document after every restart was still capped at 12 000
+characters.** Found by measuring 0.99.1 on a running installation rather than
+trusting it: the log said `12000` where it should have said `66630`.
+
+`max_context()` read the model name from whatever a previous `classify` call
+had stored. But the caller asks for the limit **before** it classifies —
+that is the whole point, since the answer decides how much text to send. On
+the first document after a restart nothing was stored yet, the provider
+answered "unknown", and the limit silently fell back to the old default.
+From the second document onwards it worked, which is the worst kind of
+fault: one that fixes itself before anyone can catch it in the act.
+
+**The model name is now a parameter** rather than something the provider is
+assumed to remember.
+
+🔑 **The test rig had let this through, and that is the more useful lesson.**
+Its fake provider set the model name by hand, so it measured a situation that
+never occurs. It now asks a provider that has never classified anything, and
+checks that the classifier **passes the name in** — with a counter-test that
+a provider asked without a name still answers "unknown".
+
+🔴 **And 0.99.0 had quietly introduced two deadlines of its own.** Detecting
+Ollama used a 3-second limit, asking for the model's context a 10-second one —
+and a failure was **remembered**. One busy moment on the machine doing the
+work would therefore have switched the whole fix off for the lifetime of the
+process: every further document truncated at 2048 tokens again, with nothing
+ever asking a second time. Exactly the silent degradation this release series
+exists to end.
+
+Both now follow the same rule as the classification itself: `timeout_seconds =
+0` means **no deadline**, and an unreachable machine still fails fast because
+the connection attempt has its own limit in the operating system. A **yes** is
+remembered, a **no** never is — it is asked again on the next document.
+
+**41 green, 0 red.**
+
+
 ## [0.99.1] - 2026-10-07
 
 ### Changed

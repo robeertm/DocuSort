@@ -40,8 +40,15 @@ class Provider:
 
     name: str = "abstract"
 
-    def max_context(self) -> int:
+    def max_context(self, model: str = "") -> int:
         """How many tokens this model can take in total — 0 when unknown.
+
+        🔴 THE MODEL NAME IS A PARAMETER, not something the provider is
+        assumed to remember. It used to be read from whatever the last
+        `classify` call had stored — but the caller asks this BEFORE it
+        classifies, in order to decide how much text to send. On the first
+        document after every restart nothing was stored yet, the answer was
+        "unknown", and the limit silently fell back to the old default.
 
         🔑 Only a provider that can ASK its model answers this. A hosted
         service bills per token, so there the limit that matters is the
