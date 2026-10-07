@@ -7,6 +7,44 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.98.3] - 2026-10-07
+
+### Fixed
+
+🌍 **The CSV importer's failure messages existed in German only — all five of
+them.** Not one was in `en.json`, so an English, French, Spanish or Italian
+user got the reason in a language they may not read. 0.98.2 made the importer
+explain itself; this release makes that explanation reach everyone, because a
+reason nobody can read is the same silence as no reason at all.
+
+The reasons are no longer finished sentences built inside the importer. The
+report carries the **key and its parameters** (`ImportReport.error_keys`,
+`invalid_example_key`), and the sentence is composed where the user's language
+is known — in the web layer, from the `lang` cookie or `Accept-Language`.
+
+🔑 **A reason can contain a reason** ("1 row read, but not one of them usable —
+the amount was not readable"). The inner one travels as its own key
+(`reason_key`), so an English clause can never end up in the middle of a
+French sentence. Both halves are rendered in the same language.
+
+🔑 **`report.errors` stays English** for the log and the API: finding a fault
+should not depend on the browser language of whoever hit it.
+
+Nine new keys in all five languages (`de`, `en`, `fr`, `es`, `it`):
+`finance.csv.err_empty`, `err_no_header`, `err_no_own_iban`,
+`err_nothing_usable`, `bad_amount`, `bad_amount_empty`, `bad_date`,
+`bad_date_empty`, `bad_unknown`.
+
+### Added
+
+🧪 `probe_csv_upload.py` grew a language section: that every key exists in
+**every** locale, that the five renderings really differ (a counter-test
+against "translated" meaning copied), that the report carries the key rather
+than the sentence, and — through the real upload route — that a French browser
+gets a French reason and an Italian one an Italian reason with the offending
+cell inside it and no English clause left in the middle. **57 green, 0 red.**
+
+
 ## [0.98.2] - 2026-10-07
 
 ### Fixed

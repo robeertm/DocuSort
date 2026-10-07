@@ -238,6 +238,23 @@ def _report_to_dict(report) -> dict:
     }
 
 
+def _import_fehler(report, lang: str) -> str:
+    """Die Gruende eines Importberichts in der Sprache DES NUTZERS.
+
+    🔴 DocuSort spricht fuenf Sprachen. `report.errors` traegt den englischen
+    Wortlaut fuer Protokoll und API; was auf dem Bildschirm steht, muss aber in
+    der Sprache stehen, die der Nutzer eingestellt hat — sonst ist ein Grund,
+    den er nicht lesen kann, dieselbe Null wie gar kein Grund. Fehlt der
+    Schluessel (aeltere Pfade, eine Datenbank-Ausnahme), bleibt der Klartext.
+    """
+    from ..finance.csv_import import aufloesen
+    schluessel = getattr(report, "error_keys", None) or []
+    if not schluessel:
+        return "; ".join(report.errors)
+    return "; ".join(aufloesen(e["key"], e.get("params") or {}, lang)
+                     for e in schluessel)
+
+
 # Per-document long-running jobs (statement / receipt extraction). Process-
 # local, in-memory: a request that hits api_extract_statement registers
 # itself here so concurrent doc-page reloads can see "Auswertung läuft"
@@ -1654,7 +1671,8 @@ def create_app(
         )
 
     @app.post("/upload")
-    async def upload_file(files: list[UploadFile] = File(...),
+    async def upload_file(request: Request,
+                          files: list[UploadFile] = File(...),
                           account_iban: str = Form("")):
         saved = []
         rejected = []
@@ -1693,7 +1711,7 @@ def create_app(
                         imported.append({
                             **_report_to_dict(rep),
                             "file_label": up.filename or "",
-                            "error": "; ".join(rep.errors),
+                            "error": _import_fehler(rep, _lang(request)),
                             "hint_iban": bool(getattr(rep, "needs_account_iban", False)),
                         })
                         logger.warning("CSV-Upload %s nicht eingelesen: %s",
