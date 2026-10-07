@@ -124,8 +124,25 @@ class OpenAICompatProvider(Provider):
         w = (self.base_url or "").rstrip("/")
         return w[:-3].rstrip("/") if w.endswith("/v1") else w
 
+    def _nebenfrage_timeout(self):
+        """Zeitgrenze fuer die kleinen Nebenfragen (`/api/version`, `/api/show`).
+
+        🔴 SIE FOLGT DERSELBEN REGEL WIE DIE EINORDNUNG: `timeout_seconds = 0`
+        heisst keine Zeitgrenze. Ich hatte hier zuerst feste 3 und 10 Sekunden
+        eingebaut — und damit eine Falle gestellt, die genau den Fehler
+        zurueckholt, den dieses Modul behebt: ist der Rechner einen Moment
+        beschaeftigt, laeuft die Frage ab, DocuSort haelt ihn fuer „kein
+        Ollama" und faellt auf den Weg zurueck, der bei 2048 Token
+        abschneidet. Still.
+
+        🔑 Dass es trotzdem nicht ewig haengt, besorgt das Betriebssystem:
+        ist der Rechner gar nicht da, scheitert schon der VERBINDUNGSAUFBAU,
+        und der hat seine eigene, kurze Grenze.
+        """
+        return None if (self.timeout or 0) <= 0 else self.timeout
+
     def ist_ollama(self) -> bool:
-        """Antwortet hinten ein Ollama? Einmal gefragt, dann gemerkt.
+        """Antwortet hinten ein Ollama? Gefragt, bis es einmal geklappt hat.
 
         🔑 Das entscheidet, ob DocuSort sagen DARF, wie gross der Kontext
         sein soll. Ueber die OpenAI-Schnittstelle kann es das nicht: gemessen
@@ -133,13 +150,20 @@ class OpenAICompatProvider(Provider):
         als eigenes Feld, in `options`, egal wie. Ollamas eigene
         Schnittstelle nimmt es an.
         """
-        if self._ist_ollama is None:
-            try:
-                req = request.Request(self._wurzel() + "/api/version")
-                with request.urlopen(req, timeout=3) as r:
-                    self._ist_ollama = bool(json.loads(r.read().decode()).get("version"))
-            except Exception:  # noqa: BLE001
-                self._ist_ollama = False
+        if self._ist_ollama:
+            return True
+        try:
+            req = request.Request(self._wurzel() + "/api/version")
+            with request.urlopen(req, timeout=self._nebenfrage_timeout()) as r:
+                self._ist_ollama = bool(json.loads(r.read().decode()).get("version"))
+        except Exception:  # noqa: BLE001
+            # 🔴 EIN NEIN WIRD NICHT GEMERKT. Vorher stand hier `= False`, und
+            #    damit haette ein einziger Aussetzer die Behebung fuer die
+            #    ganze Laufzeit des Prozesses abgeschaltet — jedes weitere
+            #    Dokument waere wieder bei 2048 Token abgeschnitten worden,
+            #    ohne dass jemals wieder nachgefragt wird. Ein Ja gilt, ein
+            #    Nein wird beim naechsten Mal neu geprueft.
+            return False
         return bool(self._ist_ollama)
 
     # 🔴 GEMESSEN, NICHT GESCHAETZT. Ein echter Lauf am 07.10.2026:
@@ -172,8 +196,16 @@ class OpenAICompatProvider(Provider):
         n = ((gebraucht + schritt - 1) // schritt) * schritt
         return max(schritt, n)
 
-    def max_context(self) -> int:
+    def max_context(self, model: str = "") -> int:
         """Wieviel Token fasst dieses Modell ueberhaupt? 0, wenn unbekannt.
+
+        🔴 DER MODELLNAME KOMMT MIT. Vorher las diese Stelle `self._modell`,
+        das erst `classify()` setzt — gefragt wird aber VORHER, naemlich um
+        zu entscheiden, wieviel Text ueberhaupt mitgeschickt wird. Beim
+        ersten Dokument nach jedem Neustart stand dort nichts, die Antwort
+        war „unbekannt", und die Grenze fiel still auf die alte Vorgabe
+        zurueck. Gefunden beim Nachmessen an der laufenden Installation:
+        „PLATZ jetzt: 12000" statt 66 630.
 
         🔑 Ollama sagt es selbst: `/api/show` liefert in `model_info` einen
         Schluessel `<architektur>.context_length` — fuer qwen2.5:7b sind das
@@ -181,6 +213,9 @@ class OpenAICompatProvider(Provider):
         Einstellung, und es ist die einzige Zahl, die wirklich eine Grenze
         ist. Einmal gefragt, dann gemerkt.
         """
+        name = model or self._modell
+        if name and name != self._modell:
+            self._modell, self._max_ctx = name, None
         if self._max_ctx is not None:
             return self._max_ctx
         self._max_ctx = 0
@@ -190,15 +225,20 @@ class OpenAICompatProvider(Provider):
                     self._wurzel() + "/api/show",
                     data=json.dumps({"model": self._modell}).encode(),
                     headers={"Content-Type": "application/json"}, method="POST")
-                with request.urlopen(req, timeout=10) as r:
+                with request.urlopen(req, timeout=self._nebenfrage_timeout()) as r:
                     info = (json.loads(r.read().decode()).get("model_info") or {})
                 for k, v in info.items():
                     if k.endswith(".context_length") and isinstance(v, int) and v > 0:
                         self._max_ctx = int(v)
                         break
-            except Exception:  # noqa: BLE001 — wer nicht antwortet, weiss es eben nicht
-                self._max_ctx = 0
-        return self._max_ctx
+            except Exception:  # noqa: BLE001
+                # 🔴 Auch hier nichts Negatives merken: `None` statt `0`, dann
+                #    wird beim naechsten Dokument neu gefragt. Sonst haette ein
+                #    Aussetzer den Textplatz dauerhaft auf die alte Vorgabe
+                #    gesetzt.
+                self._max_ctx = None
+                return 0
+        return self._max_ctx or 0
 
     def classify(self, *, system_prompt, user_prompt, model,
                  max_output_tokens: int = 600,
@@ -308,7 +348,7 @@ class OpenAICompatProvider(Provider):
         #    ohnehin, und wer es nicht kappt, belegt Speicher fuer ein Fenster,
         #    das das Modell nicht benutzen kann. Was dann trotzdem nicht
         #    hineinpasst, steht unten im Protokoll.
-        grenze = self.max_context()
+        grenze = self.max_context(model)
         if grenze > 0:
             num_ctx = min(num_ctx, grenze)
         body = {

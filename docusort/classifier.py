@@ -640,7 +640,7 @@ class Classifier:
         if eingestellt > 0:
             return eingestellt
         try:
-            grenze = int(self.provider.max_context() or 0)
+            grenze = int(self.provider.max_context(self.settings.model) or 0)
         except Exception:  # noqa: BLE001
             grenze = 0
         if grenze <= 0:
