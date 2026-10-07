@@ -188,6 +188,15 @@ class ImportReport:
     rows_overlap: int = 0      # same day + amount already known from the OTHER source (CSV ↔ Kontoauszug)
     statements: int = 0        # Kontoauszug-PDFs imported (statement import only)
     statements_skipped: int = 0  # Kontoauszüge already imported / not balanced (statement import only)
+    # 🔴 Warum die erste verworfene Zeile verworfen wurde — im Klartext, mit
+    #    dem Zellinhalt. Ohne das meldet ein Import, der NICHTS einlesen konnte,
+    #    nur „0 Buchungen“, und genau so sieht fuer den Nutzer „laedt nicht ein“ aus.
+    invalid_example: str = ""
+    # 🔴 Nur DANN darf die Oberflaeche nach der Konto-IBAN fragen. Vorher setzte
+    #    `/upload` bei JEDEM Fehler `hint_iban` — ein unbekannter Spaltenkopf
+    #    oder eine unlesbare Zeile kam beim Nutzer als „nennt kein Konto" an,
+    #    und der echte Grund wurde dabei weggeworfen.
+    needs_account_iban: bool = False
     errors: list[str] = field(default_factory=list)
 
 
@@ -403,10 +412,20 @@ def parse_csv(data: bytes | str, *, file_label: str = "",
             amount = None if deb is None and cred is None else round((cred or 0.0) - abs(deb or 0.0), 2)
         if amount is None:
             report.rows_invalid += 1
+            if not report.invalid_example:
+                roh = cell(raw_row, "amount") or cell(raw_row, "debit") or cell(raw_row, "credit")
+                report.invalid_example = (
+                    "der Betrag war nicht lesbar (%s)"
+                    % (f'\u201e{roh[:40]}\u201c' if roh else "die Spalte war leer"))
             continue
         booking_date = normalise_date(cell(raw_row, "booking_date"))
         if not booking_date:
             report.rows_invalid += 1        # trailing summary / balance lines land here
+            if not report.invalid_example:
+                roh = cell(raw_row, "booking_date")
+                report.invalid_example = (
+                    "das Buchungsdatum war nicht lesbar (%s)"
+                    % (f'\u201e{roh[:40]}\u201c' if roh else "die Spalte war leer"))
             continue
         value_date = normalise_date(cell(raw_row, "value_date"))
 
@@ -660,8 +679,23 @@ def import_csv(db, data: bytes | str, *, file_label: str = "",
             report.iban_from_known_account = guessed
     if not rows:
         if report.rows_skipped and not report.rows_inserted:
+            report.needs_account_iban = True
             report.errors.append(
                 "Die Datei nennt keine IBAN des eigenen Kontos — bitte die Konto-IBAN im Feld neben dem Import angeben."
+            )
+        # 🔴 EINE NULL OHNE GRUND IST KEINE ANTWORT. Der Spaltenkopf wurde
+        #    erkannt, Zeilen waren da — und trotzdem kam nichts an. Bisher stand
+        #    dann „0 Buchungen“ und sonst nichts; aus Sicht des Nutzers hat die
+        #    Datei „nicht geladen“, ohne dass irgendwo steht, woran es lag.
+        #    Jetzt nennt der Bericht die Zahl, den Grund und ein Beispiel aus der
+        #    Datei — damit man am Telefon sagen kann, was drinsteht.
+        elif report.rows_invalid and not report.rows_inserted:
+            report.errors.append(
+                "%d Zeile(n) gelesen, aber keine einzige verwertbar — %s. "
+                "Kommt die Datei wirklich aus der Umsatz-Übersicht des Kontos "
+                "(nicht aus einem Depot- oder Kreditkarten-Export)?"
+                % (report.rows_invalid,
+                   report.invalid_example or "Datum oder Betrag standen nicht in den erwarteten Spalten")
             )
         return report
     import_rows(db, rows, report, account_holder_hint=account_holder_hint)

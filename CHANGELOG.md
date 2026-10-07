@@ -7,6 +7,90 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.98.2] - 2026-10-07
+
+### Fixed
+
+🔴 **A bank CSV that failed to import told the user something that was not
+true.** Reported for an ING export that "would not load".
+
+The ING **format** was not the problem: measured, `parse_csv` reads both
+common ING exports cleanly, detects the bank, picks the account's own IBAN out
+of the preamble and understands the German decimal comma. The fault was in
+what DocuSort *says* when an import does not work. There is exactly **one way
+in** since v0.51.0 — the upload page — and three faults sat on top of each
+other there:
+
+1. **`/upload` set `hint_iban: True` for *every* CSV error.** The interface
+   turns that into "which account does this file belong to?" with an account
+   picker, or "names no account — ask an administrator to import it". The
+   **real** reason was thrown away. Anyone uploading a file with an unknown
+   header or unreadable amounts was asked an account question that fixes
+   nothing about it, and never learned what was actually wrong.
+2. **The failure branch used the `error` state, whose label reads "network
+   error".** The importer's own sentence appeared under a heading that is
+   simply false. That label lives in the translation file, not in the code, so
+   no API-level test could have seen it.
+3. **When not a single row could be read, nothing was reported at all.**
+   Header recognised, rows counted, amount or date unreadable → `rows_invalid`
+   incremented, `continue`, and the result said "0 bookings" with no
+   explanation. From the outside that is exactly what "it will not load" looks
+   like.
+
+**Fixed:**
+
+* The report now carries whether a missing own IBAN was really the cause
+  (`ImportReport.needs_account_iban`). `/upload` asks for the account **only**
+  then, and shows the actual reason for every other failure.
+* New `csv-failed` state on the upload page. An import reason is not a network
+  error and now reads as itself.
+* An import that could read nothing **names the count, the reason and the cell
+  from the file** (`ImportReport.invalid_example`), and asks whether the file
+  really came from the account's transaction list rather than a securities or
+  credit-card export. Specific enough to read out over the phone.
+* The failure path returns the **whole** report instead of three fields —
+  rows read, rows rejected and the detected bank used to be lost at exactly
+  the moment they are needed.
+
+🔑 **One way in, and only one.** Measured explicitly and left that way: the
+finance page accepts no file of its own and only points at the upload page;
+`.csv` is not in `ALLOWED_SUFFIXES`, so a CSV is never filed as a document in
+the inbox; and the upload route decides by file type what belongs in the
+library and what belongs in the finances. A second route through the inbox
+folder was started during this work and **discarded** — it would have solved
+the same job in a second place.
+
+### Added
+
+🧪 **New test rig `pruefstaende/probe_csv_upload.py` — the CSV import had none
+at all.** Real app (`create_app`), real database, real importer, and the files
+go through `POST /upload` the way a browser sends them:
+
+* that there really is only **one** way in (finance page without a file input,
+  `.csv` absent from `ALLOWED_SUFFIXES`),
+* both ING exports (bank, own IBAN from the preamble, decimal comma, signs,
+  ISO date, counterparty in the right field),
+* the route through the page into the real table, and that a second run
+  duplicates **nothing**,
+* that a file without its own IBAN asks for the account — **and** that
+  supplying the IBAN then really imports it, so the question is not a dead end,
+* 🔴 that every **other** failure names its reason and does **not** ask for the
+  account, with the counter-test (`hint_iban is False`) — that is the fault
+  itself,
+* 🔴 **in a real browser**, that the reason is what stands on screen and not
+  "network error", plus a counter-test with a good file ("1 booking imported"),
+* and that the document route beside it is unchanged (PDF → inbox, `.txt`
+  rejected rather than silently swallowed).
+
+**49 green, 0 red.**
+
+🟠 **Open:** this does not prove it explains the reported case. The ING files
+in the rig are reconstructions, not a genuine ING export — and the importer's
+ING support was added from assumption too. What is missing is the first few
+lines of the actual file (amounts and IBAN can be masked) and what now appears
+on screen when it is uploaded. This release makes sure something usable
+appears there at all.
+
 ## [0.98.1] - 2026-10-06
 
 ### Fixed
