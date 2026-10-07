@@ -24,6 +24,7 @@ the conf entry ourselves — it's just an INI file.
 from __future__ import annotations
 
 import configparser
+from .i18n import uebersetze_jetzt as _u
 import json
 import logging
 import os
@@ -130,7 +131,7 @@ def list_remotes() -> list[dict[str, Any]]:
 def authorize_command(backend: str) -> str:
     """The exact command the user runs on their laptop to mint a token."""
     if backend not in OAUTH_BACKENDS:
-        raise ValueError(f"{backend!r} is not OAuth-based — no token needed")
+        raise ValueError(_u("err.rclone_no_oauth", backend=backend))
     # Quoting matches the rclone docs verbatim.
     return f'rclone authorize "{backend}"'
 
@@ -144,7 +145,7 @@ def add_oauth_remote(name: str, backend: str, token_json: str) -> Path:
     either by re-serializing through json.loads/dumps.
     """
     if backend not in OAUTH_BACKENDS:
-        raise ValueError(f"{backend!r} does not use OAuth tokens")
+        raise ValueError(_u("err.rclone_no_oauth", backend=backend))
     name = _sanitise_name(name)
     token_json = (token_json or "").strip()
 
@@ -153,10 +154,7 @@ def add_oauth_remote(name: str, backend: str, token_json: str) -> Path:
     try:
         token_obj = json.loads(token_json)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Token is not valid JSON: {exc.msg}. Paste the full block printed "
-            f"by `rclone authorize \"{backend}\"`."
-        ) from exc
+        raise ValueError(_u("err.rclone_token_not_json", grund=exc.msg)) from exc
     token_min = json.dumps(token_obj, separators=(",", ":"))
 
     cp = _read_conf()
@@ -179,7 +177,7 @@ def add_s3_remote(
     """Create an S3-compatible remote (AWS, MinIO, Wasabi, R2, ...)."""
     name = _sanitise_name(name)
     if not access_key_id or not secret_access_key:
-        raise ValueError("S3 remote requires access_key_id and secret_access_key")
+        raise ValueError(_u("err.rclone_s3_fields"))
     cp = _read_conf()
     if cp.has_section(name):
         cp.remove_section(name)
@@ -202,7 +200,7 @@ def add_webdav_remote(
     """Create a WebDAV remote (Nextcloud, ownCloud, generic WebDAV)."""
     name = _sanitise_name(name)
     if not url:
-        raise ValueError("WebDAV remote requires a URL")
+        raise ValueError(_u("err.rclone_webdav_url"))
     cp = _read_conf()
     if cp.has_section(name):
         cp.remove_section(name)
@@ -225,7 +223,7 @@ def add_sftp_remote(
 ) -> Path:
     name = _sanitise_name(name)
     if not host or not user:
-        raise ValueError("SFTP remote requires host and user")
+        raise ValueError(_u("err.rclone_sftp_fields"))
     cp = _read_conf()
     if cp.has_section(name):
         cp.remove_section(name)
@@ -283,10 +281,10 @@ def _sanitise_name(name: str) -> str:
     trim out anything else so a wizard typo can't produce a broken conf."""
     name = (name or "").strip()
     if not name:
-        raise ValueError("remote name required")
+        raise ValueError(_u("err.rclone_name_required"))
     safe = "".join(c for c in name if c.isalnum() or c in "-_.")
     if not safe:
-        raise ValueError(f"remote name {name!r} has no usable characters")
+        raise ValueError(_u("err.rclone_name_unusable", name=name))
     return safe
 
 

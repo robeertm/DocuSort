@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .config import AppSettings
 from .db import Database
+from .i18n import uebersetze_jetzt as _u
 
 
 logger = logging.getLogger("docusort.trash")
@@ -47,9 +48,9 @@ def _uniquify(target: Path) -> Path:
 def delete_document(doc_id: int, settings: AppSettings, db: Database) -> dict:
     doc = db.get(doc_id)
     if not doc:
-        raise ValueError(f"document {doc_id} not found")
+        raise ValueError(_u("err.doc_missing", doc_id=doc_id))
     if doc.get("deleted_at"):
-        raise ValueError("document already in trash")
+        raise ValueError(_u("err.already_in_trash"))
 
     source_str = doc.get("library_path") or ""
     source = Path(source_str) if source_str else None
@@ -85,9 +86,9 @@ def delete_document(doc_id: int, settings: AppSettings, db: Database) -> dict:
 def restore_document(doc_id: int, settings: AppSettings, db: Database) -> dict:
     doc = db.get(doc_id)
     if not doc:
-        raise ValueError(f"document {doc_id} not found")
+        raise ValueError(_u("err.doc_missing", doc_id=doc_id))
     if not doc.get("deleted_at"):
-        raise ValueError("document is not in trash")
+        raise ValueError(_u("err.not_in_trash"))
 
     source = Path(doc["library_path"])
 
@@ -137,7 +138,7 @@ def restore_document(doc_id: int, settings: AppSettings, db: Database) -> dict:
 def purge_document(doc_id: int, settings: AppSettings, db: Database) -> dict:
     doc = db.get(doc_id)
     if not doc:
-        raise ValueError(f"document {doc_id} not found")
+        raise ValueError(_u("err.doc_missing", doc_id=doc_id))
     source = Path(doc["library_path"])
     if source.exists():
         source.unlink()

@@ -550,17 +550,6 @@ def statement_namen(settings, *, is_savings: bool) -> tuple[str, str]:
     return kat, unter
 
 
-def statement_subject(st: "ParsedStatement", settings=None) -> str:
-    """Die eine Stelle, die den Betreff eines Auszugs baut.
-
-    🔑 Vorher stand dieselbe Zeichenkette zweimal da — hier und in
-    `tidy_statement_documents`. Zwei Zeichenwege sind eine stehende Schuld: der
-    naechste Umbau trifft nur einen davon.
-    """
-    kat, unter = statement_namen(settings, is_savings=bool(st.is_savings))
-    return betreff_bauen(kat, st.statement_no, unter, st.account_iban)
-
-
 def betreff_bauen(kategorie: str, nummer: str, unter: str, iban: str) -> str:
     return f"{kategorie} {nummer} {unter} …{(iban or '')[-4:]}".strip()
 

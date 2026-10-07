@@ -11,16 +11,13 @@ through the UI and documented elsewhere.
 from __future__ import annotations
 
 import logging
-import os
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from .config import (
-    AppSettings, DEFAULT_CONFIG_DIR, load_secrets, save_secrets, secrets_path,
-)
+    DEFAULT_CONFIG_DIR, load_secrets, save_secrets, )
 
 
 logger = logging.getLogger("docusort.settings_writer")
@@ -309,8 +306,3 @@ def update_notifications(
 
     return _write_raw(cfg, config_dir)
 
-
-def remove_secret(provider: str, config_dir: Path | None = None) -> None:
-    secrets = load_secrets(config_dir)
-    secrets.pop(f"{provider}_api_key", None)
-    save_secrets(secrets, config_dir)

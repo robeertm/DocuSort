@@ -7,6 +7,104 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.0.0] - 2026-10-07
+
+A full review of the code base, asked for in one sentence: find the corpses
+and the dead code, and make this a finished product. Everything below was
+found by measuring — against the running archive where that was possible —
+and every fix is held in place by a test rig that fails if it comes back.
+
+### Fixed
+
+🔴 **Every server error message was shown in one language only.** The
+biggest single finding. `web/app.py` raised 172 errors with a message, **four**
+of which were translated — and **76 places** in the templates display that
+message to the user verbatim (`transactions.html` twelve times,
+`settings.html` ten). Ten messages were hard-coded German, the rest hard-coded
+English. On an Italian installation, every failure spoke German or English.
+
+The cause was mechanical rather than careless: translating needs the
+language, the language lives in the request, and many handlers hold no
+request — so every message would have needed a new signature. A context
+variable, set once per request by the outermost middleware, removes that
+excuse. All **142** messages now come from a key, in all five languages, with
+their placeholders checked across languages. The same was done for the errors
+raised in `retry.py`, `trash.py`, `rclone_setup.py` and `notifier.py`, which
+reach the same display paths — **122 keys** in total.
+
+🔴 **A setting that quietly did nothing.** `ai.min_confidence` was read from
+config.yaml and then never used anywhere; the threshold that decides whether
+a document is filed or sent to review was a fixed `0.65` inside
+`Classification.is_confident`. Of 68 settings fields it was the only unread
+one — and it decides where every document ends up. The threshold now travels
+with the classification, the model is told the same number in its system
+prompt, and the two call sites — which had drifted into
+`is_confident and confidence > 0` on one side and `is_confident` on the other
+— ask one question again. The guard against "confidence 0 counts as sure"
+moved into `is_confident` itself, where a threshold of 0 cannot defeat it.
+
+🔴 **A bank statement that yielded nothing said nothing.** `statement` and
+`is_statement_candidate` were computed for every document page — a database
+query per page load — and the template used neither. Measured on the running
+archive: 375 documents filed as bank statements, 134 with no statement read.
+117 of those are duplicates, which rightly have none; **17 are filed
+statements from which not a single booking was read**. Seventeen statements
+missing from the finances, with nothing anywhere saying so. The document page
+now states either how many bookings came from the statement, or that none did
+and why — and that reclassifying will try again. A gap nobody can see is a
+gap nobody will close.
+
+### Removed
+
+🔴 **A second way in.** `POST /api/finance/import-csv`: around 70 lines that
+rebuilt `/upload` — form files *and* a raw CSV body, "curl-friendly" by its
+own docstring — including a third copy of the inbox-filing logic and without
+the translated error messages added in 0.98.3. Nothing called it: not the
+interface, not the mail gateway, nothing. There is one way in, and it is
+`/upload`, which decides by file type. A second entrance is not a convenience,
+it is a second place where behaviour drifts apart — which is exactly what had
+happened. The test rig no longer merely proves that `/upload` works; it proves
+that it is the only route that accepts a file.
+
+🔴 **216 lines of code that nothing could reach.** Twelve module-level
+functions with no caller, plus the cascade behind them: a whole pause
+mechanism in `activity.py` (four functions), one whose own docstring said it
+was "used by the page-by-page statement extractor" — which had been a corpse
+itself — and one that carried its state in its name, `_ki_lage_unbenutzt`.
+Also 20 imports that nothing needed any more.
+
+🔴 **301 translation keys nothing could reach**, a quarter of the file. The
+start page had been rebuilt around a new set of keys and the old ones stayed
+behind; a statement-audit screen had been removed and its 46 strings had not.
+Dynamically assembled keys were kept, and the deletion was verified the only
+way that settles it: by building all 15 pages in all five languages, 75 page
+builds, and checking that not one deleted key appears as visible text.
+
+### Added
+
+`pruefstaende/probe_leichen.py` — the general form of the two defects that
+0.99.3 fixed: Python checks an import inside a function only when the
+function is called, and an `except` clause above it turns the failure into a
+log line nobody reads. Every project-internal import must now resolve, module
+and name, wherever it sits: **312 imports across 69 files**. Plus: no
+module-level function without a caller (519 checked), no orphaned import, no
+template without a caller, no second spelling for the AI block, and a
+counter-test that the sieve really does catch an invented class.
+
+Three of the sieves written during this review reported false positives
+first — 78, then 21, then twelve. A sieve nobody counter-tests produces a
+list that looks like work and is not, and it teaches you to ignore real
+findings. Every sieve in the rig now has its counter-test.
+
+### Still open, deliberately
+
+The statement reader understands one bank's layout. A statement from a
+different bank produces no bookings at all — that is now visible on the
+document page instead of silent, but reading it needs a real file in that
+layout to build against. Seventeen such statements are waiting; their text is
+still stored, so they can be caught up without a new scan.
+
+
 ## [0.99.3] - 2026-10-07
 
 ### Fixed

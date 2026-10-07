@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -52,10 +51,22 @@ class Classification:
     #    Warum nicht sofort: siehe `docusort/kategorien.py`.
     vorschlag_name: str = ""
     vorschlag_grund: str = ""
+    # 🔴 DIE SCHWELLE STAND FEST IM CODE — WAEHREND ES EINEN REGLER GAB.
+    #    `ai.min_confidence` wurde aus der config.yaml gelesen und danach im
+    #    ganzen Projekt NIE benutzt; entschieden hat eine 0,65 hier in der
+    #    Zeile. Wer den Regler verstellte, merkte nichts. Jetzt steht die
+    #    Zahl bei der Einordnung, der Klassifizierer setzt sie aus den
+    #    Einstellungen, und der Vorgabewert bleibt derselbe wie vorher.
+    schwelle: float = 0.65
 
     @property
     def is_confident(self) -> bool:
-        return self.confidence >= 0.65
+        # 🔑 Die Null muss hier stehen, nicht beim Aufrufer: steht der
+        #    Regler auf 0, waere sonst JEDES Ergebnis „sicher" — auch eine
+        #    Antwort mit Zuversicht 0, die gar keine Einordnung ist. Vorher
+        #    hing dieser Schutz als `and cls.confidence > 0` an genau EINER
+        #    der beiden Aufrufstellen.
+        return self.confidence > 0 and self.confidence >= self.schwelle
 
 
 SYSTEM_PROMPT_BASE = """You are an expert document classifier for a German personal document archive. You receive the extracted text of a scanned letter, invoice, contract or other household document and respond with ONE JSON object describing it.
@@ -71,7 +82,7 @@ SYSTEM_PROMPT_BASE = """You are an expert document classifier for a German perso
 - date: the document's own date (Rechnungsdatum, Vertragsdatum, Briefdatum, Bescheiddatum) in ISO format YYYY-MM-DD. If the document spans a period, use the date it was issued. If no date is present, use today's date and lower the confidence.
 - sender: the organisation or person who issued the document. 1 to 4 words, keep legal suffixes like GmbH / AG / e.V., drop salutations like "Firma" or "Herr". Prefer ASCII-safe (no umlauts if the name is clearly anglicised; keep umlauts for German orgs — they will be transliterated downstream).
 - subject: concise description of what the document is about, 3 to 8 words. Include the most identifying detail (month, year, invoice number only if short, case number only if short).
-- confidence: float from 0 to 1. Use < 0.65 when the category, sender or date is genuinely unclear — those documents go to a manual review folder. Use >= 0.9 only when the letterhead, subject line and body agree.
+- confidence: float from 0 to 1. Use < {schwelle} when the category, sender or date is genuinely unclear — those documents go to a manual review folder. Use >= 0.9 only when the letterhead, subject line and body agree.
 - reasoning: one short sentence (German or English) explaining the category choice.
 - due_date: ISO YYYY-MM-DD of a concrete actionable deadline stated in the document — a **Zahlungsziel / Fälligkeit** on an invoice, or the last day a contract can be cancelled (**Kündigungsfrist / kündbar bis / Vertragsende**). Leave "" when the document names no such deadline. Never use the plain document date as a due date, and never guess one.
 - due_kind: "zahlung" when due_date is a payment deadline (Rechnung fällig), "kuendigung" when it's a cancellation/notice deadline (Vertrag kündbar bis), else "". Must be "" whenever due_date is "".
@@ -410,12 +421,18 @@ Subcategory MUST be empty "" or one of the parent's listed subs. Tags is an arra
 ZEICHEN_JE_TOKEN = 3.0
 
 
-def _build_system_prompt(categories: list[dict[str, Any]]) -> str:
+def _build_system_prompt(categories: list[dict[str, Any]],
+                         schwelle: float = 0.65) -> str:
+    # 🔑 DIE SCHWELLE STEHT IM SYSTEMTEXT. Dem Modell wird gesagt, ab
+    #    wann eine Antwort als unsicher gilt — und das muss dieselbe Zahl
+    #    sein, mit der DocuSort danach entscheidet. Stand sie zweimal
+    #    getrennt da, verstellte der Regler die eine und nicht die andere.
+    basis = SYSTEM_PROMPT_BASE.replace("{schwelle}", ("%.2f" % schwelle).rstrip("0").rstrip("."))
     # Categories from config override the baked-in list, but the structure
     # above is intentionally verbose so the full prompt crosses the 2048-
     # token threshold required for Haiku's prompt cache.
     if not categories:
-        return SYSTEM_PROMPT_BASE
+        return basis
     lines = ["\n\n# Active category list for this request (use EXACTLY these spellings)"]
     for c in categories:
         subs = c.get("subcategories") or []
@@ -438,7 +455,7 @@ def _build_system_prompt(categories: list[dict[str, Any]]) -> str:
         "name. Never propose a name that only differs from an existing one by "
         "plural, case or spelling."
     )
-    return SYSTEM_PROMPT_BASE + "\n".join(lines)
+    return basis + "\n".join(lines)
 
 
 def _build_user_message(text: str, max_chars: int) -> str:
@@ -597,7 +614,8 @@ class Classifier:
         self._allowed_subs: dict[str, set[str]] = {
             c["name"]: set(c.get("subcategories") or []) for c in categories
         }
-        self._system_prompt = _build_system_prompt(categories)
+        self._system_prompt = _build_system_prompt(
+            categories, getattr(settings, "min_confidence", 0.65))
         self.holder_names = list(holder_names or [])
         self.pseudonymize = pseudonymize
 
@@ -615,7 +633,8 @@ class Classifier:
         self._allowed_subs = {
             c["name"]: set(c.get("subcategories") or []) for c in categories
         }
-        self._system_prompt = _build_system_prompt(categories)
+        self._system_prompt = _build_system_prompt(
+            self.categories, getattr(self.settings, "min_confidence", 0.65))
 
     def _platz_fuer_text(self, vorhanden: int) -> int:
         """Wieviele Zeichen des Dokuments duerfen mit — und warum nicht mehr.
@@ -822,6 +841,9 @@ class Classifier:
             due_kind = ""
 
         return Classification(
+            # 🔑 Die Schwelle reist MIT der Einordnung. Sonst muesste jede
+            #    Stelle, die `is_confident` fragt, die Einstellungen kennen.
+            schwelle=float(getattr(self.settings, "min_confidence", 0.65) or 0.65),
             category=category,
             subcategory=subcategory,
             tags=tags,

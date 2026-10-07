@@ -13,14 +13,12 @@ gluehen. Genau diese Luecke schliesst dieses Modul.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 import shutil
 import threading
 import time
-import urllib.request
 from collections import deque
 from typing import Any
 
@@ -213,32 +211,6 @@ def _rechnername() -> str:
     except Exception:  # noqa: BLE001
         return ""
     return "" if _HEX12.match(name or "") else (name or "")
-
-
-def _ki_lage_unbenutzt() -> dict[str, Any]:
-    """Was die KI gerade belegt — gefragt, nicht geschaetzt.
-
-    Ollama laeuft in einem anderen Container; sein /api/ps nennt das geladene
-    Modell, seine Groesse und das Kontextfenster. Das ist die einzige ehrliche
-    Quelle fuer den Posten KI in der Verbrauchsliste.
-    """
-    if not _ki_url:
-        return {}
-    try:
-        with urllib.request.urlopen(_ki_url, timeout=3) as r:
-            d = json.load(r)
-    except Exception:  # noqa: BLE001 — eine unerreichbare KI ist kein Fehler
-        return {"erreichbar": False}
-    modelle = d.get("models") or []
-    if not modelle:
-        return {"erreichbar": True, "geladen": False}
-    m = modelle[0]
-    return {"erreichbar": True, "geladen": True,
-            "modell": m.get("name") or m.get("model"),
-            "groesse": m.get("size"),
-            "parameter": (m.get("details") or {}).get("parameter_size"),
-            "quantisierung": (m.get("details") or {}).get("quantization_level"),
-            "kontext": m.get("context_length")}
 
 
 # ------------------------------------------------------------------- Sammler

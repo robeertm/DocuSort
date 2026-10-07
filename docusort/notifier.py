@@ -27,6 +27,7 @@ notification path can never break the document pipeline.
 from __future__ import annotations
 
 import json
+from .i18n import uebersetze_jetzt as _u
 import logging
 import smtplib
 import threading
@@ -69,9 +70,9 @@ class TelegramNotifier(Notifier):
 
     def __init__(self, bot_token: str, chat_id: str) -> None:
         if not bot_token:
-            raise ValueError("telegram: bot_token required")
+            raise ValueError(_u("err.telegram_token_required"))
         if not chat_id:
-            raise ValueError("telegram: chat_id required")
+            raise ValueError(_u("err.telegram_chat_required"))
         self.bot_token = bot_token
         self.chat_id   = str(chat_id)
 
@@ -113,7 +114,7 @@ class TelegramNotifier(Notifier):
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
                 if r.status >= 300:
-                    raise RuntimeError(f"Telegram HTTP {r.status}")
+                    raise RuntimeError(_u("err.telegram_http", code=r.status))
         except urllib.error.HTTPError as exc:
             detail = ""
             try:
@@ -126,10 +127,8 @@ class TelegramNotifier(Notifier):
             raise RuntimeError(_telegram_hint(exc.code, detail)) from exc
         except urllib.error.URLError as exc:
             # No HTTP status — DNS failure, no route, TLS problem, timeout.
-            raise RuntimeError(
-                f"Telegram unreachable: {getattr(exc, 'reason', exc)} "
-                "(no internet on the server, or api.telegram.org blocked?)"
-            ) from exc
+            raise RuntimeError(_u("err.telegram_unreachable",
+                                  grund=getattr(exc, 'reason', exc))) from exc
 
 
 class _TelegramParseError(RuntimeError):
@@ -140,18 +139,14 @@ def _telegram_hint(code: int, detail: str) -> str:
     """Turn a raw Telegram Bot-API error into something the owner can act on."""
     low = (detail or "").lower()
     if code == 401 or "unauthorized" in low:
-        return ("Telegram 401 Unauthorized — the bot token is wrong or was "
-                "revoked. Copy it again from @BotFather.")
+        return _u("err.telegram_unauthorized")
     if "chat not found" in low:
-        return ("Telegram: chat not found — the Chat-ID is wrong, or you "
-                "haven't messaged the bot yet. Open the bot in Telegram, "
-                "send it any message, then re-check the Chat-ID via "
-                "api.telegram.org/bot<TOKEN>/getUpdates.")
+        return _u("err.telegram_chat_not_found")
     if "bot was blocked" in low:
-        return "Telegram: you blocked the bot — unblock it and try again."
+        return _u("err.telegram_blocked")
     if "bots can't send messages to bots" in low:
-        return "Telegram: the Chat-ID points at another bot, not your account."
-    return f"Telegram HTTP {code}: {detail}"
+        return _u("err.telegram_chat_is_bot")
+    return _u("err.telegram_http_detail", code=code, grund=detail)
 
 
 def telegram_find_chats(bot_token: str) -> dict:
@@ -172,7 +167,7 @@ def telegram_find_chats(bot_token: str) -> dict:
     """
     token = (bot_token or "").strip()
     if not token:
-        raise ValueError("telegram: bot_token required")
+        raise ValueError(_u("err.telegram_token_required"))
 
     def hol(methode: str) -> dict:
         url = f"https://api.telegram.org/bot{token}/{methode}"
@@ -187,10 +182,8 @@ def telegram_find_chats(bot_token: str) -> dict:
                 pass
             raise RuntimeError(_telegram_hint(exc.code, detail)) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Telegram unreachable: {getattr(exc, 'reason', exc)} "
-                "(no internet on the server, or api.telegram.org blocked?)"
-            ) from exc
+            raise RuntimeError(_u("err.telegram_unreachable",
+                                  grund=getattr(exc, 'reason', exc))) from exc
 
     ich = hol("getMe").get("result") or {}
     bot = ich.get("username") or ich.get("first_name") or ""
@@ -232,11 +225,11 @@ class EmailNotifier(Notifier):
                  from_addr: str, to_addrs: list[str],
                  use_starttls: bool = True) -> None:
         if not smtp_host:
-            raise ValueError("email: smtp_host required")
+            raise ValueError(_u("err.email_host_required"))
         if not from_addr:
-            raise ValueError("email: from address required")
+            raise ValueError(_u("err.email_from_required"))
         if not to_addrs:
-            raise ValueError("email: at least one recipient required")
+            raise ValueError(_u("err.email_to_required"))
         self.smtp_host     = smtp_host
         self.smtp_port     = int(smtp_port)
         self.smtp_user     = smtp_user

@@ -33,7 +33,7 @@ from .buckets import (
     _AMAZON, _AUTO, _BAUMARKT, _DROGERIE, _ESSEN, _KLEIDUNG, _SUPERMARKET,
     _matches, _norm, merchant_key,
 )
-from .categories import TX_CATEGORIES, INCOME_CATEGORIES
+from .categories import INCOME_CATEGORIES
 
 SOURCE_MANUAL = "manual"
 SOURCE_TRANSFER = "transfer"

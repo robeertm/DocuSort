@@ -34,7 +34,7 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-from .aehnlichkeit import AEHNLICH_AB, gleich as namen_gleich, schlicht as _schlicht, zu_aehnlich
+from .aehnlichkeit import gleich as namen_gleich, schlicht as _schlicht, zu_aehnlich
 
 # ── Rollen: was eine Kategorie BEDEUTET, unabhaengig davon, wie sie heisst ──
 #
