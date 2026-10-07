@@ -497,7 +497,12 @@
     {% endif %}
 
 
-    {% if doc.status in ('review', 'failed') %}
+    {# 🔴 Stand auf `doc.status in ('review', 'failed')` — also 14 von 862
+       Dokumenten. Wer ein ABGELEGTES Dokument neu einordnen wollte, fand
+       keinen Knopf; genau das hiess „beim Neuklassifizieren passiert
+       nichts". Ein falsch abgelegtes Dokument ist der haeufigste Grund
+       ueberhaupt, es noch einmal einordnen zu wollen. #}
+    {% if doc.status in ('filed', 'review', 'failed') and not doc.deleted_at %}
     <div class="card p-5">
       <h2 class="font-semibold mb-3 text-sm uppercase tracking-wide text-ink-400">{{ t('retry.heading') }}</h2>
       <p class="text-xs text-ink-400 mb-3">{{ t('retry.hint') }}</p>
@@ -886,20 +891,66 @@ function vorschlagsfeld(feld) {
 }
 
 function retryWidget(docId) {
+  const SCHLUESSEL = 'ds_retry_' + docId;
   return {
     busy: false, message: '', isError: false,
+
+    // 🔑 DAS ERGEBNIS MUSS DEN SEITENNEUAUFBAU UEBERLEBEN. Vorher stand es
+    //    1,5 s lang da und war nach dem reload weg. Sagte das Modell
+    //    dasselbe wie vorher, war danach nichts zu sehen — und der Knopf
+    //    sah aus, als tue er nichts.
+    init() {
+      try {
+        const roh = sessionStorage.getItem(SCHLUESSEL);
+        if (roh) {
+          sessionStorage.removeItem(SCHLUESSEL);
+          const d = JSON.parse(roh);
+          this.message = d.text || '';
+          this.isError = !!d.fehler;
+        }
+      } catch (e) { /* ohne Browserspeicher gibt es eben keine Nachricht */ }
+    },
+
+    _merke(text, fehler) {
+      try { sessionStorage.setItem(SCHLUESSEL, JSON.stringify({ text, fehler })); }
+      catch (e) { /* kein Speicher: die Nachricht steht dann nur bis zum reload */ }
+    },
+
     async retry() {
       this.busy = true; this.message = ''; this.isError = false;
       try {
         const r = await fetch('/api/document/' + docId + '/retry', { method: 'POST' });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
-        this.message = tr('retry.done', {
-          category: d.category,
-          confidence: Math.round(d.confidence * 100),
-          cost: d.cost_usd.toFixed(4),
-        });
-        setTimeout(() => location.reload(), 1500);
+
+        const nach = catLabel(d.category) + (d.subcategory ? ' / ' + d.subcategory : '');
+        const vor  = catLabel(d.category_before)
+                   + (d.subcategory_before ? ' / ' + d.subcategory_before : '');
+        const zust = tr('retry.st.' + d.status);
+        const prozent = Math.round((d.confidence || 0) * 100);
+        // 🔑 Der Zustand kann sich aendern, ohne dass die Kategorie sich
+        //    aendert (Review -> abgelegt). Beides ist eine Aenderung.
+        const andersEingeordnet = !!d.changed;
+        const andersZustand = d.status !== d.status_before;
+
+        let text;
+        if (andersEingeordnet) {
+          text = tr('retry.result_changed',
+                    { from: vor, to: nach, confidence: prozent, status: zust });
+        } else if (andersZustand) {
+          text = tr('retry.result_status',
+                    { to: nach, confidence: prozent, status: zust });
+        } else {
+          text = tr('retry.result_same', { to: nach, confidence: prozent });
+        }
+
+        this.message = text;
+        if (andersEingeordnet || andersZustand) {
+          // Die Seite zeigt jetzt veraltete Angaben — neu aufbauen, aber die
+          // Nachricht mitnehmen.
+          this._merke(text, false);
+          setTimeout(() => location.reload(), 900);
+        }
       } catch (e) {
         this.isError = true;
         this.message = tr('retry.failed') + ' ' + (e.message || e);
