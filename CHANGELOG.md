@@ -7,6 +7,76 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [0.99.0] - 2026-10-07
+
+### Fixed
+
+🔴 **Ollama was shown only the first 2048 tokens of every prompt — and said
+nothing about it.** Reported as scanned documents no longer being recognised,
+with the remark that it used to work better. It did, and the difference is
+measurable.
+
+Measured on a running installation, not guessed:
+
+* `input_tokens` read exactly **2050** on 119 of 327 local runs — including a
+  document with 200 000 characters of text.
+* A freshly built prompt (28 339 characters of instructions plus the document)
+  came to **10 309 tokens**, of which Ollama evaluated **2 050**. Four fifths
+  were dropped.
+* 🔑 It was **not** prompt caching: a unique, uncacheable prompt was cut the
+  same way twice in a row.
+* The OpenAI-compatible endpoint DocuSort used **discards `num_ctx`** in every
+  spelling — as a top-level field, inside `options`, either way: 2050.
+* Ollama's own endpoint accepts it. With `num_ctx` the same prompt went from
+  2 050 to **14 741** evaluated tokens, and a health-insurance letter that had
+  been filed as *document / unknown / 0.50* came back as *Versicherung / IKK
+  classic / 0.98* with its payment deadline recognised.
+
+The damage was visible in the archive as a slope, and it was **silent** —
+an answer always came, it was just worse:
+
+| document text | confidence | answers with a wrong JSON schema |
+|---|---|---|
+| under 2 000 characters | 0.87 | 6 |
+| 2 000 – 5 000 | 0.78 | 19 |
+| 5 000 – 10 000 | 0.73 | 9 |
+| over 10 000 characters | **0.67** | **29** |
+
+The instruction describing the required output format sits in the front part
+of the system prompt. The longer the document, the more of the prompt fell off
+the end — which is why the model started answering with an entirely different
+JSON object (`keys: Kategorie`) instead of the one it was asked for.
+
+**Fixed:** when the endpoint answers `/api/version`, DocuSort now talks to
+Ollama's own `/api/chat` and sets `num_ctx` **computed from the prompt it is
+actually sending** — instructions, document, room for the answer and a
+reserve, rounded up to the next multiple of 2048. Nothing else changes: an
+endpoint that is not Ollama keeps the OpenAI-compatible path untouched, where
+`num_ctx` would have no effect anyway.
+
+🔑 **The context is sized by the prompt, not by a figure that ought to be
+enough.** On a machine of one's own, compute time is not an argument against a
+correct result; a truncated prompt is an argument against every result.
+
+🔑 **And it can no longer go wrong quietly.** If the prompt still needs more
+than the context can hold, that goes in the log with both numbers and what is
+being cut. The original fault was not that something was dropped — it was that
+nothing said so.
+
+### Added
+
+🧪 **New test rig `pruefstaende/probe_ollama_kontext.py`.** It talks to a small
+HTTP service of its own, not to the machine's real Ollama — otherwise it would
+measure how *this* computer happens to be configured and would be green for the
+wrong reason elsewhere. It checks that the context grows with the prompt and is
+never smaller than the prompt needs (including the exact size that failed),
+that `num_ctx` is really sent and large enough, that Ollama's own response
+shape is read (`prompt_eval_count`, `eval_count`), that a non-Ollama endpoint
+is left on the old path **without** `num_ctx`, and that a context too small for
+the prompt is logged — with the counter-test that a sufficient one is not.
+**25 green, 0 red.**
+
+
 ## [0.98.3] - 2026-10-07
 
 ### Fixed
