@@ -7,6 +7,54 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.0.3] - 2026-10-08
+
+### Fixed
+
+🔴 **The statement card from 1.0.0 was telling people something untrue —
+and it fooled its own author.** It said "not a single booking was read from
+this statement" for every statement document without a record of its own. On
+the running archive that was 17 documents, and the release notes for 1.0.0
+reported them as seventeen statements missing from the finances.
+
+Measured properly: **none of them is missing.** Twelve hold a statement that
+is in the finances already, imported from a second copy of the same file —
+the importer was right not to book the same period twice. One was already
+imported under another document. Two are not statements at all (a chimney
+sweep's invoice and a loan contract, both filed under the wrong category).
+One parses cleanly from its file and its period is covered as well.
+
+The card now tells those three cases apart: read here, already in the
+finances from another copy (naming which document holds it), or genuinely
+unreadable. A warning that cries wolf on correct behaviour is worse than no
+warning — it sent the person reading it, and the one writing it, down the
+wrong path.
+
+🔴 **A whole kind of statement could not be recognised.** The cheap
+pre-check demanded an opening balance, so a savings-account statement that
+prints only "Kontostand am … um … Uhr" was rejected before the parser ever
+saw it. Recognition now needs the account line and *any* balance; whether the
+statement can be *verified* is asked when importing, not when recognising.
+Checked against all 289 statement documents in the archive: nothing that was
+recognised before is lost, exactly one is newly recognised.
+
+A statement that brings no bookings and no opening balance has nothing to
+prove, so it is now recorded for its closing balance alone — there was
+already a path for that, which could never be reached. A statement that
+brings bookings without an opening balance is still refused: it cannot be
+shown to be complete, and guessing would put numbers in the finances that
+nobody can check.
+
+### Added
+
+🔑 **The filing threshold is now a control in the settings.** `ai.min_confidence`
+decides whether a document is filed or sent to review. It has worked since
+1.0.0 — but only for whoever edits config.yaml by hand. A control nobody can
+find is not a control. Changing it takes effect immediately, including in the
+model's own system prompt, so the number the model is told and the number
+DocuSort decides by stay the same one.
+
+
 ## [1.0.2] - 2026-10-08
 
 ### Fixed

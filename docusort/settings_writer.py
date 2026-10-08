@@ -51,6 +51,7 @@ def update_ai(
     model: str,
     base_url: str = "",
     api_key: str | None = None,
+    min_confidence: float | None = None,
     config_dir: Path | None = None,
 ) -> Path:
     """Persist the AI provider choice + model + base_url to config.yaml.
@@ -61,6 +62,12 @@ def update_ai(
     ai["provider"]  = provider.strip()
     ai["model"]     = model.strip()
     ai["base_url"]  = base_url.strip() if provider == "openai_compat" else ""
+    # 🔑 Die Ablege-Schwelle gehoert zu diesem Block — sie entscheidet, ob
+    #    ein Dokument abgelegt wird oder zur Durchsicht geht. Bis 1.0.0 war
+    #    sie nur von Hand in der config.yaml zu erreichen, obwohl sie dort
+    #    schon stand und (seit 1.0.0) auch wirkt.
+    if min_confidence is not None:
+        ai["min_confidence"] = round(float(min_confidence), 2)
     cfg["ai"] = ai
     # Drop the legacy "claude:" block so the next load can't pick a stale value.
     cfg.pop("claude", None)

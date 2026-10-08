@@ -1482,12 +1482,27 @@ def create_app(
         is_statement_candidate = any(_kat_ist(doc.get("category"), r)
                                      for r in ("kontoauszug", "bank"))
         statement = db.get_statement(doc_id) if is_statement_candidate else None
+        # 🔴 MEINE EIGENE KARTE AUS 1.0.0 HAT GELOGEN. Sie sagte bei jedem
+        #    Auszug ohne eigenen Datensatz „keine einzige Buchung gelesen" —
+        #    und am echten Archiv gemessen traf das auf 12 Dokumente zu, deren
+        #    Auszug sehr wohl in den Finanzen steht: aus einer ZWEITEN KOPIE
+        #    derselben Datei importiert. Der Importeur hatte voellig recht,
+        #    den Zeitraum nicht doppelt anzulegen; die Karte machte daraus
+        #    eine Fehlermeldung und schickte den Leser auf eine falsche
+        #    Faehrte (mich eingeschlossen).
+        #
+        # 🔑 Drei Lagen, drei Saetze: hier eingelesen — anderswo schon
+        #    drin — oder wirklich nicht lesbar.
+        statement_woanders = None
+        if is_statement_candidate and statement is None:
+            statement_woanders = _auszug_schon_woanders(doc)
         from ..receipts import SHOP_TYPES, ITEM_CATEGORIES, PAYMENT_METHODS
         from ..finance.categories import TX_CATEGORIES, TX_TYPES
         return templates.TemplateResponse(
             request, "document.html",
             {**base_ctx(request), "doc": doc, "receipt": receipt,
              "statement": statement,
+             "statement_woanders": statement_woanders,
              "payment": db.deadline_payment(doc_id),
              "is_statement_candidate": is_statement_candidate,
              "ai_provider": _aktiver_anbieter(),
@@ -1501,6 +1516,46 @@ def create_app(
              # Every exit from this page — back, save, delete — appends this.
              "slice_qs":      _slice_qs(nav_filters)},
         )
+
+    def _auszug_schon_woanders(doc: dict) -> dict | None:
+        """Steht dieser Auszug schon in den Finanzen — nur an einem anderen
+        Dokument?
+
+        Dasselbe Blatt kommt zweimal in die Bibliothek (erneut geladen, aus
+        zwei Quellen), und der Importeur nimmt zu Recht nur eines: derselbe
+        Zeitraum desselben Kontos wird nicht doppelt gebucht. Fuer das
+        zweite Dokument heisst das NICHT „unlesbar", sondern „schon drin".
+
+        Gefragt wird genau das, was der Importeur fragt — sonst erzaehlte
+        die Seite wieder etwas anderes als die Wirklichkeit.
+        """
+        text = doc.get("extracted_text") or ""
+        if not text:
+            return None
+        try:
+            from ..finance.pdf_statement import parse_statement_text, known_counterparties
+            st = parse_statement_text(text, known_names=known_counterparties(db))
+        except Exception:        # noqa: BLE001 — eine Auskunft, kein Arbeitsschritt
+            return None
+        if st is None or not st.account_iban:
+            return None
+        with db._lock:
+            konto = db._conn.execute(
+                "SELECT id FROM accounts WHERE iban = ?", (st.account_iban,)).fetchone()
+            if not konto:
+                return None
+            treffer = db._conn.execute(
+                "SELECT id, doc_id, period_start, period_end FROM statements "
+                " WHERE account_id = ? AND period_start = ? AND period_end = ?"
+                "   AND opening_balance IS NOT NULL",
+                (int(konto["id"]), st.opening_date, st.closing_date)).fetchone()
+            if not treffer:
+                return None
+            anzahl = db._conn.execute(
+                "SELECT COUNT(*) n FROM transactions WHERE statement_id = ?",
+                (int(treffer["id"]),)).fetchone()["n"]
+        return {"doc_id": treffer["doc_id"], "von": treffer["period_start"],
+                "bis": treffer["period_end"], "transactions": int(anzahl)}
 
     def path_is_file(p: str) -> bool:
         try:
@@ -4583,6 +4638,7 @@ def create_app(
              "current_provider": settings.ai.provider,
              "current_model": settings.ai.model,
              "current_base_url": settings.ai.base_url,
+             "current_min_confidence": settings.ai.min_confidence,
              "library_path": str(settings.paths.library),
              "inbox_path": str(settings.paths.inbox),
              "web_host": settings.web.host,
@@ -4608,6 +4664,7 @@ def create_app(
              "current_provider": settings.ai.provider,
              "current_model": settings.ai.model,
              "current_base_url": settings.ai.base_url,
+             "current_min_confidence": settings.ai.min_confidence,
              "library_path": str(settings.paths.library),
              "inbox_path": str(settings.paths.inbox),
              "stored_secrets": masked,
@@ -5674,13 +5731,36 @@ def create_app(
         if provider == "bridge":
             api_key = None  # bridge does not use an API key at all
 
+        # Die Ablege-Schwelle: optional, und nur in einem Bereich, der Sinn
+        # ergibt. 0 oder 1 waeren „alles abgelegt" bzw. „nichts abgelegt".
+        schwelle = payload.get("min_confidence")
+        if schwelle is not None and str(schwelle).strip() != "":
+            try:
+                schwelle = float(schwelle)
+            except (TypeError, ValueError):
+                raise _http_fehler(400, "err.not_a_number",
+                                   feld=uebersetze_jetzt("settings.ai.min_confidence"))
+            if not (0.05 <= schwelle <= 0.99):
+                raise _http_fehler(400, "err.confidence_range")
+        else:
+            schwelle = None
+
         settings_writer.update_ai(
             provider=provider, model=model, base_url=base_url,
-            api_key=api_key, config_dir=settings.config_dir,
+            api_key=api_key, min_confidence=schwelle,
+            config_dir=settings.config_dir,
         )
         settings.ai.provider = provider
         settings.ai.model    = model
         settings.ai.base_url = base_url
+        if schwelle is not None:
+            settings.ai.min_confidence = schwelle
+            # 🔑 Die Zahl steht auch im Systemtext des Modells. Wer sie
+            #    verstellt und den Text stehen laesst, sagt dem Modell etwas
+            #    anderes, als danach entschieden wird — darum werden hier
+            #    alle gebauten Klassifizierer neu aufgesetzt. Denselben Weg
+            #    nimmt eine geaenderte Kategorienliste.
+            _kategorien_geaendert()
 
         # 🔑 Und jetzt auch wirklich umstellen. Frueher stand hier nur ein
         #    Spiegel fuer lesende Zwecke und ein `restart_required: True` —
