@@ -7,6 +7,52 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.0.1] - 2026-10-08
+
+### Fixed
+
+🔴 **The model was allowed to be right only if it spelled the category
+exactly.** Reported as: reclassification runs, but nothing gets sorted into a
+category. Both checks compared character for character. The categories on this
+installation are written `Behoerde`, `Vertraege`, `KFZ` — German
+transliteration and capitals. A model writes `Behörde`, `Verträge`, `Kfz`,
+which is not wrong, it is the same word spelled differently. The consequence
+was harsh: a category that did not match exactly became `Sonstiges`, and a
+subcategory was thrown away. Caught in the log of the running archive:
+
+    Model returned subcategory 'Kfz' not allowed under 'Versicherung' – dropping
+
+— while `KFZ` is right there in the list. It looked like the AI was not
+classifying. It was; the check discarded the answer.
+
+Comparison now goes through the same transliteration the archive uses
+everywhere (`aehnlichkeit.schlicht`: ä→ae, then strip accents, then
+lowercase). **What gets stored is always the name from the list** — the
+leniency applies to the comparison, not to the result, so one category never
+ends up in the library under two spellings. Something genuinely unknown still
+falls back to `Sonstiges`, and an unknown subcategory is still dropped.
+
+🔴 **The edit form never showed the document's own category.** Alpine
+evaluates `x-model` on the `<select>` *before* the `x-for` inside it has built
+the options. At that moment the only option present is "+ new category …", so
+the browser selects exactly that; the real options arrive afterwards and the
+selection stays where it was. Measured in a browser: a document stored as
+`Versicherung / Beruf` displayed "+ new category …" with the value `__neu__`,
+while `Versicherung` was in the list. Saving from that state would have sent
+`__neu__` as the category. Both selects now set their value once the options
+exist.
+
+### Changed
+
+The test rig now stamps the page before clicking and waits for the stamp to
+disappear. It previously waited with `wait_for_url` — but the address does not
+change during a reload, so the wait returned immediately and the "the message
+survived the reload" check was reading the message from *before* the reload. A
+rig that looks too early confirms everything.
+
+**80 green, 0 red** in `probe_neu_klassifizieren.py`.
+
+
 ## [1.0.0] - 2026-10-07
 
 A full review of the code base, asked for in one sentence: find the corpses
