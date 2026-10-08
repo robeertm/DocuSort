@@ -103,7 +103,7 @@
               <template x-if="it.stage === 'needs-account'">
                 <div class="mt-2 flex flex-wrap items-center gap-2">
                   <select x-model="it.ibanChoice"
-                          class="rounded border border-ink-700 bg-ink-900/60 px-2 py-1 text-xs text-ink-200">
+                          class="rounded border border-ink-700 bg-ink-900/60 px-2 py-1 text-xs text-ink-200" x-effect="(ACCOUNTS).length && $nextTick(() => { if ($el.value !== it.ibanChoice) $el.value = it.ibanChoice })">
                     <option value="">{{ t('upload.account_choose') }}</option>
                     <template x-for="a in ACCOUNTS" :key="a.iban">
                       <option :value="a.iban" x-text="a.label"></option>

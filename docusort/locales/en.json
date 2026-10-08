@@ -1568,6 +1568,7 @@
   "tx.new_category": "+ New category …",
   "tx.new_category_prompt": "Name of the new category:",
   "tx.no_bookings": "No bookings for this filter.",
+  "tx.no_custom_cats": "None of your own yet — the built-in ones are often enough; add what you miss.",
   "tx.no_income": "No income for this filter.",
   "tx.no_payee_learn": "Without a payee name there is nothing to learn — please assign the bookings below one by one.",
   "tx.no_reason": "no reasoning stored — “run detection again” fills it in",

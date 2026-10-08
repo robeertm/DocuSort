@@ -1568,6 +1568,7 @@
   "tx.new_category": "+ Nuova categoria …",
   "tx.new_category_prompt": "Nome della nuova categoria:",
   "tx.no_bookings": "Nessun movimento per questo filtro.",
+  "tx.no_custom_cats": "Ancora nessuna personalizzata — quelle integrate spesso bastano; aggiungi ciò che ti manca.",
   "tx.no_income": "Nessuna entrata per questo filtro.",
   "tx.no_payee_learn": "Senza nome del beneficiario non c'è nulla da imparare — assegna i movimenti sotto uno per uno.",
   "tx.no_reason": "nessuna motivazione salvata — «riesegui il riconoscimento» la riempie",
