@@ -87,7 +87,8 @@ choose to send to an AI model — and you can point that at a local model too.
 
 ### Money
 - **Import bank data**: CSV exports (Sparkasse, DKB, ING, Volksbank, comdirect,
-  Commerzbank, Deutsche Bank, N26, Consorsbank) *and* statement PDFs, which are
+  Commerzbank, Deutsche Bank, N26, Consorsbank) *and* statement PDFs
+  (Sparkasse, ING — Girokonto, savings and annual statements), which are
   read deterministically and checked against the statement's own opening and
   closing balance.
 - **One way in:** documents, statements and CSVs all go through the same upload

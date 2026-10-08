@@ -430,7 +430,7 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             except Exception as exc:
                 log.warning("Receipt extraction failed for %d: %s", doc_id, exc)
 
-        # v0.47.0: a Kontoauszug-PDF (Sparkasse) feeds the finances
+        # v0.47.0: a Kontoauszug-PDF (Sparkasse, ING) feeds the finances
         # directly — a deterministic text parser, no LLM, verified by the
         # statement's own opening/closing balance. Anything that is not a
         # statement, or whose balances do not add up, is left alone.

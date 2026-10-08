@@ -539,7 +539,7 @@
   "finance.stmt.gap_csv": "covered by CSV export",
   "finance.stmt.gap_open": "statement missing — please add it",
   "finance.stmt.gap_unack_action": "look for it again",
-  "finance.stmt.hint": "Sparkasse statements in the library are read into the finances automatically — no AI, checked against each statement's opening and closing balance. A statement whose balances do not add up is not imported. A hole in the chain of statements is kept open by a row “Gap: statement missing” carrying the balance difference until the statement or a CSV export for that period arrives.",
+  "finance.stmt.hint": "Sparkasse and ING statements in the library are read into the finances automatically — no AI, checked against each statement's opening and closing balance. A statement whose balances do not add up is not imported. A hole in the chain of statements is kept open by a row “Gap: statement missing” carrying the balance difference until the statement or a CSV export for that period arrives.",
   "finance.stmt.new": "new bookings",
   "finance.stmt.read": "statements read",
   "finance.stmt.rescan": "Scan library for statements",

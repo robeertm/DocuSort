@@ -539,7 +539,7 @@
   "finance.stmt.gap_csv": "durch CSV-Export abgedeckt",
   "finance.stmt.gap_open": "Auszug fehlt — bitte nachreichen",
   "finance.stmt.gap_unack_action": "doch wieder suchen",
-  "finance.stmt.hint": "Kontoauszüge der Sparkasse aus der Bibliothek werden automatisch in die Finanzen übernommen — ohne KI, geprüft am Anfangs- und Endsaldo jedes Auszugs. Ein Auszug, dessen Salden nicht aufgehen, wird nicht übernommen. Lücken in der Auszugskette hält eine Zeile „Lücke: Kontoauszug fehlt“ mit der Saldodifferenz offen, bis der Auszug oder ein CSV-Export für den Zeitraum kommt.",
+  "finance.stmt.hint": "Kontoauszüge der Sparkasse und der ING aus der Bibliothek werden automatisch in die Finanzen übernommen — ohne KI, geprüft am Anfangs- und Endsaldo jedes Auszugs. Ein Auszug, dessen Salden nicht aufgehen, wird nicht übernommen. Lücken in der Auszugskette hält eine Zeile „Lücke: Kontoauszug fehlt“ mit der Saldodifferenz offen, bis der Auszug oder ein CSV-Export für den Zeitraum kommt.",
   "finance.stmt.new": "Buchungen neu",
   "finance.stmt.read": "Auszüge gelesen",
   "finance.stmt.rescan": "Bibliothek nach Kontoauszügen durchsuchen",
