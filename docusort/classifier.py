@@ -421,18 +421,63 @@ Subcategory MUST be empty "" or one of the parent's listed subs. Tags is an arra
 ZEICHEN_JE_TOKEN = 3.0
 
 
+def _gelernte_beispiele(beispiele: list[dict[str, Any]] | None) -> str:
+    """Die eigenen Zuordnungen des Nutzers als Beispiele fuer das Modell.
+
+    🔑 WARUM UEBERHAUPT. Die Beispiele weiter oben sind erfunden und
+    stehen fest im Quelltext. Was der Nutzer selbst von Hand zugeordnet hat,
+    sah das Modell bisher NIE — es riet bei derselben Art Dokument jeden
+    Monat neu.
+
+    🔴 WARUM SIE NUR HIER ENTSTEHEN UND NICHT JE DOKUMENT. Dieser
+    Systemtext wird vom Anbieter zwischengespeichert (`cache_read_tokens`).
+    Wanderte er mit jedem Dokument, waere der Zwischenspeicher bei JEDEM Lauf
+    kalt. Er wird deshalb nur neu gebaut, wenn sich wirklich etwas gelernt
+    hat — ein kalter Zwischenspeicher je Lernvorgang, nicht je Dokument.
+
+    🔴 Und sie bleiben WENIGE und KURZ. Der Dokumententext hat eine
+    Grenze; Beispiele, die ausufern, nehmen dem eigentlichen Dokument den
+    Platz.
+    """
+    if not beispiele:
+        return ""
+    zeilen = [
+        "\n\n# Examples from THIS user's own corrections",
+        "These were filed by hand in this very archive. They outrank the "
+        "invented examples above: if a document looks like one of these, "
+        "classify it the same way and be confident about it.",
+    ]
+    for n, b in enumerate(beispiele, 1):
+        auszug = " ".join((b.get("beispiel_text") or "").split())[:300]
+        if not auszug:
+            continue
+        ziel = {
+            "category": b.get("category") or "",
+            "subcategory": b.get("subcategory") or "",
+            "sender": b.get("sender") or "",
+            "subject": b.get("subject") or "",
+            "tags": [t for t in (b.get("tags") or "").split(",") if t],
+        }
+        zeilen.append("\n## Learned %d\nInput (excerpt):\n%r\n\nOutput (category, "
+                      "subcategory, sender, subject, tags):\n%s"
+                      % (n, auszug, json.dumps(ziel, ensure_ascii=False)))
+    return "" if len(zeilen) <= 2 else "\n".join(zeilen)
+
+
 def _build_system_prompt(categories: list[dict[str, Any]],
-                         schwelle: float = 0.65) -> str:
+                         schwelle: float = 0.65,
+                         beispiele: list[dict[str, Any]] | None = None) -> str:
     # 🔑 DIE SCHWELLE STEHT IM SYSTEMTEXT. Dem Modell wird gesagt, ab
     #    wann eine Antwort als unsicher gilt — und das muss dieselbe Zahl
     #    sein, mit der DocuSort danach entscheidet. Stand sie zweimal
     #    getrennt da, verstellte der Regler die eine und nicht die andere.
     basis = SYSTEM_PROMPT_BASE.replace("{schwelle}", ("%.2f" % schwelle).rstrip("0").rstrip("."))
+    gelernt = _gelernte_beispiele(beispiele)
     # Categories from config override the baked-in list, but the structure
     # above is intentionally verbose so the full prompt crosses the 2048-
     # token threshold required for Haiku's prompt cache.
     if not categories:
-        return basis
+        return basis + gelernt
     lines = ["\n\n# Active category list for this request (use EXACTLY these spellings)"]
     for c in categories:
         subs = c.get("subcategories") or []
@@ -455,7 +500,7 @@ def _build_system_prompt(categories: list[dict[str, Any]],
         "name. Never propose a name that only differs from an existing one by "
         "plural, case or spelling."
     )
-    return basis + "\n".join(lines)
+    return basis + "\n".join(lines) + gelernt
 
 
 def _build_user_message(text: str, max_chars: int) -> str:
@@ -611,8 +656,9 @@ class Classifier:
             timeout=settings.timeout_seconds,
         )
         self._baue_listen(categories)
+        self._beispiele: list[dict[str, Any]] = []
         self._system_prompt = _build_system_prompt(
-            categories, getattr(settings, "min_confidence", 0.65))
+            categories, getattr(settings, "min_confidence", 0.65), self._beispiele)
         self.holder_names = list(holder_names or [])
         self.pseudonymize = pseudonymize
 
@@ -627,8 +673,23 @@ class Classifier:
         wuerde. Alle drei gehoeren zusammen neu gebaut."""
         self.categories = categories
         self._baue_listen(categories)
+        # 🔴 Die gelernten Beispiele MITNEHMEN. Wer hier nur die Kategorien
+        #    neu setzt, loescht beim naechsten Kategorienwechsel still alles,
+        #    was der Nutzer dem Modell beigebracht hat.
         self._system_prompt = _build_system_prompt(
-            self.categories, getattr(self.settings, "min_confidence", 0.65))
+            self.categories, getattr(self.settings, "min_confidence", 0.65),
+            self._beispiele)
+
+    def setze_beispiele(self, beispiele: list[dict[str, Any]]) -> None:
+        """Die gelernten Zuordnungen uebernehmen — ohne Neustart.
+
+        Dasselbe Muster wie `setze_kategorien`, aus demselben Grund: der
+        Systemtext ist eine MOMENTAUFNAHME und muss zusammen mit dem, was er
+        enthaelt, neu gebaut werden."""
+        self._beispiele = list(beispiele or [])
+        self._system_prompt = _build_system_prompt(
+            self.categories, getattr(self.settings, "min_confidence", 0.65),
+            self._beispiele)
 
     def _baue_listen(self, categories: list[dict[str, Any]]) -> None:
         """Die Listen, gegen die eine Antwort des Modells geprueft wird —

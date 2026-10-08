@@ -673,6 +673,50 @@
       </div>
       <span class="block text-[11px] text-ink-500 -mt-1">{{ t('document.due.hint') }}</span>
 
+      {# ─── Gelernte Zuordnung ───────────────────────────────────────────
+         🔴 DER HAKEN IST NICHT VORGEKREUZT, und das ist der ganze Punkt.
+         Bei den Finanzen stand ein vorgekreuztes „merken" unter der Tabelle
+         und machte aus jeder Zuweisung eine Regel fuer den ganzen Zahler:
+         305 Regeln und 2738 umgefaerbte Buchungen, gemeldet von jemandem,
+         der genau einen Posten aendern wollte. Hier passiert ohne Haken
+         genau das, was dasteht — dieses eine Dokument.
+
+         🔑 Und die REICHWEITE steht VORHER da: wieviele Dokumente dieses
+         Merkmal jetzt treffen wuerde. Dort war die Zahl erst hinterher
+         sichtbar, als der Schaden schon angerichtet war. #}
+      <div class="rounded-xl border border-ink-700/70 p-3 space-y-2" x-data="lernen({{ doc.id }})">
+        <span class="block text-xs uppercase tracking-wide text-ink-400">{{ t('learn.heading') }}</span>
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input type="checkbox" name="merken" value="true" x-model="an" @change="an && hole()"
+                 class="mt-0.5 h-4 w-4 rounded border-ink-600 bg-ink-900/60 accent-emerald-500">
+          <span class="text-sm">{{ t('learn.check') }}</span>
+        </label>
+        <p class="text-[11px] text-ink-500">{{ t('learn.hint') }}</p>
+
+        <div x-show="an" x-cloak class="space-y-1">
+          <label class="block">
+            <span class="block text-[11px] text-ink-400 mb-1">{{ t('learn.marker') }}</span>
+            <input type="text" name="merkmal" x-model="merkmal" @input.debounce.400ms="messe()"
+                   class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
+          </label>
+          <p class="text-[11px] text-ink-500">{{ t('learn.marker_hint') }}</p>
+          <p x-show="treffer !== null" x-cloak class="text-[11px]"
+             :class="zuBreit ? 'text-amber-300' : 'text-ink-400'">
+            <span x-text="tr('learn.reach', { count: treffer })"></span>
+            <span x-show="zuBreit" x-text="' ' + tr('learn.reach_wide')"></span>
+          </p>
+          <p x-show="kandidaten.length > 1" x-cloak class="text-[11px] text-ink-500">
+            {{ t('learn.other') }}:
+            <template x-for="k in kandidaten.slice(1, 5)" :key="k.merkmal">
+              <button type="button" @click="merkmal = k.merkmal; messe()"
+                      class="underline decoration-dotted mr-2" x-text="k.merkmal"></button>
+            </template>
+          </p>
+          <p x-show="kandidaten.length === 0 && geholt" x-cloak
+             class="text-[11px] text-ink-500">{{ t('learn.none') }}</p>
+        </div>
+      </div>
+
       <button type="submit" class="btn-primary w-full">{{ t('document.save') }}</button>
     </form>
     {% endif %}
@@ -948,6 +992,34 @@ function vorschlagsfeld(feld) {
     frage(el) {
       const v = el.value || '';
       return (feld === 'tag' && v.includes(',')) ? v.split(',').pop().trim() : v;
+    },
+  };
+}
+
+function lernen(docId) {
+  return {
+    an: false, merkmal: '', kandidaten: [], treffer: null, grenze: 0, geholt: false,
+    get zuBreit() { return this.treffer !== null && this.grenze > 0
+                           && this.treffer > this.grenze; },
+    async hole() {
+      if (this.geholt) return;
+      try {
+        const r = await fetch('/api/document/' + docId + '/merkmal');
+        if (!r.ok) return;
+        const d = await r.json();
+        this.kandidaten = d.kandidaten || [];
+        this.grenze = d.grenze || 0;
+        // 🔑 VORSCHLAGEN JA, WAEHLEN NEIN: der Vorschlag steht im Feld und
+        //    ist aenderbar, die Alternativen stehen mit darunter.
+        if (!this.merkmal) this.merkmal = d.vorschlag || '';
+        this.messe();
+      } finally { this.geholt = true; }
+    },
+    messe() {
+      const n = (this.merkmal || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const k = this.kandidaten.find(
+        (c) => (c.merkmal || '').replace(/\s+/g, ' ').trim().toLowerCase() === n);
+      this.treffer = k ? k.treffer : null;
     },
   };
 }

@@ -676,6 +676,25 @@ class ClassifierHandle:
         return [eigen] + [k for k in alle if k != eigen]
 
     # -------------------------------------------------------------- Wechseln
+    def setze_beispiele(self, beispiele: list) -> int:
+        """Die gelernten Zuordnungen an JEDEN gebauten Klassifizierer geben.
+
+        🔴 Aus demselben Grund wie bei den Kategorien: die anderen
+        Rechenorte liegen gebaut herum und springen ein, sobald der aktive
+        langsam oder weg ist. Mit einem Systemtext ohne die gelernten
+        Beispiele wuerde dasselbe Dokument dort wieder im Review landen."""
+        gezaehlt = 0
+
+        def _an(k):
+            nonlocal gezaehlt
+            setzen = getattr(k, "setze_beispiele", None)
+            if callable(setzen):
+                setzen(beispiele)
+                gezaehlt += 1
+
+        self._verteiler.fuer_alle(_an)
+        return gezaehlt
+
     def setze_kategorien(self, categories: list) -> int:
         """Die Kategorienliste an JEDEN gebauten Klassifizierer geben.
 

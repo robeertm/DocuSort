@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from collections.abc import Iterable
 from .kategorien import ist as _kat_ist
 
 
@@ -754,6 +755,51 @@ class Database:
                    doc_id      INTEGER,
                    created_at  TEXT NOT NULL,
                    PRIMARY KEY (parent, name)
+               )"""
+        )
+
+        # v0.99.0: was der Nutzer von Hand zugeordnet hat — damit es beim
+        # naechsten Mal nicht wieder im Review landet.
+        #
+        # 🔴 WARUM EINE EIGENE TABELLE UND NICHT `category_rules`. Die dort
+        #    sind BUCHUNGS-Regeln (IBAN/Haendler → Finanzkategorie). Hier geht
+        #    es um Dokumente, und das Merkmal ist ein Textstueck.
+        #
+        # 🔑 EIN EINTRAG, ZWEI WIRKUNGEN — und genau darum EINE Tabelle:
+        #    * `match_value` gesetzt → eine HARTE Regel. Steht das Merkmal im
+        #      Text, wird das Dokument ohne KI abgelegt. Sofort, kostenlos,
+        #      immer gleich.
+        #    * `beispiel_text` → ein BEISPIEL im Systemtext der KI, fuer
+        #      Dokumente, die nur aehnlich sind. Zwei getrennte Mechanismen
+        #      koennten sich widersprechen; bei einem muss man bei der Frage
+        #      „warum liegt das da?" nur an einer Stelle nachsehen.
+        #
+        # 🔴 `match_value` ist NULL, wenn nur gelehrt und nicht entschieden
+        #    werden soll. SQLite laesst in UNIQUE beliebig viele NULL zu —
+        #    ein leerer String waere beim zweiten Eintrag kollidiert.
+        #
+        # 🔴 NICHTS WIRKT RUECKWIRKEND. Eine neue Regel fasst kein abgelegtes
+        #    Dokument an. Das ist die Lehre aus den Finanz-Regeln: ein
+        #    vorgekreuzter Haken machte dort aus jeder Zuweisung eine Regel
+        #    fuer den ganzen Zahler — 305 Regeln, 2738 umgefaerbte Buchungen.
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS doc_rules (
+                   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                   match_value   TEXT COLLATE NOCASE,
+                   category      TEXT NOT NULL,
+                   subcategory   TEXT NOT NULL DEFAULT '',
+                   sender        TEXT NOT NULL DEFAULT '',
+                   subject       TEXT NOT NULL DEFAULT '',
+                   tags          TEXT NOT NULL DEFAULT '',
+                   beispiel_text TEXT NOT NULL DEFAULT '',
+                   source        TEXT NOT NULL DEFAULT 'user',
+                   sample_name   TEXT NOT NULL DEFAULT '',
+                   doc_id        INTEGER,
+                   hits          INTEGER NOT NULL DEFAULT 0,
+                   last_hit_at   TEXT NOT NULL DEFAULT '',
+                   created_at    TEXT NOT NULL,
+                   updated_at    TEXT NOT NULL,
+                   UNIQUE (match_value)
                )"""
         )
 
@@ -3174,6 +3220,242 @@ class Database:
                 "SELECT tx_hash, category FROM transaction_category_overrides"
             ).fetchall()
         return {r["tx_hash"]: r["category"] for r in rows if r["tx_hash"]}
+
+    # ──────────────────────────────────────────────────────────────────
+    # Gelernte Zuordnungen fuer DOKUMENTE (v0.99.0)
+    # ──────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _dr_norm(text: str) -> str:
+        """Vergleichsform fuer Merkmal und Text: Kleinschreibung, Umbrueche
+        und Mehrfach-Leerzeichen zu einem Leerzeichen.
+
+        🔴 OHNE DAS TRIFFT EIN MERKMAL AUS EINEM PDF FAST NIE. Der Text eines
+        Berichts kommt mit harten Umbruechen und wechselnden Abstaenden; wer
+        roh vergleicht, sucht nach einer Zeichenkette, die so nie dasteht.
+        """
+        return re.sub(r"\s+", " ", (text or "")).strip().lower()
+
+    def doc_rules_list(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM doc_rules ORDER BY updated_at DESC, id DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def doc_rule_upsert(self, *, category: str, match_value: str = "",
+                        subcategory: str = "", sender: str = "", subject: str = "",
+                        tags: Iterable[str] = (), beispiel_text: str = "",
+                        source: str = "user", sample_name: str = "",
+                        doc_id: int | None = None) -> int:
+        """Eine gelernte Zuordnung anlegen oder ersetzen.
+
+        `match_value` leer → es wird nur GELEHRT (Beispiel fuer die KI), nicht
+        entschieden. Das landet als NULL in der Spalte, damit mehrere solche
+        Eintraege neben einander stehen koennen.
+        """
+        if not (category or "").strip():
+            return 0
+        mw = self._dr_norm(match_value)
+        # Ein Merkmal aus zwei Zeichen trifft alles. Kuerzer als vier ist
+        # keine Erkennung, sondern ein Zufall.
+        wert: str | None = mw if len(mw) >= 4 else None
+        now = datetime.now().isoformat(timespec="seconds")
+        etiketten = ",".join(
+            t for t in (str(x).strip().lower() for x in (tags or [])) if t
+        )[:200]
+        with self._lock:
+            vorhanden = None
+            if wert:
+                vorhanden = self._conn.execute(
+                    "SELECT id, source FROM doc_rules WHERE match_value = ?", (wert,)
+                ).fetchone()
+                # Eine Regel von Hand schlaegt einen Vorschlag der KI —
+                # dieselbe Vorfahrt wie bei den Finanz-Regeln.
+                if vorhanden and vorhanden["source"] == "user" and source == "ai":
+                    return int(vorhanden["id"])
+            if vorhanden:
+                self._conn.execute(
+                    """UPDATE doc_rules SET category = ?, subcategory = ?, sender = ?,
+                           subject = ?, tags = ?, beispiel_text = ?, source = ?,
+                           sample_name = CASE WHEN ? != '' THEN ? ELSE sample_name END,
+                           doc_id = COALESCE(?, doc_id), updated_at = ?
+                       WHERE id = ?""",
+                    (category, subcategory, sender, subject, etiketten,
+                     beispiel_text[:600], source, sample_name, sample_name,
+                     doc_id, now, int(vorhanden["id"])),
+                )
+                rid = int(vorhanden["id"])
+            else:
+                cur = self._conn.execute(
+                    """INSERT INTO doc_rules
+                           (match_value, category, subcategory, sender, subject, tags,
+                            beispiel_text, source, sample_name, doc_id, hits,
+                            last_hit_at, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', ?, ?)""",
+                    (wert, category, subcategory, sender, subject, etiketten,
+                     beispiel_text[:600], source, sample_name[:200], doc_id, now, now),
+                )
+                rid = int(cur.lastrowid)
+            self._conn.commit()
+        return rid
+
+    def doc_rule_delete(self, rule_id: int) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM doc_rules WHERE id = ?", (int(rule_id),))
+            self._conn.commit()
+        return bool(cur.rowcount)
+
+    def doc_rule_match(self, text: str) -> dict[str, Any] | None:
+        """Die erste Regel, deren Merkmal in diesem Text steht — oder None.
+
+        🔑 Das LAENGSTE Merkmal gewinnt. Steht in einem Text sowohl
+        „energy analyzer" als auch „shelly energy analyzer tagesbericht",
+        ist die genauere Regel gemeint; bei Reihenfolge nach Alter waere es
+        Zufall, welche zuerst zuschlaegt.
+        """
+        if not (text or "").strip():
+            return None
+        heu = self._dr_norm(text)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM doc_rules WHERE match_value IS NOT NULL "
+                "ORDER BY LENGTH(match_value) DESC, id ASC"
+            ).fetchall()
+        for r in rows:
+            if r["match_value"] and r["match_value"] in heu:
+                return dict(r)
+        return None
+
+    def doc_rule_hit(self, rule_id: int) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            self._conn.execute(
+                "UPDATE doc_rules SET hits = hits + 1, last_hit_at = ? WHERE id = ?",
+                (now, int(rule_id)),
+            )
+            self._conn.commit()
+
+    def doc_rule_reach(self, match_value: str, limit: int = 8) -> dict[str, Any]:
+        """Wen WUERDE dieses Merkmal treffen — bevor die Regel existiert.
+
+        🔴 DAS IST DIE LEHRE AUS DEN FINANZ-REGELN. Dort legte ein
+        vorgekreuzter Haken Regeln an, deren Reichweite niemand sah: eine
+        davon traf 129 Buchungen, eine andere 670. Hier steht die Zahl
+        VORHER da, mit Beispielen, und die Regel wirkt trotzdem nur nach
+        vorne — getroffene Dokumente bleiben liegen, wo sie liegen.
+        """
+        mw = self._dr_norm(match_value)
+        if len(mw) < 4:
+            return {"merkmal": mw, "zu_kurz": True, "treffer": 0, "beispiele": []}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, category, subcategory, sender, subject, status, doc_date, "
+                "       extracted_text "
+                "FROM documents WHERE deleted_at IS NULL AND extracted_text IS NOT NULL "
+                "ORDER BY id DESC"
+            ).fetchall()
+        treffer = []
+        for r in rows:
+            if mw in self._dr_norm(r["extracted_text"] or ""):
+                treffer.append({k: r[k] for k in
+                                ("id", "category", "subcategory", "sender", "subject",
+                                 "status", "doc_date")})
+        return {"merkmal": mw, "zu_kurz": False, "treffer": len(treffer),
+                "beispiele": treffer[:limit]}
+
+    def doc_rule_vorschlag(self, doc_id: int, kandidaten_max: int = 20) -> dict[str, Any]:
+        """Welches Textstueck taugt als Merkmal fuer dieses Dokument?
+
+        🔑 VORSCHLAGEN JA, WAEHLEN NEIN — dieselbe Haltung wie in
+        `aehnlichkeit.py`: die Messung findet Kandidaten, entschieden wird von
+        einem Menschen. Der Vorschlag steht im Feld und ist aenderbar.
+
+        Was einen guten Kandidaten ausmacht, an echten Daten gewaehlt:
+        * **keine Ziffern** — „Montag, 05.10.2026" und „12,28 kWh" aendern
+          sich taeglich; ein Merkmal mit Datum darin trifft genau einmal.
+        * **8 bis 60 Zeichen** — kuerzer trifft zufaellig, laenger ist eine
+          ganze Zeile Fliesstext und bricht beim naechsten Umbruch.
+        * **aus den ersten Zeilen** — Kopf und Titel stehen oben, der
+          wechselnde Inhalt unten.
+        * **so wenige Treffer wie moeglich** im Archiv. Ein Merkmal, das 200
+          Dokumente trifft, ist kein Merkmal.
+
+        🔴 EIN DURCHGANG, NICHT EINER JE KANDIDAT. Die Texte aller Dokumente
+        werden genau einmal gelesen und alle Kandidaten dagegen gehalten —
+        zwanzig einzelne Durchlaeufe ueber ein echtes Archiv waeren zwanzig
+        volle Tabellenlesungen.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, extracted_text FROM documents WHERE id = ?", (int(doc_id),)
+            ).fetchone()
+        if not row or not (row["extracted_text"] or "").strip():
+            return {"kandidaten": [], "grund": "kein Text"}
+
+        kandidaten: list[str] = []
+        gesehen: set[str] = set()
+        for zeile in (row["extracted_text"] or "").splitlines()[:40]:
+            k = " ".join(zeile.split())
+            if not (8 <= len(k) <= 60):
+                continue
+            if any(c.isdigit() for c in k):
+                continue
+            n = self._dr_norm(k)
+            if n in gesehen:
+                continue
+            gesehen.add(n)
+            kandidaten.append(k)
+            if len(kandidaten) >= kandidaten_max:
+                break
+        if not kandidaten:
+            return {"kandidaten": [], "grund": "keine ziffernfreie Zeile gefunden"}
+
+        norm = [self._dr_norm(k) for k in kandidaten]
+        treffer = [0] * len(kandidaten)
+        with self._lock:
+            texte = self._conn.execute(
+                "SELECT id, extracted_text FROM documents "
+                "WHERE deleted_at IS NULL AND extracted_text IS NOT NULL"
+            ).fetchall()
+        for t in texte:
+            heu = self._dr_norm(t["extracted_text"] or "")
+            for i, n in enumerate(norm):
+                if n in heu:
+                    treffer[i] += 1
+
+        # 🔴 WIE SORTIERT WIRD, UND WARUM NICHT NACH „WENIGSTE TREFFER".
+        #    Mein erster Versuch stellte die Kandidaten mit den wenigsten
+        #    Treffern nach vorne — und waehlte damit eine ZUFAELLIGE Zeile.
+        #    An echten Daten gemessen gewann die Fusszeile eines Berichts, und
+        #    zwar nur deshalb, weil ein zweiter Bericht sie beim Messen nicht
+        #    enthielt. Wenige Treffer heisst „selten", nicht „kennzeichnend".
+        #
+        # 🔑 Was wirklich WIEDERKEHRT, steht im KOPF: Titel und Erzeuger. Der
+        #    wechselnde Inhalt steht weiter unten. Also: zu breite Kandidaten
+        #    aussortieren, und unter den uebrigen den weiter oben stehenden
+        #    bevorzugen — bei gleichem Platz den laengeren, weil er genauer
+        #    ist.
+        mit_text = max(1, len(texte))
+        grenze = max(5, int(mit_text * 0.25))
+        ergebnis = [{"merkmal": kandidaten[i], "treffer": treffer[i], "rang": i,
+                     "zu_breit": treffer[i] > grenze}
+                    for i in range(len(kandidaten))]
+        ergebnis.sort(key=lambda e: (e["zu_breit"], e["rang"], -len(e["merkmal"])))
+        return {"kandidaten": ergebnis, "grund": "", "grenze": grenze,
+                "dokumente_mit_text": mit_text}
+
+    def doc_rule_examples(self, limit: int = 6) -> list[dict[str, Any]]:
+        """Die gelernten Zuordnungen, die der KI als Beispiele mitgegeben
+        werden. Die jüngsten zuerst, und nur die mit einem Textauszug —
+        ein Beispiel ohne Text lehrt nichts."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT category, subcategory, sender, subject, tags, beispiel_text "
+                "FROM doc_rules WHERE beispiel_text != '' "
+                "ORDER BY updated_at DESC, id DESC LIMIT ?", (int(limit),)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def finance_rules_list(self) -> list[dict[str, Any]]:
         with self._lock:
