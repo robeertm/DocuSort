@@ -610,10 +610,7 @@ class Classifier:
             base_url=settings.base_url,
             timeout=settings.timeout_seconds,
         )
-        self._allowed_names = {c["name"] for c in categories}
-        self._allowed_subs: dict[str, set[str]] = {
-            c["name"]: set(c.get("subcategories") or []) for c in categories
-        }
+        self._baue_listen(categories)
         self._system_prompt = _build_system_prompt(
             categories, getattr(settings, "min_confidence", 0.65))
         self.holder_names = list(holder_names or [])
@@ -629,12 +626,56 @@ class Classifier:
         bekommt — und die es, kaeme sie doch zurueck, selbst verwerfen
         wuerde. Alle drei gehoeren zusammen neu gebaut."""
         self.categories = categories
-        self._allowed_names = {c["name"] for c in categories}
-        self._allowed_subs = {
-            c["name"]: set(c.get("subcategories") or []) for c in categories
-        }
+        self._baue_listen(categories)
         self._system_prompt = _build_system_prompt(
             self.categories, getattr(self.settings, "min_confidence", 0.65))
+
+    def _baue_listen(self, categories: list[dict[str, Any]]) -> None:
+        """Die Listen, gegen die eine Antwort des Modells geprueft wird —
+        einmal wortwoertlich und einmal zum Vergleichen vereinfacht."""
+        self._allowed_names = {c["name"] for c in categories}
+        self._allowed_subs: dict[str, set[str]] = {
+            c["name"]: set(c.get("subcategories") or []) for c in categories
+        }
+        # 🔴 HIER LAG DER GRUND, WARUM SO VIELES IN „SONSTIGES" LANDETE.
+        #    Geprueft wurde wortwoertlich. Die Kategorien dieser Installation
+        #    heissen `Behoerde`, `Vertraege`, `KFZ` — in deutscher Umschrift
+        #    und in Grossbuchstaben. Ein Modell schreibt `Behörde`,
+        #    `Verträge`, `Kfz`, und das ist nicht falsch, sondern DASSELBE
+        #    WORT anders geschrieben. Die Folge war hart: eine Kategorie, die
+        #    nicht zeichengenau passte, wurde zu `Sonstiges`, eine
+        #    Unterkategorie weggeworfen. Gemessen am laufenden Archiv:
+        #    `Model returned subcategory 'Kfz' not allowed under
+        #    'Versicherung' – dropping` — waehrend `KFZ` in der Liste steht.
+        #
+        # 🔑 Verglichen wird mit `aehnlichkeit.schlicht()`, derselben
+        #    Umschrift, die das Archiv ueberall benutzt (ä→ae, dann
+        #    entakzentuieren, dann Kleinschreibung). GESPEICHERT wird immer
+        #    der Name aus der Liste — die Nachsicht gilt dem Vergleich, nicht
+        #    dem Ergebnis.
+        from .aehnlichkeit import schlicht
+        self._name_schlicht = {schlicht(c["name"]): c["name"] for c in categories}
+        self._subs_schlicht = {
+            c["name"]: {schlicht(u): u for u in (c.get("subcategories") or [])}
+            for c in categories
+        }
+
+    def _treffer(self, roh: str, erlaubt, karte: dict[str, str]) -> str:
+        """Den Namen aus der Liste finden, den das Modell gemeint hat.
+
+        Gibt den Namen aus der Liste zurueck, oder "" wenn keiner passt.
+        """
+        if not roh:
+            return ""
+        if roh in erlaubt:
+            return roh
+        from .aehnlichkeit import schlicht
+        getroffen = karte.get(schlicht(roh))
+        if getroffen:
+            # Kein Fehler, aber es soll sichtbar sein: so sieht man, welche
+            # Schreibweise das Modell bevorzugt.
+            logger.info("Modell schrieb %r, gemeint ist %r", roh, getroffen)
+        return getroffen or ""
 
     def _platz_fuer_text(self, vorhanden: int) -> int:
         """Wieviele Zeichen des Dokuments duerfen mit — und warum nicht mehr.
@@ -786,9 +827,11 @@ class Classifier:
         if pseudo is not None:
             data = pseudo.restore(data)
 
-        category = str(data.get("category", "Sonstiges")).strip()
-        if category not in self._allowed_names:
-            logger.warning("Model returned unknown category %r – falling back", category)
+        roh_kategorie = str(data.get("category", "Sonstiges")).strip()
+        category = self._treffer(roh_kategorie, self._allowed_names, self._name_schlicht)
+        if not category:
+            logger.warning("Model returned unknown category %r – falling back",
+                           roh_kategorie)
             category = "Sonstiges"
 
         # Ein Vorschlag fuer eine neue Kategorie. Hier wird NICHTS angelegt —
@@ -804,20 +847,22 @@ class Classifier:
             vorschlag_name = " ".join(str(roh.get("name") or "").split())[:40]
             vorschlag_grund = " ".join(str(roh.get("reason")
                                            or roh.get("description") or "").split())[:400]
-            if vorschlag_name and vorschlag_name in self._allowed_names:
+            if vorschlag_name and self._treffer(vorschlag_name, self._allowed_names,
+                                                self._name_schlicht):
                 # Das Modell hat etwas vorgeschlagen, das es schon gibt —
                 # dann ist es keine neue Kategorie, sondern seine Wahl.
                 logger.info("Modell schlug %r vor, das gibt es schon", vorschlag_name)
                 vorschlag_name = vorschlag_grund = ""
 
-        subcategory = str(data.get("subcategory", "") or "").strip()
-        allowed_subs = self._allowed_subs.get(category, set())
-        if subcategory and subcategory not in allowed_subs:
+        roh_unter = str(data.get("subcategory", "") or "").strip()
+        subcategory = self._treffer(roh_unter,
+                                    self._allowed_subs.get(category, set()),
+                                    self._subs_schlicht.get(category, {}))
+        if roh_unter and not subcategory:
             logger.warning(
                 "Model returned subcategory %r not allowed under %r – dropping",
-                subcategory, category,
+                roh_unter, category,
             )
-            subcategory = ""
 
         raw_tags = data.get("tags") or []
         tags: list[str] = []

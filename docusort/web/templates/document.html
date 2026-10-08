@@ -561,10 +561,28 @@
          Kategorie muss SOFORT in der Liste stehen und ausgewaehlt sein.
          Ein serverseitig gerendertes <select> haette dafuer einen
          Seitenneuaufbau gebraucht — und der haette das halb ausgefuellte
-         Formular mitgenommen. #}
+         Formular mitgenommen.
+
+         🔴 UND GENAU DAS HAT EINEN FEHLER ERZEUGT, der jedes Dokument traf:
+         Alpine wertet `x-model` am <select> aus, BEVOR das `x-for` darin die
+         Optionen gebaut hat. In dem Moment ist die einzige vorhandene Option
+         „+ Neue Kategorie …", und der Browser stellt genau die ein. Danach
+         kommen die echten Optionen dazu — die Auswahl bleibt aber stehen.
+
+         Im Browser gemessen: ein Dokument mit `Versicherung / Beruf` in der
+         Datenbank zeigte „+ Neue Kategorie …" mit dem Wert `__neu__`, obwohl
+         `Versicherung` in der Liste stand. Wer so speicherte, schickte
+         `__neu__` als Kategorie ab. Es sah aus, als sei das Dokument nicht
+         eingeordnet — dabei lag die Datei richtig.
+
+         🔑 Behebung: nach dem naechsten Zeichenschritt den Wert noch einmal
+         setzen, wenn die Optionen da sind. `$nextTick` statt eines festen
+         Wartens, und `x-effect` faengt auch den Fall, dass die Liste sich
+         spaeter aendert (neu angelegte Kategorie). #}
       <label class="block">
         <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_category') }}</span>
         <select name="category" x-model="category" @change="onCategoryChange()"
+                x-effect="cats.length && $nextTick(() => { if ($el.value !== category) $el.value = category })"
                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
           <template x-for="c in cats" :key="c">
             <option :value="c" x-text="catLabels[c] || c"></option>
@@ -579,6 +597,7 @@
       <label class="block">
         <span class="block text-xs text-ink-400 mb-1">{{ t('document.field_subcategory') }}</span>
         <select name="subcategory" x-model="subcategory" @change="onSubChange()"
+                x-effect="subs.length && $nextTick(() => { if ($el.value !== subcategory) $el.value = subcategory })"
                 class="w-full rounded-xl bg-ink-900/60 border border-ink-700 px-3 py-2 text-sm">
           <option value="">{{ t('document.subcategory_none') }}</option>
           <template x-for="s in subs" :key="s">
