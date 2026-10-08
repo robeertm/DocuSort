@@ -160,10 +160,23 @@ class ParsedStatement:
 
 
 def looks_like_statement(text: str) -> bool:
-    """Billige Vorprüfung, bevor der Parser läuft."""
+    """Billige Vorprüfung, bevor der Parser läuft.
+
+    🔴 VERLANGT WURDE FRÜHER EIN ANFANGSSALDO — und damit fiel eine ganze
+    Sorte Auszug durch: ein Tagesgeldkonto ohne Bewegung druckt nur
+    „Kontostand am … um … Uhr", keine Zeile „Kontostand am …, Auszug Nr. …".
+    Im Archiv gemessen war das ein echter Auszug, den niemand je zu sehen
+    bekam, weil die billige Vorprüfung ihn schon abwies.
+
+    🔑 Ein Kontoauszug ist erkennbar an seiner Kontozeile und IRGENDEINEM
+    Kontostand. Ob man ihn auch NACHRECHNEN kann, ist eine zweite Frage —
+    und die wird beim Importieren gestellt, nicht hier.
+    """
     if not text or "Kontoauszug" not in text:
         return False
-    return bool(_RE_ACCOUNT.search(text) and _RE_OPENING.search(text))
+    if not _RE_ACCOUNT.search(text):
+        return False
+    return bool(_RE_OPENING.search(text) or _RE_CLOSING.search(text))
 
 
 def _amount(num: str, sign: str | None) -> float:
@@ -473,7 +486,17 @@ def import_statement_text(db, text: str, *, doc_id: int, file_hash: str, file_la
         rep.errors.append("Kontoauszug ohne IBAN")
         rep.statements_skipped += 1
         return rep, st
-    if st.balanced is not True:
+    # 🔑 NACHRECHNEN, WO ES ETWAS ZU RECHNEN GIBT. Die Regel bleibt streng:
+    #    wer Buchungen mitbringt, muss beweisen, dass Anfang + Buchungen =
+    #    Ende ist. Ein Auszug OHNE Buchungen hat nichts zu beweisen — er
+    #    bringt nur einen Kontostand mit, und genau dafür gibt es unten
+    #    schon einen Weg (er belegt den Stand für die Lückenprüfung).
+    #    Vorher kam er nie dort an: ohne Anfangssaldo ist `balanced` None,
+    #    und die Prüfung hier wies ihn vorher ab.
+    nur_kontostand = (not st.rows
+                      and st.opening_balance is None
+                      and st.closing_balance is not None)
+    if st.balanced is not True and not nur_kontostand:
         rep.errors.append("Salden gehen nicht auf — Auszug nicht importiert: " + "; ".join(st.warnings[-1:]))
         rep.statements_skipped += 1
         return rep, st

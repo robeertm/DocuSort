@@ -59,6 +59,20 @@
       </div>
     </template>
 
+    {# 🔑 Die Ablege-Schwelle stand bis 1.0.2 nur in der config.yaml — obwohl
+       sie entscheidet, ob ein Dokument abgelegt wird oder zur Durchsicht
+       geht. Wer sie nicht kennt, kann sie nicht nutzen. #}
+    <div class="mb-4">
+      <label class="block text-sm font-medium mb-1">{{ t('settings.ai.min_confidence') }}</label>
+      <div class="flex items-center gap-3">
+        <input x-model.number="ai.min_confidence" type="range" min="0.05" max="0.99" step="0.01"
+               class="flex-1 accent-emerald-500">
+        <span class="tabular-nums text-sm w-14 text-right"
+              x-text="Math.round((ai.min_confidence || 0) * 100) + ' %'"></span>
+      </div>
+      <p class="text-xs text-ink-500 mt-1">{{ t('settings.ai.min_confidence_hint') }}</p>
+    </div>
+
     <template x-if="ai.provider !== 'openai_compat' && ai.provider !== 'bridge'">
       <div class="mb-4">
         <label class="block text-sm font-medium mb-1">{{ t('setup.step_ai.api_key') }}</label>
@@ -1079,6 +1093,7 @@ function settingsPage() {
       provider:  '{{ current_provider }}',
       model:     '{{ current_model }}',
       base_url:  '{{ current_base_url }}',
+      min_confidence: {{ current_min_confidence }},
       api_key:   '',
       saving:    false,
       message:   '',
@@ -1156,6 +1171,7 @@ function settingsPage() {
             model: this.ai.model,
             base_url: this.ai.base_url,
             api_key: this.ai.api_key,
+            min_confidence: this.ai.min_confidence,
           }),
         });
         if (!r.ok) {
