@@ -61,7 +61,7 @@
       <div>
         <label class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('inv.category') }}</label>
         <select x-model="f.kategorie" @change="holen()"
-                class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm">
+                class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm" x-effect="((daten.kategorien || [])).length && $nextTick(() => { if ($el.value !== f.kategorie) $el.value = f.kategorie })">
           <option value="">{{ t('inv.all_categories') }}</option>
           <template x-for="k in (daten.kategorien || [])" :key="k">
             <option :value="k" x-text="catLabel(k)"></option>
@@ -71,7 +71,7 @@
       <div>
         <label class="block text-[11px] uppercase tracking-wider text-ink-500 mb-1">{{ t('inv.group') }}</label>
         <select x-model="f.gruppe" @change="holen()"
-                class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm">
+                class="rounded-lg bg-ink-900/60 border border-ink-700 px-2.5 py-1.5 text-sm" x-effect="(gruppen).length && $nextTick(() => { if ($el.value !== f.gruppe) $el.value = f.gruppe })">
           <template x-for="g in gruppen" :key="g">
             <option :value="g" x-text="gruppeLabel(g)"></option>
           </template>

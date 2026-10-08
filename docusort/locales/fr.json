@@ -1568,6 +1568,7 @@
   "tx.new_category": "+ Nouvelle catégorie …",
   "tx.new_category_prompt": "Nom de la nouvelle catégorie :",
   "tx.no_bookings": "Aucune écriture pour ce filtre.",
+  "tx.no_custom_cats": "Aucune personnalisée pour l'instant — les catégories intégrées suffisent souvent ; ajoutez ce qui vous manque.",
   "tx.no_income": "Aucune entrée pour ce filtre.",
   "tx.no_payee_learn": "Sans nom de bénéficiaire, rien à apprendre — affectez les écritures ci-dessous une par une.",
   "tx.no_reason": "aucune justification enregistrée — « relancer la détection » la remplit",

@@ -350,7 +350,7 @@
         <label class="block">
           <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_shop_type') }}</span>
           <select x-model="header.shop_type"
-                  class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm">
+                  class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm" x-effect="(shopTypes).length && $nextTick(() => { if ($el.value !== header.shop_type) $el.value = header.shop_type })">
             <option value="">—</option>
             <template x-for="st in shopTypes" :key="st">
               <option :value="st" x-text="T['receipt.shop.' + st] || st"></option>
@@ -360,7 +360,7 @@
         <label class="block">
           <span class="block text-[11px] text-ink-500 mb-1">{{ t('receipt.field_payment') }}</span>
           <select x-model="header.payment_method"
-                  class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm">
+                  class="w-full rounded-lg bg-ink-900/60 border border-ink-700 px-2 py-1.5 text-sm" x-effect="(paymentMethods).length && $nextTick(() => { if ($el.value !== header.payment_method) $el.value = header.payment_method })">
             <option value="">—</option>
             <template x-for="pm in paymentMethods" :key="pm">
               <option :value="pm" x-text="T['receipt.payment.' + pm] || pm"></option>
@@ -394,7 +394,7 @@
                          class="w-full bg-transparent border-0 border-b border-transparent focus:border-ink-600 px-0 py-1 text-sm focus:outline-none focus:ring-0"
                          :placeholder="T['receipt.col_item']">
                   <select x-model="it.item_category"
-                          class="block mt-1 w-full bg-transparent border-0 px-0 py-0 text-[10px] uppercase tracking-wider text-ink-500 focus:outline-none focus:ring-0 cursor-pointer">
+                          class="block mt-1 w-full bg-transparent border-0 px-0 py-0 text-[10px] uppercase tracking-wider text-ink-500 focus:outline-none focus:ring-0 cursor-pointer" x-effect="(itemCategories).length && $nextTick(() => { if ($el.value !== it.item_category) $el.value = it.item_category })">
                     <option value="">—</option>
                     <template x-for="cat in itemCategories" :key="cat">
                       <option :value="cat" x-text="T['receipt.cat.' + cat] || cat"></option>

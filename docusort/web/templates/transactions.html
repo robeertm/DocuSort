@@ -48,7 +48,7 @@
       <div class="grid grid-cols-2 md:grid-cols-12 gap-x-3 gap-y-3 items-end">
         <label class="col-span-2 md:col-span-4 block">
           <span class="flt-label">Gehaltsmonat</span>
-          <select x-model="salaryPeriod" @change="applySalaryPeriod()" class="flt-input">
+          <select x-model="salaryPeriod" @change="applySalaryPeriod()" class="flt-input" x-effect="(periods).length && $nextTick(() => { if ($el.value !== salaryPeriod) $el.value = salaryPeriod })">
             <option value="">{{ t('tx.pick_salary_month') }}</option>
             <template x-for="p in periods" :key="p.start">
               <option :value="p.start + '|' + p.end"
@@ -108,7 +108,7 @@
         </label>
         <label class="block md:col-span-2">
           <span class="flt-label">{{ t('tx.category') }}</span>
-          <select x-model="filter.category" @change="reload()" class="flt-input">
+          <select x-model="filter.category" @change="reload()" class="flt-input" x-effect="(cats).length && $nextTick(() => { if ($el.value !== filter.category) $el.value = filter.category })">
             <option value="">Alle</option>
             <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
           </select>
@@ -337,7 +337,7 @@
       <div class="px-4 py-3 flex items-center gap-3 flex-wrap text-xs text-ink-400 bg-ink-900/30">
         <span>{{ t('tx.assign_all') }} <b class="text-ink-200">{{ t('tx.all_word') }}</b> {{ t('tx.assign_all2') }}</span>
         <select x-model="unresolvedCat" @change="loadUnresolved()"
-                class="rounded bg-ink-900/60 border border-ink-700 px-2 py-1 text-xs">
+                class="rounded bg-ink-900/60 border border-ink-700 px-2 py-1 text-xs" x-effect="(cats).length && $nextTick(() => { if ($el.value !== unresolvedCat) $el.value = unresolvedCat })">
           <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
         </select>
         <label class="flex items-center gap-1">
@@ -434,7 +434,7 @@
                         title="{{ t('tx.delete_cat') }}">✕</button>
               </div>
             </template>
-            <span x-show="!customCats.length" x-cloak class="text-ink-500">Noch keine eigenen — die eingebauten reichen oft; lege an, was dir fehlt.</span>
+            <span x-show="!customCats.length" x-cloak class="text-ink-500">{{ t('tx.no_custom_cats') }}</span>
           </div>
         </div>
         <div x-show="showRules" x-cloak class="w-full mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -512,7 +512,7 @@
       <div x-show="selected.size > 0" x-cloak
            class="flex items-center gap-2 text-sm rounded-lg bg-emerald-500/10 px-3 py-1.5">
         <span class="text-emerald-200" x-text="selected.size + (' ' + tr('tx.selected'))"></span>
-        <select x-model="bulkCategory" @change="if (bulkCategory === '__new__') { bulkCategory = ''; newCategory((k) => { bulkCategory = k; }); }"
+        <select x-model="bulkCategory" x-effect="(cats).length && $nextTick(() => { if ($el.value !== bulkCategory) $el.value = bulkCategory })" @change="if (bulkCategory === '__new__') { bulkCategory = ''; newCategory((k) => { bulkCategory = k; }); }"
                 class="rounded bg-ink-900/60 border border-ink-700 px-2 py-1 text-xs">
           <option value="">{{ t('tx.pick_category') }}</option>
           <template x-for="c in cats" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>

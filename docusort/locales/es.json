@@ -1568,6 +1568,7 @@
   "tx.new_category": "+ Nueva categoría …",
   "tx.new_category_prompt": "Nombre de la nueva categoría:",
   "tx.no_bookings": "No hay apuntes para este filtro.",
+  "tx.no_custom_cats": "Todavía ninguna propia — las integradas suelen bastar; añade lo que te falte.",
   "tx.no_income": "No hay entradas para este filtro.",
   "tx.no_payee_learn": "Sin nombre de beneficiario no hay nada que aprender — asigna los apuntes de abajo uno a uno.",
   "tx.no_reason": "sin motivo guardado — «volver a ejecutar la detección» lo rellena",

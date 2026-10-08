@@ -7,6 +7,51 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.0.2] - 2026-10-08
+
+### Fixed
+
+🔴 **Ten more selects had the same defect 1.0.1 fixed on one.** Asked
+whether anything was still left over, the honest answer was to go looking for
+the same *class* of fault rather than the same fault. Alpine evaluates
+`x-model` on a `<select>` before an `x-for` inside it has built the options,
+so the browser picks whichever static option happens to be there — and the
+selection stays when the real options arrive.
+
+Measured in a browser: a receipt stored as `supermarkt` displayed an empty
+dash. The receipt editor saves from its own state rather than from the field,
+so nothing was corrupted there — but the page told the user the shop type was
+unset when it was not. The affected fields were the receipt's shop type,
+payment method and item category, the invoice filters, four selects on the
+bookings page and the account picker on the upload page.
+
+All twelve selects whose options are built in the browser now set their value
+once those options exist. `probe_konsistenz.py` checks the property across
+every template, with a counter-test.
+
+🔴 **One line of interface text existed only in German** — the hint shown
+when no custom booking categories have been created yet. It is now a key in
+all five languages, like everything else.
+
+🔴 **And the repair itself broke one line before the gate caught it.** The
+guard was inserted with a pattern for an HTML tag — and in one field the
+`@change` handler contained an arrow function. Its `>` ended the pattern, so
+the new attribute landed in the middle of the JavaScript
+(`newCategory((k) = x-effect="…">`). Three pages threw *Invalid left-hand side
+in assignment*. A pattern for a tag has to know about quotes, otherwise every
+`>` inside an attribute is a trap; the rig now checks that too, so a torn
+attribute is caught without having to open a browser.
+
+### Checked, and found sound
+
+The same sweep looked for the other class 1.0.1 fixed: a model's answer
+compared character for character against an internal list. The receipt and
+booking validators lower-case before comparing and their lists hold no
+capitals or umlauts, so the category path was the single outlier — it alone
+compared display names carrying both. The test rig's own timing was swept too:
+no probe waits on a condition that is already true.
+
+
 ## [1.0.1] - 2026-10-08
 
 ### Fixed

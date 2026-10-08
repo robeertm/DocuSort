@@ -1568,6 +1568,7 @@
   "tx.new_category": "+ Neue Kategorie …",
   "tx.new_category_prompt": "Name der neuen Kategorie:",
   "tx.no_bookings": "Keine Buchungen für diesen Filter.",
+  "tx.no_custom_cats": "Noch keine eigenen — die eingebauten reichen oft; lege an, was dir fehlt.",
   "tx.no_income": "Keine Eingänge für diesen Filter.",
   "tx.no_payee_learn": "Ohne Empfängernamen gibt es nichts zu lernen — bitte die Buchungen unten einzeln zuweisen.",
   "tx.no_reason": "keine Begründung gespeichert — „Erkennung neu laufen lassen“ füllt sie",
