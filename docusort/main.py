@@ -55,6 +55,55 @@ def _sha256(path: Path, chunk_size: int = 1 << 16) -> str:
     return h.hexdigest()
 
 
+def _gelernte_regel(db, text: str, dateiname: str) -> Classification | None:
+    """Hat der Nutzer DIESE Art Dokument schon einmal von Hand zugeordnet?
+
+    🔑 WARUM VOR DER KI. Ein maschinell erzeugter Bericht, der jeden Tag
+    gleich aussieht, braucht kein Sprachmodell. Steht das gelernte Merkmal im
+    Text, ist die Antwort schon bekannt: sofort, ohne Kosten, und morgen
+    dieselbe wie heute. Gemeldet an einem Energie-Tagesbericht, den die KI mit
+    Zuversicht 0,50 ins Review legte — ein Bericht, der ab jetzt JEDEN TAG
+    kommt.
+
+    🔴 Die Zuversicht ist 1.0, und das ist keine Schmeichelei: hier hat
+    ein Mensch entschieden, nicht ein Modell geschaetzt. Nur so landet das
+    Dokument abgelegt und nicht wieder im Review.
+
+    🔴 Faellt irgendetwas aus, gibt diese Stelle `None` zurueck und die
+    KI laeuft wie immer. Eine gelernte Abkuerzung darf die Kette nie anhalten.
+    """
+    # 🔴 `log` ist in dieser Datei LOKAL je Funktion, nicht auf
+    #    Modulebene — ein `log.warning` hier haette beim ersten Treffer
+    #    einen NameError geworfen, und zwar nur im Fehlerfall.
+    log = logging.getLogger("docusort.pipeline")
+    try:
+        regel = db.doc_rule_match(text)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Gelernte Regeln nicht lesbar (%s) — die KI entscheidet", exc)
+        return None
+    if not regel:
+        return None
+    try:
+        db.doc_rule_hit(int(regel["id"]))
+    except Exception:  # noqa: BLE001
+        pass            # Ein Zaehler ist kein Grund, die Ablage zu verfehlen.
+    etiketten = [t for t in (regel.get("tags") or "").split(",") if t]
+    log.info("Gelernte Regel #%s greift fuer %s -> %s / %s (ohne KI)",
+             regel["id"], dateiname, regel["category"], regel["subcategory"] or "-")
+    return Classification(
+        category=regel["category"],
+        date="",                      # Das Datum holt die Ablage aus dem Dokument.
+        sender=regel.get("sender") or "Unbekannt",
+        subject=regel.get("subject") or "Dokument",
+        confidence=1.0,
+        reasoning="Von Hand gelernt: Merkmal %r stand im Text (Regel #%s)."
+                  % (regel["match_value"], regel["id"]),
+        subcategory=regel.get("subcategory") or "",
+        tags=etiketten,
+        model="regel",
+    )
+
+
 def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Database):
     log = logging.getLogger("docusort.pipeline")
     # ZWEI ENGSTELLEN, UND SIE SIND VERSCHIEDEN.
@@ -192,6 +241,11 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
                 subject="OCR-fehlgeschlagen", confidence=0.0,
                 reasoning="No text could be extracted",
             )
+        # 🔑 DIE GELERNTE ABKUERZUNG STEHT VOR DER KI, NICHT DANEBEN.
+        #    Was ein Mensch in diesem Archiv schon einmal von Hand zugeordnet
+        #    hat, muss nicht jeden Tag neu geraten werden.
+        elif (regel := _gelernte_regel(db, ocr_res.text, path.name)) is not None:
+            cls = regel
         else:
             try:
                 _activity.work_stage(path.name, _activity.STAGE_AI)

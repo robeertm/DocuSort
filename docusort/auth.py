@@ -237,6 +237,19 @@ USER_ALLOW: tuple[tuple[str, str], ...] = (
     # --- own account -------------------------------------------------
     ("GET", r"^/api/me$"),
     ("POST", r"^/api/me/password$"),
+    # --- gelernte Zuordnungen -----------------------------------------
+    # 🔑 Dasselbe Recht wie eine Kategorie anzulegen, und aus demselben
+    #    Grund: wer ein Dokument einsortieren darf, darf sich die Zuordnung
+    #    auch merken — angelegt wird sie ohnehin im Formular von
+    #    `POST /document/<id>/edit`, das oben schon erlaubt ist. Das Merkmal
+    #    VORGESCHLAGEN zu bekommen ist weniger, als die Seite ohnehin zeigt:
+    #    der Text des Dokuments steht dort.
+    #
+    # 🔴 LESEN DER LISTE und LOESCHEN stehen bewusst NICHT hier. Eine
+    #    Regel wirkt auf jedes kuenftige Dokument aller Nutzer; sie
+    #    wegzunehmen ist, wie eine Kategorie zu entfernen, Sache des
+    #    Verwalters.
+    ("GET", r"^/api/document/[^/]+/merkmal$"),
 )
 
 _USER_ALLOW_COMPILED = tuple((m, re.compile(p)) for m, p in USER_ALLOW)

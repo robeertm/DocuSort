@@ -1056,6 +1056,26 @@ def create_app(
     def _subcategory_map(lang: str | None = None) -> dict[str, list[str]]:
         return _kat.unterkategorien(_kategorien(lang))
 
+    def _beispiele_geaendert() -> int:
+        """Nach jedem Lernvorgang: allen Klassifizierern die Beispiele geben.
+
+        🔴 Zwilling zu `_kategorien_geaendert`, und aus demselben Grund:
+        der Systemtext ist eine Momentaufnahme. Ohne das kennt das Modell die
+        gerade gelernte Zuordnung erst nach einem Neustart — und legt
+        dasselbe Dokument bis dahin wieder ins Review.
+
+        🔑 Genau HIER wird der Zwischenspeicher des Anbieters einmal
+        kalt, und nur hier: beim Lernen, nicht bei jedem Dokument."""
+        setzen = getattr(classifier, "setze_beispiele", None)
+        if not callable(setzen):
+            return 0
+        try:
+            return int(setzen(db.doc_rule_examples()) or 0)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Gelernte Beispiele nicht an den Klassifizierer "
+                           "durchgereicht: %s", exc)
+            return 0
+
     def _kategorien_geaendert() -> int:
         """Nach jeder Aenderung: allen Klassifizierern die neue Liste geben.
 
@@ -1648,6 +1668,14 @@ def create_app(
         subject: str = Form(""),
         due_date: str = Form(""),
         due_kind: str = Form(""),
+        # 🔴 NICHT VORGEKREUZT, und das ist der ganze Punkt. Bei den
+        #    Finanzen stand ein vorgekreuztes „merken" unter der Tabelle und
+        #    machte aus jeder Zuweisung eine Regel fuer den ganzen Zahler:
+        #    305 Regeln, 2738 umgefaerbte Buchungen. `Form(False)` heisst:
+        #    ohne Haken passiert genau das, was der Nutzer sieht — dieses
+        #    eine Dokument.
+        merken: bool = Form(False),
+        merkmal: str = Form(""),
     ):
         from ..organizer import target_path
         from ..finance.dates import normalise_date
@@ -1716,6 +1744,34 @@ def create_app(
         )
         logger.info("Edited doc %d -> %s (sub=%s tags=%s)",
                     doc_id, new_path.name, sub, tag_list)
+
+        # 🔑 Und jetzt, nur wenn der Nutzer es ausdruecklich wollte:
+        #    lernen. Bis hierher war eine Zuordnung von Hand genau das —
+        #    diese eine Zeile, und sonst nichts; derselbe Bericht kam morgen
+        #    wieder und wurde wieder geraten.
+        #
+        # 🔴 NICHTS WIRKT RUECKWIRKEND. Die Regel gilt fuer KUENFTIGE
+        #    Dokumente; was abgelegt ist, bleibt liegen, wo es liegt.
+        if merken:
+            try:
+                auszug = " ".join(((db.get(doc_id) or {}).get("extracted_text")
+                                   or "")[:1200].split())[:600]
+                rid = db.doc_rule_upsert(
+                    category=category, subcategory=sub,
+                    match_value=merkmal.strip(),
+                    sender=sender.strip(), subject=subject.strip(),
+                    tags=tag_list, beispiel_text=auszug,
+                    source="user", sample_name=new_path.name, doc_id=doc_id,
+                )
+                hart = len(db._dr_norm(merkmal)) >= 4  # noqa: SLF001
+                logger.info("Gelernt aus doc %d: Regel #%s (%s), Ziel %s/%s",
+                            doc_id, rid, "mit Merkmal" if hart else "nur Beispiel",
+                            category, sub or "-")
+                _beispiele_geaendert()
+            except Exception as exc:  # noqa: BLE001
+                # 🔴 Das Dokument ist schon gespeichert. Ein Fehlschlag
+                #    beim Lernen darf die Ablage nicht zurueckdrehen.
+                logger.warning("Lernen aus doc %d fehlgeschlagen: %s", doc_id, exc)
 
         # Where to land. The edit just set the status to 'filed' and may have
         # moved the document to another category, so it can have left the very
@@ -2069,6 +2125,53 @@ def create_app(
         from ..receipts_salvage import scan_misclassified
         candidates = scan_misclassified(db, limit=limit)
         return {"candidates": candidates, "count": len(candidates)}
+
+    @app.get("/api/document/{doc_id}/merkmal")
+    def api_document_merkmal(doc_id: int):
+        """Welches Textstueck taugt als Merkmal — und wen wuerde es treffen?
+
+        🔑 Die Messung findet Kandidaten, entschieden wird von einem
+        Menschen: der Vorschlag steht im Feld und ist aenderbar, die
+        Alternativen stehen mit ihrer Reichweite daneben. Dieselbe Haltung
+        wie in `aehnlichkeit.py`, wo aus genau diesem Grund nichts
+        automatisch zusammengelegt wird.
+        """
+        if not db.get(doc_id):
+            raise _http_fehler(404, "err.doc_missing")
+        v = db.doc_rule_vorschlag(doc_id)
+        kand = v.get("kandidaten") or []
+        return {
+            "vorschlag": (kand[0]["merkmal"] if kand else ""),
+            "kandidaten": kand[:8],
+            "grund": v.get("grund") or "",
+            "grenze": v.get("grenze", 0),
+            "dokumente_mit_text": v.get("dokumente_mit_text", 0),
+        }
+
+    @app.get("/api/doc-rules")
+    def api_doc_rules():
+        """Alle gelernten Zuordnungen. Verwalter-Sache — siehe `auth.py`."""
+        regeln = db.doc_rules_list()
+        return {
+            "rules": regeln,
+            # Getrennt gezaehlt, weil beides etwas anderes tut: eine Regel
+            # ENTSCHEIDET ohne KI, ein Beispiel BELEHRT sie nur.
+            "mit_merkmal": sum(1 for r in regeln if r.get("match_value")),
+            "nur_beispiel": sum(1 for r in regeln if not r.get("match_value")),
+        }
+
+    @app.delete("/api/doc-rules/{rule_id}")
+    def api_doc_rule_delete(rule_id: int):
+        """Eine gelernte Zuordnung zuruecknehmen.
+
+        🔑 Es bleibt bei den Dokumenten, die sie schon abgelegt hat —
+        die liegen richtig, ein Mensch hat es so entschieden. Weg ist nur die
+        Wirkung auf KUENFTIGE Dokumente, und das ist die Umkehrung dessen,
+        was das Anlegen getan hat."""
+        if not db.doc_rule_delete(rule_id):
+            raise _http_fehler(404, "err.rule_missing")
+        _beispiele_geaendert()
+        return {"ok": True, "deleted": rule_id}
 
     @app.get("/api/document/{doc_id}/diagnostics")
     def api_document_diagnostics(doc_id: int):

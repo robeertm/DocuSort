@@ -511,6 +511,43 @@
   </section>
 
   <!-- ===== Finance privacy ===== -->
+  {# 🔑 Die gelernten Zuordnungen GEHOEREN SICHTBAR. Eine Regel, die künftige
+     Dokumente ohne KI einsortiert, muss man nachsehen und zurücknehmen
+     können — sonst fragt irgendwann jemand „warum liegt das da?" und findet
+     keine Antwort. Lesen und Löschen sind Verwalter-Sache (siehe auth.py). #}
+  <section class="card p-6" id="gelernt" x-data="gelernteRegeln()" x-init="laden()">
+    <h2 class="text-lg font-semibold mb-1">{{ t('learn.rules_heading') }}</h2>
+    <p class="text-sm text-ink-400 mb-4">{{ t('learn.rules_hint') }}</p>
+
+    <p x-show="!regeln.length && geladen" x-cloak
+       class="text-sm text-ink-500">{{ t('learn.rules_none') }}</p>
+
+    <p x-show="regeln.length" x-cloak class="text-xs text-ink-400 mb-2"
+       x-text="tr('learn.rules_counts', { hard: mitMerkmal, soft: nurBeispiel })"></p>
+
+    <div class="space-y-2">
+      <template x-for="r in regeln" :key="r.id">
+        <div class="flex items-start gap-3 rounded-xl border border-ink-700/70 px-3 py-2">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm">
+              <span x-text="catLabel(r.category)"></span><template x-if="r.subcategory"><span
+                    x-text="' / ' + r.subcategory"></span></template>
+            </div>
+            <div class="text-[11px] text-ink-500 truncate">
+              <template x-if="r.match_value"><span class="font-mono" x-text="r.match_value"></span></template>
+              <template x-if="!r.match_value"><span>{{ t('learn.rule_example_only') }}</span></template>
+            </div>
+            <div class="text-[11px] text-ink-500" x-show="r.hits"
+                 x-text="tr('learn.rule_hits', { count: r.hits })"></div>
+          </div>
+          <button type="button" class="btn-ghost text-xs shrink-0"
+                  @click="weg(r.id)">{{ t('learn.rule_delete') }}</button>
+        </div>
+      </template>
+    </div>
+    <p x-show="fehler" x-cloak class="text-xs text-rose-300 mt-2" x-text="fehler"></p>
+  </section>
+
   <section class="card p-6" id="finance" x-data="financeSettings()">
     <h2 class="text-lg font-semibold mb-1">{{ t('settings.finance.heading') }}</h2>
     <p class="text-ink-400 text-sm mb-5">{{ t('settings.finance.subtitle') }}</p>
@@ -1085,6 +1122,35 @@
 </div>
 
 <script>
+function gelernteRegeln() {
+  return {
+    regeln: [], mitMerkmal: 0, nurBeispiel: 0, geladen: false, fehler: '',
+    async laden() {
+      try {
+        const r = await fetch('/api/doc-rules');
+        if (!r.ok) { this.geladen = true; return; }
+        const d = await r.json();
+        this.regeln = d.rules || [];
+        this.mitMerkmal = d.mit_merkmal || 0;
+        this.nurBeispiel = d.nur_beispiel || 0;
+      } catch (e) { this.fehler = String(e); }
+      finally { this.geladen = true; }
+    },
+    async weg(id) {
+      if (!confirm(tr('learn.rule_delete_confirm'))) return;
+      this.fehler = '';
+      try {
+        const r = await fetch('/api/doc-rules/' + id, { method: 'DELETE' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        this.regeln = this.regeln.filter((x) => x.id !== id);
+        this.mitMerkmal = this.regeln.filter((x) => x.match_value).length;
+        this.nurBeispiel = this.regeln.length - this.mitMerkmal;
+      } catch (e) { this.fehler = e.message || String(e); }
+    },
+  };
+}
+
 function settingsPage() {
   return {
     storedKey: '{{ stored_secrets.get(current_provider + "_api_key", "") }}',

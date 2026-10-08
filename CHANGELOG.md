@@ -7,6 +7,57 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.1.0] - 2026-10-08
+
+### Added
+
+🔑 **DocuSort learns from what you file by hand.** A machine-generated
+report that looks the same every day used to land in review every day. Filing
+it by hand changed exactly that one row — tomorrow the same report arrived
+and was guessed at again.
+
+Ticking **"recognise this by itself next time"** when saving a document stores
+the filing. From then on, a document carrying the same marker is filed
+straight away, **without asking the model at all**: instantly, at no cost, and
+tomorrow the same as today. The confidence is 1.0, and that is not flattery —
+a person decided this, a model did not estimate it.
+
+What was learned is also shown to the model. The examples in its system prompt
+were invented and fixed in the source; now the archive's own corrections stand
+beside them, and they outrank the invented ones. They are rebuilt only when
+something is actually learned, never per document — so the provider's prompt
+cache goes cold once per lesson, not once per file.
+
+### How it is kept safe
+
+The same idea existed for bookings once, with a **pre-ticked** box under the
+table. The result was 305 learned rules and 2738 recoloured bookings, one of
+them matching 670 bookings of a payment service — reported by someone who
+wanted to change a single row. Every property below follows from that:
+
+- **Nothing happens without the tick.** No rule, no example. Unticked, saving
+  does exactly what it says: this one document.
+- **Nothing works retroactively.** A new rule never touches a filed document.
+- **The reach is shown before the rule exists** — how many documents in the
+  archive the marker would match right now, measured, not guessed, with
+  alternatives beside it. Back then the number only became visible after the
+  damage.
+- **The marker is proposed, not chosen.** The suggestion comes from the
+  document's own first lines, skipping anything with a digit in it — a marker
+  containing yesterday's date matches exactly once. It sits in a field and can
+  be edited.
+- **A marker under four characters never becomes a hard rule**, only an
+  example for the model. Two characters match everything.
+- **Learned filings are listed in the settings and can be taken back.** Taking
+  one back removes its effect on future documents and nothing else: the
+  documents it already filed stay where they are, because a person decided
+  they belong there.
+
+`pruefstaende/probe_lernen.py`: **45 green, 0 red**, including that the box is
+not pre-ticked, that a sibling document is untouched after learning, and that
+a change of category list does not silently wipe what was learned.
+
+
 ## [1.0.3] - 2026-10-08
 
 ### Fixed
