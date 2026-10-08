@@ -539,7 +539,7 @@
   "finance.stmt.gap_csv": "coperta dall'export CSV",
   "finance.stmt.gap_open": "estratto mancante — da aggiungere",
   "finance.stmt.gap_unack_action": "cercarlo di nuovo",
-  "finance.stmt.hint": "Gli estratti Sparkasse nella libreria vengono importati automaticamente nelle finanze — senza IA, verificati con il saldo iniziale e finale di ogni estratto. Un estratto i cui saldi non tornano non viene importato. Un buco nella catena degli estratti resta visibile con una riga «Lacuna: estratto mancante» con la differenza di saldo, finché arriva l'estratto o un export CSV.",
+  "finance.stmt.hint": "Gli estratti Sparkasse e ING nella libreria vengono importati automaticamente nelle finanze — senza IA, verificati con il saldo iniziale e finale di ogni estratto. Un estratto i cui saldi non tornano non viene importato. Un buco nella catena degli estratti resta visibile con una riga «Lacuna: estratto mancante» con la differenza di saldo, finché arriva l'estratto o un export CSV.",
   "finance.stmt.new": "movimenti nuovi",
   "finance.stmt.read": "estratti letti",
   "finance.stmt.rescan": "Cerca estratti nella libreria",

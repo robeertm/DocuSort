@@ -1,4 +1,4 @@
-"""Kontoauszug-PDF → Buchungen (Sparkasse), ohne LLM.
+"""Kontoauszug-PDF → Buchungen (Sparkasse und ING), ohne LLM.
 
 Ein Sparkassen-Kontoauszug ist eine Tabelle: Kopfzeile je Buchung
 (Datum [Wertstellung] Buchungsart), darunter Text (Empfänger + Verwendungs-
@@ -156,7 +156,8 @@ class ParsedStatement:
     @property
     def is_savings(self) -> bool:
         k = self.account_kind.lower()
-        return "tagesgeld" in k or "spar" in k or "zinsaktiv" in k
+        return ("tagesgeld" in k or "spar" in k or "zinsaktiv" in k
+                or "extra" in k or "wachstums" in k)
 
 
 def looks_like_statement(text: str) -> bool:
@@ -174,9 +175,11 @@ def looks_like_statement(text: str) -> bool:
     """
     if not text or "Kontoauszug" not in text:
         return False
-    if not _RE_ACCOUNT.search(text):
-        return False
-    return bool(_RE_OPENING.search(text) or _RE_CLOSING.search(text))
+    if _RE_ACCOUNT.search(text):
+        return bool(_RE_OPENING.search(text) or _RE_CLOSING.search(text))
+    # Zweite Vorlage: ING. Erkannt am Briefkopf samt Kontozeile, NICHT daran,
+    # dass irgendwo „ING" steht — siehe `_sieht_wie_ing_aus`.
+    return _sieht_wie_ing_aus(text)
 
 
 def _amount(num: str, sign: str | None) -> float:
@@ -317,9 +320,18 @@ def _split_name(detail_lines: list[str], kind: str, known: "_Known | tuple[str, 
 
 
 def parse_statement_text(text: str, *, known_names: tuple[str, ...] = ()) -> ParsedStatement | None:
-    """Parst den Text eines Sparkassen-Kontoauszugs. None, wenn es keiner ist."""
+    """Parst den Text eines Kontoauszugs. None, wenn es keiner ist.
+
+    Zwei Vorlagen: Sparkasse (Betrag in eigener Zeile) und ING (Betrag am
+    Ende der Buchungszeile). Welche es ist, entscheidet der Briefkopf.
+    """
     if not looks_like_statement(text):
         return None
+    # Die Sparkassen-Kontozeile ist spezifisch; sie entscheidet zuerst. Ein
+    # Sparkassen-Auszug, der eine Ueberweisung an ein ING-Konto zeigt, bleibt
+    # damit ein Sparkassen-Auszug.
+    if not _RE_ACCOUNT.search(text) and _sieht_wie_ing_aus(text):
+        return _parse_ing(text)
     st = ParsedStatement()
     m = _RE_ACCOUNT.search(text)
     if m:
@@ -444,6 +456,364 @@ def parse_statement_text(text: str, *, known_names: tuple[str, ...] = ()) -> Par
 
 
 # ---------------------------------------------------------------------------
+# ING: die zweite Vorlage
+#
+# Gemessen an ECHTEN ING-Auszuegen (anonymisierte Textabzuege oeffentlicher
+# Pruefdateien). Es wurde nur die VORLAGE daraus gelesen, keine Daten
+# uebernommen; die Pruefdateien hier sind eigene. Drei Bauformen:
+#
+#   Girokonto / Extra-Konto
+#     ING-DiBa AG - 60628 Frankfurt am Main
+#     Datum 28.02.2020
+#     Herrn Auszugsnummer 1                     <- Anschrift UND Kopfdaten
+#     Max Mustermann Alter Saldo 0,00 Euro         stehen in EINER Zeile
+#     12345 Musterstadt Neuer Saldo 956,01 Euro
+#     IBAN DE36 5001 0517 1234 1234 12
+#     Girokonto Nummer 1234123412
+#     Kontoauszug Februar 2020                  <- Monatsname, nicht "2/2020"
+#     Buchung Buchung / Verwendungszweck Betrag (EUR)
+#     Valuta
+#     12.02.2020 Gutschrift Max Mustermann 1.000,00   <- Betrag am ENDE
+#     12.02.2020 xyz                                  <- Valuta + Zweck
+#     Mandat: 012345                                  <- weitere Zweckzeile
+#     Neuer Saldo 956,01                        <- Ende der Tabelle
+#
+#   VL-Sparen (Jahresauszug)
+#     Jahres-Kontoauszug 2020
+#     Valuta Vorgang Euro
+#     IBAN DE93 ... / Kontonummer 4113746412
+#     alter Saldo 0,00
+#     13.10.2020 Gutschrift-VWL 40,00           <- EINE Zeile je Buchung
+#     31.12.2020 neuer Saldo 120,02
+#
+# Der Unterschied zur Sparkasse ist nicht kosmetisch: dort steht der Betrag
+# ALLEIN in einer eigenen Zeile, hier am ENDE der Buchungszeile. Ein Leser
+# fuer die eine Vorlage findet in der anderen null Buchungen.
+#
+# 🔴 Die gemessenen Textabzuege stammen aus einem ANDEREN PDF-Leser als dem
+#    von DocuSort (PDFBox gegen pypdf). Wie die Spalten zusammenfallen, kann
+#    sich unterscheiden — darum wird hier NIRGENDS auf Spaltenabstaende
+#    gebaut, sondern nur auf Wortmarken, und die Kopfmarken werden mit
+#    `search` IRGENDWO in der Zeile gesucht: nachweislich stehen sie hinter
+#    der Anschrift, und wo genau, entscheidet der PDF-Leser.
+_RE_ING_HAUS = re.compile(r"ING-DiBa\s+AG", re.I)
+_RE_ING_KONTO = re.compile(
+    r"^\s*((?:Giro|Extra-|Extra|VL-|Wachstums|Direkt-|Depot|Sparbrief)[A-Za-zÄÖÜäöü-]*)\s+Nummer\s+([0-9A-Za-z]{6,14})",
+    re.M,
+)
+_RE_ING_VL_KONTO = re.compile(r"Kontonummer\s+(\d{6,14})")
+_RE_ING_NR = re.compile(r"Auszugsnummer\s+(\d{1,3})")
+_RE_ING_ALT = re.compile(rf"[Aa]lter\s+Saldo\s+({_AMT})")
+_RE_ING_NEU = re.compile(rf"[Nn]euer\s+Saldo\s+({_AMT})")
+_RE_ING_IBAN = re.compile(r"IBAN\s+([A-Za-z]{2}\d{2}(?:\s?[0-9A-Za-z]{4}){4}\s?[0-9A-Za-z]{0,4})")
+_RE_ING_DATUM = re.compile(rf"^\s*Datum\s+({_DATE})\s*$", re.M)
+_RE_ING_MONAT = re.compile(r"Kontoauszug\s+(?:([A-ZÄÖÜ][a-zäöü]+)\s+)?(\d{4})")
+_RE_ING_VL_SALDO = re.compile(rf"^\s*({_DATE})\s+neuer\s+Saldo\s+({_AMT})\s*$", re.M | re.I)
+_RE_ING_VL_SPARTE = re.compile(r"^\s*(VL-Sparen|Sparbrief|Wachstumssparen)\b", re.M)
+
+# Eine Buchungszeile: Datum vorn, Betrag HINTEN, dazwischen Art + Gegenseite.
+_RE_ING_ROW = re.compile(rf"^({_DATE})\s+(\S.*?)\s+({_AMT})$")
+# Die Valuta-Zeile: Datum vorn, KEIN Betrag hinten (sonst waere es die
+# naechste Buchung — genau daran unterscheiden sich die beiden Bauformen).
+_RE_ING_VAL = re.compile(rf"^({_DATE})\s*(.*)$")
+# Die Zinstabelle des Abschlusses sieht einer Buchung zum Verwechseln
+# aehnlich: „16.12.2023 bis 31.12.2023 3,750% ... 0,01". Sie ist keine.
+_RE_ING_ZINSTABELLE = re.compile(rf"^\s*{_DATE}\s+bis\s+{_DATE}\b")
+
+# Buchungsarten, GEZAEHLT in echten Auszuegen (nicht geraten). Laengster
+# Treffer gewinnt, damit „Gutschrift/Dauerauftrag" nicht als „Gutschrift"
+# gelesen wird und der Rest als Name des Empfaengers.
+_ING_ARTEN: tuple[str, ...] = (
+    "Gutschrift/Dauerauftrag", "Dauerauftrag/Terminueberw.", "Dauerauftrag/Terminüberw.",
+    "Gutschrift-VWL", "Lastschrift-Einzug", "Echtzeitüberweisung", "Echtzeitueberweisung",
+    "Kapitalertragsteuer", "Solidaritätszuschlag", "Wertpapierverkauf", "Wertpapierkauf",
+    "Zins/Dividende", "Zinsgutschrift", "Gehalt/Rente", "Kirchensteuer", "Rückbuchung",
+    "Lastschrift", "Ueberweisung", "Überweisung", "Dauerauftrag", "Zinsertrag",
+    "Gutschrift", "Abbuchung", "Abschluss", "Entgelt", "Bezuege", "Bezüge",
+    "Retouren", "Retoure", "Storno",
+)
+_ING_ARTEN_SORT = tuple(sorted(_ING_ARTEN, key=len, reverse=True))
+
+# ING schreibt Umlaute in aelteren Auszuegen als „ue"/„oe" — die Sparkassen-
+# Zuordnung oben kennt nur „überw". Darum zuerst diese Nadeln, dann die
+# gemeinsame Karte.
+_ING_TYP_EXTRA: tuple[tuple[str, str, str], ...] = (
+    ("echtzeitueberweisung", "ueberweisung", "ECHTZEITUEBERWEISUNG"),
+    ("ueberweisung", "ueberweisung", "UEBERWEISUNG"),
+    ("zinsertrag", "zinsen", "ZINSERTRAG"),
+    ("zinsgutschrift", "zinsen", "ZINSGUTSCHRIFT"),
+    ("zins/dividende", "zinsen", "ZINSEN DIVIDENDE"),
+    ("bezuege", "gehalt", "LOHN GEHALT"),
+    ("bezüge", "gehalt", "LOHN GEHALT"),
+    ("gutschrift-vwl", "ueberweisung", "GUTSCHRIFT VWL"),
+    ("wertpapier", "sonstiges", "WERTPAPIER"),
+    ("kapitalertragsteuer", "gebuehr", "KAPITALERTRAGSTEUER"),
+    ("solidaritätszuschlag", "gebuehr", "SOLIDARITAETSZUSCHLAG"),
+    ("kirchensteuer", "gebuehr", "KIRCHENSTEUER"),
+    ("abbuchung", "lastschrift", "ABBUCHUNG"),
+    ("retour", "sonstiges", "RETOURE"),
+)
+
+_ING_MONATE = {
+    "januar": 1, "februar": 2, "märz": 3, "maerz": 3, "april": 4, "mai": 5, "juni": 6,
+    "juli": 7, "august": 8, "september": 9, "oktober": 10, "november": 11, "dezember": 12,
+}
+
+# Seitenmoebel innerhalb der Tabelle: ING wiederholt Kontozeile, Spaltenkopf
+# und Seitenzahl auf JEDER Seite. Keine davon beendet die Tabelle.
+_ING_MOEBEL = re.compile(
+    r"^\s*(?:Valuta\s*$|Valuta\s+Vorgang|Buchung\s+Buchung\s*/|Seite\s+\d+\s+von\s+\d+|ING-DiBa|IBAN\b|BIC\b|"
+    r"Datum\s+\d|Auszugsnummer|Eingeräumte\s+Kontoüberziehung|[Aa]lter\s+Saldo|Herrn\b|Frau\b|"
+    r"Kontoauszug\b|Jahres-Kontoauszug\b|34[A-Z]{2}[A-Z0-9]+_T\s*$|[-·•]\s*$)"
+)
+# Hier ist die Tabelle zu Ende — danach kommen nur noch Abschluss, Hinweise
+# und der Briefkasten.
+_ING_ENDE = re.compile(
+    r"^\s*(?:Neuer\s+Saldo\s+-?\d|Kunden-Information|Abschluss\s+für\s+Konto|Bitte\s+beachten\s+Sie|"
+    r"Wichtige\s+Informationen|Vorliegender\s+Freistellungsauftrag)"
+)
+
+
+def _sieht_wie_ing_aus(text: str) -> bool:
+    """Ist das ein ING-Auszug — und nicht bloss einer, in dem ING vorkommt?
+
+    🔴 DIESE UNTERSCHEIDUNG IST DER KERN. Im Archiv standen neun Auszuege
+    mit „INGDDEFF" darin; alle neun waren Auszuege einer ANDEREN Bank, und
+    das Kuerzel war die GEGENSEITE einer Ueberweisung. Ein Bankkuerzel im
+    Text benennt den Empfaenger, nicht den Absender. Darum zaehlt hier nur
+    der BRIEFKOPF („ING-DiBa AG") zusammen mit einer ING-Kontozeile.
+    """
+    if not text or not _RE_ING_HAUS.search(text):
+        return False
+    if _RE_ING_KONTO.search(text):
+        return True
+    return bool(_RE_ING_VL_SPARTE.search(text) and _RE_ING_VL_KONTO.search(text))
+
+
+def _ing_typ(art: str) -> tuple[str, str]:
+    a = art.lower()
+    for nadel, tx_type, text in _ING_TYP_EXTRA:
+        if nadel in a:
+            return tx_type, text
+    return _map_type(art)
+
+
+def _ing_art_trennen(rest: str) -> tuple[str, str]:
+    """„Gutschrift/Dauerauftrag Max Mustermann" → (Art, Gegenseite)."""
+    r = _squeeze(rest)
+    for art in _ING_ARTEN_SORT:
+        if r.lower().startswith(art.lower()):
+            return art, r[len(art):].strip(" -–")
+    # Unbekannte Art: das erste Wort ist die Art, der Rest die Gegenseite.
+    # Lieber eine Buchung mit unscharfem Namen als gar keine.
+    teile = r.split(" ", 1)
+    return teile[0], (teile[1] if len(teile) > 1 else "")
+
+
+def _parse_ing(text: str) -> ParsedStatement:
+    st = ParsedStatement(bank="ING", bank_name="ING-DiBa AG")
+
+    konten = {m.group(2) for m in _RE_ING_KONTO.finditer(text)}
+    arten = [_squeeze(m.group(1)) for m in _RE_ING_KONTO.finditer(text)]
+    if arten:
+        st.account_kind = arten[0]
+        st.account_no = sorted(konten)[0]
+    elif (vm := _RE_ING_VL_KONTO.search(text)):
+        sp = _RE_ING_VL_SPARTE.search(text)
+        st.account_kind = _squeeze(sp.group(1)) if sp else "VL-Sparen"
+        st.account_no = vm.group(1)
+        konten = {vm.group(1)}
+    if (im := _RE_ING_IBAN.search(text)):
+        st.account_iban = normalise_iban(im.group(1))
+
+    # 🔴 EIN PDF, MEHRERE KONTEN. Gemessen: ein Auszug kann fuenf Abschnitte
+    #    mit verschiedenen Kontonummern tragen. Welche Buchung zu welchem
+    #    Konto gehoert, laesst sich aus dem flachen Text nicht sicher sagen —
+    #    und eine falsch zugeordnete Buchung ist schlimmer als eine fehlende.
+    if len(konten) > 1:
+        st.warnings.append(
+            "mehrere Konten in einer Datei (%s) — nicht zuzuordnen" % ", ".join(sorted(konten))
+        )
+        return st
+
+    if (nm := _RE_ING_NR.search(text)):
+        nummer = nm.group(1)
+    else:
+        nummer = ""
+    jahr = monat = 0
+    if (mm := _RE_ING_MONAT.search(text)):
+        jahr = int(mm.group(2))
+        monat = _ING_MONATE.get((mm.group(1) or "").lower(), 0)
+    if jahr and nummer:
+        st.statement_no = f"{int(nummer)}/{jahr}"
+
+    if (am := _RE_ING_ALT.search(text)):
+        st.opening_balance = _amount(am.group(1), None)
+    if (nm2 := _RE_ING_NEU.search(text)):
+        st.closing_balance = _amount(nm2.group(1), None)
+
+    if (dm := _RE_ING_DATUM.search(text)):
+        st.closing_date = normalise_date(dm.group(1))
+    elif (vs := _RE_ING_VL_SALDO.search(text)):
+        st.closing_date = normalise_date(vs.group(1))
+    # Der Anfangssaldo traegt bei ING KEIN Datum. Der Auszug nennt aber
+    # seinen Zeitraum („Kontoauszug Februar 2020", „Kontoauszug 2023"), und
+    # genau der wird hier gesetzt — nicht geraten, sondern abgelesen.
+    if jahr:
+        st.opening_date = f"{jahr}-{monat:02d}-01" if monat else f"{jahr}-01-01"
+        if not st.closing_date:
+            st.closing_date = f"{jahr}-12-31"
+
+    _ing_zeilen_lesen(text, st)
+
+    # Der Jahresauszug trägt oben „Datum 30.12." und bucht die Zinsen am
+    # 31.12. — ein Zeitraum, der vor seiner letzten Buchung endet, ist
+    # falsch (die Doppelprüfung und die Lückenkarte lesen ihn).
+    if st.rows:
+        letzte = max(r.booking_date for r in st.rows)
+        if st.closing_date and letzte > st.closing_date:
+            st.closing_date = letzte
+
+    if st.balanced is False:
+        st.warnings.append(
+            f"Salden passen nicht: {st.opening_balance:.2f} + {st.total:.2f} ≠ {st.closing_balance:.2f} "
+            f"(Differenz {round(st.opening_balance + st.total - st.closing_balance, 2):+.2f})"
+        )
+    return st
+
+
+def _ing_tabellenzeilen(text: str) -> list[str]:
+    """Die Zeilen zwischen Spaltenkopf und Abschluss — ohne Seitenmöbel."""
+    zeilen: list[str] = []
+    in_tabelle = False
+    for roh in text.splitlines():
+        zeile = roh.strip()
+        if not zeile:
+            continue
+        if not in_tabelle:
+            if "Buchung / Verwendungszweck" in zeile or re.match(r"^\s*Valuta\s+Vorgang\b", zeile):
+                in_tabelle = True
+            continue
+        if _ING_ENDE.match(zeile) or _RE_ING_VL_SALDO.match(zeile):
+            break
+        if _RE_ING_ZINSTABELLE.match(zeile) or _ING_MOEBEL.match(zeile):
+            continue
+        zeilen.append(zeile)
+    return zeilen
+
+
+def _ing_ist_art(rest: str) -> bool:
+    r = rest.strip().lower()
+    return any(r.startswith(a.lower()) for a in _ING_ARTEN_SORT)
+
+
+def _ing_zeilen_lesen(text: str, st: ParsedStatement) -> None:
+    """Buchungen aus der Tabelle lesen — in BEIDER Bauform der Betragsspalte.
+
+    🔴 WARUM ZWEI BAUFORMEN. Der Betrag steht in den gemessenen ING-Texten am
+    ENDE der Buchungszeile. Diese Texte sind aber mit einem anderen PDF-Leser
+    gewonnen als dem, mit dem DocuSort liest, und derselbe DocuSort-Leser
+    setzt bei der Sparkasse den Betrag ALLEIN in eine eigene Zeile. Welche
+    der beiden Bauformen bei einer echten ING-Datei herauskommt, ist nicht
+    gemessen — also wird sie nicht geraten, sondern an der Datei ABGELESEN.
+
+    🔑 Beide Wege sind ungefährlich, weil der Beweis dahinter unverändert
+    streng bleibt: Anfangssaldo + Summe muss den Endsaldo ergeben. Eine
+    falsch zusammengesetzte Buchung lässt die Salden nicht aufgehen, und
+    dann wird der Auszug NICHT importiert, sondern gemeldet.
+    """
+    zeilen = _ing_tabellenzeilen(text)
+    offen: dict | None = None
+
+    def _schliessen() -> None:
+        nonlocal offen
+        if offen is None:
+            return
+        if offen.get("betrag") is None:
+            st.warnings.append("Buchung ohne Betrag: %s %s" % (offen["datum"], offen["rest"][:40]))
+            offen = None
+            return
+        art, gegen = _ing_art_trennen(offen["rest"])
+        tx_type, booking_text = _ing_typ(art)
+        zweck = _squeeze(" ".join(offen["zweck"]))
+        iban = ""
+        if (m := _RE_IBAN_IN_TEXT.search(zweck)):
+            iban = normalise_iban(m.group(1))
+        mandat = re.search(r"Mandat:\s*(\S+)", zweck)
+        glaeub = re.search(r"Gläubiger-ID:\s*(\S+)", zweck)
+        refer = re.search(r"Referenz:\s*(\S+)", zweck)
+        st.rows.append(ImportRow(
+            account_iban=st.account_iban,
+            booking_date=offen["datum"],
+            value_date=offen["valuta"] or offen["datum"],
+            booking_text=booking_text,
+            purpose=zweck,
+            amount=offen["betrag"],
+            currency="EUR",
+            counterparty=_squeeze(gegen),
+            counterparty_iban=iban,
+            sammlerreferenz=refer.group(1) if refer else "",
+            mandatsreferenz=mandat.group(1) if mandat else "",
+            glaeubiger_id=glaeub.group(1) if glaeub else "",
+            info=f"Kontoauszug {st.statement_no}".strip(),
+            tx_type=tx_type,
+        ))
+        offen = None
+
+    def _oeffnen(datum: str, rest: str, betrag: float | None) -> None:
+        nonlocal offen
+        _schliessen()
+        offen = {"datum": normalise_date(datum), "valuta": "", "rest": rest,
+                 "betrag": betrag, "zweck": []}
+
+    # Die Bauform wird GEZÄHLT, nicht angenommen.
+    betrag_hinten = sum(1 for z in zeilen if _RE_ING_ROW.match(z))
+
+    if betrag_hinten:
+        valuta_gelesen = False
+        for zeile in zeilen:
+            mb = _RE_ING_ROW.match(zeile)
+            mv = _RE_ING_VAL.match(zeile)
+            # Eine Zeile mit Datum UND Betrag am Ende ist immer eine Buchung;
+            # eine Zeile mit Datum OHNE Betrag ist die Valuta der offenen.
+            if offen is not None and not valuta_gelesen and mv and not mb:
+                offen["valuta"] = normalise_date(mv.group(1))
+                if mv.group(2).strip():
+                    offen["zweck"].append(mv.group(2).strip())
+                valuta_gelesen = True
+                continue
+            if mb:
+                _oeffnen(mb.group(1), mb.group(2), _amount(mb.group(3), None))
+                valuta_gelesen = False
+                continue
+            if offen is not None:
+                offen["zweck"].append(zeile)
+    else:
+        # Betrag in eigener Zeile. Eine Datumszeile eröffnet nur dann eine
+        # Buchung, wenn dahinter eine BUCHUNGSART steht (gezähltes Vokabular
+        # echter Auszüge) — sonst ist sie die Valuta-Zeile der offenen.
+        for zeile in zeilen:
+            ma = _RE_AMOUNT_LINE.match(zeile)
+            if ma and offen is not None and offen.get("betrag") is None:
+                offen["betrag"] = _amount(ma.group(1), ma.group(2))
+                _schliessen()
+                continue
+            mv = _RE_ING_VAL.match(zeile)
+            if mv:
+                rest = mv.group(2).strip()
+                if offen is not None and not offen["valuta"] and not _ing_ist_art(rest):
+                    offen["valuta"] = normalise_date(mv.group(1))
+                    if rest:
+                        offen["zweck"].append(rest)
+                    continue
+                _oeffnen(mv.group(1), rest, None)
+                continue
+            if offen is not None:
+                offen["zweck"].append(zeile)
+    _schliessen()
+
+
+# ---------------------------------------------------------------------------
 # Import: Text → Buchungen in der Datenbank
 # ---------------------------------------------------------------------------
 
@@ -481,6 +851,10 @@ def import_statement_text(db, text: str, *, doc_id: int, file_hash: str, file_la
     if st is None:
         rep.errors.append("kein Kontoauszug erkannt")
         return rep, None
+    # 🔴 HIER STAND „Sparkasse" FEST. Mit nur einer Vorlage fiel das nicht
+    #    auf; ein ING-Auszug waere unter dem falschen Banknamen gelandet —
+    #     `import_rows` legt das Konto mit `report.bank` an.
+    rep.bank = st.bank
     rep.rows_seen = len(st.rows)
     if not st.account_iban:
         rep.errors.append("Kontoauszug ohne IBAN")
@@ -527,7 +901,7 @@ def import_statement_text(db, text: str, *, doc_id: int, file_hash: str, file_la
         # als Auszug: er belegt den Kontostand für die Lückenprüfung.
         from .csv_import import _ensure_pdf_statement
         from .dates import iban_hash
-        account_id = db.upsert_account(bank_name="Sparkasse", iban=st.account_iban, iban_last4=st.account_iban[-4:],
+        account_id = db.upsert_account(bank_name=st.bank, iban=st.account_iban, iban_last4=st.account_iban[-4:],
                                        iban_hash=iban_hash(st.account_iban), account_holder=st.holder)
         _ensure_pdf_statement(db, account_id, meta)
         rep.accounts_touched.append(st.account_iban)
@@ -637,7 +1011,16 @@ def tidy_statement_documents(db, settings, *, log=None, only_doc_ids: set[int] |
                 sender = (st.bank_name if st else "") or ""
             except Exception:  # noqa: BLE001
                 sender = ""
-            sender = sender or (r["sender"] if "sparkasse" in (r["sender"] or "").lower() else "") or r["bank_name"] or "Sparkasse"
+            # 🔴 HIER STAND „Sparkasse" ALS LETZTE ZUFLUCHT — und der vom
+            #    Modell gelesene Absender wurde nur behalten, wenn er
+            #    „Sparkasse" enthielt. Mit einer zweiten Bank wird daraus
+            #    ein falscher ORDNERNAME auf der Platte. Jetzt zaehlt,
+            #    ob ueberhaupt eine Bank genannt ist.
+            roh = (r["sender"] or "").strip()
+            nennt_bank = bool(re.search(
+                r"sparkasse|ing-diba|\bing\b|bank|volksbank|raiffeisen|dkb|comdirect|postbank|n26",
+                roh, re.I))
+            sender = sender or (roh if nennt_bank else "") or r["bank_name"] or "Bank"
             extra["bank_name"] = sender
             with db._lock:
                 db._conn.execute("UPDATE statements SET extra_json = ? WHERE id = ?", (_json.dumps(extra), int(r["stmt_id"])))

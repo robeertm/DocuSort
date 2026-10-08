@@ -539,7 +539,7 @@
   "finance.stmt.gap_csv": "couverte par l'export CSV",
   "finance.stmt.gap_open": "relevé manquant — à fournir",
   "finance.stmt.gap_unack_action": "le rechercher de nouveau",
-  "finance.stmt.hint": "Les relevés Sparkasse de la bibliothèque sont intégrés automatiquement aux finances — sans IA, vérifiés au solde initial et final de chaque relevé. Un relevé dont les soldes ne concordent pas n'est pas importé. Un trou dans la chaîne des relevés reste visible par une ligne « Lacune : relevé manquant » portant la différence de solde, jusqu'à l'arrivée du relevé ou d'un export CSV.",
+  "finance.stmt.hint": "Les relevés Sparkasse et ING de la bibliothèque sont intégrés automatiquement aux finances — sans IA, vérifiés au solde initial et final de chaque relevé. Un relevé dont les soldes ne concordent pas n'est pas importé. Un trou dans la chaîne des relevés reste visible par une ligne « Lacune : relevé manquant » portant la différence de solde, jusqu'à l'arrivée du relevé ou d'un export CSV.",
   "finance.stmt.new": "nouvelles écritures",
   "finance.stmt.read": "relevés lus",
   "finance.stmt.rescan": "Chercher des relevés dans la bibliothèque",

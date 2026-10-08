@@ -539,7 +539,7 @@
   "finance.stmt.gap_csv": "cubierto por export CSV",
   "finance.stmt.gap_open": "falta el extracto — por favor añadir",
   "finance.stmt.gap_unack_action": "volver a buscarlo",
-  "finance.stmt.hint": "Los extractos de la Sparkasse en la biblioteca se incorporan automáticamente a las finanzas — sin IA, comprobados con el saldo inicial y final de cada extracto. Un extracto cuyos saldos no cuadran no se importa. Un hueco en la cadena de extractos queda visible con una fila «Hueco: falta extracto» con la diferencia de saldo hasta que llegue el extracto o un export CSV.",
+  "finance.stmt.hint": "Los extractos de la Sparkasse y de ING en la biblioteca se incorporan automáticamente a las finanzas — sin IA, comprobados con el saldo inicial y final de cada extracto. Un extracto cuyos saldos no cuadran no se importa. Un hueco en la cadena de extractos queda visible con una fila «Hueco: falta extracto» con la diferencia de saldo hasta que llegue el extracto o un export CSV.",
   "finance.stmt.new": "apuntes nuevos",
   "finance.stmt.read": "extractos leídos",
   "finance.stmt.rescan": "Buscar extractos en la biblioteca",

@@ -7,6 +7,59 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.2.0] - 2026-10-08
+
+### Added
+
+🔑 **The statement reader understands a second template: ING.** Until now it
+knew exactly one bank. A statement from any other bank produced zero bookings
+— reported on the document page since 1.0.0, but never read. Three ING layouts
+are now read: **Girokonto**, **Extra-Konto** (savings) and the **VL-Sparen**
+annual statement.
+
+The difference between the two templates is not cosmetic. A Sparkasse
+statement prints the amount **alone on its own line**; ING prints it at the
+**end of the booking line**, with the value date and the reference on the line
+below. A reader built for one template finds nothing in the other.
+
+🔑 **Both shapes of the amount column are read, and which one applies is
+measured, not assumed.** The ING layout was measured from eleven anonymised
+text extractions of real statements — but those were produced by a different
+PDF text extractor than the one DocuSort uses, and that same extractor puts
+Sparkasse amounts on their own line. Rather than guess which shape a real ING
+file yields, the reader counts both and takes the one the file actually shows.
+Either way the proof stays strict: opening balance + sum of bookings must equal
+the closing balance, or the statement is not imported.
+
+### Fixed
+
+- 🔴 **The bank name was hard-wired to “Sparkasse”** in the statement import —
+  for accounts, for the import report and as the last-resort sender when a
+  statement PDF could not be re-read. With only one template that never showed;
+  with a second, an ING statement would have been filed under the wrong bank,
+  and the sender becomes a **folder name on disk**.
+- 🔴 **A statement whose period ended before its own last booking.** The ING
+  annual statement is dated 30 December and books the interest on 31 December.
+  The gap detection and the duplicate check read that period.
+- An ING **Extra-Konto** is now recognised as a savings account, so money put
+  aside is not counted as spending.
+- Two things that look exactly like a booking are not one: the interest table
+  of the closing statement (`16.12.2023 bis 31.12.2023 … 0,01`) and the
+  `neuer Saldo` line of the annual statement.
+
+### Safety
+
+- **Several accounts in one file** are refused with a named reason instead of
+  being distributed by guesswork — measured: a single ING PDF can carry five
+  account sections. A booking filed against the wrong account is worse than a
+  booking that is missing.
+- 🔴 **A bank's code in a statement names the recipient, not the sender.** Nine
+  documents in a real archive contained `INGDDEFF`; all nine were statements of
+  a *different* bank, and the code sat behind `BIC / IBAN:` in a transfer.
+  Detection therefore reads the **letterhead**, and a counter-test in the test
+  bench keeps it that way.
+- The hint on the finance page now names both banks, in all five languages.
+
 ## [1.1.0] - 2026-10-08
 
 ### Added
