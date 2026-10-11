@@ -383,6 +383,83 @@ def stand(ziele: list[Any] | None = None) -> dict[str, Any]:
     return raus
 
 
+# --------------------------------------------------------------- Die Ampel
+# 🔑 EINE FRAGE, DREI ANTWORTEN. Gewuenscht war: sobald irgendeine KI rechnen
+# kann, ist die Seite gruen; rechnet nur die langsame, gelb mit Hinweis.
+#
+# Vorher meldete die Startseite rot „nicht erreichbar", sobald der GEWAEHLTE
+# Rechner fehlte — waehrend die NAS daneben bereitstand und der Verteiler ihr
+# jedes Dokument gegeben haette. Eine wahre Aussage ueber einen Rechner,
+# gelesen als Ausfall der ganzen KI.
+#
+#   gruen  — es kann gerechnet werden, und zwar so schnell, wie es hier geht
+#   gelb   — es kann gerechnet werden, aber nur auf einem LANGSAMEN Rechner,
+#            weil ein schnellerer gerade fehlt
+#   rot    — kein einziger Rechenort ist bereit
+#   offen  — nicht nachgesehen (Wolke): weder gruen noch rot
+#
+# 🔴 „Langsam" ist ein VERGLEICH, keine feste Zahl. Wer nur die NAS hat, hat
+#    nichts Schnelleres zu vermissen — das ist gruen. Gelb heisst: ein
+#    Rechner FEHLT, der es besser koennte.
+LANGSAM_FAKTOR = 3.0
+# Ohne Vergleich (der fehlende Rechner wurde nie gemessen) gilt als langsam,
+# was laenger braucht, als jemand vor einer Seite wartet.
+LANGSAM_AB_S = 120.0
+
+
+def ampel(orte: dict[str, dict[str, Any]], bevorzugt: str = "") -> dict[str, Any]:
+    """Wie steht es um die KI als Ganzes? `orte` wie in der Startseiten-
+    Abfrage: je Schluessel `zustand`, `s_pro_dokument`, `label`.
+
+    🔴 Nie werfen, nie eine Adresse zurueckgeben — diese Antwort sieht jedes
+    angemeldete Konto.
+    """
+    orte = orte or {}
+    if not orte:
+        return {"farbe": "offen", "ort": "", "label": "", "fehlt": [],
+                "s_pro_dokument": None}
+
+    def s_von(k: str) -> float | None:
+        v = (orte.get(k) or {}).get("s_pro_dokument")
+        return float(v) if isinstance(v, (int, float)) and v > 0 else None
+
+    def label_von(k: str) -> str:
+        return str((orte.get(k) or {}).get("label") or k)
+
+    bereit = [k for k, o in orte.items() if (o or {}).get("zustand") == "bereit"]
+    fehlt = [k for k, o in orte.items()
+             if (o or {}).get("zustand") in ("tot", "ohne_modell")]
+
+    if not bereit:
+        # Nur nicht nachgesehene Rechner (Wolke) — darueber wird nichts
+        # behauptet. Sonst: es gibt nichts, was rechnen koennte.
+        farbe = "rot" if fehlt else "offen"
+        return {"farbe": farbe, "ort": "", "label": "",
+                "fehlt": [label_von(k) for k in fehlt], "s_pro_dokument": None}
+
+    # Wer rechnet jetzt? Derselbe, den `waehle()` nehmen wuerde: der
+    # schnellste unter den bereiten, ein nie gemessener mit `ANNAHME_S`, bei
+    # Gleichstand der bevorzugte. 🔴 Sonst nennte die Ampel die NAS, waehrend
+    # der Verteiler das Dokument an den frisch eingetragenen Laptop gibt.
+    def schaetzung(k: str) -> tuple[float, int]:
+        s = s_von(k)
+        return (s if s is not None else ANNAHME_S, 0 if k == bevorzugt else 1)
+    ort = min(bereit, key=schaetzung)
+    s_ort = s_von(ort)
+
+    langsam = False
+    if fehlt and s_ort is not None:
+        besser = [s_von(k) for k in fehlt if s_von(k) is not None]
+        if besser:
+            langsam = s_ort >= LANGSAM_FAKTOR * min(besser)
+        else:
+            langsam = s_ort >= LANGSAM_AB_S
+    return {"farbe": "gelb" if langsam else "gruen", "ort": ort,
+            "label": label_von(ort),
+            "fehlt": [label_von(k) for k in fehlt],
+            "s_pro_dokument": s_ort}
+
+
 def zuruecksetzen() -> None:
     """Nur fuer Pruefstaende."""
     global _datei

@@ -645,6 +645,19 @@ class ClassifierHandle:
             "Alle Rechenorte haben abgelehnt (%s): %s"
             % (", ".join(versucht), letzter)) from letzter
 
+    def runtime_von(self, key: str) -> dict[str, Any]:
+        """Wo rechnet das Modell DIESES Rechenorts? Fuer die Startseite, wenn
+        nicht der gewaehlte, sondern ein anderer gerade die Arbeit macht.
+        🔴 Nie werfen — eine Seite ohne Angabe ist unvollstaendig, eine mit
+        Ausnahme ist kaputt."""
+        try:
+            ziel = next((t for t in self._liste() if t.key == key), None)
+            if ziel is None:
+                return {"where": "unknown"}
+            return self._verteiler.hole(ziel).provider.runtime()
+        except Exception:  # noqa: BLE001
+            return {"where": "unknown"}
+
     # ------------------------------------------------------- Wahl der Kandidaten
     def _liste(self) -> list[Target]:
         return ziele(self._settings, bridge_verbunden=_bridge_verbunden())

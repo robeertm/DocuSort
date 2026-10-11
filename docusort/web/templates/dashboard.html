@@ -98,19 +98,27 @@
       <div class="flex items-center gap-2 text-xs">
         <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1"
               :title="(state.ki && state.ki.provider) || ''"
-              :class="!state.ki ? 'bg-ink-500/15 text-ink-300'
-                      : state.ki.erreichbar === true  ? 'bg-emerald-500/15 text-emerald-300'
-                      : state.ki.erreichbar === false ? 'bg-rose-500/15 text-rose-300'
+              :class="kiFarbe() === 'gruen' ? 'bg-emerald-500/15 text-emerald-300'
+                      : kiFarbe() === 'gelb'  ? 'bg-amber-500/15 text-amber-300'
+                      : kiFarbe() === 'rot'   ? 'bg-rose-500/15 text-rose-300'
                       : 'bg-ink-500/15 text-ink-300'">
           <span class="h-1.5 w-1.5 rounded-full"
-                :class="!state.ki ? 'bg-ink-400'
-                        : state.ki.erreichbar === true  ? 'bg-emerald-400'
-                        : state.ki.erreichbar === false ? 'bg-rose-400'
+                :class="kiFarbe() === 'gruen' ? 'bg-emerald-400'
+                        : kiFarbe() === 'gelb'  ? 'bg-amber-400'
+                        : kiFarbe() === 'rot'   ? 'bg-rose-400'
                         : 'bg-ink-400'"></span>
           <span x-text="kiText()"></span>
         </span>
       </div>
     </div>
+    {# 🔑 GELB HEISST: ES WIRD GERECHNET, NUR LANGSAM — und warum. Ein Laptop
+       war unterwegs und nur noch ueber Tailscale da, und die Seite meldete
+       rot einen Ausfall, waehrend die NAS bereitstand. Jetzt steht hier, wer
+       rechnet, wie lange es dauert und wer fehlt. #}
+    <p x-show="kiFarbe() === 'gelb'" x-cloak
+       class="-mt-1 mb-3 rounded-lg border border-amber-500/40 bg-amber-500/5
+              px-3 py-2 text-xs text-amber-200"
+       x-text="kiLangsamHinweis()"></p>
 
     {# WER MACHT GERADE WAS — eine Zeile je Dokument mit seiner Stufe.
        Vorher stand hier nur „laeuft etwas durch die KI?"; ein Scan, der zwanzig
@@ -1195,9 +1203,38 @@ function dashboard() {
        wurde — bei einem Anbieter in der Wolke steht gar nichts dahinter. */
     kiText() {
       const k = this.state.ki;
+      const a = this.kiAmpel();
+      /* Mit Rechenorten spricht die Gesamt-Ampel: WER rechnet, nicht wer
+         eingestellt ist. Ohne (Wolke, Einrichtung) bleibt die alte Auskunft. */
+      if (a.farbe === 'rot') return tr('hub.ki.none_reachable');
+      if (a.farbe === 'gruen' || a.farbe === 'gelb') {
+        const name = [a.modell || (k && k.model), a.label].filter(Boolean).join(' · ');
+        return a.farbe === 'gelb' ? name + ' — ' + tr('hub.ki.slow') : name;
+      }
       if (!k) return tr('hub.ki.none');
       const name = [k.model, k.wo].filter(Boolean).join(' · ') || tr('hub.ki.none');
       return k.erreichbar === false ? name + ' — ' + tr('hub.ki.unreachable') : name;
+    },
+    kiAmpel() { return (this.state.ai_ziel && this.state.ai_ziel.ampel) || {}; },
+    /* gruen · gelb · rot · grau. 🔴 Rot nur, wenn KEIN Rechenort rechnen
+       kann — ein fehlender Laptop ist kein Ausfall, solange die NAS da ist. */
+    kiFarbe() {
+      const a = this.kiAmpel();
+      if (a.farbe === 'gruen' || a.farbe === 'gelb' || a.farbe === 'rot') return a.farbe;
+      const k = this.state.ki;
+      if (!k) return 'grau';
+      if (k.erreichbar === true) return 'gruen';
+      if (k.erreichbar === false) return 'rot';
+      return 'grau';
+    },
+    kiLangsamHinweis() {
+      const a = this.kiAmpel();
+      const s = a.s_pro_dokument;
+      return tr('hub.ki.slow_hint', {
+        fehlt: (a.fehlt || []).join(', '),
+        ort: a.label || '',
+        dauer: (s === null || s === undefined) ? '–' : this.dauer(Math.round(s)),
+      });
     },
     /* This counted LLM calls only. The same page then claimed nothing was
        running while, two cards below, the machine card reported twenty-one
@@ -1276,15 +1313,24 @@ function dashboard() {
        meant "fine". Amber reads as a warning, so a healthy install looked
        like a problem. Every colour now carries a meaning, and the meaning is
        written next to it. */
-    get ampelFarbe() {
+    /* Der Rechner, ueber den die Zeile zum laufenden Modell berichtet: der, den die
+       Ampel als rechnend nennt — sonst der gewaehlte. Zeile und Punkt muessen
+       vom SELBEN Rechner sprechen. */
+    get gezeigtesZiel() {
       const z = (this.state.ai_ziel || {});
+      const ort = this.kiAmpel().ort;
+      if (ort && ort !== z.key && z.orte && z.orte[ort]) return z.orte[ort];
+      return z;
+    },
+    get ampelFarbe() {
+      const z = this.gezeigtesZiel;
       if (z.zustand === 'tot')         return 'bg-rose-400';
       if (z.zustand === 'ohne_modell') return 'bg-amber-400';
       if (z.zustand === 'offen')       return 'bg-ink-400';
       return z.geladen === false ? 'bg-amber-400' : 'bg-emerald-400';
     },
     get ampelText() {
-      const z = (this.state.ai_ziel || {});
+      const z = this.gezeigtesZiel;
       if (!z.zustand) return '';
       if (z.zustand === 'bereit' && z.geladen === false) return tr('hub.sys.cold');
       return tr('hub.sys.state.' + z.zustand);
@@ -1373,6 +1419,8 @@ function dashboard() {
                    + (l.rechnet_an ? ' · ' + l.rechnet_an : ''));
       } else if (this.zustandVon(z) === 'bereit') {
         teile.push(tr('hub.sys.idle'));
+      } else if (this.zustandVon(z) === 'tot') {
+        teile.push(tr('hub.sys.unreachable'));
       }
       if (l.wartend > 0) teile.push(l.wartend + ' ' + tr('hub.sys.waiting'));
       return teile.join(' · ');
@@ -1398,7 +1446,9 @@ function dashboard() {
     },
     ampelFuer(z) {
       const s = this.zustandVon(z);
-      if (s === 'tot')         return 'bg-rose-400';
+      /* 🔴 Rot nur, wenn gar nichts mehr rechnet. Ein Laptop, der unterwegs
+         ist, waehrend die NAS die Arbeit macht, ist abwesend, nicht kaputt. */
+      if (s === 'tot')         return this.kiFarbe() === 'rot' ? 'bg-rose-400' : 'bg-ink-400';
       if (s === 'ohne_modell') return 'bg-amber-400';
       if (s === 'offen')       return 'bg-ink-400';
       return this.geladenVon(z) === false ? 'bg-amber-400' : 'bg-emerald-400';

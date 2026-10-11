@@ -774,6 +774,10 @@ def _start_web(settings: AppSettings, db: Database, classifier: Classifier) -> N
     #    stuendlich. Nie toedlich: wer Tailscale nicht benutzt, merkt nichts.
     try:
         from . import tailscale as _ts
+        # 🔑 Zuerst die Weiche: Rechenorte im Tailnet gehen ueber den Ausgang
+        #    von DocuSorts eigenem tailscaled — sonst waere ein Laptop, der
+        #    unterwegs nur noch ueber Tailscale da ist, „nicht erreichbar".
+        _ts.weiche_einbauen()
         threading.Thread(target=_ts.beim_start,
                          args=(settings.config_dir, settings.web.port),
                          daemon=True).start()

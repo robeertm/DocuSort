@@ -476,7 +476,15 @@ def create_app(
     from .. import ai_targets as _ai_targets_mod
     _ai_targets_mod.starte_waechter(settings)
 
-    def _modell_laeuft_auf() -> dict[str, Any]:
+    def _modell_laeuft_auf(ort: str = "") -> dict[str, Any]:
+        """Wo rechnet das Modell — und zwar das, das GERADE die Arbeit
+        bekommt. 🔑 Faellt der gewaehlte Rechner aus und die Ampel nennt einen
+        anderen, beschreibt diese Zeile den anderen. Sonst stand hier
+        „nicht erreichbar" ueber einen Laptop im Hotel, waehrend die NAS
+        daneben rechnete."""
+        laufend = getattr(getattr(classifier, "ziel", None), "key", "")
+        if ort and ort != laufend and hasattr(classifier, "runtime_von"):
+            return classifier.runtime_von(ort)
         return _runtime_von(classifier)
     templates_dir = Path(__file__).parent / "templates"
     static_dir = Path(__file__).parent / "static"
@@ -2938,6 +2946,9 @@ def create_app(
         except Exception:
             deadlines = []
 
+        # Einmal gemessen, zweimal gebraucht: die Ampel bestimmt auch, ueber
+        # welchen Rechner „Das Modell laeuft auf" berichtet.
+        ai_ziel = _ai_ziel_kurz()
         return {
             "now":           datetime.now().isoformat(timespec="seconds"),
             "counts":        counts,
@@ -2959,13 +2970,14 @@ def create_app(
             #    Bruecke oder in der Wolke. DocuSorts /proc beschreibt immer nur
             #    SEINEN Wirt — ohne diese Auskunft stuende auf der Seite eine
             #    wahre Zahl ueber das falsche Geraet.
-            "modell_laeuft_auf": _modell_laeuft_auf(),
+            "modell_laeuft_auf": _modell_laeuft_auf(
+                (ai_ziel.get("ampel") or {}).get("ort") or ""),
             # 🔴 HIER STEHT ABSICHTLICH KEINE ADRESSE. Das Blatt sieht jedes
             #    angemeldete Konto; die Adressen der eigenen Rechner gehen nur
             #    an einen Admin, und zwar ueber `GET /api/ai/targets`. Hier
             #    steht nur, WELCHES Ziel rechnet und ob es mehr als eines gibt
             #    — daran entscheidet die Seite, ob sie einen Umschalter zeigt.
-            "ai_ziel":       _ai_ziel_kurz(),
+            "ai_ziel":       ai_ziel,
             "system":        _system_stats.snapshot(),
             "version":       __version__,
         }
@@ -5053,10 +5065,17 @@ def create_app(
                     "rechnet_seit_s": l.get("rechnet_seit_s"),
                     "rechnet_an": l.get("rechnet_an") or "",
                 }
+            # 🔑 Die Ampel fuer die KI als Ganzes — gruen, gelb, rot. Sie
+            #    fragt, ob IRGENDEIN Rechenort rechnen kann, nicht nur der
+            #    gewaehlte; siehe `ai_pool.ampel`.
+            gesamt = _p.ampel(orte, key)
+            gesamt["modell"] = next((t.model for t in liste
+                                     if t.key == gesamt.get("ort")), "") or ""
             return {
                 "key": key,
                 "label": getattr(jetzt, "label", "") or "",
                 "anzahl": len(liste),
+                "ampel": gesamt,
                 "zustand": meiner.get("zustand") or _t.ZUSTAND_OFFEN,
                 "geladen": meiner.get("geladen"),
                 "rechenwerk": meiner.get("rechenwerk") or "",
@@ -5075,7 +5094,10 @@ def create_app(
         except Exception:  # noqa: BLE001
             return {"key": "", "label": "", "anzahl": 0, "umschaltbar": False,
                     "zustand": "offen", "tot": 0, "verteilen": "auto",
-                    "orte": {}, "bereit": 0, "rechenwerk": ""}
+                    "orte": {}, "bereit": 0, "rechenwerk": "",
+                    "ampel": {"farbe": "offen", "ort": "", "label": "",
+                              "fehlt": [], "s_pro_dokument": None,
+                              "modell": ""}}
 
     @app.get("/api/ai/targets")
     def api_ai_targets():
@@ -5327,6 +5349,14 @@ def create_app(
         basis = url if url.endswith("/v1") else url + "/v1"
         from urllib.parse import urlsplit
         rechner = urlsplit(url).hostname or url
+        # 🔑 Ein Fund im Tailnet heisst sonst nur „100.x.y.z" — Tailscale
+        #    kennt den Namen des Rechners, also steht der auf der Karte.
+        if not label or label == rechner:
+            try:
+                from .. import tailscale as _ts
+                label = _ts.name_von(rechner) or label
+            except Exception:  # noqa: BLE001 — ein Name ist Zierde, kein Muss
+                pass
         schluessel = str((payload or {}).get("key") or "").strip() or rechner
         # 🔑 Schluessel muessen eindeutig sein — sonst zeigt ein gemerkter
         #    Wechsel spaeter auf den falschen Rechner.

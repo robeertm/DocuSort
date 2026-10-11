@@ -7,6 +7,52 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.3.0] - 2026-10-11
+
+### Added
+
+🔑 **A compute place in your tailnet is reachable from inside the container.**
+DocuSort's built-in Tailscale runs in userspace mode — it needs no special
+rights, but until now it could only *accept* connections. A request to a
+`100.x` address left through the container's ordinary network, which knows
+nothing about the tailnet. A laptop that was away from home, reachable only
+over Tailscale, therefore showed up as “not reachable” — while DocuSort's own
+tailnet node could see it.
+
+`tailscaled` now also opens an outbound HTTP proxy on `127.0.0.1:1055`
+(localhost only), and DocuSort routes **only** tailnet destinations through it:
+`100.64.0.0/10`, `fd7a:115c:a1e0::/48` and `*.ts.net` names. Everything else
+goes exactly as before — directly, or through the proxy set in `HTTP_PROXY`.
+Without a running Tailscale nothing changes at all.
+
+To use it, enter the machine with its **tailnet address** (for example via
+*Find machines* while you are connected over Tailscale). That address works
+at home and on the road. A machine added this way is labelled with its
+Tailscale name instead of a number.
+
+🔑 **One traffic light for the AI as a whole.** The home page used to report
+red “not reachable” as soon as the *selected* compute place was missing — even
+when another one was ready and the distributor would have given it every
+document. Now:
+
+- **green** — a compute place is ready, and nothing faster is missing
+- **amber, with a note** — work continues, but only on a slow machine because
+  a faster one is missing; the note says who is computing, roughly how long a
+  document takes, and who is missing
+- **red** — no compute place is ready at all
+
+“Slow” is a comparison, not a fixed number: if the slow machine is all you
+have, there is nothing to miss and the light stays green. A missing machine's
+card turns grey instead of red while another one does the work, and the
+*The model runs on* line describes the machine that is actually computing.
+
+### Fixed
+
+- 🔴 The network scan could pick the **tailnet** as “the home network” when the
+  computer running DocuSort routes its traffic through a Tailscale exit node —
+  its own address is then a `100.x` address. Such an address is no longer used
+  as the basis for a scan.
+
 ## [1.2.0] - 2026-10-08
 
 ### Added

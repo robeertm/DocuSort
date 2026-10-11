@@ -418,7 +418,12 @@ def _eigenes_netz(client_ip: str = "",
                 and not _ist_tailnet(h) and not _ist_docker_netz(h)
                 and h.replace(".", "").isdigit()):
             kandidaten.append(h)
-    if eigene and not eigene.startswith("127.") and not _ist_docker_netz(eigene):
+    # 🔴 Auch die EIGENE Adresse kann im Tunnel liegen: auf einem Rechner,
+    #    der ueber einen Tailscale-Exit-Node ins Netz geht, zeigt die
+    #    Standardroute ins Tailnet. Gemessen am 11.10.2026 — der Pruefstand
+    #    wurde genau dort rot und haette ein /24 im Tailnet abgesucht.
+    if (eigene and not eigene.startswith("127.")
+            and not _ist_docker_netz(eigene) and not _ist_tailnet(eigene)):
         kandidaten.append(eigene)
     for ip in kandidaten:
         teile = ip.split(".")

@@ -33,6 +33,21 @@ SOCKET = "/tmp/docusort-tailscaled.sock"
 _lock = threading.Lock()
 _daemon: subprocess.Popen | None = None
 
+# 🔑 DER AUSGANG INS TAILNET
+# Mit `--tun=userspace-networking` gibt es keine Netzwerkkarte `tailscale0`.
+# Hinein kommt man ueber `tailscale serve` — HINAUS bisher gar nicht: eine
+# Anfrage an `100.x` ging an das normale Netz des Containers, und das kennt
+# kein Tailnet. Genau daran scheiterte am 11.10.2026 ein Rechenort: der Laptop
+# war unterwegs, nur noch ueber Tailscale da, und DocuSort meldete ihn
+# „nicht erreichbar", waehrend sein eigener Tailscale-Knoten ihn sah.
+#
+# `--outbound-http-proxy-listen` laesst tailscaled einen HTTP-Proxy auf
+# localhost oeffnen, der Ziele im Tailnet ueber seinen eigenen Netzstapel
+# erreicht. Gemessen am veroeffentlichten Abbild (tailscaled 1.86.2): der
+# Schalter wird angenommen, der Proxy beantwortet `GET http://100.x/…`.
+# 🔴 Nur localhost — von aussen ist dieser Proxy nicht zu erreichen.
+AUSGANG_PORT = 1055
+
 
 def verfuegbar() -> bool:
     """Sind die Binaerdateien ueberhaupt da? Aeltere Abbilder haben sie nicht."""
@@ -134,6 +149,7 @@ def daemon_starten(config_dir) -> bool:
         _daemon = subprocess.Popen(
             ["tailscaled",
              "--tun=userspace-networking",
+             "--outbound-http-proxy-listen=127.0.0.1:%d" % AUSGANG_PORT,
              "--state=%s" % (ordner / "tailscaled.state"),
              "--socket=%s" % SOCKET],
             stdout=log, stderr=log, start_new_session=True)
@@ -285,3 +301,106 @@ def beim_start(config_dir, port: int) -> None:
                 "Certificates are off in the tailnet. Switch both on at "
                 "https://login.tailscale.com/admin/dns, then disconnect and "
                 "connect again on the settings page.")
+
+
+# ------------------------------------------------- Die Weiche fuer urllib
+# 🔑 WARUM EINE WEICHE UND NICHT EIN PROXY FUER ALLES
+# Jede Anfrage an einen Rechenort geht durch `urllib.request.urlopen` —
+# Messung, Einordnung, Aufwecken, Modell holen, die Suche. Statt jede dieser
+# Stellen umzubauen, bekommt urllib EINMAL einen Oeffner, der nur Ziele im
+# Tailnet ueber den Ausgang schickt. Alles andere geht wie vorher: direkt,
+# oder ueber den Proxy aus der Umgebung (`HTTP_PROXY`), falls einer gesetzt
+# ist — eine Firma mit eigenem Proxy darf durch diese Weiche nichts verlieren.
+#
+# 🔴 Nur wenn UNSER tailscaled laeuft. Ohne ihn gibt es den Ausgang nicht,
+#    und eine Anfrage an einen toten Proxy waere schlechter als der direkte
+#    Versuch: auf einem Wirt mit eigenem Tailscale (Kernel-Modus) kommt der
+#    direkte Weg naemlich an.
+
+def ist_tailnet_host(host: str) -> bool:
+    """Liegt diese Adresse im Tailnet? 100.64.0.0/10, fd7a:115c:a1e0::/48
+    oder ein MagicDNS-Name (`*.ts.net`)."""
+    import ipaddress
+    h = (host or "").strip().strip("[]").rstrip(".").lower()
+    if not h:
+        return False
+    if h.endswith(".ts.net"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return False
+    if ip.version == 4:
+        return ip in ipaddress.ip_network("100.64.0.0/10")
+    return ip in ipaddress.ip_network("fd7a:115c:a1e0::/48")
+
+
+def ausgang() -> str:
+    """Die Adresse des Ausgangs — leer, wenn es ihn gerade nicht gibt."""
+    return ("http://127.0.0.1:%d" % AUSGANG_PORT) if daemon_laeuft() else ""
+
+
+def _weiche_klasse():
+    import urllib.request as _u
+
+    class _Weiche(_u.ProxyHandler):
+        """Ziele im Tailnet ueber den Ausgang, alles andere wie gehabt."""
+
+        def __init__(self) -> None:
+            self._umgebung = dict(_u.getproxies())
+            proxies = dict(self._umgebung)
+            # 🔴 ProxyHandler haengt sich nur in die Schemata ein, fuer die er
+            #    einen Eintrag hat. Ohne Umgebungs-Proxy gaebe es keinen — und
+            #    damit auch keinen Weg ins Tailnet.
+            proxies.setdefault("http", "http://127.0.0.1:%d" % AUSGANG_PORT)
+            proxies.setdefault("https", "http://127.0.0.1:%d" % AUSGANG_PORT)
+            super().__init__(proxies)
+
+        def proxy_open(self, req, proxy, type):  # noqa: A002 — urllib-Name
+            from urllib.parse import urlsplit
+            ziel = urlsplit(req.full_url).hostname or ""
+            weg = ausgang() if ist_tailnet_host(ziel) else ""
+            if weg:
+                return super().proxy_open(req, weg, type)
+            vorher = self._umgebung.get(type)
+            if not vorher:
+                return None          # direkt, wie ohne Weiche
+            return super().proxy_open(req, vorher, type)
+
+    return _Weiche
+
+
+_weiche_drin = False
+
+
+def weiche_einbauen() -> bool:
+    """Den Oeffner fuer ganz urllib setzen. Einmal genuegt; ein zweiter Aufruf
+    tut nichts. 🔴 Nie werfen — ohne Weiche laeuft DocuSort wie bisher."""
+    global _weiche_drin
+    if _weiche_drin:
+        return True
+    try:
+        import urllib.request as _u
+        _u.install_opener(_u.build_opener(_weiche_klasse()()))
+        _weiche_drin = True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Tailscale: outbound route not installed: %s", exc)
+    return _weiche_drin
+
+
+def name_von(ip: str) -> str:
+    """Wie heisst der Rechner mit dieser Tailnet-Adresse? Leer, wenn unbekannt.
+    Damit steht auf einer Karte „MacBook Pro" statt einer Zahlenreihe."""
+    if not ist_tailnet_host(ip) or not daemon_laeuft():
+        return ""
+    code, aus = _cli("status", "--json", timeout=5)
+    if code != 0 or not aus.startswith("{"):
+        return ""
+    try:
+        d = json.loads(aus)
+    except Exception:  # noqa: BLE001
+        return ""
+    for p in (d.get("Peer") or {}).values():
+        if ip in (p.get("TailscaleIPs") or []):
+            return str(p.get("HostName") or "").strip()
+    return ""
