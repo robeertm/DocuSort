@@ -7,6 +7,55 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.4.0] - 2026-10-25
+
+### Added
+
+🔑 **A narrow, read-only JSON API with its own token.** An assistant or a
+script can now ask “what came in lately, what is due?” without a login
+session — through exactly one path, and nothing else:
+
+```
+GET /api/readonly/documents?limit=10&days=30&q=<term>
+Authorization: Bearer <token>
+```
+
+- `limit` 1–50 (default 10), `days` 1–365 (only documents added within the
+  last N days), `q` up to 80 characters — searched in subject, sender,
+  category, subcategory and file name, plus the library's own full-text index.
+- The answer is `{"ok": true, "version": …, "count": n, "documents": [...]}`,
+  newest first. Each document carries `id`, `title`, `date`, `added`,
+  `category`, `subcategory`, `sender`, `amount`, `currency`, `due_date`,
+  `due_done`, `paid` and a `summary` of at most 300 characters.
+- 🔴 **What never leaves:** the extracted text (the search may use it, the
+  answer never carries it), files, storage paths, costs and model token
+  counts. Deleted documents, the trash and duplicate notes are never listed.
+
+The API is **off** until you create a token. It is managed on the machine
+DocuSort runs on — there is no button for it:
+
+```bash
+docker exec docusort python3 -m docusort.readonly_token new     # prints the token once
+docker exec docusort python3 -m docusort.readonly_token status  # on / off
+docker exec docusort python3 -m docusort.readonly_token off     # disable the API
+```
+
+`new` writes **only** the token to standard output, so it can be piped
+straight into a file. Only its SHA-256 is stored (`readonly_token.json` in the
+configuration directory, mode `0600`); a new token replaces the old one at
+once, without a restart.
+
+Without a token the path answers `404`, with a missing or wrong token `401`,
+and after 10 failed attempts within a minute `429`.
+
+🔴 **The token is the protection, not the sender's address.** Behind Docker's
+port mapping every request appears to come from the Docker bridge, so an
+address check cannot tell callers apart there. As an *additional* hurdle,
+`DOCUSORT_READONLY_ALLOW` limits the API to private networks, `100.64.0.0/10`
+and loopback by default and refuses public senders wherever their real
+address arrives; set it to a comma-separated list of networks, or to `any` to
+switch the check off.
+
 ## [1.3.0] - 2026-10-11
 
 ### Added

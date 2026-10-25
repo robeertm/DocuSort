@@ -166,6 +166,11 @@ PUBLIC_PATHS = (
     #    nichts.
     "/api/local-ai/setup-script", "/api/local-ai/adopt", "/api/local-ai/finish",
     "/api/local-ai/ticket-check",
+    # The read-only JSON API (1.4.0) carries its own bearer token and checks
+    # it in the handler (docusort/readonly_api.py). 🔴 This ONE exact path —
+    # never a prefix like `/api/readonly/`: whatever is added under it next
+    # would be open to anyone without a session.
+    "/api/readonly/documents",
 )
 
 # What a non-admin may reach. Anything not listed is admin-only.

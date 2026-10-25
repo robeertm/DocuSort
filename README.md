@@ -555,6 +555,46 @@ Notable options:
 | `sync.remote` | an rclone remote for backups, e.g. `gdrive:DocuSort` |
 | `finance.salary_match` | text that identifies your salary booking, for the salary month |
 
+### Read-only API
+
+For an assistant or a script that should see what came in — and nothing more —
+there is one read-only JSON endpoint with its own token. It is **off** until a
+token exists:
+
+```bash
+docker exec docusort python3 -m docusort.readonly_token new     # prints the token once
+docker exec docusort python3 -m docusort.readonly_token status  # on / off
+docker exec docusort python3 -m docusort.readonly_token off     # disable it again
+```
+
+```
+GET /api/readonly/documents?limit=10&days=30&q=<term>
+Authorization: Bearer <token>
+```
+
+| Parameter | Meaning |
+|---|---|
+| `limit` | 1–50, default 10 |
+| `days` | 1–365 — only documents added within the last N days |
+| `q` | up to 80 characters; subject, sender, category, subcategory, file name and the full-text index |
+
+Each document comes with `id`, `title`, `date`, `added`, `category`,
+`subcategory`, `sender`, `amount`, `currency`, `due_date`, `due_done`, `paid`
+and a short `summary`, newest first. The extracted text, files, storage paths
+and costs are never part of the answer; deleted documents and the trash are
+never listed.
+
+- Only the token's SHA-256 is stored (`readonly_token.json` in the
+  configuration directory, mode `0600`). `new` replaces the old token at once.
+- No token set up → `404`; missing or wrong token → `401`; 10 failures within
+  a minute → `429`.
+- **The token is the protection.** Behind Docker's port mapping every request
+  looks as if it came from the Docker bridge, so the sender's address proves
+  nothing there. `DOCUSORT_READONLY_ALLOW` is an extra hurdle where the real
+  address does arrive: by default private networks, `100.64.0.0/10` and
+  loopback; a comma-separated list of networks replaces that, `any` switches
+  the check off.
+
 ---
 
 ## Privacy

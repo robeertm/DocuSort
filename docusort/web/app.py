@@ -6545,6 +6545,53 @@ def create_app(
         return _postwache.kopplung(db, settings.config_dir,
                                    str(request.base_url))
 
+    # ---------- Die nur lesende Schnittstelle (1.4.0) ----------
+    # 🔑 Steht als EIN genauer Pfad in `auth.PUBLIC_PATHS` — ohne Sitzung
+    #    erreichbar, darum prueft der Handler das Token SELBST, vor allem
+    #    anderen. Reihenfolge: aus → 404, fremdes Netz → 403, Bremse → 429,
+    #    Token falsch/fehlt → 401, erst dann werden Parameter angesehen.
+    from .. import readonly_api as _ro_api
+    from .. import readonly_token as _ro_token
+    _ro_bremse = _ro_api.FailureBrake(max_fails=10, window=60.0)
+
+    def _ro_antwort(inhalt: dict[str, Any], status: int = 200,
+                    kopf: dict[str, str] | None = None) -> JSONResponse:
+        k = {"Cache-Control": "no-store"}
+        if kopf:
+            k.update(kopf)
+        return JSONResponse(inhalt, status_code=status, headers=k)
+
+    @app.get("/api/readonly/documents")
+    def api_readonly_documents(request: Request,
+                               limit: str | None = None,
+                               days: str | None = None,
+                               q: str | None = None):
+        if not _ro_token.is_enabled(settings.config_dir):
+            return _ro_antwort({"ok": False, "error": "not found"}, 404)
+        absender = request.client.host if request.client else ""
+        if not _ro_api.client_allowed(absender):
+            logger.info("read-only API: refused sender outside %s", _ro_api.ALLOW_ENV)
+            return _ro_antwort({"ok": False, "error": "forbidden"}, 403)
+        warten = _ro_bremse.retry_after(absender)
+        if warten:
+            return _ro_antwort({"ok": False, "error": "too many failed attempts"},
+                               429, {"Retry-After": str(warten)})
+        token = _ro_api.bearer_token(request.headers.get("authorization"))
+        if not _ro_token.verify(token, settings.config_dir):
+            _ro_bremse.fail(absender)
+            # 🔴 Nie das mitgeschickte Token protokollieren — auch kein Stueck.
+            logger.info("read-only API: rejected request (%s token)",
+                        "wrong" if token else "no")
+            return _ro_antwort({"ok": False, "error": "unauthorized"}, 401,
+                               {"WWW-Authenticate": "Bearer"})
+        try:
+            n, tage, such = _ro_api.parse_params(limit, days, q)
+        except _ro_api.BadParameter as exc:
+            return _ro_antwort({"ok": False, "error": str(exc)}, 400)
+        dokumente = _ro_api.list_documents(db, limit=n, days=tage, q=such)
+        return _ro_antwort({"ok": True, "version": __version__,
+                            "count": len(dokumente), "documents": dokumente})
+
     @app.get("/api/version")
     def api_version():
         from .. import updater
