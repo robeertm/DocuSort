@@ -171,6 +171,10 @@ PUBLIC_PATHS = (
     # never a prefix like `/api/readonly/`: whatever is added under it next
     # would be open to anyone without a session.
     "/api/readonly/documents",
+    # Opening one document (1.5.0): same token, same handler-side check.
+    # 🔴 Two more EXACT paths, each on its own — still no prefix.
+    "/api/readonly/document",
+    "/api/readonly/preview",
 )
 
 # What a non-admin may reach. Anything not listed is admin-only.

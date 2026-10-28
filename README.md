@@ -584,6 +584,20 @@ and a short `summary`, newest first. The extracted text, files, storage paths
 and costs are never part of the answer; deleted documents and the trash are
 never listed.
 
+To open one document the reader found there, two more paths take the same
+token:
+
+```
+GET /api/readonly/document?id=<id>             # metadata + "seiten", "vorschau_verfuegbar"
+GET /api/readonly/preview?id=<id>&seite=<n>    # one page as image/png
+```
+
+`document` carries the same fields as the listing, plus `seiten` (pages that
+can be shown, `0` without a preview) and `vorschau_verfuegbar`. `preview`
+renders one page as a PNG; `seite` is clamped to the pages that exist, and a
+document without a preview answers `404`. Neither ever returns the file
+itself or where it is stored.
+
 - Only the token's SHA-256 is stored (`readonly_token.json` in the
   configuration directory, mode `0600`). `new` replaces the old token at once.
 - No token set up → `404`; missing or wrong token → `401`; 10 failures within

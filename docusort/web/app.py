@@ -6561,11 +6561,12 @@ def create_app(
             k.update(kopf)
         return JSONResponse(inhalt, status_code=status, headers=k)
 
-    @app.get("/api/readonly/documents")
-    def api_readonly_documents(request: Request,
-                               limit: str | None = None,
-                               days: str | None = None,
-                               q: str | None = None):
+    def _ro_tor(request: Request) -> JSONResponse | None:
+        """The gate shared by every read-only path — None means "let in".
+
+        🔑 One function for all of them, so a new read-only path cannot end
+           up with a weaker check than `/api/readonly/documents`.
+        """
         if not _ro_token.is_enabled(settings.config_dir):
             return _ro_antwort({"ok": False, "error": "not found"}, 404)
         absender = request.client.host if request.client else ""
@@ -6584,6 +6585,16 @@ def create_app(
                         "wrong" if token else "no")
             return _ro_antwort({"ok": False, "error": "unauthorized"}, 401,
                                {"WWW-Authenticate": "Bearer"})
+        return None
+
+    @app.get("/api/readonly/documents")
+    def api_readonly_documents(request: Request,
+                               limit: str | None = None,
+                               days: str | None = None,
+                               q: str | None = None):
+        abgewiesen = _ro_tor(request)
+        if abgewiesen is not None:
+            return abgewiesen
         try:
             n, tage, such = _ro_api.parse_params(limit, days, q)
         except _ro_api.BadParameter as exc:
@@ -6591,6 +6602,47 @@ def create_app(
         dokumente = _ro_api.list_documents(db, limit=n, days=tage, q=such)
         return _ro_antwort({"ok": True, "version": __version__,
                             "count": len(dokumente), "documents": dokumente})
+
+    # 🔑 Opening ONE document (1.5.0): its metadata, and its pages as images.
+    #    Same gate as above, each path listed exactly in `auth.PUBLIC_PATHS`.
+    #    🔴 Neither answer carries the file or its path — the path is resolved
+    #    from the id inside `readonly_api` and only handed to the renderer.
+    @app.get("/api/readonly/document")
+    def api_readonly_document(request: Request, id: str | None = None):
+        abgewiesen = _ro_tor(request)
+        if abgewiesen is not None:
+            return abgewiesen
+        try:
+            doc_id = _ro_api.parse_id(id)
+        except _ro_api.BadParameter as exc:
+            return _ro_antwort({"ok": False, "error": str(exc)}, 400)
+        dokument = _ro_api.get_document(db, doc_id)
+        if dokument is None:
+            return _ro_antwort({"ok": False, "error": "not found"}, 404)
+        return _ro_antwort({"ok": True, "version": __version__, "document": dokument})
+
+    @app.get("/api/readonly/preview")
+    def api_readonly_preview(request: Request, id: str | None = None,
+                             seite: str | None = None):
+        abgewiesen = _ro_tor(request)
+        if abgewiesen is not None:
+            return abgewiesen
+        try:
+            doc_id = _ro_api.parse_id(id)
+            nr = _ro_api.parse_page(seite)
+        except _ro_api.BadParameter as exc:
+            return _ro_antwort({"ok": False, "error": str(exc)}, 400)
+        if not _ro_api.document_visible(db, doc_id):
+            return _ro_antwort({"ok": False, "error": "not found"}, 404)
+        # The database knows where it really lives (as in /document/…/page.png).
+        bild = _ro_api.render_preview(db, doc_id,
+                                      Path(getattr(db, "path", settings.paths.db)),
+                                      page=nr)
+        if bild is None:
+            return _ro_antwort({"ok": False, "error": "preview not available"}, 404)
+        return Response(content=bild, media_type="image/png",
+                        headers={"Cache-Control": "no-store",
+                                 "X-Content-Type-Options": "nosniff"})
 
     @app.get("/api/version")
     def api_version():

@@ -7,6 +7,48 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.5.0] - 2026-10-28
+
+### Added
+
+🔑 **Opening one document through the read-only API.** A trusted reader that
+already uses `/api/readonly/documents` can now open a single document it
+found there — its metadata and its pages as images — with the same token and
+through two more exact paths:
+
+```
+GET /api/readonly/document?id=<id>
+GET /api/readonly/preview?id=<id>&seite=<page>
+Authorization: Bearer <token>
+```
+
+- `/api/readonly/document` answers `{"ok": true, "version": …, "document":
+  {…}}` with exactly the fields the listing carries (`id`, `title`, `date`,
+  `added`, `category`, `subcategory`, `sender`, `amount`, `currency`,
+  `due_date`, `due_done`, `paid`, `summary`) plus `seiten` (pages that can be
+  shown as an image, `0` without a preview) and `vorschau_verfuegbar`.
+- `/api/readonly/preview` answers one page as `image/png` (1400 px wide).
+  `seite` defaults to 1 and is clamped to the pages that exist (at most 30,
+  the renderer's own limit). Without a preview — not a PDF, unreadable, or
+  `pdftoppm` missing — it answers a plain `404` JSON.
+- An unknown id, a deleted document, a duplicate note or a CSV container
+  answers `404 {"ok": false, "error": "not found"}`; an id that is not a
+  positive whole number answers `400`.
+- 🔴 **Still no file and no path.** The storage location is looked up from the
+  id inside the server and handed only to the renderer. Neither answer
+  carries the original file, `library_path`, `processed_path` or any other
+  path — the only bytes that leave are a rendered PNG.
+- Both paths go through the very same gate as the listing (token off → `404`,
+  network outside `DOCUSORT_READONLY_ALLOW` → `403`, brake → `429`, missing or
+  wrong token → `401`), now one shared function. Each is listed as its own
+  exact path in the public allowlist — still no `/api/readonly/` prefix.
+
+### Tests
+
+- `tests/test_readonly_api.py` covers the gate on all three read-only paths,
+  unknown and invalid ids, the PNG preview, the clean `404` without a preview,
+  and that no path field or PDF byte ever appears in an answer.
+
 ## [1.4.0] - 2026-10-25
 
 ### Added

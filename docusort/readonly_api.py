@@ -23,6 +23,11 @@ nie), keine Datei, kein Pfad (`library_path`, `processed_path`), keine Kosten,
 keine Tokenzahlen des Modells. Die Antwort wird aus einer festen Feldliste
 GEBAUT, nicht aus der Zeile gefiltert — ein neues Feld in der Tabelle kann
 deshalb nicht versehentlich mitlaufen.
+
+Since 1.5.0 two more exact paths share the same token and gate:
+`GET /api/readonly/document?id=N` (one document's metadata plus its preview
+page count) and `GET /api/readonly/preview?id=N&seite=P` (one page rendered
+as PNG). The same rule holds there: no file, no path — only a rendered image.
 """
 from __future__ import annotations
 
@@ -33,7 +38,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 logger = logging.getLogger("docusort.readonly")
@@ -287,3 +292,125 @@ def list_documents(db, *, limit: int = LIMIT_DEFAULT, days: int | None = None,
     with db._lock:
         reihen = db._conn.execute(sql, p).fetchall()
     return [_als_dokument(r) for r in reihen]
+
+
+# ── One document: metadata and preview image (1.5.0) ────────────────────────
+# 🔑 Opening ONE document a trusted reader named. The answer is the same
+#    fixed field list as above, plus how many pages can be shown as an image.
+#    🔴 The source path is looked up here and stays here: it is handed to the
+#    renderer and never placed in any answer. The only bytes that leave are a
+#    rendered PNG — never the original file.
+
+def parse_id(raw: str | None) -> int:
+    """A positive whole number, or BadParameter."""
+    try:
+        doc_id = int(str(raw if raw is not None else "").strip())
+    except ValueError:
+        raise BadParameter("id must be a whole number") from None
+    if doc_id < 1:
+        raise BadParameter("id must be a positive number")
+    return doc_id
+
+
+def parse_page(raw: str | None) -> int:
+    """The requested page (1 when not given). Capped later to what exists."""
+    if raw is None or str(raw).strip() == "":
+        return 1
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        raise BadParameter("seite must be a whole number") from None
+
+
+def document_visible(db, doc_id: int) -> bool:
+    """Does this id name a document the listing could show?"""
+    with db._lock:
+        r = db._conn.execute(
+            f"SELECT 1 FROM documents d WHERE d.id = ? AND {_GRUND}",
+            (int(doc_id),)).fetchone()
+    return r is not None
+
+
+def _source_pdf(db, doc_id: int) -> Path | None:
+    """The document's PDF on disk — for internal use only, never returned.
+
+    Same visibility rule as the listing (`_GRUND`): a deleted document, a
+    duplicate note or a CSV container cannot be opened through this door
+    either. Anything that is not an existing PDF counts as "no preview".
+    """
+    with db._lock:
+        r = db._conn.execute(
+            f"SELECT d.library_path FROM documents d WHERE d.id = ? AND {_GRUND}",
+            (int(doc_id),)).fetchone()
+    raw = (r["library_path"] if r else "") or ""
+    if not raw:
+        return None
+    src = Path(raw)
+    try:
+        if src.suffix.lower() != ".pdf" or not src.is_file():
+            return None
+    except OSError:
+        return None
+    return src
+
+
+def preview_pages(src: Path | None) -> int:
+    """How many pages can be rendered as an image (0 = no preview).
+
+    0 when there is no PDF, the PDF cannot be read, or pdftoppm is missing.
+    Capped at what the renderer itself is willing to render.
+    """
+    from . import preview
+    if src is None or not preview.available():
+        return 0
+    try:
+        from pypdf import PdfReader
+        n = len(PdfReader(str(src)).pages)
+    except Exception as exc:                            # noqa: BLE001
+        # 🔴 Log the name only — the full path stays out of every message.
+        logger.info("read-only preview: cannot count pages of %s: %s",
+                    src.name, type(exc).__name__)
+        return 0
+    return max(0, min(n, preview.MAX_PAGES))
+
+
+def get_document(db, doc_id: int) -> dict[str, Any] | None:
+    """One document's metadata — the same fields `list_documents` returns,
+    plus `seiten` and `vorschau_verfuegbar`. None if the id is not visible."""
+    sql = (f"SELECT {_SPALTEN} FROM documents d "
+           "LEFT JOIN receipts r ON r.doc_id = d.id "
+           f"WHERE d.id = ? AND {_GRUND}")
+    with db._lock:
+        r = db._conn.execute(sql, (int(doc_id),)).fetchone()
+    if r is None:
+        return None
+    dok = _als_dokument(r)
+    seiten = preview_pages(_source_pdf(db, doc_id))
+    dok["seiten"] = seiten
+    dok["vorschau_verfuegbar"] = seiten > 0
+    return dok
+
+
+def render_preview(db, doc_id: int, db_path: Path, page: int = 1) -> bytes | None:
+    """PNG bytes of one page, or None when the document has no preview.
+
+    The page is clamped to 1..pages, so asking for page 99 of a three-page
+    letter shows page 3.
+    """
+    from . import preview
+    src = _source_pdf(db, doc_id)
+    seiten = preview_pages(src)
+    if not seiten or src is None:
+        return None
+    seite = max(1, min(int(page), seiten))
+    img = preview.render_page(src, db_path, page=seite, width=preview.DEFAULT_WIDTH)
+    if img is None:
+        return None
+    try:
+        daten = img.read_bytes()
+    except OSError:
+        return None
+    # 🔴 Only a real PNG leaves — never whatever else might sit at that place.
+    if not daten.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    return daten
