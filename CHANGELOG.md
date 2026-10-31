@@ -7,6 +7,16 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.5.1] - 2026-10-31
+
+### Changed
+
+- No functional change; the container image is rebuilt from the cleaned
+  source. A few code comments now use sample names instead of real ones, and
+  the statement parser recognises an address line by a general street pattern
+  instead of one fixed street. Settings, database and API are the same as in
+  1.5.0.
+
 ## [1.5.0] - 2026-10-28
 
 ### Added
