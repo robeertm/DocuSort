@@ -653,6 +653,12 @@ If you send a pull request that touches the interface, add the new strings to
 all five language files (`docusort/locales/*.json`) — the key sets are
 identical by design and a test checks that.
 
+Your commits show your name and e-mail to everyone. Use the address you want
+public (GitHub's no-reply address works). Pushes are checked by
+`scripts/check_commit_identity.py` (in CI, and locally after
+`git config core.hooksPath .githooks`); it only refuses the maintainer's own
+identities and machine placeholders such as `agent@host`.
+
 ## Licence
 
 **Source-available, not open source.** Read the code, run it for yourself,
