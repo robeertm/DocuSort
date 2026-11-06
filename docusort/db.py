@@ -991,6 +991,20 @@ class Database:
             row = self._conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
         return int(row["n"] or 0)
 
+    def ping(self, wait: float = 3.0) -> bool:
+        """Is the database answering? Used by the container health check.
+
+        🔑 A busy database is not a dead one: while a long write holds the
+           lock the answer is still "alive", otherwise a big import would
+           get the container marked unhealthy.
+        """
+        if not self._lock.acquire(timeout=wait):
+            return True
+        try:
+            return self._conn.execute("SELECT 1").fetchone() is not None
+        finally:
+            self._lock.release()
+
     def admin_count(self) -> int:
         """Active admins. The web layer refuses to delete, demote or
         disable the last one — an archive with no admin is unreachable."""

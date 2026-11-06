@@ -7,6 +7,20 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.5.2] - 2026-11-06
+
+### Added
+
+- **Container health check.** The image now carries a Docker `HEALTHCHECK`,
+  so `docker ps` shows `healthy` or `unhealthy` instead of just `Up`. It
+  calls a new open path, `GET /healthz`, which answers `{"status":"ok"}`
+  (200) when the database responds and `{"status":"error"}` (503) when it
+  does not. It carries no version, path, user or setting. It is one exact
+  path; everything else still needs a login. The probe is a small Python
+  module (`python -m docusort.healthcheck`) because the image has no curl;
+  it follows the port from `config.yaml` and also works with TLS enabled.
+  The same address can be used by an external uptime monitor.
+
 ## [1.5.1] - 2026-10-31
 
 ### Changed

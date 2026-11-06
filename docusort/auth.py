@@ -154,6 +154,9 @@ PUBLIC_PATHS = (
     "/login", "/login/reset", "/logout", "/setup/admin",
     "/static/", "/upload-sw.js", "/favicon.ico",
     "/api/version",
+    # Container health check (1.5.2). One exact path; it answers only
+    # {"status": "ok"} or 503 and carries no version, path or user data.
+    "/healthz",
     # The one-click Ollama setup runs on the user's own machine and has no
     # session cookie. 🔴 These three exact paths only — never the prefix
     # `/api/local-ai/`, or the search and the apply would be open to anyone

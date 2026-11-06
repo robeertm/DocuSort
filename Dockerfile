@@ -69,6 +69,13 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 9876
 
+# Health check: asks the web server for /healthz from inside the container
+# (python is the one tool that is certainly here; curl is removed above).
+# start-period covers the first start, which can be slow while the database
+# is migrated.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["python", "-m", "docusort.healthcheck"]
+
 VOLUME ["/data", "/app/config", "/app/logs"]
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

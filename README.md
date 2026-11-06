@@ -477,6 +477,20 @@ next restart — you would see "updated", restart, and silently be back on the
 old version. In a container the banner therefore shows the `docker compose`
 command instead of a button.
 
+### Health check
+
+The image ships a Docker `HEALTHCHECK`: `docker ps` shows `(healthy)` once the
+web server and the database answer. The check calls `GET /healthz` inside the
+container; the same address works for an external uptime monitor and returns
+only `{"status":"ok"}` (HTTP 200) or `{"status":"error"}` (HTTP 503) - no
+version, paths or settings, and no login needed. Nothing else becomes
+reachable without a login.
+
+```bash
+curl -fsS http://<host>:9876/healthz
+docker ps --format '{{.Names}} {{.Status}}' | grep docusort
+```
+
 ## First run
 
 1. **Create the admin account** — the first visit asks for it; nothing is

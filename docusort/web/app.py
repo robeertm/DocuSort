@@ -518,7 +518,7 @@ def create_app(
     _setup_open = (
         "/setup", "/static/", "/upload-sw.js",
         "/api/setup/", "/api/settings/", "/api/sync/", "/api/language/",
-        "/api/version", "/api/pricing",
+        "/api/version", "/api/pricing", "/healthz",
     )
 
     @app.middleware("http")
@@ -6643,6 +6643,19 @@ def create_app(
         return Response(content=bild, media_type="image/png",
                         headers={"Cache-Control": "no-store",
                                  "X-Content-Type-Options": "nosniff"})
+
+    # 🔑 Health check for Docker and external monitors (1.5.2). Open without a
+    #    session on purpose, so the answer must carry nothing: no version, no
+    #    path, no user. 200 {"status":"ok"} or 503 {"status":"error"}.
+    @app.get("/healthz")
+    def healthz():
+        try:
+            alive = db.ping()
+        except Exception:       # noqa: BLE001 — any failure means "not healthy"
+            alive = False
+        return JSONResponse({"status": "ok" if alive else "error"},
+                            status_code=200 if alive else 503,
+                            headers={"Cache-Control": "no-store"})
 
     @app.get("/api/version")
     def api_version():
