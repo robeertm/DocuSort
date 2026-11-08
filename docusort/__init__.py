@@ -1,5 +1,5 @@
 """DocuSort – AI-powered document organizer for Synology and beyond."""
 
-__version__ = "1.5.2"
+__version__ = "1.6.0"
 __author__ = "robeertm"
 __license__ = "Proprietary"

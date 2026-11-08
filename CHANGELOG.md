@@ -7,6 +7,44 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.6.0] - 2026-11-08
+
+### Added
+
+- **Webhook notifications.** Next to Telegram and email there is now a third
+  channel: every notification is sent as JSON in a `POST` to an address of
+  your choice — your own receiver, a home automation, an assistant. Set it up
+  under Settings → Notifications → Webhook. The body is
+
+  ```json
+  {"source": "docusort", "version": "1.6.0", "event": "doc_review",
+   "title": "...", "body": "...", "doc_id": 42, "url": "https://.../document/42",
+   "data": {}, "sent_at": "2026-11-08T09:30:00+01:00"}
+  ```
+
+  with `Content-Type: application/json`, `User-Agent: DocuSort/<version>` and
+  a 10-second timeout. An optional token is sent as
+  `Authorization: Bearer <token>`; it is stored in `secrets.yaml` like the
+  other channel secrets and the settings page only shows whether one is set.
+  Only `http` and `https` addresses are accepted. Any answer outside 2xx and
+  any network error count as a failed delivery, so the Test button tells you
+  why, and a one-time password falls back to the file in the configuration
+  folder. Logs and error messages name only the host, never the token or the
+  full address. Off by default; the per-event switches apply as for the other
+  channels.
+- **Machine-readable event data.** `ai_down` carries
+  `{"target", "state", "previous"}`, `deadline` carries
+  `{"count", "items": [{"doc_id", "due_date", "due_kind", "sender",
+  "subject"}]}` (at most 25). Only the webhook passes `data` on; Telegram and
+  email messages are unchanged.
+
+### Fixed
+
+- Turning the "compute target stopped answering" event off in the settings
+  now takes effect immediately instead of after the next restart.
+- The "Saved" message and the "Email" heading in the notification settings
+  are now translated.
+
 ## [1.5.2] - 2026-11-06
 
 ### Added

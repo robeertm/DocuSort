@@ -1,7 +1,8 @@
 """Notification channels for DocuSort.
 
-Two transports out of the box: Telegram (bot API) and email (SMTP). Both
-are stdlib-only so they work on a fresh install without extra wheels.
+Three transports out of the box: Telegram (bot API), email (SMTP) and a
+generic webhook (JSON over HTTP POST). All are stdlib-only so they work on
+a fresh install without extra wheels.
 
 Events the rest of the code can fire:
 
@@ -35,8 +36,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from email.message import EmailMessage
-from typing import Optional
+from typing import Any, Optional
 
 
 logger = logging.getLogger("docusort.notifier")
@@ -50,6 +52,9 @@ class NotificationEvent:
     body: str = ""
     doc_id: Optional[int] = None
     url: Optional[str] = None    # clickable link (server origin + /document/<id>)
+    # Maschinenlesbare Zusatzdaten — nur der Webhook reicht sie weiter.
+    # Telegram und E-Mail zeigen weiterhin nur Titel/Text/Link.
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 # ----------------------------------------------------------------- channels
@@ -258,6 +263,108 @@ class EmailNotifier(Notifier):
             s.send_message(msg)
 
 
+def webhook_url_ok(url: str) -> bool:
+    """Nur http/https mit einem Host — alles andere (file:, ftp:, ein nacktes
+    Wort) wird abgelehnt, bevor es je in einen Request wandert."""
+    try:
+        teile = urllib.parse.urlsplit((url or "").strip())
+    except ValueError:
+        return False
+    return teile.scheme in ("http", "https") and bool(teile.hostname)
+
+
+def _webhook_host(url: str) -> str:
+    """Nur der Host fuer Log und Fehlermeldung. 🔴 Pfad und Query koennen
+    selbst ein Geheimnis tragen (manche Empfaenger stecken den Schluessel in
+    die Adresse) — darum nie die volle URL ausgeben."""
+    try:
+        return urllib.parse.urlsplit(url).hostname or "?"
+    except ValueError:
+        return "?"
+
+
+class WebhookNotifier(Notifier):
+    """Schickt jedes Ereignis als JSON per POST an eine frei waehlbare
+    Adresse — fuer einen eigenen Empfaenger, eine Hausautomation oder einen
+    Assistenten, der selbst entscheidet, was er daraus macht.
+
+    Rumpf::
+
+        {"source": "docusort", "version": "<x.y.z>", "event": "<kind>",
+         "title": "...", "body": "...", "doc_id": <int|null>,
+         "url": <str|null>, "data": {...}, "sent_at": "<ISO-8601>"}
+
+    🔴 Jede Antwort ausserhalb 2xx und jeder Netzfehler wird als Exception
+    geworfen. Nur so meldet der Test-Knopf den wahren Grund, und nur so
+    faellt das Einmalpasswort (notzugang.py) auf die Datei zurueck, statt
+    einen Versand zu melden, der nie angekommen ist.
+    """
+    name = "webhook"
+    TIMEOUT_S = 10
+
+    def __init__(self, url: str, token: str = "") -> None:
+        url = (url or "").strip()
+        if not url:
+            raise ValueError(_u("err.webhook_url_required"))
+        if not webhook_url_ok(url):
+            raise ValueError(_u("err.webhook_url_invalid"))
+        self.url   = url
+        self.token = (token or "").strip()
+        self.host  = _webhook_host(url)
+
+    def payload(self, event: NotificationEvent) -> dict[str, Any]:
+        from . import __version__
+        return {
+            "source":  "docusort",
+            "version": __version__,
+            "event":   event.kind,
+            "title":   event.title,
+            "body":    event.body or "",
+            "doc_id":  event.doc_id,
+            "url":     event.url,
+            "data":    dict(event.data or {}),
+            "sent_at": datetime.now(timezone.utc).astimezone().isoformat(
+                timespec="seconds"),
+        }
+
+    def send(self, event: NotificationEvent) -> None:
+        from . import __version__
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent":   f"DocuSort/{__version__}",
+        }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(
+            self.url, method="POST", headers=headers,
+            data=json.dumps(self.payload(event), ensure_ascii=False,
+                            default=str).encode("utf-8"),
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.TIMEOUT_S) as r:
+                code = getattr(r, "status", 200)
+                # urlopen folgt Weiterleitungen nicht fuer POST und wirft
+                # bei 4xx/5xx selbst — 1xx/3xx, die doch ankommen, sind
+                # trotzdem kein Erfolg.
+                if not 200 <= int(code) < 300:
+                    raise RuntimeError(_u("err.webhook_http",
+                                          host=self.host, code=code))
+        except urllib.error.HTTPError as exc:
+            # 🔴 Den Antworttext NICHT anhaengen: ein Empfaenger kann die
+            #    Anfrage samt Kopf zurueckspiegeln, und dann staende das
+            #    Token in der Meldung.
+            raise RuntimeError(_u("err.webhook_http",
+                                  host=self.host, code=exc.code)) from None
+        except urllib.error.URLError as exc:
+            raise RuntimeError(_u("err.webhook_unreachable", host=self.host,
+                                  grund=getattr(exc, "reason", exc))) from None
+        except (TimeoutError, OSError) as exc:
+            # Zeitlimit beim Lesen der Antwort kommt als nackter
+            # socket.timeout/TimeoutError, nicht als URLError.
+            raise RuntimeError(_u("err.webhook_unreachable", host=self.host,
+                                  grund=type(exc).__name__)) from None
+
+
 # ----------------------------------------------------------------- dispatch
 @dataclass
 class _DispatcherState:
@@ -334,7 +441,7 @@ _dispatcher_lock = threading.Lock()
 
 def configure(settings) -> CompositeDispatcher:
     """Build (or rebuild) the dispatcher from the live AppSettings.
-    Reads SMTP password and Telegram token from secrets.yaml."""
+    Reads SMTP password, Telegram token and webhook token from secrets.yaml."""
     global _dispatcher
     from .config import load_secrets
 
@@ -372,6 +479,20 @@ def configure(settings) -> CompositeDispatcher:
             ))
         except Exception as exc:
             logger.warning("Email channel skipped: %s", exc)
+
+    # 🔑 Webhook: aktiv, sobald eingeschaltet UND eine Adresse da ist. Das
+    #    Token ist freiwillig (ein Empfaenger im eigenen Netz braucht evtl.
+    #    keins) und liegt wie die anderen Geheimnisse in secrets.yaml.
+    if getattr(n, "webhook_enabled", False):
+        wh_url = (getattr(n, "webhook_url", "") or "").strip()
+        if wh_url:
+            try:
+                channels.append(WebhookNotifier(
+                    wh_url, (secrets.get("webhook_token") or "").strip()))
+            except Exception as exc:
+                logger.warning("Webhook channel skipped: %s", exc)
+        else:
+            logger.info("Webhook enabled but no URL — skipped.")
 
     events = {
         "doc_review":  bool(getattr(n, "event_doc_review",  True)),

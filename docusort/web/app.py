@@ -6235,12 +6235,24 @@ def create_app(
             "smtp_to":           n.smtp_to,
             "smtp_starttls":     n.smtp_starttls,
             "smtp_password_set": bool((secrets.get("smtp_password") or "").strip()),
+            "webhook_enabled":   n.webhook_enabled,
+            "webhook_url":       n.webhook_url,
+            # 🔴 Wie beim Telegram-Token: nur „gesetzt", nie der Wert.
+            "webhook_token_set": bool((secrets.get("webhook_token") or "").strip()),
             "channels_active":   list(__import__("docusort.notifier", fromlist=["get_dispatcher"]).get_dispatcher().channels_summary()),
         }
 
     @app.post("/api/settings/notifications")
     def api_settings_notifications(payload: dict):
         from .. import settings_writer, notifier as _notifier
+        # 🔑 Webhook-Adresse vor dem Schreiben pruefen: nur http/https. Eine
+        #    leere Adresse ist erlaubt (Kanal bleibt dann still).
+        wh_url = payload.get("webhook_url")
+        if wh_url is not None:
+            wh_url = str(wh_url).strip()
+            if wh_url and not _notifier.webhook_url_ok(wh_url):
+                raise _http_fehler(400, "err.webhook_url_invalid")
+            payload["webhook_url"] = wh_url
         # Empty-string token/password mean "leave the existing value
         # alone". The UI sends None when the field hasn't been touched.
         settings_writer.update_notifications(
@@ -6263,6 +6275,9 @@ def create_app(
             smtp_to=payload.get("smtp_to"),
             smtp_starttls=payload.get("smtp_starttls"),
             smtp_password=(payload.get("smtp_password") or None),
+            webhook_enabled=payload.get("webhook_enabled"),
+            webhook_url=payload.get("webhook_url"),
+            webhook_token=(payload.get("webhook_token") or None),
             config_dir=settings.config_dir,
         )
         # Mirror into the live AppSettings so the in-memory dispatcher
@@ -6270,10 +6285,11 @@ def create_app(
         n = settings.notifications
         for key in ("enabled","event_doc_review","event_doc_failed",
                     "event_doc_filed","event_bulk_done",
-                    "event_sync_failed","event_deadline",
+                    "event_sync_failed","event_deadline","event_ai_down",
                     "telegram_enabled","telegram_chat_id",
                     "email_enabled","smtp_host","smtp_port","smtp_user",
-                    "smtp_from","smtp_to","smtp_starttls"):
+                    "smtp_from","smtp_to","smtp_starttls",
+                    "webhook_enabled","webhook_url"):
             if payload.get(key) is not None:
                 setattr(n, key, payload[key])
         _notifier.configure(settings)

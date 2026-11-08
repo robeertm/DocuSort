@@ -686,7 +686,19 @@ def _deadline_watchdog_forever(settings: AppSettings, db: Database,
                 body += f"\n… und {len(lines) - 25} weitere."
             try:
                 from . import notifier as _n
-                _n.fire(_n.NotificationEvent(kind="deadline", title=title, body=body))
+                # 🔑 Dieselben Fristen maschinenlesbar fuer den Webhook —
+                #    hoechstens 25, wie der Text.
+                data = {
+                    "count": len(due),
+                    "items": [{"doc_id": d.get("id"),
+                               "due_date": d.get("due_date"),
+                               "due_kind": d.get("due_kind"),
+                               "sender": d.get("sender"),
+                               "subject": d.get("subject")}
+                              for d in due[:25]],
+                }
+                _n.fire(_n.NotificationEvent(kind="deadline", title=title,
+                                             body=body, data=data))
             except Exception:
                 log.exception("Could not fire deadline reminder")
             for d in due:

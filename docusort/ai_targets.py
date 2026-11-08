@@ -981,6 +981,10 @@ def _melde(t: Target, vorher: str, jetzt: str) -> None:
     logger.info("KI-Waechter: %s (%s -> %s)", titel, vorher, jetzt)
     try:
         from . import notifier as _n
-        _n.fire(_n.NotificationEvent(kind="ai_down", title=titel, body=text))
+        # 🔑 `data` fuer maschinelle Empfaenger (Webhook): wieder nur der
+        #    Name, keine Adresse — dieselbe Regel wie fuer den Text.
+        _n.fire(_n.NotificationEvent(
+            kind="ai_down", title=titel, body=text,
+            data={"target": name, "state": jetzt, "previous": vorher}))
     except Exception as exc:  # noqa: BLE001
         logger.warning("KI-Waechter: Meldung ging nicht raus: %s", exc)

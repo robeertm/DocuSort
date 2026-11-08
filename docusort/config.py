@@ -181,7 +181,7 @@ class FinanceSettings:
 class NotificationSettings:
     """Where + when to send out-of-band notifications.
 
-    Channel credentials (Telegram bot token, SMTP password) live in
+    Channel credentials (Telegram bot token, SMTP password, webhook token) live in
     secrets.yaml so they don't end up in the regular config file. The
     rest is here.
     """
@@ -212,6 +212,11 @@ class NotificationSettings:
     smtp_from:      str  = ""
     smtp_to:        str  = ""       # comma-separated recipients
     smtp_starttls:  bool = True
+
+    # Webhook channel — JSON per POST an eine eigene Adresse. Das Token
+    # (`webhook_token`) liegt in secrets.yaml, nie hier.
+    webhook_enabled: bool = False
+    webhook_url:     str  = ""
 
 
 @dataclass
@@ -368,6 +373,8 @@ def load_config(config_dir: Path | None = None) -> AppSettings:
         smtp_from=str(n_cfg.get("smtp_from", "") or ""),
         smtp_to=str(n_cfg.get("smtp_to", "") or ""),
         smtp_starttls=bool(n_cfg.get("smtp_starttls", True)),
+        webhook_enabled=bool(n_cfg.get("webhook_enabled", False)),
+        webhook_url=str(n_cfg.get("webhook_url", "") or "").strip(),
     )
 
     return AppSettings(

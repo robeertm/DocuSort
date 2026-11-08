@@ -569,6 +569,45 @@ Notable options:
 | `sync.remote` | an rclone remote for backups, e.g. `gdrive:DocuSort` |
 | `finance.salary_match` | text that identifies your salary booking, for the salary month |
 
+### Notifications
+
+DocuSort can tell you when something needs attention — a document waiting for
+review, a failed classification, an upcoming deadline, a compute target that
+stopped answering, a finished bulk job. Each event can be switched on or off
+under **Settings → Notifications**, and there are three channels: Telegram,
+email and a generic **webhook**.
+
+The webhook sends every event as JSON in a `POST` to the address you enter
+(`http` or `https`):
+
+```json
+{
+  "source": "docusort",
+  "version": "1.6.0",
+  "event": "deadline",
+  "title": "...",
+  "body": "...",
+  "doc_id": null,
+  "url": null,
+  "data": {"count": 1, "items": [{"doc_id": 42, "due_date": "2026-11-20",
+           "due_kind": "zahlung", "sender": "...", "subject": "..."}]},
+  "sent_at": "2026-11-08T09:30:00+01:00"
+}
+```
+
+- `event` is one of `doc_review`, `doc_failed`, `doc_filed`, `bulk_done`,
+  `sync_failed`, `deadline`, `ai_down`, `password_reset` and `test`.
+- `data` is empty for most events; `ai_down` carries `target`, `state` and
+  `previous`, `deadline` carries `count` and up to 25 `items`.
+- With a token set, the request carries `Authorization: Bearer <token>`. The
+  token lives in `config/secrets.yaml`, never in `config.yaml`, and the
+  settings page only shows whether one is stored.
+- Anything other than a 2xx answer counts as a failed delivery (10-second
+  timeout). The **Test** button reports the reason; logs name only the host.
+- A one-time password requested on the login page is sent to every channel,
+  the webhook included — so the receiver should be one you trust and, ideally,
+  reachable only inside your own network.
+
 ### Read-only API
 
 For an assistant or a script that should see what came in — and nothing more —

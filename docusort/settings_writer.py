@@ -263,11 +263,14 @@ def update_notifications(
     smtp_to: str | None = None,
     smtp_starttls: bool | None = None,
     smtp_password: str | None = None,         # → secrets.yaml
+    webhook_enabled: bool | None = None,
+    webhook_url: str | None = None,
+    webhook_token: str | None = None,         # → secrets.yaml
     config_dir: Path | None = None,
 ) -> Path:
-    """Persist notification settings to config.yaml. Bot tokens and SMTP
-    passwords go to secrets.yaml so they don't end up in the git-friendly
-    config file."""
+    """Persist notification settings to config.yaml. Bot tokens, SMTP
+    passwords and the webhook token go to secrets.yaml so they don't end up
+    in the git-friendly config file."""
     cfg = _read_raw(config_dir)
     n = cfg.get("notifications") or {}
     for key, val in [
@@ -282,6 +285,7 @@ def update_notifications(
         ("telegram_enabled", telegram_enabled),
         ("email_enabled",    email_enabled),
         ("smtp_starttls",    smtp_starttls),
+        ("webhook_enabled",  webhook_enabled),
     ]:
         if val is not None:
             n[key] = bool(val)
@@ -291,6 +295,7 @@ def update_notifications(
         ("smtp_user",        smtp_user),
         ("smtp_from",        smtp_from),
         ("smtp_to",          smtp_to),
+        ("webhook_url",      webhook_url),
     ]:
         if val is not None:
             n[key] = str(val).strip()
@@ -307,6 +312,9 @@ def update_notifications(
         secrets_changed = True
     if smtp_password is not None and smtp_password.strip():
         secrets["smtp_password"] = smtp_password.strip()
+        secrets_changed = True
+    if webhook_token is not None and webhook_token.strip():
+        secrets["webhook_token"] = webhook_token.strip()
         secrets_changed = True
     if secrets_changed:
         save_secrets(secrets, config_dir)
