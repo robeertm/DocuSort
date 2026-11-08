@@ -284,6 +284,7 @@ def test_mask_text_leaves_ordinary_numbers():
     ("Versicherungsschein Vertragsnummer KV-998877-12 Kunde 4711", "•••712", "998877"),
     ("Rechnungs-Nr. R45671407 25,09 EUR", "•••407 25,09 EUR", "4567"),
     ("Deine Vertragsnummer: AB-123-XYZ, bitte", "•••XYZ, bitte", "AB-123"),
+    ("Zahlungsweise jährlichBZ-XD 212 29.900 km", "jährlich••• 29.900 km", "BZ-XD"),
 ])
 def test_mask_text_1_7_1(roh, rein, raus):
     t, _ = content_api.mask_text(roh)

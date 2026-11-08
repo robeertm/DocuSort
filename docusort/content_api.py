@@ -115,7 +115,7 @@ def iban_ersetzen(ganz: str, rest_zeichen: int = 4) -> str | None:
 _KARTE = re.compile(r"(?<![\d])(\d(?:[ -]?\d){12,18})(?![\d])")
 # Kfz-Kennzeichen: Ort (1–3 Buchstaben), Trenner, 1–2 Buchstaben, 1–4 Ziffern
 # (1.7.1: kam vorher ungeschwaerzt heraus).
-_KENNZEICHEN = re.compile(r"(?<![A-Za-zÄÖÜäöü0-9])[A-ZÄÖÜ]{1,3}[- ][A-Z]{1,2} ?\d{1,4}[EH]?(?![A-Za-z0-9])")
+_KENNZEICHEN = re.compile(r"(?<![A-ZÄÖÜ0-9])[A-ZÄÖÜ]{1,3}[- ][A-Z]{1,2} ?\d{1,4}[EH]?(?![A-Za-z0-9])")
 # Stichwort + Nummer (1.7.1): Vertrags-, Kunden-, Versicherungs-, Konto-,
 # Zaehlernummer (nie der Zaehlerstand), Steuer-, Rechnungsnummer … Der Wert besteht aus Grossbuchstaben und
 # Ziffern; weitere Gruppen nur, wenn sie mit einer Ziffer beginnen. Auch kurze

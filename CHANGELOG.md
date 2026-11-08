@@ -7,6 +7,15 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.7.2] - 2026-11-08
+
+### Security
+
+- **Number plates glued to the previous word are masked too.** The text layer
+  of real PDFs often loses the space before a value ("jährlichBZ-XD 212");
+  such a plate went through unmasked in 1.7.1. A plate now only must not
+  follow a capital letter or a digit.
+
 ## [1.7.1] - 2026-11-08
 
 ### Security
