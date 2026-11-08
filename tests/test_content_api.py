@@ -195,7 +195,7 @@ def test_text_masks_iban_and_card(env):
     assert IBAN not in t and IBAN.replace(" ", "") not in t and "3704" not in t
     assert "3000" in t or "30 00" in t or "•" in t
     assert CARD not in t and "1111 1111 1111 1111" not in t
-    assert d["masked"] == {"iban": 1, "card": 1}
+    assert d["masked"]["iban"] == 1 and d["masked"]["card"] == 1
 
 
 def test_page_is_capped(env):
@@ -207,7 +207,7 @@ def test_text_without_text_layer_falls_back_to_stored_text(env):
     r = env["client"].get("/api/content/text?id=%d" % env["ids"]["stored"], headers=_hdr(env["token"]))
     d = r.json()
     assert d["source"] == "stored"
-    assert d["pages"] == [{"seite": None, "text": "Die Police laeuft bis 31.12.2027 Vertragsnummer KV-998877"}]
+    assert d["pages"] == [{"seite": None, "text": "Die Police laeuft bis 31.12.2027 Vertragsnummer •••877"}]
 
 
 @pytest.mark.parametrize("key", ["dup"])
@@ -266,5 +266,42 @@ def test_search_params(env):
 
 
 def test_mask_text_leaves_ordinary_numbers():
-    t, z = content_api.mask_text("Kundennummer 1234567890123 Rechnung 2026-10-01 Betrag 87,50")
-    assert t.startswith("Kundennummer 1234567890123") and z == {"iban": 0, "card": 0}
+    t, z = content_api.mask_text("Bestellung 1234567890123 Rechnung 2026-10-01 Betrag 87,50")
+    assert t == "Bestellung 1234567890123 Rechnung 2026-10-01 Betrag 87,50" and z["iban"] == z["card"] == 0
+
+
+@pytest.mark.parametrize("roh,rein,raus", [
+    ("Vertragsnummer: AB-123-XYZ", "•••XYZ", "AB-123"),
+    ("Ihr Vertrag 4711-0815-22", "•••522", "4711"),
+    ("Vertrags-Nr. VK 2024 7781 33", "•••133", "7781"),
+    ("Kfz-Kennzeichen: BZ-AB 123", "•••", "BZ-AB"),
+    ("Kennzeichen: BZ AB 1234", "•••", "AB 1234"),
+    ("amtl. Kennzeichen BZ-RM 42", "•••", "BZ-RM"),
+    ("Fahrzeug BZ-RM 4242", "•••", "4242"),
+    ("iban: de89 3704 0044 0532 0130 00", "DE••", "3704"),
+    ("IBAN: DE89  3704  0044  0532  0130  00", "DE••", "0044"),
+    ("Zählernummer 1ESY1160123456", "•••456", "1160123"),
+    ("Versicherungsschein Vertragsnummer KV-998877-12 Kunde 4711", "•••712", "998877"),
+    ("Rechnungs-Nr. R45671407 25,09 EUR", "•••407 25,09 EUR", "4567"),
+    ("Deine Vertragsnummer: AB-123-XYZ, bitte", "•••XYZ, bitte", "AB-123"),
+])
+def test_mask_text_1_7_1(roh, rein, raus):
+    t, _ = content_api.mask_text(roh)
+    assert rein in t and raus not in t, t
+
+
+@pytest.mark.parametrize("roh", ["Beitrag 412,30 EUR ab 01.01.2026", "Ihr Vertrag vom 3.11.2026",
+                                 "Kontoauszug 10/2026", "Abschlag 87,50 EUR monatlich", "Vertrag mit der GmbH",
+                                 "Mo 12 Uhr bis Fr 18 Uhr geöffnet", "in KW 45 und KW 46 wird abgelesen",
+                                 "Zählerstand 12345 kWh", "Zählerstand neu 46 912,4 kWh", "Rechnungsbetrag 99,99 €",
+                                 "Gesamtbetrag 12.345,67 €", "Am 12 Mai kommt der Ableser vorbei"])
+def test_mask_text_laesst_betraege_und_daten(roh):
+    assert content_api.mask_text(roh)[0] == roh
+
+
+def test_iban_braucht_gueltige_pruefsumme():
+    assert content_api.iban_gueltig("DE89370400440532013000")
+    assert not content_api.iban_gueltig("DE89370400440532013001")
+    assert not content_api.iban_gueltig("MO12UHRBISFR18")
+    t, z = content_api.mask_text("iban de89 3704 0044\n0532 0130 00 bitte")
+    assert "3704" not in t and t.endswith(" bitte") and z["iban"] == 1

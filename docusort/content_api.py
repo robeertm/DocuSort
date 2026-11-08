@@ -24,7 +24,9 @@ gespeicherte Text als EIN Block ohne Seitenzahl (`seite: null`).
 🔴 WAS NIE HINAUSGEHT
 Keine Datei, kein Pfad, keine Kosten. Kontonummern (IBAN) und Kartennummern
 werden im Text und in den Ausschnitten maskiert (nur die letzten vier Zeichen
-bleiben), ehe etwas die Tuer verlaesst. Geloeschte Dokumente, Doppelgaenger-
+bleiben), Kfz-Kennzeichen ganz und Nummern hinter Stichworten (Vertrag,
+Kunde, Konto, Zaehler …) bis auf die letzten drei (1.7.1), ehe etwas die Tuer
+verlaesst. Geloeschte Dokumente, Doppelgaenger-
 Notizen und CSV-Huellen bleiben unsichtbar — dieselbe Regel wie die Lese-Tuer.
 """
 from __future__ import annotations
@@ -75,11 +77,56 @@ class RateLimit:
 
 # ── Maskieren ───────────────────────────────────────────────────────────────
 # IBAN: Laenderkennung, zwei Pruefziffern, 11–30 weitere Zeichen, gern in
-# Vierergruppen mit Leerzeichen geschrieben.
-_IBAN = re.compile(r"\b([A-Z]{2})\s?(\d{2})((?:\s?[A-Z0-9]){11,30})\b")
+# Vierergruppen; Gross/klein egal, auch doppelte Leerzeichen und Umbrueche.
+_IBAN = re.compile(r"\b([A-Za-z]{2})\s{0,2}(\d{2})((?:\s{0,2}[A-Za-z0-9]){11,30})\b")
+# 🔴 1.7.1: eine IBAN zaehlt nur mit gueltigem Laendercode, passender Laenge und
+#    bestandener mod-97-Pruefsumme — sonst fraesse das grobe Muster normalen
+#    Text wie „Mo 12 Uhr bis Fr 18 Uhr“. Gross/klein und Umbrueche bleiben erlaubt.
+IBAN_LAENGE = {"AD": 24, "AT": 20, "BE": 16, "BG": 22, "CH": 21, "CY": 28, "CZ": 24, "DE": 22, "DK": 18, "EE": 20,
+               "ES": 24, "FI": 18, "FR": 27, "GB": 22, "GR": 27, "HR": 21, "HU": 28, "IE": 22, "IS": 26, "IT": 27,
+               "LI": 21, "LT": 20, "LU": 20, "LV": 21, "MC": 27, "MT": 31, "NL": 18, "NO": 15, "PL": 28, "PT": 25,
+               "RO": 24, "SE": 24, "SI": 19, "SK": 24, "SM": 27}
+
+
+def iban_gueltig(s: str) -> bool:
+    s = s.upper()
+    if len(s) != IBAN_LAENGE.get(s[:2], -1) or not s.isalnum():
+        return False
+    try:
+        return int("".join(str(int(c, 36)) for c in s[4:] + s[:4])) % 97 == 1
+    except ValueError:
+        return False
+
+
+def iban_ersetzen(ganz: str, rest_zeichen: int = 4) -> str | None:
+    """Treffer des groben Musters → verdeckte IBAN + unveraenderter Rest, oder None (keine gueltige IBAN)."""
+    laenge = IBAN_LAENGE.get(ganz[:2].upper())
+    if not laenge:
+        return None
+    pos = [i for i, c in enumerate(ganz) if c.isalnum()]
+    if len(pos) < laenge:
+        return None
+    kandidat = "".join(ganz[i] for i in pos[:laenge]).upper()
+    if not iban_gueltig(kandidat):
+        return None
+    return kandidat[:2] + "•• •••• •••• " + kandidat[-rest_zeichen:] + ganz[pos[laenge - 1] + 1:]
 # Kartennummern: 13–19 Ziffern, wahlweise in Gruppen; nur mit gueltiger
 # Luhn-Pruefziffer (sonst waere jede lange Kundennummer betroffen).
 _KARTE = re.compile(r"(?<![\d])(\d(?:[ -]?\d){12,18})(?![\d])")
+# Kfz-Kennzeichen: Ort (1–3 Buchstaben), Trenner, 1–2 Buchstaben, 1–4 Ziffern
+# (1.7.1: kam vorher ungeschwaerzt heraus).
+_KENNZEICHEN = re.compile(r"(?<![A-Za-zÄÖÜäöü0-9])[A-ZÄÖÜ]{1,3}[- ][A-Z]{1,2} ?\d{1,4}[EH]?(?![A-Za-z0-9])")
+# Stichwort + Nummer (1.7.1): Vertrags-, Kunden-, Versicherungs-, Konto-,
+# Zaehlernummer (nie der Zaehlerstand), Steuer-, Rechnungsnummer … Der Wert besteht aus Grossbuchstaben und
+# Ziffern; weitere Gruppen nur, wenn sie mit einer Ziffer beginnen. Auch kurze
+# alphanumerische Werte („AB-123-XYZ“) werden verdeckt, Daten nicht.
+_STICHWORT = re.compile(
+    r"(?i:(?P<wort>\b(vertrag\w*|kunde\w*|versicherung\w*|versicherte\w*|police\w*|konto\w*|mitglied\w*|"
+    r"z[äa]hler(?:nummer|nr\.?)|z[äa]hler(?=\s*[-‐]\s*(?:nummer|nr))|steuer\w*|identifikations\w*|personal\w*|referenz\w*|mandats\w*|gl[äa]ubiger\w*|kassenzeichen|"
+    r"aktenzeichen|rechnungs\w*|abonnenten\w*|vorgangs\w*|fahrgestell\w*|depot\w*|iban|bic|kennzeichen|"
+    r"kfz-kennzeichen)(\s*[-‐]?\s*(nummer|nr\.?|id))?\s*[:.#]?\s*))"
+    r"(?P<nr>[A-Z0-9](?:[A-Z0-9\-/.]*[A-Z0-9])?(?: \d(?:[\d\-/.]*\d)?(?![\d]|,\d)){0,5})(?![A-Za-zÄÖÜäöüß\d]|,\d)")
+_DATUM = re.compile(r"^(\d{1,2}\.\d{1,2}\.(\d{2,4})?|\d{1,2}[./]\d{2,4}|(19|20)\d{2}([/-]\d{2,4})?)$")
 
 
 def _luhn(ziffern: str) -> bool:
@@ -96,15 +143,16 @@ def _luhn(ziffern: str) -> bool:
 
 
 def mask_text(text: str) -> tuple[str, dict[str, int]]:
-    """IBAN und Kartennummern bis auf die letzten vier Zeichen verdecken."""
-    zahl = {"iban": 0, "card": 0}
+    """IBAN und Kartennummern bis auf die letzten vier Zeichen verdecken,
+    Kfz-Kennzeichen ganz, Nummern hinter Stichworten bis auf die letzten drei."""
+    zahl = {"iban": 0, "card": 0, "plate": 0, "number": 0}
 
     def _iban(m: re.Match) -> str:
-        rest = re.sub(r"\s", "", m.group(3))
-        if not rest[-4:].isalnum():
+        neu = iban_ersetzen(m.group(0))
+        if neu is None:
             return m.group(0)
         zahl["iban"] += 1
-        return "%s•• •••• •••• %s" % (m.group(1), rest[-4:])
+        return neu
 
     def _karte(m: re.Match) -> str:
         ziffern = re.sub(r"\D", "", m.group(1))
@@ -113,8 +161,22 @@ def mask_text(text: str) -> tuple[str, dict[str, int]]:
         zahl["card"] += 1
         return "•••• •••• •••• " + ziffern[-4:]
 
+    def _kennzeichen(m: re.Match) -> str:
+        zahl["plate"] += 1
+        return "•••"
+
+    def _stichwort(m: re.Match) -> str:
+        nr = m.group("nr")
+        rein = re.sub(r"[\s\-/.]", "", nr)
+        if "•" in nr or not any(c.isdigit() for c in nr) or _DATUM.match(nr) or len(rein) < 3:
+            return m.group(0)
+        zahl["number"] += 1
+        return m.group("wort") + "•••" + rein[-3:]
+
     aus = _IBAN.sub(_iban, text or "")
     aus = _KARTE.sub(_karte, aus)
+    aus = _KENNZEICHEN.sub(_kennzeichen, aus)
+    aus = _STICHWORT.sub(_stichwort, aus)
     return aus, zahl
 
 
@@ -188,7 +250,7 @@ def get_text(db, doc_id: int, page: int | None = None) -> dict[str, Any] | None:
         nr = max(1, min(int(page), gesamt))
         seiten = [seiten[nr - 1]]
     rest, gekuerzt = TEXT_MAX_CHARS, False
-    aus, maskiert = [], {"iban": 0, "card": 0}
+    aus, maskiert = [], {"iban": 0, "card": 0, "plate": 0, "number": 0}
     for s in seiten:
         if rest <= 0:
             gekuerzt = True

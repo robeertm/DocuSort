@@ -686,8 +686,10 @@ GET /api/content/text?id=<id>[&seite=<n>]         # the text, page by page
 - `text` returns `pages` as `[{"seite": n, "text": …}]` from the PDF's text
   layer, so answers can cite a page. A PDF without a readable text layer
   falls back to the stored text as one block with `"seite": null`.
-- **IBANs and card numbers are masked** (only the last four characters stay)
-  before anything leaves, in texts and in snippets.
+- **IBANs and card numbers are masked** (only the last four characters stay),
+  number plates completely, and numbers after a keyword (contract, customer,
+  account, meter, invoice …) down to their last three characters, before
+  anything leaves, in texts and in snippets.
 - Limits: at most 60 000 characters per answer (`truncated: true` says when
   it was cut), 60 pages read, 120 valid requests per minute (`429` with
   `Retry-After` beyond that), the same failure brake and network hurdle as the

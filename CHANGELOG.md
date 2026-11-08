@@ -7,6 +7,23 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.7.1] - 2026-11-08
+
+### Security
+
+- **The content API masks more.** Number plates are now hidden completely,
+  and numbers after a keyword (contract, customer, policy, account, meter,
+  tax, invoice number …) are masked down to their last three characters even
+  when they are short or contain letters ("AB-123-XYZ", "4711-0815-22"). IBANs
+  are recognised in lower case, with double spaces and across line breaks.
+- **No over-masking.** An IBAN only counts with a valid country code, the
+  matching length and a passing mod-97 checksum, so ordinary text such as
+  "Mo 12 Uhr bis Fr 18 Uhr" or "KW 45" stays as it is. Meter numbers are
+  masked, meter readings ("Zählerstand 12345 kWh") never. Dates, amounts and
+  month/year references stay readable.
+- Checked: the web server writes no access log, so search terms of the content
+  API (`?q=`) never reach the log.
+
 ## [1.7.0] - 2026-11-08
 
 ### Added
