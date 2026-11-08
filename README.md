@@ -662,6 +662,38 @@ itself or where it is stored.
   loopback; a comma-separated list of networks replaces that, `any` switches
   the check off.
 
+### Read-only content API
+
+For a trusted assistant that has to answer questions *from* the documents
+("when does my car insurance end?"), there is a second, separate door with
+**its own token**. The listing token above never opens it, and this token
+never opens the listing. It is **off** until you create its token:
+
+```bash
+docker exec docusort python3 -m docusort.content_token new     # prints the token once
+docker exec docusort python3 -m docusort.content_token status  # on / off
+docker exec docusort python3 -m docusort.content_token off     # disable it again
+```
+
+```
+GET /api/content/search?q=<words>&limit=<1-20>   # hits with snippet and page
+GET /api/content/text?id=<id>[&seite=<n>]         # the text, page by page
+```
+
+- `search` uses the same search ladder as the library (exact, partial word,
+  any word) and returns the listing's fields plus `snippet` (the hit in
+  `[ ]`) and `page` (where the words stand, for the first hits).
+- `text` returns `pages` as `[{"seite": n, "text": …}]` from the PDF's text
+  layer, so answers can cite a page. A PDF without a readable text layer
+  falls back to the stored text as one block with `"seite": null`.
+- **IBANs and card numbers are masked** (only the last four characters stay)
+  before anything leaves, in texts and in snippets.
+- Limits: at most 60 000 characters per answer (`truncated: true` says when
+  it was cut), 60 pages read, 120 valid requests per minute (`429` with
+  `Retry-After` beyond that), the same failure brake and network hurdle as the
+  listing. No file and no path ever leave; deleted documents and duplicates
+  stay invisible. The token's SHA-256 is stored in `content_token.json`.
+
 ---
 
 ## Privacy

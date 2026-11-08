@@ -7,6 +7,25 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.7.0] - 2026-11-08
+
+### Added
+
+- **Read-only content API with its own token.** Two exact paths,
+  `GET /api/content/search` (full-text search with a snippet and the page the
+  words stand on) and `GET /api/content/text` (a document's text, page by page
+  from the PDF's text layer), let a trusted assistant answer questions from
+  the documents and cite title, date and page. The door is off until its own
+  token exists (`python3 -m docusort.content_token new|status|off`); the
+  read-only listing token does not open it, and its token does not open the
+  listing.
+- IBANs and card numbers are masked in every text and snippet before they
+  leave (only the last four characters stay). Masking happens before the
+  snippet is cut, so a half IBAN can never slip through.
+- Limits: 60 000 characters per answer, 60 pages, 120 valid requests per
+  minute, plus the failure brake and network hurdle of the listing. No file,
+  no path, no costs; deleted documents and duplicates stay invisible.
+
 ## [1.6.0] - 2026-11-08
 
 ### Added
