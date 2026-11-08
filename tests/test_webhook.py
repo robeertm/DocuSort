@@ -174,7 +174,7 @@ def test_bad_urls_rejected(url):
 
 
 def test_good_urls_accepted():
-    assert notifier.webhook_url_ok("http://192.168.0.10:8080/hook")
+    assert notifier.webhook_url_ok("http://192.0.2.10:8080/hook")
     assert notifier.webhook_url_ok("https://example.com/a?b=c")
 
 
