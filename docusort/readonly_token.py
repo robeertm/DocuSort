@@ -35,18 +35,18 @@ from pathlib import Path
 FILENAME = "readonly_token.json"
 
 
-def token_path(config_dir: Path | str | None = None) -> Path:
+def token_path(config_dir: Path | str | None = None, filename: str = FILENAME) -> Path:
     if config_dir is None:
         from .config import DEFAULT_CONFIG_DIR
         config_dir = DEFAULT_CONFIG_DIR
-    return Path(config_dir) / FILENAME
+    return Path(config_dir) / filename
 
 
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def stored_hash(config_dir: Path | str | None = None) -> str:
+def stored_hash(config_dir: Path | str | None = None, filename: str = FILENAME) -> str:
     """Der gespeicherte Hash, oder "" wenn die Schnittstelle aus ist.
 
     🔴 Bei JEDER Anfrage frisch gelesen, nie gemerkt: sonst wirkte `off` erst
@@ -55,7 +55,7 @@ def stored_hash(config_dir: Path | str | None = None) -> str:
        verschlossene Tuer als eine, deren Schloss niemand pruefen kann.
     """
     try:
-        daten = json.loads(token_path(config_dir).read_text(encoding="utf-8"))
+        daten = json.loads(token_path(config_dir, filename).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return ""
     wert = str(daten.get("sha256", "")) if isinstance(daten, dict) else ""
@@ -64,33 +64,34 @@ def stored_hash(config_dir: Path | str | None = None) -> str:
     return wert
 
 
-def is_enabled(config_dir: Path | str | None = None) -> bool:
-    return bool(stored_hash(config_dir))
+def is_enabled(config_dir: Path | str | None = None, filename: str = FILENAME) -> bool:
+    return bool(stored_hash(config_dir, filename))
 
 
-def verify(token: str, config_dir: Path | str | None = None) -> bool:
+def verify(token: str, config_dir: Path | str | None = None,
+           filename: str = FILENAME) -> bool:
     """Passt das Token? Vergleich in konstanter Zeit."""
-    gespeichert = stored_hash(config_dir)
+    gespeichert = stored_hash(config_dir, filename)
     if not gespeichert or not token:
         return False
     return hmac.compare_digest(_hash(token), gespeichert)
 
 
-def created_at(config_dir: Path | str | None = None) -> str:
+def created_at(config_dir: Path | str | None = None, filename: str = FILENAME) -> str:
     try:
-        daten = json.loads(token_path(config_dir).read_text(encoding="utf-8"))
+        daten = json.loads(token_path(config_dir, filename).read_text(encoding="utf-8"))
         return str(daten.get("created", "")) if isinstance(daten, dict) else ""
     except (OSError, ValueError):
         return ""
 
 
-def new_token(config_dir: Path | str | None = None) -> str:
+def new_token(config_dir: Path | str | None = None, filename: str = FILENAME) -> str:
     """Wuerfelt ein neues Token, speichert seinen Hash und gibt es zurueck.
 
     Ein vorhandenes Token wird damit ungueltig.
     """
     token = secrets.token_urlsafe(32)          # 256 Bit
-    ziel = token_path(config_dir)
+    ziel = token_path(config_dir, filename)
     ziel.parent.mkdir(parents=True, exist_ok=True)
     inhalt = json.dumps({"sha256": _hash(token),
                          "created": datetime.now().isoformat(timespec="seconds")})
@@ -113,10 +114,10 @@ def new_token(config_dir: Path | str | None = None) -> str:
     return token
 
 
-def disable(config_dir: Path | str | None = None) -> bool:
+def disable(config_dir: Path | str | None = None, filename: str = FILENAME) -> bool:
     """Schaltet die Schnittstelle ab. True, wenn vorher ein Token da war."""
     try:
-        token_path(config_dir).unlink()
+        token_path(config_dir, filename).unlink()
         return True
     except FileNotFoundError:
         return False

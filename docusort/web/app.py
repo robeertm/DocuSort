@@ -6660,6 +6660,71 @@ def create_app(
                         headers={"Cache-Control": "no-store",
                                  "X-Content-Type-Options": "nosniff"})
 
+    # ---------- The read-only CONTENT door (1.7.0) ----------
+    # 🔑 A second door with its OWN token (`content_token.py`): the token of
+    #    the read-only listing above never opens it, and this one never opens
+    #    that. Same order of checks, plus a volume brake for valid requests.
+    #    🔴 Answers carry text (IBAN and card numbers masked), never a file
+    #    or a path.
+    from .. import content_api as _ct_api
+    from .. import content_token as _ct_token
+    _ct_bremse = _ro_api.FailureBrake(max_fails=10, window=60.0)
+    _ct_menge = _ct_api.RateLimit()
+
+    def _ct_tor(request: Request) -> JSONResponse | None:
+        if not _ct_token.is_enabled(settings.config_dir):
+            return _ro_antwort({"ok": False, "error": "not found"}, 404)
+        absender = request.client.host if request.client else ""
+        if not _ro_api.client_allowed(absender):
+            logger.info("content API: refused sender outside %s", _ro_api.ALLOW_ENV)
+            return _ro_antwort({"ok": False, "error": "forbidden"}, 403)
+        warten = _ct_bremse.retry_after(absender)
+        if warten:
+            return _ro_antwort({"ok": False, "error": "too many failed attempts"},
+                               429, {"Retry-After": str(warten)})
+        token = _ro_api.bearer_token(request.headers.get("authorization"))
+        if not _ct_token.verify(token, settings.config_dir):
+            _ct_bremse.fail(absender)
+            # 🔴 Never log the token, not even a piece of it.
+            logger.info("content API: rejected request (%s token)",
+                        "wrong" if token else "no")
+            return _ro_antwort({"ok": False, "error": "unauthorized"}, 401,
+                               {"WWW-Authenticate": "Bearer"})
+        warten = _ct_menge.take()
+        if warten:
+            return _ro_antwort({"ok": False, "error": "too many requests"},
+                               429, {"Retry-After": str(warten)})
+        return None
+
+    @app.get("/api/content/text")
+    def api_content_text(request: Request, id: str | None = None,
+                         seite: str | None = None):
+        abgewiesen = _ct_tor(request)
+        if abgewiesen is not None:
+            return abgewiesen
+        try:
+            doc_id = _ro_api.parse_id(id)
+            nr = _ct_api.parse_optional_page(seite)
+        except _ro_api.BadParameter as exc:
+            return _ro_antwort({"ok": False, "error": str(exc)}, 400)
+        inhalt = _ct_api.get_text(db, doc_id, nr)
+        if inhalt is None:
+            return _ro_antwort({"ok": False, "error": "not found"}, 404)
+        return _ro_antwort({"ok": True, "version": __version__, **inhalt})
+
+    @app.get("/api/content/search")
+    def api_content_search(request: Request, q: str | None = None,
+                           limit: str | None = None):
+        abgewiesen = _ct_tor(request)
+        if abgewiesen is not None:
+            return abgewiesen
+        try:
+            such, n = _ct_api.parse_search(q, limit)
+        except _ro_api.BadParameter as exc:
+            return _ro_antwort({"ok": False, "error": str(exc)}, 400)
+        return _ro_antwort({"ok": True, "version": __version__,
+                            **_ct_api.search(db, such, n)})
+
     # 🔑 Health check for Docker and external monitors (1.5.2). Open without a
     #    session on purpose, so the answer must carry nothing: no version, no
     #    path, no user. 200 {"status":"ok"} or 503 {"status":"error"}.

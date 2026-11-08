@@ -178,6 +178,10 @@ PUBLIC_PATHS = (
     # 🔴 Two more EXACT paths, each on its own — still no prefix.
     "/api/readonly/document",
     "/api/readonly/preview",
+    # The read-only CONTENT door (1.7.0): its own token, checked in the handler
+    # (docusort/content_api.py). 🔴 Two exact paths, no `/api/content/` prefix.
+    "/api/content/text",
+    "/api/content/search",
 )
 
 # What a non-admin may reach. Anything not listed is admin-only.
