@@ -961,6 +961,16 @@ class Database:
                            sqlite3.sqlite_version, exc)
             self._such_trigramm = False
 
+        # 1.8.0: Seitentexte vorab fuer die Inhalts-Tuer (`page_texts.py`).
+        # 🔴 In einem try: fehlt die Ablage, liest die Tuer wie frueher selbst —
+        #    ein Start darf daran nie scheitern.
+        try:
+            from . import page_texts as _pt
+            _pt.ensure_schema(self._conn)
+        except sqlite3.Error as exc:
+            logger.warning("Seitentext-Ablage nicht verfuegbar (SQLite %s): %s",
+                           sqlite3.sqlite_version, exc)
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

@@ -20,6 +20,9 @@ einer Schleife haengt, liest so nicht die ganze Bibliothek leer.
 aus der Textebene des PDFs in der Bibliothek (nach einer Texterkennung hat
 auch ein Scan eine). Hat das PDF keine lesbare Textebene, gilt der
 gespeicherte Text als EIN Block ohne Seitenzahl (`seite: null`).
+Seit 1.8.0 liegen die Seiten vorab in der Datenbank (`page_texts.py`); die
+Textebene liest die Tuer nur noch, wenn fuer diese Fassung der Datei nichts
+abgelegt ist.
 
 🔴 WAS NIE HINAUSGEHT
 Keine Datei, kein Pfad, keine Kosten. Kontonummern (IBAN) und Kartennummern
@@ -35,10 +38,10 @@ import logging
 import re
 import threading
 import time
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
+from . import page_texts as _pt
 from . import readonly_api as _ro
 
 logger = logging.getLogger("docusort.content")
@@ -181,44 +184,38 @@ def mask_text(text: str) -> tuple[str, dict[str, int]]:
 
 
 # ── Seiten ──────────────────────────────────────────────────────────────────
-_seiten_speicher: "OrderedDict[tuple[str, float], list[str]]" = OrderedDict()
-_speicher_lock = threading.Lock()
+# 🔑 1.8.0: Die Seiten liegen vorab in der Datenbank (`page_texts.py`). Nur wenn
+#    fuer GENAU diese Fassung der Datei noch nichts abgelegt ist, liest die Tuer
+#    die Textebene selbst — und legt das Ergebnis fuer das naechste Mal ab.
 
 
-def _pdf_pages(src: Path) -> list[str]:
-    """Text je Seite aus der Textebene (hoechstens PAGES_MAX Seiten), mit
-    kleinem Zwischenspeicher je Datei und Aenderungszeit."""
+def _pdf_pages(db, doc_id: int, src: Path | None) -> tuple[list[str], int | None]:
+    """(Text je Seite, volle Seitenzahl oder None). Hoechstens PAGES_MAX Seiten."""
+    if src is None:
+        return [], None
+    key = _pt.src_key(src)
+    if key is None:
+        return [], None
     try:
-        schluessel = (str(src), src.stat().st_mtime)
-    except OSError:
-        return []
-    with _speicher_lock:
-        if schluessel in _seiten_speicher:
-            _seiten_speicher.move_to_end(schluessel)
-            return _seiten_speicher[schluessel]
+        abgelegt = _pt.load(db, doc_id, key)
+    except Exception as exc:                            # noqa: BLE001 — Ablage fehlt: lesen wie frueher
+        logger.info("content API: page store unavailable: %s", type(exc).__name__)
+        abgelegt = None
+    if abgelegt is not None and abgelegt[0] != _pt.FAILED:
+        return abgelegt[1][:PAGES_MAX], abgelegt[0]
     try:
-        from pypdf import PdfReader
-        reader = PdfReader(str(src))
-        if reader.is_encrypted:
-            try:
-                reader.decrypt("")
-            except Exception:                           # noqa: BLE001
-                pass
-        seiten = []
-        for i, seite in enumerate(reader.pages):
-            if i >= PAGES_MAX:
-                break
-            seiten.append((seite.extract_text() or "").strip())
+        gesamt, seiten = _pt.extract(src, PAGES_MAX)
     except Exception as exc:                            # noqa: BLE001
         # 🔴 Nur der Name, nie der volle Pfad.
         logger.info("content API: cannot read text layer of %s: %s",
                     src.name, type(exc).__name__)
-        return []
-    with _speicher_lock:
-        _seiten_speicher[schluessel] = seiten
-        while len(_seiten_speicher) > 32:
-            _seiten_speicher.popitem(last=False)
-    return seiten
+        return [], None
+    if abgelegt is None:
+        try:
+            _pt.store(db, doc_id, key, gesamt, seiten)
+        except Exception as exc:                        # noqa: BLE001 — Antwort geht trotzdem raus
+            logger.info("content API: cannot store page texts: %s", type(exc).__name__)
+    return seiten, gesamt
 
 
 def _stored_text(db, doc_id: int) -> str:
@@ -231,20 +228,39 @@ def _stored_text(db, doc_id: int) -> str:
 
 def document_pages(db, doc_id: int) -> tuple[list[dict[str, Any]], str]:
     """[(seite, text)] und woher der Text stammt ("pdf" oder "stored")."""
+    seiten, herkunft, _ = _pages_and_total(db, doc_id)
+    return seiten, herkunft
+
+
+def _pages_and_total(db, doc_id: int) -> tuple[list[dict[str, Any]], str, int | None]:
     src = _ro._source_pdf(db, doc_id)
-    seiten = _pdf_pages(src) if src is not None else []
+    seiten, gesamt = _pdf_pages(db, doc_id, src)
     if any(s.strip() for s in seiten):
-        return [{"seite": i, "text": t} for i, t in enumerate(seiten, start=1)], "pdf"
+        return [{"seite": i, "text": t} for i, t in enumerate(seiten, start=1)], "pdf", gesamt
     text = _stored_text(db, doc_id).strip()
-    return ([{"seite": None, "text": text}] if text else []), "stored"
+    return ([{"seite": None, "text": text}] if text else []), "stored", gesamt
+
+
+def _known_pages(db, doc_id: int) -> int | None:
+    """Abgelegte volle Seitenzahl dieser Dateifassung — erspart das Zaehlen per pypdf."""
+    try:
+        src = _ro._source_pdf(db, doc_id)
+        abgelegt = _pt.load(db, doc_id, _pt.src_key(src))
+    except Exception:                                   # noqa: BLE001
+        return None
+    if abgelegt is None or abgelegt[0] == _pt.FAILED:
+        return None
+    return abgelegt[0]
 
 
 def get_text(db, doc_id: int, page: int | None = None) -> dict[str, Any] | None:
     """Eckdaten + Text Seite fuer Seite (maskiert, gekuerzt). None = unsichtbar."""
-    meta = _ro.get_document(db, doc_id)
+    if not _ro.document_visible(db, doc_id):
+        return None
+    seiten, herkunft, gesamt_pdf = _pages_and_total(db, doc_id)
+    meta = _ro.get_document(db, doc_id, known_pages=gesamt_pdf)
     if meta is None:
         return None
-    seiten, herkunft = document_pages(db, doc_id)
     gesamt = len(seiten)
     if page is not None and herkunft == "pdf" and seiten:
         nr = max(1, min(int(page), gesamt))
@@ -345,7 +361,7 @@ def _seite_mit(db, doc_id: int, woerter: list[str]) -> int | None:
         return None
     from .aehnlichkeit import schlicht
     src = _ro._source_pdf(db, doc_id)
-    seiten = _pdf_pages(src) if src else []
+    seiten, _ = _pdf_pages(db, doc_id, src)
     beste, punkte = None, 0
     for i, t in enumerate(seiten, start=1):
         s = schlicht(t)
@@ -380,7 +396,7 @@ def search(db, q: str, limit: int = SEARCH_LIMIT_DEFAULT) -> dict[str, Any]:
     woerter = _woerter(q)
     treffer = []
     for i, r in enumerate(reihen):
-        meta = _ro.get_document(db, int(r["id"]))
+        meta = _ro.get_document(db, int(r["id"]), known_pages=_known_pages(db, int(r["id"])))
         if meta is None:
             continue
         meta.pop("vorschau_verfuegbar", None)

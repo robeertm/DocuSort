@@ -686,6 +686,13 @@ GET /api/content/text?id=<id>[&seite=<n>]         # the text, page by page
 - `text` returns `pages` as `[{"seite": n, "text": …}]` from the PDF's text
   layer, so answers can cite a page. A PDF without a readable text layer
   falls back to the stored text as one block with `"seite": null`.
+- **Page texts are read ahead.** While the door is on, a background job
+  stores every PDF's page texts in the database — new documents right after
+  they are filed, the existing library bit by bit. It reads in a separate
+  process at the lowest priority, with a time limit per file and a pause
+  after each document. A file that changes on disk is read again, so answers
+  come from the database instead of re-reading the PDF. Switch the job off
+  with `DOCUSORT_PAGE_TEXTS=0`.
 - **IBANs and card numbers are masked** (only the last four characters stay),
   number plates completely, and numbers after a keyword (contract, customer,
   account, meter, invoice …) down to their last three characters, before

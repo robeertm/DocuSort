@@ -340,6 +340,14 @@ def _build_pipeline(settings: AppSettings, classifier: Classifier | None, db: Da
             log.exception("DB insert failed for %s: %s", target.name, exc)
             return
 
+        # 1.8.0: Seitentexte fuer die Inhalts-Tuer gleich ablegen lassen — der
+        # Nachlauf liest in einem eigenen Prozess, die Pipeline wartet nicht.
+        try:
+            from . import page_texts as _pt
+            _pt.nudge()
+        except Exception:                               # noqa: BLE001 — nie die Pipeline aufhalten
+            pass
+
         # Hat das Modell eine neue Kategorie vorgeschlagen? Dann merken —
         # mehr nicht. Es wird KEINE Kategorie angelegt und das Dokument
         # NICHT dorthin gelegt: es liegt schon in der besten vorhandenen,
@@ -1203,6 +1211,13 @@ def main(argv: list[str] | None = None) -> int:
         name="statement-backfill",
         daemon=True,
     ).start()
+    # 1.8.0: page texts for the content door, read ahead at low priority —
+    # only while that door is switched on.
+    try:
+        from . import page_texts as _pt
+        _pt.start_backfill(db, settings.config_dir)
+    except Exception:
+        log.exception("Page texts: backfill could not be started — continuing without it")
 
     if args.no_web:
         run_forever(observer)

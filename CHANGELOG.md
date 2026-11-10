@@ -7,6 +7,27 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.8.0] - 2026-11-10
+
+### Performance
+
+- **The content API answers from stored page texts.** Until now the first
+  request for a document read its PDF text layer page by page during the
+  request — up to ten seconds for a large scan, and the in-memory cache was
+  gone after every restart. Page texts now live in the database: new
+  documents are read right after they are filed, the existing library is
+  filled by a background job, and the door only reads a PDF itself when
+  nothing is stored for exactly that version of the file.
+- **Changed files are read again.** Each stored entry carries the file's size
+  and modification time; a merged, replaced or re-recognised file no longer
+  matches and is read anew. Moving or renaming a file keeps its entry.
+- **Low load.** The background job reads each PDF in its own process at the
+  lowest priority, with a time limit per file and a pause after each
+  document, so it never uses more than half a core. A file that cannot be
+  read is remembered and only tried again once it changes. The job only runs
+  while the content API is switched on; `DOCUSORT_PAGE_TEXTS=0` turns it off.
+- The page count of a stored document no longer needs the PDF to be opened.
+
 ## [1.7.2] - 2026-11-08
 
 ### Security

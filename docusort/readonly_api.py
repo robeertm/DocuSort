@@ -354,15 +354,19 @@ def _source_pdf(db, doc_id: int) -> Path | None:
     return src
 
 
-def preview_pages(src: Path | None) -> int:
+def preview_pages(src: Path | None, known: int | None = None) -> int:
     """How many pages can be rendered as an image (0 = no preview).
 
     0 when there is no PDF, the PDF cannot be read, or pdftoppm is missing.
-    Capped at what the renderer itself is willing to render.
+    Capped at what the renderer itself is willing to render. `known` is a
+    page count stored for exactly this file (1.8.0) — it spares opening a
+    large PDF just to count its pages.
     """
     from . import preview
     if src is None or not preview.available():
         return 0
+    if known is not None and known >= 0:
+        return max(0, min(int(known), preview.MAX_PAGES))
     try:
         from pypdf import PdfReader
         n = len(PdfReader(str(src)).pages)
@@ -374,7 +378,7 @@ def preview_pages(src: Path | None) -> int:
     return max(0, min(n, preview.MAX_PAGES))
 
 
-def get_document(db, doc_id: int) -> dict[str, Any] | None:
+def get_document(db, doc_id: int, known_pages: int | None = None) -> dict[str, Any] | None:
     """One document's metadata — the same fields `list_documents` returns,
     plus `seiten` and `vorschau_verfuegbar`. None if the id is not visible."""
     sql = (f"SELECT {_SPALTEN} FROM documents d "
@@ -385,7 +389,7 @@ def get_document(db, doc_id: int) -> dict[str, Any] | None:
     if r is None:
         return None
     dok = _als_dokument(r)
-    seiten = preview_pages(_source_pdf(db, doc_id))
+    seiten = preview_pages(_source_pdf(db, doc_id), known_pages)
     dok["seiten"] = seiten
     dok["vorschau_verfuegbar"] = seiten > 0
     return dok
