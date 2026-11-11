@@ -1712,5 +1712,8 @@
   "upload.summary_done_of_total": "{done} of {total} done",
   "upload.title": "Upload documents",
   "upload.to_library": "To the library →",
-  "upload.view": "View →"
+  "upload.view": "View →",
+  "learn.rule_disable": "Switch off",
+  "learn.rule_enable": "Switch on",
+  "learn.rule_off": "This learned rule is switched off: it no longer decides anything."
 }

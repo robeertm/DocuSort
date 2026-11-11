@@ -1712,5 +1712,8 @@
   "upload.summary_done_of_total": "{done} sur {total} terminés",
   "upload.title": "Importer des documents",
   "upload.to_library": "Vers la bibliothèque →",
-  "upload.view": "Voir →"
+  "upload.view": "Voir →",
+  "learn.rule_disable": "Désactiver",
+  "learn.rule_enable": "Activer",
+  "learn.rule_off": "Cette règle apprise est désactivée : elle ne décide plus rien."
 }

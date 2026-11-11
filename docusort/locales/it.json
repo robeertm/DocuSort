@@ -1712,5 +1712,8 @@
   "upload.summary_done_of_total": "{done} di {total} completati",
   "upload.title": "Carica documenti",
   "upload.to_library": "Alla libreria →",
-  "upload.view": "Vedi →"
+  "upload.view": "Vedi →",
+  "learn.rule_disable": "Disattiva",
+  "learn.rule_enable": "Attiva",
+  "learn.rule_off": "Questa regola appresa è disattivata: non decide più nulla."
 }

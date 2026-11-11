@@ -802,6 +802,14 @@ class Database:
                    UNIQUE (match_value)
                )"""
         )
+        # 1.9.0: eine gelernte Regel laesst sich abschalten, ohne sie zu
+        # loeschen. Bestehende Zeilen bleiben AN (DEFAULT 1) — nichts aendert
+        # sich fuer eine Installation, die nichts anfasst.
+        try:
+            self._conn.execute(
+                "ALTER TABLE doc_rules ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass  # Spalte gibt es schon
 
         # Generic key-value meta table. First customer is
         # last_reanalyzed_version so the auto-reanalyse-on-upgrade hook
@@ -3330,6 +3338,15 @@ class Database:
             self._conn.commit()
         return bool(cur.rowcount)
 
+    def doc_rule_set_enabled(self, rule_id: int, enabled: bool) -> bool:
+        """Eine gelernte Zuordnung an- oder abschalten. Wirkt nur nach vorn."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE doc_rules SET enabled = ? WHERE id = ?",
+                (1 if enabled else 0, int(rule_id)))
+            self._conn.commit()
+        return bool(cur.rowcount)
+
     def doc_rule_match(self, text: str) -> dict[str, Any] | None:
         """Die erste Regel, deren Merkmal in diesem Text steht — oder None.
 
@@ -3343,7 +3360,7 @@ class Database:
         heu = self._dr_norm(text)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM doc_rules WHERE match_value IS NOT NULL "
+                "SELECT * FROM doc_rules WHERE match_value IS NOT NULL AND enabled = 1 "
                 "ORDER BY LENGTH(match_value) DESC, id ASC"
             ).fetchall()
         for r in rows:
@@ -3476,7 +3493,7 @@ class Database:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT category, subcategory, sender, subject, tags, beispiel_text "
-                "FROM doc_rules WHERE beispiel_text != '' "
+                "FROM doc_rules WHERE beispiel_text != '' AND enabled = 1 "
                 "ORDER BY updated_at DESC, id DESC LIMIT ?", (int(limit),)
             ).fetchall()
         return [dict(r) for r in rows]

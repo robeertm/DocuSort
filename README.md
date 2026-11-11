@@ -75,6 +75,14 @@ choose to send to an AI model — and you can point that at a local model too.
   text and land on a "due soon" list.
 - **Full-text search** across everything, with a year tree, tag filters and a
   review queue for anything the model was unsure about.
+- **Learns from what you file by hand — only if you ask.** When you correct a
+  document you can tick *Remember this for similar documents*; the box is never
+  ticked for you. DocuSort proposes a marker phrase from the document's header,
+  shows how many documents it would match *before* anything is saved, and the
+  rule only ever applies to documents that arrive afterwards — nothing already
+  filed is touched. *Settings → Learned assignments* lists every rule; each one
+  can be switched off (and on again) or deleted, and either way the documents
+  it already filed stay where they are.
 
 ### Receipts
 - Till receipts are broken down **line by line** — every item, quantity, unit
@@ -565,6 +573,7 @@ Notable options:
 | `web.default_language` | `en`, `de`, `fr`, `es`, `it` — the browser's preference wins when it matches one of them |
 | `web.ssl_cert` / `web.ssl_key` | serve HTTPS directly (a Tailscale certificate works nicely) |
 | `ai.provider` | `anthropic`, `openai`, `gemini`, `openai_compat` (Ollama, LM Studio, …) |
+| `ai.min_confidence` | below this confidence a document goes to the review queue instead of being filed (a slider in *Settings*, 5–99 %, default 65 %) |
 | `ocr.enabled` | run OCR on scans and photos |
 | `sync.remote` | an rclone remote for backups, e.g. `gdrive:DocuSort` |
 | `finance.salary_match` | text that identifies your salary booking, for the salary month |
@@ -583,7 +592,7 @@ The webhook sends every event as JSON in a `POST` to the address you enter
 ```json
 {
   "source": "docusort",
-  "version": "1.6.0",
+  "version": "1.9.0",
   "event": "deadline",
   "title": "...",
   "body": "...",

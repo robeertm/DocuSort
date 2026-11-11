@@ -1712,5 +1712,8 @@
   "upload.summary_done_of_total": "{done} von {total} fertig",
   "upload.title": "Dokumente hochladen",
   "upload.to_library": "Zur Bibliothek →",
-  "upload.view": "Ansehen →"
+  "upload.view": "Ansehen →",
+  "learn.rule_disable": "Abschalten",
+  "learn.rule_enable": "Einschalten",
+  "learn.rule_off": "Diese gelernte Zuordnung ist abgeschaltet: sie entscheidet nichts mehr."
 }

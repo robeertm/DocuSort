@@ -2168,6 +2168,23 @@ def create_app(
             "nur_beispiel": sum(1 for r in regeln if not r.get("match_value")),
         }
 
+    @app.post("/api/doc-rules/{rule_id}/enabled")
+    async def api_doc_rule_enabled(rule_id: int, request: Request):
+        """Eine gelernte Zuordnung ab- oder wieder anschalten (Verwalter).
+
+        Abgeschaltet heisst: sie entscheidet nichts mehr und belehrt die KI
+        nicht mehr. Bereits abgelegte Dokumente bleiben unberuehrt."""
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        wert = (payload or {}).get("enabled", True)
+        wert = bool(wert) if not isinstance(wert, str) else wert.lower() not in ("0", "false", "no")
+        if not db.doc_rule_set_enabled(rule_id, wert):
+            raise _http_fehler(404, "err.rule_missing")
+        _beispiele_geaendert()
+        return {"ok": True, "id": rule_id, "enabled": wert}
+
     @app.delete("/api/doc-rules/{rule_id}")
     def api_doc_rule_delete(rule_id: int):
         """Eine gelernte Zuordnung zuruecknehmen.

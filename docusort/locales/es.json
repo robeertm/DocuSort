@@ -1712,5 +1712,8 @@
   "upload.summary_done_of_total": "{done} de {total} listos",
   "upload.title": "Subir documentos",
   "upload.to_library": "A la biblioteca →",
-  "upload.view": "Ver →"
+  "upload.view": "Ver →",
+  "learn.rule_disable": "Desactivar",
+  "learn.rule_enable": "Activar",
+  "learn.rule_off": "Esta regla aprendida está desactivada: ya no decide nada."
 }

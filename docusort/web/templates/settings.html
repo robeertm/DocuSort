@@ -527,7 +527,8 @@
 
     <div class="space-y-2">
       <template x-for="r in regeln" :key="r.id">
-        <div class="flex items-start gap-3 rounded-xl border border-ink-700/70 px-3 py-2">
+        <div class="flex items-start gap-3 rounded-xl border border-ink-700/70 px-3 py-2"
+             :class="r.enabled === 0 ? 'opacity-60' : ''">
           <div class="flex-1 min-w-0">
             <div class="text-sm">
               <span x-text="catLabel(r.category)"></span><template x-if="r.subcategory"><span
@@ -537,11 +538,18 @@
               <template x-if="r.match_value"><span class="font-mono" x-text="r.match_value"></span></template>
               <template x-if="!r.match_value"><span>{{ t('learn.rule_example_only') }}</span></template>
             </div>
+            <div class="text-[11px] text-amber-300" x-show="r.enabled === 0" x-cloak>{{ t('learn.rule_off') }}</div>
             <div class="text-[11px] text-ink-500" x-show="r.hits"
                  x-text="tr('learn.rule_hits', { count: r.hits })"></div>
           </div>
-          <button type="button" class="btn-ghost text-xs shrink-0"
-                  @click="weg(r.id)">{{ t('learn.rule_delete') }}</button>
+          <div class="flex flex-col sm:flex-row gap-1 shrink-0">
+            <button type="button" class="btn-ghost text-xs min-h-[44px] sm:min-h-0"
+                    :aria-pressed="r.enabled !== 0"
+                    @click="schalte(r)"
+                    x-text="r.enabled === 0 ? tr('learn.rule_enable') : tr('learn.rule_disable')"></button>
+            <button type="button" class="btn-ghost text-xs min-h-[44px] sm:min-h-0"
+                    @click="weg(r.id)">{{ t('learn.rule_delete') }}</button>
+          </div>
         </div>
       </template>
     </div>
@@ -1162,6 +1170,18 @@ function gelernteRegeln() {
         this.nurBeispiel = d.nur_beispiel || 0;
       } catch (e) { this.fehler = String(e); }
       finally { this.geladen = true; }
+    },
+    async schalte(r) {
+      this.fehler = '';
+      const an = (r.enabled === 0);
+      try {
+        const res = await fetch('/api/doc-rules/' + r.id + '/enabled', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: an }) });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.detail || ('HTTP ' + res.status));
+        r.enabled = an ? 1 : 0;
+      } catch (e) { this.fehler = e.message || String(e); }
     },
     async weg(id) {
       if (!confirm(tr('learn.rule_delete_confirm'))) return;

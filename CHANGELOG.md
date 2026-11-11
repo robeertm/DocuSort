@@ -7,6 +7,19 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.9.0] - 2026-11-11
+
+### Added
+
+- **Learned assignments can be switched off.** Under *Settings → Learned
+  assignments* every rule now has an on/off switch next to *Take back*. A
+  switched-off rule no longer decides anything and no longer teaches the
+  model, but stays in the list so it can be turned on again. Documents that a
+  rule already filed are never touched, in either direction. Existing rules
+  stay on; the database gains one column and needs no action.
+- The README describes learning from manual filing and the confidence
+  threshold, and its webhook example shows the current version.
+
 ## [1.8.0] - 2026-11-10
 
 ### Performance
