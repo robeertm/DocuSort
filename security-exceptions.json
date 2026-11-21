@@ -1,0 +1,3 @@
+{"exceptions": [
+  {"kind": "secret", "finding": "1186bcb9df1de822", "reason": "Placeholder text in .env.example (sk-ant-your-key-here), not a real key", "until": "2027-09-01"}
+]}
