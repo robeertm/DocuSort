@@ -918,7 +918,7 @@
               </template>
             </div>
             <a :href="'/document/' + d.id"
-               class="rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500 shrink-0">→</a>
+               class="tap rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500 shrink-0">→</a>
           </div>
         </li>
       </template>
@@ -977,7 +977,7 @@
                   :class="statusClass(d.status)" x-text="statusLabel(d.status)"></span>
             <div class="flex-1 min-w-0">
               <a :href="'/document/' + d.id"
-                 class="block font-medium text-ink-100 hover:text-emerald-300 truncate"
+                 class="block font-medium text-ink-100 hover:text-emerald-300 break-words"
                  x-text="d.subject || d.original_name || ('Dok ' + d.id)"></a>
               <div class="text-[11px] text-ink-500 mt-0.5">
                 <span x-text="d.sender || 'Unbekannter Absender'"></span>
@@ -989,14 +989,14 @@
             </div>
             <div class="flex items-center gap-1 shrink-0">
               <button @click="retryDoc(d.id)" :disabled="busyDoc === d.id"
-                      class="rounded-lg px-2 py-1 text-[11px] border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10"
+                      class="tap rounded-lg px-2 py-1 text-[11px] border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10"
                       :class="busyDoc === d.id ? 'opacity-50' : ''"
                       :title="tr('hub.problems.retry')">
                 <span x-show="busyDoc !== d.id">↻</span>
                 <span x-show="busyDoc === d.id">…</span>
               </button>
               <a :href="'/document/' + d.id"
-                 class="rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500"
+                 class="tap rounded-lg px-2 py-1 text-[11px] border border-ink-700 text-ink-300 hover:border-ink-500"
                  :title="tr('hub.problems.open')">→</a>
             </div>
           </div>
@@ -1030,7 +1030,7 @@
                   :class="statusClass(d.status)" x-text="statusLabel(d.status)"></span>
             <div class="flex-1 min-w-0">
               <a :href="'/document/' + d.id"
-                 class="block text-sm font-medium hover:text-emerald-300 truncate"
+                 class="block text-sm font-medium hover:text-emerald-300 break-words"
                  x-text="d.subject || d.original_name || ('Dok ' + d.id)"></a>
               <div class="text-[11px] text-ink-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                 <span class="truncate" x-text="d.category + (d.subcategory ? ' / ' + d.subcategory : '')"></span>

@@ -66,7 +66,7 @@
       <label class="block text-sm font-medium mb-1">{{ t('settings.ai.min_confidence') }}</label>
       <div class="flex items-center gap-3">
         <input x-model.number="ai.min_confidence" type="range" min="0.05" max="0.99" step="0.01"
-               class="flex-1 accent-emerald-500">
+               class="flex-1 accent-emerald-500 min-h-[44px]">
         <span class="tabular-nums text-sm w-14 text-right"
               x-text="Math.round((ai.min_confidence || 0) * 100) + ' %'"></span>
       </div>
@@ -534,7 +534,7 @@
               <span x-text="catLabel(r.category)"></span><template x-if="r.subcategory"><span
                     x-text="' / ' + r.subcategory"></span></template>
             </div>
-            <div class="text-[11px] text-ink-500 truncate">
+            <div class="text-[11px] text-ink-500 break-words">
               <template x-if="r.match_value"><span class="font-mono" x-text="r.match_value"></span></template>
               <template x-if="!r.match_value"><span>{{ t('learn.rule_example_only') }}</span></template>
             </div>

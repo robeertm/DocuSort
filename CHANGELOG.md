@@ -7,6 +7,18 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.9.1] - 2026-11-21
+
+### Fixed
+- Phone layout (390 px): long document titles on the start page now wrap
+  instead of being cut off, the small arrow and retry buttons carry the
+  invisible 44 px touch field, the learned-rule feature no longer ends in an
+  ellipsis, and the confidence slider is a full touch-height row.
+
+### Added
+- Regression test `tests/test_mobile_390.py` (real browser, 390 px): no
+  sideways scrolling, inputs at least 16 px, touch fields, no cut-off titles.
+
 ## [1.9.0] - 2026-11-11
 
 ### Added
