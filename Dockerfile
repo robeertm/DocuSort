@@ -57,7 +57,8 @@ WORKDIR /app
 ENV DOCUSORT_IN_DOCKER=1
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Exact versions + hashes (requirements.txt is locked from requirements.in, see scripts/relock.sh)
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 COPY docusort /app/docusort
 COPY config /app/config-default

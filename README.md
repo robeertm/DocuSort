@@ -425,7 +425,8 @@ pip install -r requirements.txt
 python -m docusort            # http://localhost:9876
 ```
 
-Python 3.11+ is required. For OCR install Tesseract (`apt install
+`requirements.txt` is a hash-locked file built from `requirements.in`
+(`scripts/relock.sh`). Python 3.11+ is required. For OCR install Tesseract (`apt install
 tesseract-ocr tesseract-ocr-deu poppler-utils` or `brew install tesseract
 poppler`).
 

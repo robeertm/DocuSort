@@ -1,0 +1,15 @@
+anthropic>=0.40.0,<1.0.0
+openai>=1.50.0,<2.0.0
+google-genai>=0.3.0,<2.0.0
+watchdog>=4.0.0,<7.0.0
+pypdf>=6.21.4,<7.0.0
+pytesseract>=0.3.10,<0.4.0
+Pillow>=13.0.0,<14.0.0
+PyYAML>=6.0,<7.0
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.32.0,<1.0.0
+jinja2>=3.1.0,<4.0.0
+python-multipart>=0.0.20,<1.0.0
+# Ein Blatt zum Abheften: /ausgaben.pdf zeichnet den gewaehlten Zeitraum
+# auf EINE A4-Seite. Reines Python, baut auf jeder Architektur.
+reportlab>=4.0.0,<5.0.0

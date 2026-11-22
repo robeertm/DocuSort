@@ -7,6 +7,23 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.9.2] - 2026-11-22
+
+### Security
+- Dependencies are now locked: `requirements.txt` holds exact versions with
+  hashes (compiled from the ranges in the new `requirements.in`), and the
+  image installs with `--require-hashes`. Every image build gets the same,
+  checked libraries instead of whatever is newest that day.
+- Two libraries with published vulnerabilities were raised: `pypdf` 5.9.0 to
+  6.21.4 and `Pillow` 11.3.0 to 13.0.0. The dependency audit reports none for
+  the locked set.
+- A test (`tests/test_requirements_pinned.py`, rules in `scripts/check_pins.py`)
+  fails when any requirement is not pinned with a hash.
+
+### Changed
+- To lift the pins, run `scripts/relock.sh --upgrade`, then the tests and the
+  release gate.
+
 ## [1.9.1] - 2026-11-21
 
 ### Fixed
