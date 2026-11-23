@@ -217,38 +217,32 @@ Controls are not all stretched to thumb size — a checkbox stays a checkbox.
 Each one carries an invisible 44 × 44 field instead, so the eye sees a square
 and the thumb still hits it. Measured on an iPhone Air, 420 × 912 points.
 
-<table>
-  <tr>
-    <td width="33%"><a href="docs/screenshots/12-mobile-dashboard.png"><img src="docs/screenshots/12-mobile-dashboard.png" alt="Dashboard on a phone" /></a></td>
-    <td width="33%"><a href="docs/screenshots/25-mobile-menu.png"><img src="docs/screenshots/25-mobile-menu.png" alt="The More sheet with every section" /></a></td>
-    <td width="33%"><a href="docs/screenshots/22-mobile-bookings.png"><img src="docs/screenshots/22-mobile-bookings.png" alt="Bookings as rows instead of a table" /></a></td>
-  </tr>
-  <tr>
-    <td><a href="docs/screenshots/20-mobile-daily.png"><img src="docs/screenshots/20-mobile-daily.png" alt="Daily chart on a phone" /></a></td>
-    <td><a href="docs/screenshots/21-mobile-game.png"><img src="docs/screenshots/21-mobile-game.png" alt="Saving game on a phone" /></a></td>
-    <td><a href="docs/screenshots/23-mobile-fixed.png"><img src="docs/screenshots/23-mobile-fixed.png" alt="Fixed costs on a phone" /></a></td>
-  </tr>
-  <tr>
-    <td><a href="docs/screenshots/24-mobile-library.png"><img src="docs/screenshots/24-mobile-library.png" alt="Library on a phone: each card leads with the document name" /></a></td>
-    <td><a href="docs/screenshots/13-mobile-spending.png"><img src="docs/screenshots/13-mobile-spending.png" alt="Monthly spending on a phone" /></a></td>
-    <td></td>
-  </tr>
-</table>
+<p><img src="docs/screenshots/12-mobile-dashboard.png" width="170" alt="Dashboard on a phone">
+<img src="docs/screenshots/25-mobile-menu.png" width="170" alt="The More sheet with every section">
+<img src="docs/screenshots/22-mobile-bookings.png" width="170" alt="Bookings as rows instead of a table">
+<img src="docs/screenshots/20-mobile-daily.png" width="170" alt="Daily chart on a phone">
+<img src="docs/screenshots/21-mobile-game.png" width="170" alt="Saving game on a phone">
+<img src="docs/screenshots/23-mobile-fixed.png" width="170" alt="Fixed costs on a phone"></p>
 
-<table>
-  <tr>
-    <td width="50%"><a href="docs/screenshots/03-spending.png"><img src="docs/screenshots/03-spending.png" alt="Monthly spending, daily chart, saving game and leaderboard" /></a></td>
-    <td width="50%"><a href="docs/screenshots/05-receipts.png"><img src="docs/screenshots/05-receipts.png" alt="Receipts: how each one was paid, line items, cash by category" /></a></td>
-  </tr>
-  <tr>
-    <td><a href="docs/screenshots/04-finance.png"><img src="docs/screenshots/04-finance.png" alt="Finance: net worth, budget alarm, cashflow, accounts" /></a></td>
-    <td><a href="docs/screenshots/06-fixed-costs.png"><img src="docs/screenshots/06-fixed-costs.png" alt="Fixed costs per month and per year" /></a></td>
-  </tr>
-  <tr>
-    <td><a href="docs/screenshots/02-library.png"><img src="docs/screenshots/02-library.png" alt="Library with year tree, search and tag filters" /></a></td>
-    <td><a href="docs/screenshots/07-transactions.png"><img src="docs/screenshots/07-transactions.png" alt="Bookings explorer with per-booking reasoning" /></a></td>
-  </tr>
-</table>
+<details>
+<summary>2 more pictures</summary>
+
+<p><img src="docs/screenshots/24-mobile-library.png" width="170" alt="Library on a phone: each card leads with the document name">
+<img src="docs/screenshots/13-mobile-spending.png" width="170" alt="Monthly spending on a phone"></p>
+
+</details>
+
+
+<p><img src="docs/screenshots/03-spending.png" width="170" alt="Monthly spending, daily chart, saving game and leaderboard">
+<img src="docs/screenshots/05-receipts.png" width="170" alt="Receipts: how each one was paid, line items, cash by category">
+<img src="docs/screenshots/04-finance.png" width="170" alt="Finance: net worth, budget alarm, cashflow, accounts"></p>
+
+<p><img src="docs/screenshots/06-fixed-costs.png" width="100%" alt="Fixed costs per month and per year"></p>
+
+<p><img src="docs/screenshots/02-library.png" width="170" alt="Library with year tree, search and tag filters"></p>
+
+<p><img src="docs/screenshots/07-transactions.png" width="100%" alt="Bookings explorer with per-booking reasoning"></p>
+
 
 *(Every screenshot on this page comes from a demo instance filled with invented
 data — fictional shops, fictional employer, fictional bank.)*
