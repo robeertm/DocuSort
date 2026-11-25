@@ -177,9 +177,9 @@
     <div x-show="!anyActivity" x-cloak
          class="text-sm text-ink-400 text-center">
       {{ t('hub.live.idle') }}
-      <a href="/upload" class="underline hover:text-emerald-300">/upload</a>
+      <a href="/upload" class="underline hover:text-emerald-300 inline-block py-2 px-1">{{ t('nav.upload') }}</a>
       ·
-      <a href="/finance" class="underline hover:text-emerald-300">/finance</a>
+      <a href="/finance" class="underline hover:text-emerald-300 inline-block py-2 px-1">{{ t('nav.finance') }}</a>
     </div>
     </div>{# Ende des Behaelters mit fester Mindesthoehe #}
 
@@ -1045,7 +1045,7 @@
     </ul>
     <div x-show="(state.recent || []).length === 0" x-cloak
          class="text-sm text-ink-500 py-6 text-center">
-      {{ t('hub.recent.empty') }} <a href="/upload" class="underline hover:text-emerald-300">/upload</a>
+      {{ t('hub.recent.empty') }} <a href="/upload" class="underline hover:text-emerald-300 inline-block py-2 px-1">{{ t('nav.upload') }}</a>
     </div>
   </section>
 

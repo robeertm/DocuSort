@@ -7,6 +7,13 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.9.3] - 2026-11-25
+
+### Fixed
+- The idle line on the start page no longer shows raw paths (`/upload`,
+  `/finance`) as link text; the links now carry the translated menu names in
+  all five languages and have a comfortable tap area on phones.
+
 ## [1.9.2] - 2026-11-22
 
 ### Security
