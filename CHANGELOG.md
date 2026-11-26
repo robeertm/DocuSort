@@ -9,6 +9,8 @@ along the way rather than every single step.
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-11-26
+
 ### Changed
 - The interface no longer loads htmx and Alpine.js from a public script host:
   both ship inside the app (`docusort/web/static/vendor/`, same versions as
