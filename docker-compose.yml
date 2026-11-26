@@ -9,6 +9,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - TZ=Europe/Berlin
       - DOCUSORT_LOG_LEVEL=INFO
+      - DOCUSORT_UPDATE_CHECK=${DOCUSORT_UPDATE_CHECK:-on}   # off = never ask GitHub for a newer release
     volumes:
       # Adjust the left side of each mapping to wherever your documents live.
       - ./data/inbox:/data/inbox

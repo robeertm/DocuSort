@@ -36,6 +36,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - TZ=${TZ:-Europe/Berlin}
       - DOCUSORT_LOG_LEVEL=INFO
+      - DOCUSORT_UPDATE_CHECK=${DOCUSORT_UPDATE_CHECK:-on}   # off = never ask GitHub for a newer release
       # The shared pairing secret. DocuSort creates the account with it.
       - DOCUSORT_POSTWACHE_PASSWORD=${PAIRING_SECRET:?put PAIRING_SECRET=... in .env — `openssl rand -base64 24` makes a good one}
     volumes:

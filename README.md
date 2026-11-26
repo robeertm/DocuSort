@@ -717,9 +717,29 @@ GET /api/content/text?id=<id>[&seite=<n>]         # the text, page by page
   deterministic reader, not an AI, and checked against the statement's own
   balances.
 - **Statements can be pseudonymised** before anything is stored.
-- **No telemetry, no phone-home, no account.** The only outbound connections
-  are the AI provider you chose, the rclone remote you configured, and an
-  optional update check against GitHub.
+- **No telemetry, no analytics, no account.** Nothing about you, your
+  documents or your usage is ever sent to the project.
+
+### Network connections
+
+The browser only talks to your own DocuSort server: all scripts and styles
+(htmx, Alpine.js, the Tailwind stylesheet) are served locally, nothing is
+loaded from a third-party host. The server itself makes these outbound
+connections, and only these:
+
+- **The AI provider you chose** (Anthropic, OpenAI, Gemini, or an
+  OpenAI-compatible endpoint such as a local Ollama) — extracted text only. A
+  local endpoint keeps it on your network.
+- **The rclone remote you configured**, if you sync the library.
+- **The update check:** the interface asks GitHub's release API once per page
+  load whether a newer release exists. Nothing but the DocuSort version number (in the
+  request's client name) is sent. Switch it off with `DOCUSORT_UPDATE_CHECK=off` (environment or
+  `.env`; the shipped compose files pass it through). The check is the only
+  thing that is automatic — installing an update always needs your click, or
+  your own Watchtower in the container setup.
+- **Optional, only if you configure them:** Telegram, e-mail (SMTP) and
+  webhook notifications to the target you entered, and the Tailscale
+  connection built into the container.
 
 ---
 
@@ -743,26 +763,34 @@ inbox/  →  watcher  →  OCR / text  →  AI classification  →  library/<yea
 
 ## Contributing
 
-Issues and pull requests are welcome. Please keep in mind that this is a
-personal project built for one household first; features that only make sense
-for a specific bank or country may be declined.
+Bug reports and feature requests are welcome in the issue tracker. Please keep
+in mind that this is a personal project built for one household first;
+features that only make sense for a specific bank or country may be declined.
+Contributions of code are not accepted under the [LICENSE](LICENSE) (section 3);
+pull requests are closed unless a separate agreement covers them.
 
-If you send a pull request that touches the interface, add the new strings to
-all five language files (`docusort/locales/*.json`) — the key sets are
-identical by design and a test checks that.
+Anything that touches the interface must add its new strings to all five
+language files (`docusort/locales/*.json`) — the key sets are identical by
+design and a test checks that.
 
-Your commits show your name and e-mail to everyone. Use the address you want
-public (GitHub's no-reply address works). Pushes are checked by
+Commits pushed to this repository are checked by
 `scripts/check_commit_identity.py` (in CI, and locally after
-`git config core.hooksPath .githooks`); it only refuses the maintainer's own
+`git config core.hooksPath .githooks`); it refuses the maintainer's own
 identities and machine placeholders such as `agent@host`.
 
 ## Licence
 
-**Source-available, not open source.** Read the code, run it for yourself,
-change it for your own use — that is expressly allowed and always free. What
-is not allowed is selling it, offering it as a service, or shipping it as part
-of someone else's product. All rights stay with the authors.
+**Source-available, not open source.** Read the code and run it for yourself,
+free of charge, for personal, non-commercial use. What is not allowed is
+modifying it, selling it, offering it as a service, or shipping it as part of
+someone else's product. All rights stay with the copyright holder; the full
+terms are in [LICENSE](LICENSE). Third-party components and their licences are
+listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 GitHub does not recognise this as one of its standard licences, so the
-sidebar shows none; the full terms are in [LICENSE](LICENSE).
+sidebar shows none.
+
+All product and company names mentioned in this project are trademarks or
+registered trademarks of their respective owners. Their use here is for
+identification only and does not imply any affiliation, endorsement or
+sponsorship.

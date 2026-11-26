@@ -38,6 +38,20 @@ REPO = os.environ.get("DOCUSORT_UPDATE_REPO", "robeertm/DocuSort")
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 TARBALL = "https://codeload.github.com/{repo}/tar.gz/refs/tags/{tag}"
 
+
+
+def update_check_enabled() -> bool:
+    """False when the user switched the automatic update check off.
+
+    `DOCUSORT_UPDATE_CHECK=off` (also `0`, `false`, `no`) stops the one
+    request DocuSort makes to GitHub to ask for the latest release; the
+    interface then simply never shows an update banner. The explicit
+    `POST /api/update` (a deliberate click or an API call) still works.
+    """
+    return os.environ.get("DOCUSORT_UPDATE_CHECK", "").strip().lower() not in {
+        "off", "0", "false", "no", "disabled"}
+
+
 # The command a container install uses instead of the in-app updater.
 CONTAINER_UPDATE_COMMAND = "docker compose pull && docker compose up -d"
 
@@ -131,6 +145,15 @@ def version_info() -> dict[str, Any]:
     `error` string the UI can show.
     """
     container = in_container()
+    if not update_check_enabled():
+        return {
+            "current": __version__,
+            "latest": None,
+            "has_update": False,
+            "check_disabled": True,
+            "container": container,
+            "update_command": CONTAINER_UPDATE_COMMAND if container else "",
+        }
     try:
         rel = fetch_latest_release()
     except Exception as exc:

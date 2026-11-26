@@ -62,6 +62,8 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 COPY docusort /app/docusort
 COPY config /app/config-default
+# Licence and third-party notices travel with the image.
+COPY LICENSE THIRD-PARTY-NOTICES.md /app/
 
 # On first start, copy default config to the (mounted) config directory
 # if it's empty, so users get a working setup out of the box.

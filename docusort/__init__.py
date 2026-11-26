@@ -2,4 +2,4 @@
 
 __version__ = "1.9.3"
 __author__ = "robeertm"
-__license__ = "Proprietary"
+__license__ = "Source-Available"

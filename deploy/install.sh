@@ -252,6 +252,7 @@ services:
     environment:
       - TZ=\${TZ}
       - DOCUSORT_LOG_LEVEL=INFO
+      - DOCUSORT_UPDATE_CHECK=\${DOCUSORT_UPDATE_CHECK:-on}
       # Optional: put your key here instead of typing it into the settings page.
       # - ANTHROPIC_API_KEY=\${ANTHROPIC_API_KEY}
     volumes:
