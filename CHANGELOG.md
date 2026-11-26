@@ -7,8 +7,6 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
-## [Unreleased]
-
 ## [1.9.4] - 2026-11-26
 
 ### Changed
