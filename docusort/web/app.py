@@ -1333,6 +1333,10 @@ def create_app(
             {**base_ctx(request), "docs": docs, "years": years, "tree": tree,
              "tags": tags, "trash": trash,
              "filter": filter_ctx,
+             # An empty answer to a filter is not an empty library: no upload button.
+             "gefiltert": any(filter_ctx[k] for k in
+                              ("category", "subcategory", "tag", "status", "year", "q",
+                               "doc_from", "doc_to", "scan_from", "scan_to")),
              # The cards hand this straight to /document/<id> so the detail
              # page knows which slice the visitor came from.
              "slice_qs": qs,

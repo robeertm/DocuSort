@@ -107,7 +107,7 @@
     <path d="M21 21l-4.3-4.3"/><circle cx="11" cy="11" r="7"/>
   </svg>
   <p class="mt-3">{{ t('library.none_found') }}</p>
-  {% if not (filter.q or filter.category or filter.tag or filter.year or filter.status) %}
+  {% if not gefiltert %}
   <a href="/upload" class="btn-primary mt-4">{{ t('library.start_upload') }}</a>
   {% endif %}
 </div>
