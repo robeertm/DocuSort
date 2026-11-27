@@ -7,6 +7,17 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.9.5] - 2026-11-27
+
+### Fixed
+- Library: an empty search result now appears directly under the search box
+  on phones instead of below the collapsed folder tree, and the "start
+  uploading" button no longer shows when a filter is active.
+- Document page: when the stored file is missing the preview area says so
+  instead of showing an empty white frame.
+- The background polling requests (activity, dashboard) end when the page is
+  left, which stops WebKit logging them as access-control errors.
+
 ## [1.9.4] - 2026-11-26
 
 ### Changed

@@ -6,6 +6,15 @@
 <meta name="theme-color" content="#0f172a">
 <title>{% block title %}DocuSort{% endblock %}</title>
 <script>
+  // Polling requests end when the page is left (WebKit logs a cancelled
+  // request as an access-control error otherwise).
+  (function () {
+    var c = new AbortController();
+    window.dsAbortSignal = function () { return c.signal; };
+    addEventListener('pagehide', function () { c.abort(); });
+  })();
+</script>
+<script>
   // Resolve theme before paint to avoid a dark→light flash on light-mode loads.
   // Persisted in localStorage; falls back to the system preference; defaults to dark
   // (the original DocuSort look) when neither is available.
@@ -491,7 +500,7 @@ function aiActivity() {
     },
     async tick() {
       try {
-        const r = await fetch('/api/activity');
+        const r = await fetch('/api/activity', { signal: dsAbortSignal() });
         if (!r.ok) return;
         this.snap = await r.json();
       } catch (e) { /* swallow */ }

@@ -90,7 +90,9 @@
 
   <!-- Preview -->
   <div class="card overflow-hidden lg:sticky lg:top-4">
-    {% if doc.library_path.lower().endswith('.pdf') %}
+    {% if datei_fehlt %}
+      <div class="p-6 text-center text-sm text-ink-300" role="status" data-datei-fehlt>{{ t('err.file_missing') }}</div>
+    {% elif doc.library_path.lower().endswith('.pdf') %}
       {# 🔴 Auf dem Telefon KEIN iframe: iOS-Safari ignoriert
          `#view=Fit` und zeigt die Seite in Originalgröße — sichtbar war
          die linke obere Ecke, der Rest abgeschnitten. Ein serverseitig

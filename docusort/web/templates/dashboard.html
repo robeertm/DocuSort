@@ -1710,7 +1710,7 @@ function dashboard() {
     async refresh() {
       this.loading = true;
       try {
-        const r = await fetch('/api/dashboard');
+        const r = await fetch('/api/dashboard', { signal: dsAbortSignal() });
         if (r.ok) {
           this.state = await r.json();
           this.lastUpdate = new Date().toLocaleTimeString();

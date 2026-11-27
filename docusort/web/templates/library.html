@@ -266,7 +266,12 @@ function libClearDates(btn) {
 </div>
 {% endif %}
 
-<div x-data="library({ trash: {{ trash | tojson }} })" class="lg:grid lg:grid-cols-[260px_1fr] lg:gap-6">
+<div id="lib-wrap" x-data="library({ trash: {{ trash | tojson }} })" class="lg:grid lg:grid-cols-[260px_1fr] lg:gap-6">
+
+  {# Leere Suche: auf dem Handy steht die Antwort sonst unter dem zugeklappten
+     Baum, ausserhalb des ersten Bildschirms. Das Raster wird per htmx getauscht,
+     deshalb ordnet reines CSS die Leer-Karte nach oben (nicht ein fester Text). #}
+  <style>@media (max-width:1023px){ #lib-wrap{display:flex;flex-direction:column}#lib-wrap:has([data-leer-hinweis]) #grid{order:-1;margin-bottom:1rem}}</style>
 
   {# Auf dem Handy ist der Jahres-/Kategorienbaum zugeklappt: er steht
      sonst zwischen der Suche und dem ersten Dokument. #}

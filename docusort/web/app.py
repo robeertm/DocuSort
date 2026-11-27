@@ -1531,6 +1531,7 @@ def create_app(
             {**base_ctx(request), "doc": doc, "receipt": receipt,
              "statement": statement,
              "statement_woanders": statement_woanders,
+             "datei_fehlt": not doc.get("library_path") or not path_is_file(doc["library_path"]),
              "payment": db.deadline_payment(doc_id),
              "is_statement_candidate": is_statement_candidate,
              "ai_provider": _aktiver_anbieter(),
