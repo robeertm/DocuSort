@@ -17,12 +17,35 @@ DIR="${DOCUSORT_DIR:-$PWD/docusort}"
 # dem Menschen sagen, wie er diesen Installer noch einmal startet.
 EINZEILER="https://raw.githubusercontent.com/robeertm/DocuSort/main/deploy/install.sh"
 PORT="${DOCUSORT_PORT:-9876}"
-TZ_DEFAULT="${TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##')}"
-TZ_DEFAULT="${TZ_DEFAULT:-Europe/Berlin}"
 
 say()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
+
+# Time zone for the container. Order: $TZ, the /etc/localtime symlink,
+# /etc/timezone, timedatectl, then UTC with a clear notice. Minimal systems
+# (Alpine, some containers) have no /etc/localtime; with `set -e -o pipefail`
+# a failing readlink used to end the installer without a single word.
+tz_valid() { case "$1" in ""|*" "*|n/a|Local) return 1;; *) return 0;; esac; }
+detect_tz() {
+  local cand=""
+  if tz_valid "${TZ:-}"; then printf '%s' "$TZ"; return; fi
+  cand="$(readlink "${DOCUSORT_LOCALTIME:-/etc/localtime}" 2>/dev/null || true)"
+  cand="${cand##*/zoneinfo/}"
+  if tz_valid "$cand" && [ "${cand#/}" = "$cand" ]; then printf '%s' "$cand"; return; fi
+  if [ -r "${DOCUSORT_TIMEZONE_FILE:-/etc/timezone}" ]; then
+    cand="$(head -n1 "${DOCUSORT_TIMEZONE_FILE:-/etc/timezone}" 2>/dev/null | tr -d '[:space:]' || true)"
+    if tz_valid "$cand"; then printf '%s' "$cand"; return; fi
+  fi
+  if command -v timedatectl >/dev/null 2>&1; then
+    cand="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+    if tz_valid "$cand"; then printf '%s' "$cand"; return; fi
+  fi
+  warn "Could not detect this machine's time zone (no TZ, /etc/localtime, /etc/timezone or timedatectl)." >&2
+  warn "Using UTC. To choose another, run again with e.g. TZ=Europe/Berlin, or edit TZ= in the .env afterwards." >&2
+  printf 'UTC'
+}
+TZ_DEFAULT="$(detect_tz)"
 
 command -v docker >/dev/null 2>&1 || die "Docker is not installed. See https://docs.docker.com/get-docker/"
 if docker compose version >/dev/null 2>&1; then

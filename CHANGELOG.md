@@ -7,6 +7,18 @@ This file starts with the first public release. The project was developed
 privately before that; the summary under *0.1.0 – 0.55.0* lists what arrived
 along the way rather than every single step.
 
+## [1.9.6] - 2026-11-27
+
+### Fixed
+- `deploy/install.sh` no longer stops silently on systems without
+  `/etc/localtime` (e.g. Alpine). The time zone is now taken from `$TZ`, the
+  `/etc/localtime` link, `/etc/timezone` or `timedatectl`, in that order; if
+  none works the installer says so, uses UTC and explains how to pick another.
+
+### Added
+- Regression test `tests/test_install_tz.py` (no `/etc/localtime`, `$TZ`,
+  link and `/etc/timezone` cases).
+
 ## [1.9.5] - 2026-11-27
 
 ### Fixed
